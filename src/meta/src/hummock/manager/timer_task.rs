@@ -56,6 +56,7 @@ impl HummockManager {
                 FullGc,
 
                 GroupScheduleMerge,
+                ReclaimTableWriteThroughputStatistic,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -181,6 +182,23 @@ impl HummockManager {
                 triggers.push(Box::pin(group_scheduling_merge_trigger));
             }
 
+            let periodic_table_stat_throuput_reclaim_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_table_stat_throuput_reclaim_interval_sec;
+
+            if periodic_table_stat_throuput_reclaim_interval_sec > 0 {
+                let mut table_stat_throuput_reclaim_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_table_stat_throuput_reclaim_interval_sec),
+                );
+                table_stat_throuput_reclaim_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                let table_stat_throuput_reclaim_trigger =
+                    IntervalStream::new(table_stat_throuput_reclaim_trigger_interval)
+                        .map(|_| HummockTimerEvent::ReclaimTableWriteThroughputStatistic);
+                triggers.push(Box::pin(table_stat_throuput_reclaim_trigger));
+            }
+
             let event_stream = select_all(triggers);
             use futures::pin_mut;
             pin_mut!(event_stream);
@@ -301,12 +319,14 @@ impl HummockManager {
                                             // accumulate the throughput of all tables in the group
                                             let mut avg_throuput = 0;
                                             for table_id in group_info.table_statistic.keys() {
-                                                if let Some(throuput) =
+                                                if let Some(statistic_vec) =
                                                     tables_throughput.get(table_id)
                                                 {
-                                                    let table_avg_throughput =
-                                                        throuput.iter().sum::<u64>()
-                                                            / throuput.len() as u64;
+                                                    let table_avg_throughput = statistic_vec
+                                                        .iter()
+                                                        .map(|statistic| statistic.throughput)
+                                                        .sum::<u64>()
+                                                        / statistic_vec.len() as u64;
 
                                                     avg_throuput += table_avg_throughput;
                                                 }
@@ -440,6 +460,16 @@ impl HummockManager {
                                     {
                                         tracing::info!("Start full GC from meta node.");
                                     }
+                                }
+
+                                HummockTimerEvent::ReclaimTableWriteThroughputStatistic => {
+                                    hummock_manager.reclaim_table_write_throughput(
+                                        hummock_manager
+                                            .env
+                                            .opts
+                                            .table_stat_old_throuput_reclaim_interval_sec
+                                            as _,
+                                    );
                                 }
                             }
                         }

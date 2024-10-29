@@ -32,7 +32,7 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::CompactionConfig;
 use sea_orm::TransactionTrait;
 
-use super::TableThroughputStatistic;
+use super::TableWriteThroughputStatistic;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::transaction::{
@@ -327,7 +327,7 @@ impl HummockManager {
         for (table_id, stat) in table_stats {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
-            entry.push_back(TableThroughputStatistic {
+            entry.push_back(TableWriteThroughputStatistic {
                 throughput,
                 timestamp,
             });

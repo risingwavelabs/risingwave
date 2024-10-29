@@ -398,6 +398,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                periodic_table_stat_throuput_reclaim_interval_sec: config
+                    .meta
+                    .periodic_table_stat_throuput_reclaim_interval_sec,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,
@@ -447,6 +450,9 @@ pub fn start(
                 table_stat_throuput_window_seconds_for_merge: config
                     .meta
                     .table_stat_throuput_window_seconds_for_merge,
+                table_stat_old_throuput_reclaim_interval_sec: config
+                    .meta
+                    .table_stat_old_throuput_reclaim_interval_sec,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta

@@ -2635,9 +2635,8 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst1_epoch1.clone(),
-        vec![NewTableFragmentInfo::Normal {
-            mv_table_id: None,
-            internal_table_ids: vec![existing_table_id],
+        vec![NewTableFragmentInfo {
+            table_ids: HashSet::from_iter([existing_table_id]),
         }],
         &[existing_table_id],
     )
@@ -2723,7 +2722,7 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst2_epoch1.clone(),
-        vec![NewTableFragmentInfo::NewCompactionGroup {
+        vec![NewTableFragmentInfo {
             table_ids: HashSet::from_iter([new_table_id]),
         }],
         &[new_table_id],
