@@ -326,7 +326,8 @@ impl HummockManager {
                                                         .iter()
                                                         .map(|statistic| statistic.throughput)
                                                         .sum::<u64>()
-                                                        / statistic_vec.len() as u64;
+                                                        .checked_div(statistic_vec.len() as u64)
+                                                        .unwrap_or(0);
 
                                                     avg_throuput += table_avg_throughput;
                                                 }
