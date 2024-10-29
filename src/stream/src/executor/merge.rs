@@ -34,13 +34,8 @@ use crate::executor::exchange::input::{
 use crate::executor::prelude::*;
 use crate::task::SharedContext;
 
-pub(crate) enum MergeExecutorUpstream {
-    Singleton(BoxedInput),
-    Merge(SelectReceivers),
-}
-
 pub(crate) struct MergeExecutorInput {
-    upstream: MergeExecutorUpstream,
+    upstream: SelectReceivers,
     actor_context: ActorContextRef,
     upstream_fragment_id: UpstreamFragmentId,
     shared_context: Arc<SharedContext>,
@@ -51,7 +46,7 @@ pub(crate) struct MergeExecutorInput {
 
 impl MergeExecutorInput {
     pub(crate) fn new(
-        upstream: MergeExecutorUpstream,
+        upstream: SelectReceivers,
         actor_context: ActorContextRef,
         upstream_fragment_id: UpstreamFragmentId,
         shared_context: Arc<SharedContext>,
@@ -72,30 +67,18 @@ impl MergeExecutorInput {
 
     pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
         let fragment_id = self.actor_context.fragment_id;
-        let executor = match self.upstream {
-            MergeExecutorUpstream::Singleton(input) => ReceiverExecutor::new(
-                self.actor_context,
-                fragment_id,
-                self.upstream_fragment_id,
-                input,
-                self.shared_context,
-                self.executor_stats,
-                barrier_rx,
-            )
-            .boxed(),
-            MergeExecutorUpstream::Merge(inputs) => MergeExecutor::new(
-                self.actor_context,
-                fragment_id,
-                self.upstream_fragment_id,
-                inputs,
-                self.shared_context,
-                self.executor_stats,
-                barrier_rx,
-                self.chunk_size,
-                self.info.schema.clone(),
-            )
-            .boxed(),
-        };
+        let executor = MergeExecutor::new(
+            self.actor_context,
+            fragment_id,
+            self.upstream_fragment_id,
+            self.upstream,
+            self.shared_context,
+            self.executor_stats,
+            barrier_rx,
+            self.chunk_size,
+            self.info.schema.clone(),
+        )
+        .boxed();
         (self.info, executor).into()
     }
 }
@@ -104,10 +87,7 @@ impl Stream for MergeExecutorInput {
     type Item = DispatcherMessageStreamItem;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match &mut self.get_mut().upstream {
-            MergeExecutorUpstream::Singleton(input) => input.poll_next_unpin(cx),
-            MergeExecutorUpstream::Merge(inputs) => inputs.poll_next_unpin(cx),
-        }
+        self.get_mut().upstream.poll_next_unpin(cx)
     }
 }
 

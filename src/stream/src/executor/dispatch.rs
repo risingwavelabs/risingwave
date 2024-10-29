@@ -1066,7 +1066,6 @@ mod tests {
     use super::*;
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
@@ -1250,8 +1249,7 @@ mod tests {
 
         let input = Executor::new(
             Default::default(),
-            ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone())
-                .boxed(),
+            MergeExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone()).boxed(),
         );
         let executor = Box::new(DispatchExecutor::new(
             input,

@@ -14,12 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
+use risingwave_pb::stream_plan::MergeNode;
 
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput, MergeExecutorUpstream};
+use crate::executor::{ActorContextRef, MergeExecutor, MergeExecutorInput};
 use crate::task::SharedContext;
 
 pub struct MergeExecutorBuilder;
@@ -50,26 +50,7 @@ impl MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
-        // scale to multiple upstreams.
-        let always_single_input = match node.get_upstream_dispatcher_type()? {
-            DispatcherType::Unspecified => unreachable!(),
-            DispatcherType::Hash | DispatcherType::Broadcast => false,
-            // There could be arbitrary number of upstreams with simple dispatcher.
-            DispatcherType::Simple => false,
-            // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle => true,
-        };
-
-        let upstreams = if always_single_input {
-            MergeExecutorUpstream::Singleton(inputs.into_iter().exactly_one().unwrap())
-        } else {
-            MergeExecutorUpstream::Merge(MergeExecutor::new_select_receiver(
-                inputs,
-                &executor_stats,
-                &actor_context,
-            ))
-        };
+        let upstreams = MergeExecutor::new_select_receiver(inputs, &executor_stats, &actor_context);
         Ok(MergeExecutorInput::new(
             upstreams,
             actor_context,

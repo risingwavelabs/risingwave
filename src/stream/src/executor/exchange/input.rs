@@ -30,8 +30,7 @@ use crate::executor::{
 };
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
-/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) and
-/// [`ReceiverExecutor`](crate::executor::ReceiverExecutor) to receive data from upstream actors.
+/// `Input` provides an interface for [`MergeExecutor`](crate::executor::MergeExecutor) to receive data from upstream actors.
 pub trait Input: DispatcherMessageStream {
     /// The upstream actor id.
     fn actor_id(&self) -> ActorId;
