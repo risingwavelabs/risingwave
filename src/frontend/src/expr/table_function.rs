@@ -446,7 +446,9 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamp,
 
                             // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR
+                            | MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
                                     format!("unsupported column type: {:?}", column.column_type())
