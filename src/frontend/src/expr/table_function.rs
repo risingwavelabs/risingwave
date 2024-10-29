@@ -432,13 +432,22 @@ impl TableFunction {
                         let data_type = match column.column_type() {
                             // Numeric types
                             MySqlColumnType::MYSQL_TYPE_BIT => DataType::Boolean,
+                            MySqlColumnType::MYSQL_TYPE_TINY => {
+                                if column.column_length() == 1 {
+                                    // Bool/Boolean is an alias for TINYINT(1)
+                                    DataType::Boolean
+                                } else {
+                                    DataType::Int16
+                                }
+                            }
                             MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
                             MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
                             MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
                             MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
                             MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
-                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL
-                            | MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
 
                             // Date time types
                             MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
@@ -449,6 +458,16 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_VARCHAR
                             | MySqlColumnType::MYSQL_TYPE_STRING
                             | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+
+                            // JSON types
+                            MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
+
+                            // Binary types
+                            MySqlColumnType::MYSQL_TYPE_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
+
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
                                     format!("unsupported column type: {:?}", column.column_type())
