@@ -516,33 +516,3 @@ export function generateFragmentEdges(
   }
   return links
 }
-
-export function generateRelationBackPressureEdges(
-  layoutMap: RelationBoxPosition[]
-): Edge[] {
-  const links = []
-  const relationMap = new Map<string, RelationBoxPosition>()
-  for (const x of layoutMap) {
-    relationMap.set(x.id, x)
-  }
-  for (const relation of layoutMap) {
-    for (const parentId of relation.parentIds) {
-      const parentRelation = relationMap.get(parentId)!
-      links.push({
-        points: [
-          {
-            x: relation.x + relation.width / 2,
-            y: relation.y + relation.height / 2,
-          },
-          {
-            x: parentRelation.x + parentRelation.width / 2,
-            y: parentRelation.y + parentRelation.height / 2,
-          },
-        ],
-        source: relation.id,
-        target: parentId,
-      })
-    }
-  }
-  return links
-}

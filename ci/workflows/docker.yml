@@ -98,6 +98,7 @@ steps:
     retry: *auto-retry
 
   - label: "generate notification step"
+    if: build.env("ENABLE_DOCKER_SCOUT") == "true"
     depends_on:
       - "docker-scout"
     command: ci/scripts/docker-scout-notify.sh
