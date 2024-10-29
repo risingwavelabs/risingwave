@@ -24,6 +24,7 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
 use risingwave_common::RW_VERSION;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
@@ -667,6 +668,13 @@ impl ClusterControllerInner {
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
                 property.parallelism = Set(current_parallelism as _);
+                property.label = Set(Some(add_property.node_label.unwrap_or_else(|| {
+                    tracing::warn!(
+                        "node_label is not set for worker {}, fallback to `default`",
+                        worker.worker_id
+                    );
+                    DEFAULT_COMPUTE_NODE_LABEL.to_string()
+                })));
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
