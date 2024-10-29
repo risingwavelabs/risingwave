@@ -419,7 +419,7 @@ impl TableFunction {
                         .await
                         .context("failed to connect to mysql in binder")?;
 
-                    let query = evaled_args[6].clone();
+                    let query = evaled_args[5].clone();
                     let statement = conn
                         .prep(query)
                         .await
