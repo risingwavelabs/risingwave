@@ -115,9 +115,14 @@ impl SchemaCatalog {
         let table_ref = Arc::new(table);
 
         let old_table = self.table_by_id.get(&id).unwrap();
-        // check if table name get updated.
+        // check if the table name gets updated.
         if old_table.name() != name {
-            self.table_by_name.remove(old_table.name());
+            // keep the old table for swap rename if the old name assigned to another table.
+            if let Some(t) = self.table_by_name.get(old_table.name())
+                && t.id == id
+            {
+                self.table_by_name.remove(old_table.name());
+            }
         }
         self.table_by_name.insert(name, table_ref.clone());
         self.table_by_id.insert(id, table_ref.clone());
@@ -137,9 +142,13 @@ impl SchemaCatalog {
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
 
-        // check if index name get updated.
+        // check if the index name gets updated.
         if old_index.name != name {
-            self.index_by_name.remove(&old_index.name);
+            if let Some(idx) = self.index_by_name.get(&old_index.name)
+                && idx.id == id
+            {
+                self.index_by_name.remove(&old_index.name);
+            }
         }
         self.index_by_name.insert(name, index_ref.clone());
         self.index_by_id.insert(id, index_ref.clone());
@@ -245,9 +254,14 @@ impl SchemaCatalog {
         let source_ref = Arc::new(source);
 
         let old_source = self.source_by_id.get(&id).unwrap();
-        // check if source name get updated.
+        // check if the source name gets updated.
         if old_source.name != name {
-            self.source_by_name.remove(&old_source.name);
+            // keep the old source for swap rename if the old name assigned to another source.
+            if let Some(src) = self.source_by_name.get(&old_source.name)
+                && src.id == id
+            {
+                self.source_by_name.remove(&old_source.name);
+            }
         }
 
         self.source_by_name.insert(name, source_ref.clone());
@@ -294,9 +308,14 @@ impl SchemaCatalog {
         let sink_ref = Arc::new(sink);
 
         let old_sink = self.sink_by_id.get(&id).unwrap();
-        // check if sink name get updated.
+        // check if the sink name gets updated.
         if old_sink.name != name {
-            self.sink_by_name.remove(&old_sink.name);
+            // keep the old sink for swap rename if the old name assigned to another sink.
+            if let Some(s) = self.sink_by_name.get(&old_sink.name)
+                && s.id.sink_id == id
+            {
+                self.sink_by_name.remove(&old_sink.name);
+            }
         }
 
         self.sink_by_name.insert(name, sink_ref.clone());
@@ -331,9 +350,15 @@ impl SchemaCatalog {
         let subscription_ref = Arc::new(subscription);
 
         let old_subscription = self.subscription_by_id.get(&id).unwrap();
-        // check if subscription name get updated.
+        // check if the subscription name gets updated.
         if old_subscription.name != name {
-            self.subscription_by_name.remove(&old_subscription.name);
+            // keep the old subscription for swap rename
+            // if the old name assigned to another subscription.
+            if let Some(s) = self.subscription_by_name.get(&old_subscription.name)
+                && s.id.subscription_id == id
+            {
+                self.subscription_by_name.remove(&old_subscription.name);
+            }
         }
 
         self.subscription_by_name
@@ -365,9 +390,14 @@ impl SchemaCatalog {
         let view_ref = Arc::new(view);
 
         let old_view = self.view_by_id.get(&id).unwrap();
-        // check if view name get updated.
+        // check if the view name gets updated.
         if old_view.name != name {
-            self.view_by_name.remove(&old_view.name);
+            // keep the old view for swap rename if the old name assigned to another view.
+            if let Some(v) = self.view_by_name.get(old_view.name())
+                && v.id == id
+            {
+                self.view_by_name.remove(&old_view.name);
+            }
         }
 
         self.view_by_name.insert(name, view_ref.clone());
@@ -438,11 +468,15 @@ impl SchemaCatalog {
             .function_by_name
             .get_mut(&old_function_by_id.name)
             .unwrap();
-        // check if function name get updated.
+        // check if the function name gets updated.
         if old_function_by_id.name != name {
-            old_function_by_name.remove(&old_function_by_id.arg_types);
-            if old_function_by_name.is_empty() {
-                self.function_by_name.remove(&old_function_by_id.name);
+            if let Some(f) = old_function_by_name.get(&old_function_by_id.arg_types)
+                && f.id == id
+            {
+                old_function_by_name.remove(&old_function_by_id.arg_types);
+                if old_function_by_name.is_empty() {
+                    self.function_by_name.remove(&old_function_by_id.name);
+                }
             }
         }
 
@@ -473,9 +507,13 @@ impl SchemaCatalog {
         let connection_ref = Arc::new(connection);
 
         let old_connection = self.connection_by_id.get(&id).unwrap();
-        // check if connection name get updated.
+        // check if the connection name gets updated.
         if old_connection.name != name {
-            self.connection_by_name.remove(&old_connection.name);
+            if let Some(conn) = self.connection_by_name.get(&old_connection.name)
+                && conn.id == id
+            {
+                self.connection_by_name.remove(&old_connection.name);
+            }
         }
 
         self.connection_by_name.insert(name, connection_ref.clone());
@@ -513,9 +551,13 @@ impl SchemaCatalog {
         let secret_ref = Arc::new(secret);
 
         let old_secret = self.secret_by_id.get(&id).unwrap();
-        // check if secret name get updated.
+        // check if the secret name gets updated.
         if old_secret.name != name {
-            self.secret_by_name.remove(&old_secret.name);
+            if let Some(s) = self.secret_by_name.get(&old_secret.name)
+                && s.id == id
+            {
+                self.secret_by_name.remove(&old_secret.name);
+            }
         }
 
         self.secret_by_name.insert(name, secret_ref.clone());
