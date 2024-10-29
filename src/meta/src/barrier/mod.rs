@@ -56,7 +56,7 @@ use tracing::{debug, error, info, warn, Instrument};
 use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::{PeriodicBarriers, ScheduledBarriers};
@@ -399,7 +399,9 @@ impl CheckpointControl {
             .set(self.total_command_num() as i64);
     }
 
-    fn jobs_to_merge(&self) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>> {
+    fn jobs_to_merge(
+        &self,
+    ) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>> {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
@@ -865,9 +867,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                     info!(?changed_worker, "worker changed");
 
-                    self.checkpoint_control.state.inflight_graph_info
-                        .on_new_worker_node_map(self.active_streaming_nodes.current());
-                    self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
                         self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info, &*self.context).await;
                     }
@@ -1058,7 +1057,7 @@ impl CheckpointControl {
             &barrier_info,
             prev_paused_reason,
             &pre_applied_graph_info,
-            Some(&self.state.inflight_graph_info),
+            &self.state.inflight_graph_info,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1603,13 +1602,7 @@ impl GlobalBarrierWorkerContextImpl {
             .load_all_actors()
             .await?;
 
-        Ok(InflightGraphInfo::new(
-            all_actor_infos
-                .fragment_infos
-                .into_iter()
-                .map(|(id, info)| (id as _, info))
-                .collect(),
-        ))
+        Ok(InflightGraphInfo::new(all_actor_infos))
     }
 }
 
