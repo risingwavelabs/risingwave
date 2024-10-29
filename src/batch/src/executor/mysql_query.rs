@@ -75,12 +75,14 @@ macro_rules! mysql_value_to_scalar {
             Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val.into())),
             Some(Ok(None)) => None,
             Some(Err(e)) => {
-                let e: anyhow::Error = anyhow::Error::new(e.clone()).context(format!(
-                    "failed to deserialize column {} at index {} as value of rust_type: {}",
-                    $name,
-                    $i,
-                    stringify!($ty),
-                ));
+                let e: anyhow::Error = anyhow::Error::new(e.clone())
+                    .context("failed to deserialize MySQL value into rust value")
+                    .context(format!(
+                        "column: {}, index: {}, rust_type: {}",
+                        $name,
+                        $i,
+                        stringify!($ty),
+                    ));
                 let e = BatchExternalSystemError(e);
                 return Err(e.into());
             }
