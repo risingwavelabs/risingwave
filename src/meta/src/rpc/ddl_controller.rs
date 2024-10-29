@@ -27,7 +27,7 @@ use risingwave_common::secret::SecretEncryption;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
+    visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, hash, must_match};
 use risingwave_connector::error::ConnectorError;
@@ -40,11 +40,9 @@ use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
-    Sink, Source, Subscription, Table, View,
+    Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
+    Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -903,7 +901,7 @@ impl DdlController {
     pub async fn create_streaming_job(
         &self,
         mut streaming_job: StreamingJob,
-        mut fragment_graph: StreamFragmentGraphProto,
+        fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceTableInfo>,
     ) -> MetaResult<NotificationVersion> {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
@@ -917,24 +915,6 @@ impl DdlController {
             )
             .await?;
         let job_id = streaming_job.id();
-
-        match &mut streaming_job {
-            StreamingJob::Table(src, table, job_type) => {
-                // If we're creating a table with connector, we should additionally fill its ID first.
-                fill_table_stream_graph_info(src, table, *job_type, &mut fragment_graph);
-            }
-            StreamingJob::Source(src) => {
-                // set the inner source id of source node.
-                for fragment in fragment_graph.fragments.values_mut() {
-                    visit_fragment(fragment, |node_body| {
-                        if let NodeBody::Source(source_node) = node_body {
-                            source_node.source_inner.as_mut().unwrap().source_id = src.id;
-                        }
-                    });
-                }
-            }
-            _ => {}
-        }
 
         tracing::debug!(
             id = job_id,
@@ -1949,53 +1929,5 @@ impl DdlController {
             .catalog_controller
             .comment_on(comment)
             .await
-    }
-}
-
-/// Fill in necessary information for `Table` stream graph.
-/// e.g., fill source id for table with connector, fill external table id for CDC table.
-pub fn fill_table_stream_graph_info(
-    source: &mut Option<PbSource>,
-    table: &mut PbTable,
-    table_job_type: TableJobType,
-    fragment_graph: &mut PbStreamFragmentGraph,
-) {
-    let mut source_count = 0;
-    for fragment in fragment_graph.fragments.values_mut() {
-        visit_fragment(fragment, |node_body| {
-            if let NodeBody::Source(source_node) = node_body {
-                if source_node.source_inner.is_none() {
-                    // skip empty source for dml node
-                    return;
-                }
-
-                // If we're creating a table with connector, we should additionally fill its ID first.
-                if let Some(source) = source {
-                    source_node.source_inner.as_mut().unwrap().source_id = source.id;
-                    source_count += 1;
-
-                    assert_eq!(
-                        source_count, 1,
-                        "require exactly 1 external stream source when creating table with a connector"
-                    );
-
-                    // Fill in the correct table id for source.
-                    source.optional_associated_table_id =
-                        Some(OptionalAssociatedTableId::AssociatedTableId(table.id));
-                    // Fill in the correct source id for mview.
-                    table.optional_associated_source_id =
-                        Some(OptionalAssociatedSourceId::AssociatedSourceId(source.id));
-                }
-            }
-
-            // fill table id for cdc backfill
-            if let NodeBody::StreamCdcScan(node) = node_body
-                && table_job_type == TableJobType::SharedCdcSource
-            {
-                if let Some(table_desc) = node.cdc_table_desc.as_mut() {
-                    table_desc.table_id = table.id;
-                }
-            }
-        });
     }
 }
