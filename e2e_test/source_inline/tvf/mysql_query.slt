@@ -8,7 +8,7 @@ mysql -e "
 USE tvf;
 CREATE TABLE test (
     id bigint primary key,
-    v1 bool,
+    v1 bit,
     v2 smallint,
     v3 integer,
     v4 bigint,
