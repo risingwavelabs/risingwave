@@ -13,8 +13,7 @@ rpk topic create 'avro_alter_table_test'
 
 # create a schema and produce a message
 system ok
-echo '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}' | jq '{"schema": tojson}' \
-| curl -s -X POST -H 'content-type:application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro_alter_table_test-value/versions"
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
 
 system ok
 echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_table_test
@@ -38,8 +37,7 @@ select * from t
 
 # create a new version of schema that removed field bar
 system ok
-echo '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}' | jq '{"schema": tojson}' \
-| curl -s -X POST -H 'content-type:application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro_alter_table_test-value/versions"
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
 
 # Refresh table schema should fail
 statement error

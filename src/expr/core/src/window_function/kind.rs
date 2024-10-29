@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use enum_as_inner::EnumAsInner;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
@@ -20,7 +21,7 @@ use crate::aggregate::AggType;
 use crate::Result;
 
 /// Kind of window functions.
-#[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
@@ -64,7 +65,7 @@ impl WindowFuncKind {
 }
 
 impl WindowFuncKind {
-    pub fn is_rank(&self) -> bool {
+    pub fn is_numbering(&self) -> bool {
         matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
     }
 }
