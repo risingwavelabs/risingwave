@@ -1180,6 +1180,8 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
     }
 }
 
+/// `rename_relation` renames the target relation and its definition,
+/// it commits the changes to the transaction and returns the updated relations and the old name.
 pub async fn rename_relation(
     txn: &DatabaseTransaction,
     object_type: ObjectType,
@@ -1257,6 +1259,8 @@ pub async fn rename_relation(
     Ok((to_update_relations, old_name))
 }
 
+/// `rename_relation_refer` updates the definition of relations that refer to the target one,
+/// it commits the changes to the transaction and returns all the updated relations.
 pub async fn rename_relation_refer(
     txn: &DatabaseTransaction,
     object_type: ObjectType,
