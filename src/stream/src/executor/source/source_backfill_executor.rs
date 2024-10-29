@@ -406,6 +406,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         type PausedReader = Option<impl Stream>;
         let mut paused_reader: PausedReader = None;
+        let mut command_paused = false;
 
         macro_rules! pause_reader {
             () => {
@@ -422,6 +423,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
+            command_paused = true;
             pause_reader!();
         }
 
@@ -463,7 +465,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
             let mut self_paused = false;
-            let mut command_paused = false;
 
             // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {

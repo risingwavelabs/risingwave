@@ -364,8 +364,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
         if start_with_paused {
             stream.pause_stream();
+            command_paused = true;
         }
 
         yield Message::Barrier(barrier);
@@ -376,7 +378,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
-        let mut command_paused = false;
 
         let source_output_row_count = self
             .metrics
