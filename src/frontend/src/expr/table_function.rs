@@ -430,16 +430,22 @@ impl TableFunction {
                     for column in statement.columns() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
+                            // Numeric types
                             MySqlColumnType::MYSQL_TYPE_BIT => DataType::Boolean,
                             MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
                             MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
                             MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
                             MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
                             MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
-                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL
+                            | MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+
+                            // Date time types
                             MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
                             MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
                             MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamp,
+
+                            // String types
                             MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
                             _ => {
                                 return Err(crate::error::ErrorCode::BindError(
