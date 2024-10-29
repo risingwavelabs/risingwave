@@ -249,6 +249,7 @@ impl IcebergSplitEnumerator {
         let mut position_delete_files = vec![];
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
+        // TODO(kwannoel): add filter here.
         let scan = table
             .scan()
             .snapshot_id(snapshot_id)
