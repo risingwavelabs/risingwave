@@ -225,7 +225,6 @@ impl ActiveStreamingWorkerNodes {
                             id: node.id,
                             r#type: node.r#type,
                             host: node.host.clone(),
-                            parallelism: node.parallelism,
                             property: node.property.clone(),
                             resource: node.resource.clone(),
                             ..Default::default()
