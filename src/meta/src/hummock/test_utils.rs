@@ -32,10 +32,10 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::controller::catalog::CatalogController;
@@ -347,12 +347,12 @@ pub async fn setup_compute_env_with_metric(
             WorkerType::ComputeNode,
             fake_host_address,
             Property {
-                worker_node_parallelism: fake_parallelism as _,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
                 internal_rpc_host_addr: "".to_string(),
-                label: None,
+                node_label: None,
+                parallelism: fake_parallelism as _,
             },
             Default::default(),
         )

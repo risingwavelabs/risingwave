@@ -227,7 +227,7 @@ impl Fragment {
         self.r
             .worker_nodes
             .iter()
-            .map(|w| (w.id, w.parallelism as usize))
+            .map(|w| (w.id, w.parallelism()))
             .collect()
     }
 

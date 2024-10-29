@@ -232,8 +232,7 @@ mod tests {
             is_unschedulable: false,
             is_serving: true,
             is_streaming: false,
-            internal_rpc_host_addr: "".to_string(),
-            node_label: None,
+            ..Default::default()
         };
 
         let count_same_vnode_mapping = |wm1: &WorkerSlotMapping, wm2: &WorkerSlotMapping| {
@@ -249,10 +248,11 @@ mod tests {
             count
         };
 
+        let mut property = serving_property.clone();
+        property.parallelism = 1;
         let worker_1 = WorkerNode {
             id: 1,
-            parallelism: 1,
-            property: Some(serving_property.clone()),
+            property: Some(property),
             ..Default::default()
         };
 
@@ -264,10 +264,11 @@ mod tests {
         let re_worker_mapping_2 = place_vnode(None, &[worker_1.clone()], None).unwrap();
         assert_eq!(re_worker_mapping_2.iter_unique().count(), 1);
 
+        let mut property = serving_property.clone();
+        property.parallelism = 50;
         let worker_2 = WorkerNode {
             id: 2,
-            parallelism: 50,
-            property: Some(serving_property.clone()),
+            property: Some(property),
             ..Default::default()
         };
 
@@ -283,10 +284,11 @@ mod tests {
         let score = count_same_vnode_mapping(&re_worker_mapping_2, &re_worker_mapping);
         assert!(score >= 5);
 
+        let mut property = serving_property.clone();
+        property.parallelism = 60;
         let worker_3 = WorkerNode {
             id: 3,
-            parallelism: 60,
-            property: Some(serving_property.clone()),
+            property: Some(property),
             ..Default::default()
         };
         let re_pu_mapping_2 = place_vnode(

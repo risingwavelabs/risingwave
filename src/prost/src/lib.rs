@@ -23,6 +23,7 @@ pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+use crate::common::WorkerType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -220,7 +221,11 @@ impl stream_plan::MaterializeNode {
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
     pub fn parallelism(&self) -> usize {
-        self.parallelism as usize
+        assert_eq!(self.r#type(), WorkerType::ComputeNode);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
     }
 }
 

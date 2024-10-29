@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -426,7 +427,10 @@ fn make_cluster_info() -> StreamingClusterInfo {
         0,
         WorkerNode {
             id: 0,
-            parallelism: 8,
+            property: Some(Property {
+                parallelism: 8,
+                ..Default::default()
+            }),
             ..Default::default()
         },
     ))
