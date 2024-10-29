@@ -196,7 +196,7 @@ struct SessionFrameGapRef<'a> {
     add_expr: &'a dyn Expression,
 }
 
-impl<'a> SessionFrameGapRef<'a> {
+impl SessionFrameGapRef<'_> {
     fn minimal_next_start_of(&self, end_order_value: impl ToOwnedDatum) -> Datum {
         let row = OwnedRow::new(vec![end_order_value.to_owned_datum()]);
         self.add_expr

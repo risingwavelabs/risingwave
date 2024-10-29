@@ -125,7 +125,7 @@ impl AwsEc2Client {
         // The number of returned DNS names may not equal to the input AZs,
         // because some AZs may not have a subnet in the RW VPC
         let mut azid_to_dns_map = HashMap::new();
-        if endpoint_dns_names.first().is_none() {
+        if endpoint_dns_names.is_empty() {
             return Err(MetaError::from(anyhow!(
                 "No DNS name returned for the endpoint"
             )));

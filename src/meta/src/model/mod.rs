@@ -113,7 +113,7 @@ impl<'a, T> VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T> Deref for VarTransaction<'a, T> {
+impl<T> Deref for VarTransaction<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -124,7 +124,7 @@ impl<'a, T> Deref for VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T: Clone> DerefMut for VarTransaction<'a, T> {
+impl<T: Clone> DerefMut for VarTransaction<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         if self.new_value.is_none() {
             self.new_value.replace(self.orig_value_ref.clone());
@@ -133,7 +133,7 @@ impl<'a, T: Clone> DerefMut for VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T> InMemValTransaction for VarTransaction<'a, T>
+impl<T> InMemValTransaction for VarTransaction<'_, T>
 where
     T: PartialEq,
 {
@@ -216,7 +216,7 @@ impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let is_occupied = matches!(
             self.staging_entry.as_ref().unwrap(),
@@ -478,7 +478,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
+impl<K, V> Deref for BTreeMapEntryTransaction<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -486,13 +486,13 @@ impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K, V> DerefMut for BTreeMapEntryTransaction<'a, K, V> {
+impl<K, V> DerefMut for BTreeMapEntryTransaction<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.new_value
     }
 }
 
-impl<'a, K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'a, K, V> {
+impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, K, V> {
     fn commit(self) {
         self.tree_ref.insert(self.key, self.new_value);
     }
