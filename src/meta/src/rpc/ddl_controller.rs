@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use rand::Rng;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
@@ -32,10 +31,8 @@ use risingwave_common::util::stream_graph_visitor::{
 };
 use risingwave_common::{bail, hash, must_match};
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
-    UPSTREAM_SOURCE_KEY,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta_model::object::ObjectType;
@@ -1973,25 +1970,6 @@ pub fn fill_table_stream_graph_info(
                 if let Some(source) = source {
                     source_node.source_inner.as_mut().unwrap().source_id = source.id;
                     source_count += 1;
-
-                    // Generate a random server id for mysql cdc source if needed
-                    // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-                    // group (that is, different from any other server id being used by any master or slave)
-                    if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY)
-                        && matches!(
-                            CdcSourceType::from(connector.as_str()),
-                            CdcSourceType::Mysql
-                        )
-                    {
-                        let props = &mut source_node.source_inner.as_mut().unwrap().with_properties;
-                        let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
-                        props
-                            .entry("server.id".to_string())
-                            .or_insert(rand_server_id.to_string());
-
-                        // make these two `Source` consistent
-                        props.clone_into(&mut source.with_properties);
-                    }
 
                     assert_eq!(
                         source_count, 1,
