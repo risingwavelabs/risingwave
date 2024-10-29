@@ -42,10 +42,10 @@ use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -124,12 +124,12 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
-            worker_node_parallelism: opts.parallelism as u64,
+            parallelism: opts.parallelism as u32,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
-            label: Some(opts.node_label.clone()),
+            node_label: Some(opts.node_label.clone()),
         },
         &config.meta,
     )

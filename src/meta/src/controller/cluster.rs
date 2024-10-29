@@ -29,9 +29,10 @@ use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
 use risingwave_meta_model::worker::{WorkerStatus, WorkerType};
 use risingwave_meta_model::{worker, worker_property, TransactionId, WorkerId};
-use risingwave_pb::common::worker_node::{PbProperty, PbResource, PbState};
+use risingwave_pb::common::worker_node::{
+    PbProperty, PbProperty as AddNodeProperty, PbResource, PbState,
+};
 use risingwave_pb::common::{HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode};
-use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::prelude::Expr;
@@ -76,13 +77,13 @@ impl From<WorkerInfo> for PbWorkerNode {
                 port: info.0.port,
             }),
             state: PbState::from(info.0.status) as _,
-            parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
             property: info.1.as_ref().map(|p| PbProperty {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
                 node_label: p.label.clone(),
+                parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: info.2.resource,
@@ -394,7 +395,7 @@ impl StreamingClusterInfo {
     pub fn parallelism(&self) -> usize {
         self.worker_nodes
             .values()
-            .map(|worker| worker.parallelism as usize)
+            .map(|worker| worker.parallelism())
             .sum()
     }
 }
@@ -443,7 +444,6 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
             .map(HostAddr::to_protobuf)
             .ok(),
         state: PbState::Running as _,
-        parallelism: 0,
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
@@ -627,7 +627,7 @@ impl ClusterControllerInner {
             return if worker.worker_type == WorkerType::ComputeNode {
                 let property = property.unwrap();
                 let mut current_parallelism = property.parallelism as usize;
-                let new_parallelism = add_property.worker_node_parallelism as usize;
+                let new_parallelism = add_property.parallelism as usize;
                 match new_parallelism.cmp(&current_parallelism) {
                     Ordering::Less => {
                         if !self.disable_automatic_parallelism_control {
@@ -677,7 +677,7 @@ impl ClusterControllerInner {
                 let worker_property = worker_property::ActiveModel {
                     worker_id: Set(worker.worker_id),
                     parallelism: Set(add_property
-                        .worker_node_parallelism
+                        .parallelism
                         .try_into()
                         .expect("invalid parallelism")),
                     is_streaming: Set(add_property.is_streaming),
@@ -713,7 +713,7 @@ impl ClusterControllerInner {
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
-                    .worker_node_parallelism
+                    .parallelism
                     .try_into()
                     .expect("invalid parallelism")),
                 is_streaming: Set(add_property.is_streaming),
@@ -721,7 +721,7 @@ impl ClusterControllerInner {
                 is_unschedulable: Set(add_property.is_unschedulable),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
                 label: if r#type == PbWorkerType::ComputeNode {
-                    Set(add_property.label.clone())
+                    Set(add_property.node_label.clone())
                 } else {
                     Set(None)
                 },
@@ -957,12 +957,12 @@ mod tests {
         let parallelism_num = 4_usize;
         let worker_count = 5_usize;
         let property = AddNodeProperty {
-            worker_node_parallelism: parallelism_num as _,
+            parallelism: parallelism_num as _,
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
-            label: None,
+            node_label: None,
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1005,7 +1005,7 @@ mod tests {
 
         // re-register existing worker node with larger parallelism and change its serving mode.
         let mut new_property = property.clone();
-        new_property.worker_node_parallelism = (parallelism_num * 2) as _;
+        new_property.parallelism = (parallelism_num * 2) as _;
         new_property.is_serving = false;
         cluster_ctl
             .add_worker(
@@ -1049,12 +1049,12 @@ mod tests {
             port: 5001,
         };
         let mut property = AddNodeProperty {
-            worker_node_parallelism: 4,
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
-            label: None,
+            node_label: None,
+            parallelism: 4,
         };
         let worker_id = cluster_ctl
             .add_worker(
