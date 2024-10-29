@@ -718,7 +718,10 @@ impl CatalogController {
                     Expr::col((table::Entity, table::Column::Name)),
                     Expr::if_null(
                         Expr::col((source::Entity, source::Column::Name)),
-                        Expr::col((sink::Entity, sink::Column::Name)),
+                        Expr::if_null(
+                            Expr::col((sink::Entity, sink::Column::Name)),
+                            Expr::val("<unknown>"),
+                        ),
                     ),
                 ),
                 "name",
