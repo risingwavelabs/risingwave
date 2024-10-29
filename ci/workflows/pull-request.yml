@@ -808,7 +808,7 @@ steps:
 
   - label: "end-to-end test (mysql backend)"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-mysql-backend"
-    if: false
+    if: "false"
     # TODO: enable this when all bugs of mysql backend are addressed.
     # if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
