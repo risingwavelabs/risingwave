@@ -430,6 +430,11 @@ impl TableFunction {
                     for column in statement.columns() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
+                            // Boolean types
+                            MySqlColumnType::MYSQL_TYPE_BIT if column.column_length() == 1 => {
+                                DataType::Boolean
+                            }
+
                             // Numeric types
                             // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
                             // we treat it as Int16 here. It is better to be straightforward in our conversion.
@@ -463,13 +468,13 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
 
                             // Binary types
-                            MySqlColumnType::MYSQL_TYPE_BLOB
+                            MySqlColumnType::MYSQL_TYPE_BIT
+                            | MySqlColumnType::MYSQL_TYPE_BLOB
                             | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
                             | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
                             | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
 
                             MySqlColumnType::MYSQL_TYPE_UNKNOWN
-                            | MySqlColumnType::MYSQL_TYPE_BIT
                             | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
                             | MySqlColumnType::MYSQL_TYPE_ENUM
                             | MySqlColumnType::MYSQL_TYPE_SET

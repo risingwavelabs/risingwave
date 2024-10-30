@@ -67,6 +67,30 @@ pub fn mysql_datum_to_rw_datum(
     rw_data_type: &DataType,
 ) -> Result<Datum, anyhow::Error> {
     match rw_data_type {
+        DataType::Boolean => {
+            // Bit
+            match mysql_row.take_opt::<Option<Vec<u8>>, _>(mysql_datum_index) {
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    column_name,
+                    mysql_datum_index
+                ),
+                Some(Ok(val)) => match val {
+                    None => Ok(None),
+                    Some(val) => match val.as_slice() {
+                        [0] => Ok(Some(ScalarImpl::from(false))),
+                        [1] => Ok(Some(ScalarImpl::from(true))),
+                        _ => Err(anyhow!("invalid value for boolean: {:?}", val)),
+                    },
+                },
+                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                    .context("failed to deserialize MySQL value into rust value")
+                    .context(format!(
+                        "column: {}, index: {}, rust_type: Vec<u8>",
+                        column_name, mysql_datum_index,
+                    ))),
+            }
+        }
         DataType::Int16 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i16)
         }
@@ -156,8 +180,7 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Boolean
-        | DataType::Interval
+        DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Int256
