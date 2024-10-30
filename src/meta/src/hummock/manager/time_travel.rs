@@ -34,7 +34,6 @@ use risingwave_meta_model::{
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
-use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
