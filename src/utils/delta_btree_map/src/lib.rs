@@ -130,7 +130,7 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
 ///
 /// A cursor always points at the gap of items in the map. For example:
 ///
-/// ```
+/// ```text
 /// | Foo | Bar |
 /// ^     ^     ^
 /// 1     2     3
