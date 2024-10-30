@@ -25,10 +25,6 @@ scrape_configs:
     static_configs:
       - targets: ["compactor-0:1260"]
 
-  - job_name: etcd
-    static_configs:
-      - targets: ["etcd-0:2379"]
-
   - job_name: frontend
     static_configs:
       - targets: ["frontend-node-0:2222"]
