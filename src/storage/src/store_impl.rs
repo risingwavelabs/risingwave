@@ -635,13 +635,16 @@ impl StateStoreImpl {
                 .build_and_install();
         }
 
+        const SLAB_INITIAL_CAPACITY: usize = 4 * 1024 * 1024; // 4 MiB
+
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.meta_cache_shard_num)
+                .with_slab_initial_capacity(SLAB_INITIAL_CAPACITY / opts.meta_cache_shard_num)
+                .with_slab_segment_size(64 * 1024)
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
@@ -690,7 +693,8 @@ impl StateStoreImpl {
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.block_cache_shard_num)
+                .with_slab_initial_capacity(SLAB_INITIAL_CAPACITY / opts.block_cache_shard_num)
+                .with_slab_segment_size(64 * 1024)
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
