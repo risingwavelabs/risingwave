@@ -1192,18 +1192,41 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate))
+        Ok(StreamTemporalJoin::new(
+            new_logical_join,
+            new_predicate,
+            false,
+        ))
     }
 
     fn to_stream_nested_loop_temporal_join(
         &self,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<StreamNestedLoopTemporalJoin> {
+    ) -> Result<StreamTemporalJoin> {
         use super::stream::prelude::*;
-        assert!(predicate.has_eq());
+        assert!(!predicate.has_eq());
 
-        let condition = predicate.other_cond();
+        let left = self.left().to_stream_with_dist_required(
+            &RequiredDist::PhysicalDist(Distribution::Broadcast),
+            ctx,
+        )?;
+        assert!(left.as_stream_exchange().is_some());
+
+        if self.join_type() != JoinType::Inner {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires an inner join".into(),
+                "Please use an inner join".into(),
+            )));
+        }
+
+        if !left.append_only() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires the left hash side to be append only".into(),
+                "Please ensure the left hash side is append only".into(),
+            )));
+        }
+
         let right = self.right();
         let logical_scan = Self::check_temporal_rhs(&right)?;
 
@@ -1214,23 +1237,22 @@ impl LogicalJoin {
                 self.output_indices(),
                 self.left().schema().len(),
             )?;
-            
-        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
-        let left = self.left().to_stream(ctx)?;
+        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
             left,
             right,
-            condition.clone(),
+            new_join_on,
             self.join_type(),
             new_join_output_indices,
         );
 
-        Ok(StreamNestedLoopTemporalJoin::new(
-            logical_join.core,
-            predicate,
+        Ok(StreamTemporalJoin::new(
+            new_logical_join,
+            new_predicate,
+            true,
         ))
     }
 
@@ -1455,6 +1477,9 @@ impl ToStream for LogicalJoin {
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }
+        } else if self.should_be_temporal_join() {
+            self.to_stream_nested_loop_temporal_join(predicate, ctx)
+                .map(|x| x.into())
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {
