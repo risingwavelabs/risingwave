@@ -8,34 +8,62 @@ mysql -e "
 USE tvf;
 CREATE TABLE test (
     id bigint primary key,
+    v0 bit,
     v1 bool,
-    v2 smallint,
-    v3 integer,
-    v4 bigint,
-    v5 float,
-    v6 double,
-    v7 numeric,
-    v8 date,
-    v9 time,
-    v10 timestamp,
-    v11 varchar(255)
+    v2 tinyint(1),
+    v3 tinyint(2),
+    v4 smallint,
+    v5 mediumint,
+    v6 integer,
+    v7 bigint,
+    v8 float,
+    v9 double,
+    v10 numeric(4, 2),
+    v11 decimal(4, 2),
+    v12 char(255),
+    v13 varchar(255),
+    v14 bit(10),
+    v15 tinyblob,
+    v16 blob,
+    v17 mediumblob,
+    v18 longblob,
+    v19 date,
+    v20 time,
+    v21 timestamp
 );
 INSERT INTO test SELECT
   1 as id,
+  true as v0,
   true as v1,
-  1 as v2,
-  1 as v3,
-  1 as v4,
-  1.23 as v5,
-  1.23 as v6,
-  1.0 as v7,
-  '2021-01-01' as v8,
-  '00:00:00' as v9,
-  '2021-01-01 00:00:00' as v10,
-  'text' as v11;
+  2 as v2,
+  3 as v3,
+  4 as v4,
+  5 as v5,
+  6 as v6,
+  7 as v7,
+  1.08 as v8,
+  1.09 as v9,
+  1.10 as v10,
+  1.11 as v11,
+  'char' as v12,
+  'varchar' as v13,
+  b'1010' as v14,
+  x'16' as v15,
+  x'17' as v16,
+  x'18' as v17,
+  x'19' as v18,
+  '2021-01-01' as v19,
+  '12:34:56' as v20,
+  '2021-01-01 12:34:56' as v21;
 "
 
-query II
+query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 1 1 1.23 1.23 1 2021-01-01 00:00:00 2021-01-01 00:00:00 text
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00
+
+system ok
+mysql -e "
+USE tvf;
+DROP DATABASE tvf;
+"
