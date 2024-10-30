@@ -39,12 +39,6 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
-- package-ecosystem: maven
-  directory: /java
-  schedule:
-    interval: "daily"
-  open-pull-requests-limit: 10
-  rebase-strategy: "disabled"
 
 # Don't update these directories
 - package-ecosystem: cargo
@@ -53,3 +47,21 @@ updates:
     interval: "daily"
   ignore:
     - dependency-name: "*"
+
+- package-ecosystem: maven
+  directory: /java
+  schedule:
+    interval: "weekly"
+  open-pull-requests-limit: 5
+  # Disable auto rebase to reduce cost. Use `@dependabot rebase` manually instead.
+  rebase-strategy: "disabled"
+  ignore:
+    # Do not bump Debezium because we have hacked its source code e.g. #18760
+    - dependency-name: "io.debezium:*"
+      update-types:
+        ["version-update:semver-minor", "version-update:semver-major"]
+  groups:
+    # Group all dependenies together because Java libraries are quite stable
+    all:
+      patterns:
+        - "*"
