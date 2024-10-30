@@ -431,7 +431,6 @@ impl TableFunction {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
                             // Numeric types
-                            MySqlColumnType::MYSQL_TYPE_BIT => DataType::Boolean,
                             MySqlColumnType::MYSQL_TYPE_TINY => {
                                 if column.column_length() == 1 {
                                     // Bool/Boolean is an alias for TINYINT(1)
@@ -468,7 +467,19 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
                             | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
 
-                            _ => {
+                            MySqlColumnType::MYSQL_TYPE_UNKNOWN
+                            | MySqlColumnType::MYSQL_TYPE_BIT
+                            | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
+                            | MySqlColumnType::MYSQL_TYPE_ENUM
+                            | MySqlColumnType::MYSQL_TYPE_SET
+                            | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                            | MySqlColumnType::MYSQL_TYPE_NULL
+                            | MySqlColumnType::MYSQL_TYPE_TIMESTAMP2
+                            | MySqlColumnType::MYSQL_TYPE_DATETIME
+                            | MySqlColumnType::MYSQL_TYPE_DATETIME2
+                            | MySqlColumnType::MYSQL_TYPE_TIME2
+                            | MySqlColumnType::MYSQL_TYPE_YEAR
+                            | MySqlColumnType::MYSQL_TYPE_NEWDATE => {
                                 return Err(crate::error::ErrorCode::BindError(
                                     format!("unsupported column type: {:?}", column.column_type())
                                         .to_string(),
