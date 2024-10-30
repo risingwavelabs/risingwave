@@ -644,6 +644,9 @@ pub struct CacheConfig {
 
     #[serde(default)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    #[serde(default = "default::storage::compactor_meta_cache_capacity_mb")]
+    pub compactor_meta_cache_capacity_mb: usize,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -1756,6 +1759,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             2
+        }
+
+        pub fn compactor_meta_cache_capacity_mb() -> usize {
+            128
         }
     }
 

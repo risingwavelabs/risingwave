@@ -144,7 +144,10 @@ pub struct StorageOpts {
     pub compactor_max_preload_meta_file_count: usize,
 
     pub object_store_config: ObjectStoreConfig,
+
     pub time_travel_version_cache_capacity: u64,
+
+    pub compactor_meta_cache_capacity_mb: usize,
 }
 
 impl Default for StorageOpts {
@@ -247,6 +250,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
+            compactor_meta_cache_capacity_mb: c.storage.cache.compactor_meta_cache_capacity_mb,
         }
     }
 }
