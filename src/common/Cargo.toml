@@ -59,6 +59,7 @@ itoa = "1.0"
 jsonbb = { workspace = true }
 lru = { workspace = true }
 memcomparable = { version = "0.2", features = ["decimal"] }
+mysql_async = { workspace = true }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
