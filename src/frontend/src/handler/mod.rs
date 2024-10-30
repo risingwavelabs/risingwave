@@ -336,7 +336,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
-            source_schema,
+            format_encode,
             source_watermarks,
             append_only,
             on_conflict,
@@ -363,7 +363,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+            let format_encode = format_encode.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -371,7 +371,7 @@ pub async fn handle(
                 wildcard_idx,
                 constraints,
                 if_not_exists,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -948,9 +948,9 @@ pub async fn handle(
         }
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::FormatEncode { connector_schema },
+            operation: AlterSourceOperation::FormatEncode { format_encode },
         } => {
-            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
                 .await
         }
         Statement::AlterSource {

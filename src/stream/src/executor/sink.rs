@@ -295,7 +295,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    assert!(!is_paused, "Should not receive any data after pause");
+                    assert!(
+                        !is_paused,
+                        "Actor {actor_id} should not receive any data after pause"
+                    );
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
