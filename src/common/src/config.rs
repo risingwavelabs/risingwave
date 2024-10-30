@@ -683,6 +683,11 @@ pub struct CacheConfig {
     #[serde(default)]
     #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
+
+    /// Configure the capacity of the meta cache in MB explicitly for compactor.
+    // TODO(li0k): `compactor_meta_cache_capacity_mb` is only used for compactor meta cache configuration, it is not involved in the calculation of CN reserved memory, we consider removing it in the future..
+    #[serde(default = "default::storage::compactor_meta_cache_capacity_mb")]
+    pub compactor_meta_cache_capacity_mb: usize,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -1810,6 +1815,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             32
+        }
+
+        pub fn compactor_meta_cache_capacity_mb() -> usize {
+            128
         }
     }
 
