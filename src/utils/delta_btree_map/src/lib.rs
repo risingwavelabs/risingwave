@@ -15,7 +15,7 @@
 #![feature(btree_cursors)]
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 use std::ops::Bound;
 
 use educe::Educe;
@@ -28,6 +28,9 @@ use enum_as_inner::EnumAsInner;
 pub struct DeltaBTreeMap<'a, K: Ord, V> {
     snapshot: &'a BTreeMap<K, V>,
     delta: &'a BTreeMap<K, Change<V>>,
+
+    first_key: Option<&'a K>,
+    last_key: Option<&'a K>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumAsInner)]
@@ -37,8 +40,29 @@ pub enum Change<V> {
 }
 
 impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
+    /// Create a new [`DeltaBTreeMap`] from the given snapshot and delta.
+    /// Best case time complexity: O(1), worst case time complexity: O(m), where m is `delta.len()`.
     pub fn new(snapshot: &'a BTreeMap<K, V>, delta: &'a BTreeMap<K, Change<V>>) -> Self {
-        Self { snapshot, delta }
+        let first_key = {
+            let cursor = CursorWithDelta2 {
+                ss_cursor: snapshot.lower_bound(Bound::Unbounded),
+                dt_cursor: delta.lower_bound(Bound::Unbounded),
+            };
+            cursor.peek_next().map(|(key, _)| key)
+        };
+        let last_key = {
+            let cursor = CursorWithDelta2 {
+                ss_cursor: snapshot.upper_bound(Bound::Unbounded),
+                dt_cursor: delta.upper_bound(Bound::Unbounded),
+            };
+            cursor.peek_prev().map(|(key, _)| key)
+        };
+        Self {
+            snapshot,
+            delta,
+            first_key,
+            last_key,
+        }
     }
 
     /// Get a reference to the snapshot.
@@ -51,24 +75,14 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
         self.delta
     }
 
-    /// Get the first key in the updated version of the snapshot.
+    /// Get the first key in the updated version of the snapshot. Complexity: O(1).
     pub fn first_key(&self) -> Option<&'a K> {
-        let cursor = CursorWithDelta {
-            snapshot: self.snapshot,
-            delta: self.delta,
-            curr_key_value: None,
-        };
-        cursor.peek_next().map(|(key, _)| key)
+        self.first_key
     }
 
-    /// Get the last key in the updated version of the snapshot.
+    /// Get the last key in the updated version of the snapshot. Complexity: O(1).
     pub fn last_key(&self) -> Option<&'a K> {
-        let cursor = CursorWithDelta {
-            snapshot: self.snapshot,
-            delta: self.delta,
-            curr_key_value: None,
-        };
-        cursor.peek_prev().map(|(key, _)| key)
+        self.last_key
     }
 
     /// Get a [`CursorWithDelta`] pointing to the element corresponding to the given key.
@@ -282,6 +296,119 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
     /// Move the cursor to the previous position.
     pub fn move_prev(&mut self) {
         self.curr_key_value = self.peek_prev();
+    }
+}
+
+/// Cursor that can iterate back and forth over the updated version of the snapshot.
+///
+/// A cursor always points to the boundary of items in the map. For example:
+///
+///     | Foo | Bar |
+///     ^     ^     ^
+///     1     2     3
+///
+/// The cursor can be at position 1, 2, or 3.
+/// If it's at position 1, `peek_prev` will return `None`, and `peek_next` will return `Foo`.
+/// If it's at position 3, `peek_prev` will return `Bar`, and `peek_next` will return `None`.
+#[derive(Debug, Clone)]
+pub struct CursorWithDelta2<'a, K: Ord, V> {
+    // NOTE: `btree_map::Cursor` always points to the boundary of items in the map.
+    ss_cursor: btree_map::Cursor<'a, K, V>,
+    dt_cursor: btree_map::Cursor<'a, K, Change<V>>,
+}
+
+impl<'a, K: Ord, V> CursorWithDelta2<'a, K, V> {
+    pub fn peek_prev(&self) -> Option<(&'a K, &'a V)> {
+        self.peek::<false /* PREV */>()
+    }
+
+    pub fn peek_next(&self) -> Option<(&'a K, &'a V)> {
+        self.peek::<true /* NEXT */>()
+    }
+
+    pub fn prev(&mut self) -> Option<(&'a K, &'a V)> {
+        self.r#move::<false /* PREV */>()
+    }
+
+    pub fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        self.r#move::<true /* NEXT */>()
+    }
+
+    fn peek<const NEXT: bool>(&self) -> Option<(&'a K, &'a V)> {
+        let mut ss_cursor = self.ss_cursor.clone();
+        let mut dt_cursor = self.dt_cursor.clone();
+        let res = Self::move_impl::<NEXT>(&mut ss_cursor, &mut dt_cursor);
+        res
+    }
+
+    fn r#move<const NEXT: bool>(&mut self) -> Option<(&'a K, &'a V)> {
+        let mut ss_cursor = self.ss_cursor.clone();
+        let mut dt_cursor = self.dt_cursor.clone();
+        let res = Self::move_impl::<NEXT>(&mut ss_cursor, &mut dt_cursor);
+        self.ss_cursor = ss_cursor;
+        self.dt_cursor = dt_cursor;
+        res
+    }
+
+    fn move_impl<const NEXT: bool>(
+        ss_cursor: &mut btree_map::Cursor<'a, K, V>,
+        dt_cursor: &mut btree_map::Cursor<'a, K, Change<V>>,
+    ) -> Option<(&'a K, &'a V)> {
+        loop {
+            let ss_peek = if NEXT {
+                ss_cursor.peek_next()
+            } else {
+                ss_cursor.peek_prev()
+            };
+            let dt_peek = if NEXT {
+                dt_cursor.peek_next()
+            } else {
+                dt_cursor.peek_prev()
+            };
+
+            let in_delta = match (ss_peek, dt_peek) {
+                (None, None) => return None,
+                (None, Some(_)) => true,
+                (Some(_), None) => false,
+                (Some((ss_key, _)), Some((dt_key, dt_change))) => match ss_key.cmp(dt_key) {
+                    Ordering::Less => !NEXT,   // if NEXT { in snapshot } else { in delta }
+                    Ordering::Greater => NEXT, // if NEXT { in delta } else { in snapshot }
+                    Ordering::Equal => {
+                        if NEXT {
+                            ss_cursor.next().unwrap();
+                        } else {
+                            ss_cursor.prev().unwrap();
+                        }
+                        match dt_change {
+                            Change::Insert(_) => true, // in delta
+                            Change::Delete => {
+                                if NEXT {
+                                    dt_cursor.next().unwrap();
+                                } else {
+                                    dt_cursor.prev().unwrap();
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                },
+            };
+
+            if in_delta {
+                let (key, change) = if NEXT {
+                    dt_cursor.next().unwrap()
+                } else {
+                    dt_cursor.prev().unwrap()
+                };
+                return Some((key, change.as_insert().unwrap()));
+            } else {
+                return if NEXT {
+                    ss_cursor.next()
+                } else {
+                    ss_cursor.prev()
+                };
+            }
+        }
     }
 }
 
