@@ -21,8 +21,8 @@ CREATE TABLE test (
     v11 varchar(255)
 );
 INSERT INTO test SELECT
-  true as id,
-  1 as v1,
+  1 as id,
+  true as v1,
   1 as v2,
   1 as v3,
   1 as v4,
@@ -38,3 +38,4 @@ INSERT INTO test SELECT
 query II
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
+1 t 1 1 1 1.23 1.23 1 2021-01-01 00:00:00 2021-01-01 00:00:00 text
