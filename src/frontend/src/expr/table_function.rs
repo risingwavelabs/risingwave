@@ -431,14 +431,9 @@ impl TableFunction {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
                             // Numeric types
-                            MySqlColumnType::MYSQL_TYPE_TINY => {
-                                if column.column_length() == 1 {
-                                    // Bool/Boolean is an alias for TINYINT(1)
-                                    DataType::Boolean
-                                } else {
-                                    DataType::Int16
-                                }
-                            }
+                            // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
+                            // we treat it as Int16 here. It is better to be straightforward in our conversion.
+                            MySqlColumnType::MYSQL_TYPE_TINY => DataType::Int16,
                             MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
                             MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
                             MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,

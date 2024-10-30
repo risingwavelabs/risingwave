@@ -33,7 +33,7 @@ macro_rules! handle_data_type {
                     "column: {}, index: {}, rust_type: {}",
                     $name,
                     $i,
-                    stringify!($ty),
+                    stringify!($type),
                 ))),
         }
     }};
@@ -67,9 +67,6 @@ pub fn mysql_datum_to_rw_datum(
     rw_data_type: &DataType,
 ) -> Result<Datum, anyhow::Error> {
     match rw_data_type {
-        DataType::Boolean => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, bool)
-        }
         DataType::Int16 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i16)
         }
@@ -159,7 +156,8 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Interval
+        DataType::Boolean
+        | DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Int256
