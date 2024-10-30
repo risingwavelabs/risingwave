@@ -89,10 +89,18 @@ pub async fn prepare_start_parameters(
     let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
-    let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
+    let meta_cache_capacity_bytes = storage_opts.compactor_meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (non_reserved_memory_bytes - meta_cache_capacity_bytes) as u64,
+        None => match non_reserved_memory_bytes.checked_sub(meta_cache_capacity_bytes) {
+            Some(compactor_memory_limit_bytes) => compactor_memory_limit_bytes as u64,
+            None => {
+                panic!(
+                    "Compactor memory limit {} is too small meta_cache_capacity_bytes {}",
+                    non_reserved_memory_bytes, meta_cache_capacity_bytes
+                );
+            }
+        },
     };
 
     tracing::info!(
