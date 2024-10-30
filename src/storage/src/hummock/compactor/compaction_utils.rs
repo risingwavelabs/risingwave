@@ -232,7 +232,7 @@ pub async fn generate_splits(
     context: &CompactorContext,
     max_sub_compaction: u32,
 ) -> HummockResult<Vec<KeyRange>> {
-    const MAX_FILE_COUNT: usize = 32;
+    const MAX_FILE_COUNT: usize = 0;
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
         if sstable_infos.len() > MAX_FILE_COUNT {
