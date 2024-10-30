@@ -270,3 +270,18 @@
               │     └─BatchValues { rows: [[1:Int32, '2024-06-20 19:01:00+00:00':Timestamptz]] }
               └─BatchExchange { order: [], dist: HashShard(r.src_id) }
                 └─BatchScan { table: r, columns: [r.ts, r.src_id, r.dev_id], distribution: SomeShard }
+- name: lateral join with CTE
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1, lateral (
+        with cte as (select * from t2 where t2.y = t1.y)  select x from cte
+    );
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y, output: [t1.x, t1.y, t2.x] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.y) }
+      │ └─BatchScan { table: t1, columns: [t1.x, t1.y], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.y) }
+        └─BatchFilter { predicate: IsNotNull(t2.y) }
+          └─BatchScan { table: t2, columns: [t2.x, t2.y], distribution: SomeShard }

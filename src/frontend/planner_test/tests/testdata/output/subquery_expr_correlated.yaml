@@ -2193,3 +2193,29 @@
                                       └─LogicalProjectSet { select_list: [$0, JsonbEach($0)] }
                                         └─LogicalAgg { group_key: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], aggs: [] }
                                           └─LogicalValues { rows: [['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb], ['{"x": {"value": 456}, "y": {"value": [7, 8, 9]}, "z": {"value": [{"a": 0, "b": 1}, {"a": 2, "b": 3}]}}':Jsonb]], schema: Schema { fields: ['{"x": {"value": 123}, "y": {"value": [1, 2, 3]}, "z": {"value": [{"a": 4, "b": 5}, {"a": 6, "b": 7}]}}':Jsonb:Jsonb] } }
+- name: subquery with CTE
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1 where t1.x = ( with cte as (select * from t2 where t2.y = t1.y)  select x from cte limit 1);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y AND t1.x = t2.x, output: [t1.x, t1.y] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.y) }
+      │ └─BatchScan { table: t1, columns: [t1.x, t1.y], distribution: SomeShard }
+      └─BatchGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
+        └─BatchExchange { order: [], dist: HashShard(t2.y) }
+          └─BatchProject { exprs: [t2.y, t2.x] }
+            └─BatchFilter { predicate: IsNotNull(t2.y) }
+              └─BatchScan { table: t2, columns: [t2.x, t2.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t1._row_id(hidden), t2.y(hidden)], stream_key: [t1._row_id, y, x], pk_columns: [t1._row_id, y, x], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.x, t1.y, t1._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y AND t1.x = t2.x, output: [t1.x, t1.y, t1._row_id, t2.y] }
+        ├─StreamExchange { dist: HashShard(t1.y) }
+        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
+          └─StreamExchange { dist: HashShard(t2.y) }
+            └─StreamProject { exprs: [t2.y, t2.x, t2._row_id] }
+              └─StreamFilter { predicate: IsNotNull(t2.y) }
+                └─StreamTableScan { table: t2, columns: [t2.x, t2.y, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
