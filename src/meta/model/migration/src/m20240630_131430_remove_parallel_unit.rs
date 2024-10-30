@@ -75,7 +75,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Fragment::Table)
-                    .add_column(ColumnDef::new(Fragment::VnodeMapping).binary().not_null())
+                    .add_column(ColumnDef::new(Fragment::VnodeMapping).blob().not_null())
                     .to_owned(),
             )
             .await?;

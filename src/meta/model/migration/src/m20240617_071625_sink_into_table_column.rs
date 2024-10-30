@@ -12,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::OriginalTargetColumns).binary())
+                    .add_column(ColumnDef::new(Sink::OriginalTargetColumns).blob())
                     .to_owned(),
             )
             .await?;

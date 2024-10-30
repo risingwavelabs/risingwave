@@ -10,7 +10,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Index::Table)
-                    .add_column(ColumnDef::new(Index::IndexColumnProperties).binary())
+                    .add_column(ColumnDef::new(Index::IndexColumnProperties).blob())
                     .to_owned(),
             )
             .await

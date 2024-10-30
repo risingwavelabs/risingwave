@@ -26,7 +26,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockSstableInfo::SstableInfo)
-                            .blob(BlobSize::Long)
+                            .blob()
                             .null(),
                     )
                     .to_owned(),
@@ -46,7 +46,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockTimeTravelVersion::Version)
-                            .blob(BlobSize::Long)
+                            .blob()
                             .null(),
                     )
                     .to_owned(),
@@ -66,7 +66,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockTimeTravelDelta::VersionDelta)
-                            .blob(BlobSize::Long)
+                            .blob()
                             .null(),
                     )
                     .to_owned(),

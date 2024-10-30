@@ -21,7 +21,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Secret::Name).string().not_null())
-                    .col(ColumnDef::new(Secret::Value).binary().not_null())
+                    .col(ColumnDef::new(Secret::Value).blob().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_secret_object_id")
@@ -42,7 +42,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::SecretRef).binary())
+                    .add_column(ColumnDef::new(Sink::SecretRef).blob())
                     .to_owned(),
             )
             .await?;
@@ -52,7 +52,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Source::Table)
-                    .add_column(ColumnDef::new(Source::SecretRef).binary())
+                    .add_column(ColumnDef::new(Source::SecretRef).blob())
                     .to_owned(),
             )
             .await?;

@@ -18,9 +18,7 @@ impl MigrationTrait for Migration {
                     .alter_table(
                         Table::alter()
                             .table(Function::Table)
-                            .modify_column(
-                                ColumnDef::new(Function::CompressedBinary).blob(BlobSize::Medium),
-                            )
+                            .modify_column(ColumnDef::new(Function::CompressedBinary).blob())
                             .to_owned(),
                     )
                     .await?;

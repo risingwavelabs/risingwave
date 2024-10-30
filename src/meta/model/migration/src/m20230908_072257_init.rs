@@ -140,7 +140,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(User::CanCreateDb).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateUser).boolean().not_null())
                     .col(ColumnDef::new(User::CanLogin).boolean().not_null())
-                    .col(ColumnDef::new(User::AuthInfo).binary())
+                    .col(ColumnDef::new(User::AuthInfo).blob())
                     .to_owned(),
             )
             .await?;
@@ -376,12 +376,8 @@ impl MigrationTrait for Migration {
                             .string()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Fragment::StreamNode)
-                            .blob(BlobSize::Long)
-                            .not_null(),
-                    )
-                    .col(ColumnDef::new(Fragment::VnodeMapping).binary().not_null())
+                    .col(ColumnDef::new(Fragment::StreamNode).blob().not_null())
+                    .col(ColumnDef::new(Fragment::VnodeMapping).blob().not_null())
                     .col(ColumnDef::new(Fragment::StateTableIds).json_binary())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json_binary())
                     .foreign_key(
@@ -407,12 +403,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Actor::FragmentId).integer().not_null())
                     .col(ColumnDef::new(Actor::Status).string().not_null())
-                    .col(ColumnDef::new(Actor::Splits).binary())
+                    .col(ColumnDef::new(Actor::Splits).blob())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::WorkerId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json_binary())
-                    .col(ColumnDef::new(Actor::VnodeBitmap).binary())
-                    .col(ColumnDef::new(Actor::ExprContext).binary().not_null())
+                    .col(ColumnDef::new(Actor::VnodeBitmap).blob())
+                    .col(ColumnDef::new(Actor::ExprContext).blob().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")
@@ -454,7 +450,7 @@ impl MigrationTrait for Migration {
                             .json_binary()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(ActorDispatcher::HashMapping).binary())
+                    .col(ColumnDef::new(ActorDispatcher::HashMapping).blob())
                     .col(
                         ColumnDef::new(ActorDispatcher::DispatcherId)
                             .integer()
@@ -495,7 +491,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Connection::Name).string().not_null())
-                    .col(ColumnDef::new(Connection::Info).binary().not_null())
+                    .col(ColumnDef::new(Connection::Info).blob().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_connection_object_id")
@@ -514,7 +510,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Source::SourceId).integer().primary_key())
                     .col(ColumnDef::new(Source::Name).string().not_null())
                     .col(ColumnDef::new(Source::RowIdIndex).integer())
-                    .col(ColumnDef::new(Source::Columns).binary().not_null())
+                    .col(ColumnDef::new(Source::Columns).blob().not_null())
                     .col(ColumnDef::new(Source::PkColumnIds).json_binary().not_null())
                     .col(
                         ColumnDef::new(Source::WithProperties)
@@ -522,8 +518,8 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Source::Definition).text().not_null())
-                    .col(ColumnDef::new(Source::SourceInfo).binary())
-                    .col(ColumnDef::new(Source::WatermarkDescs).binary().not_null())
+                    .col(ColumnDef::new(Source::SourceInfo).blob())
+                    .col(ColumnDef::new(Source::WatermarkDescs).blob().not_null())
                     .col(ColumnDef::new(Source::OptionalAssociatedTableId).integer())
                     .col(ColumnDef::new(Source::ConnectionId).integer())
                     .col(ColumnDef::new(Source::Version).big_integer().not_null())
@@ -562,8 +558,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
                     .col(ColumnDef::new(Table::TableType).string().not_null())
                     .col(ColumnDef::new(Table::BelongsToJobId).integer())
-                    .col(ColumnDef::new(Table::Columns).binary().not_null())
-                    .col(ColumnDef::new(Table::Pk).binary().not_null())
+                    .col(ColumnDef::new(Table::Columns).blob().not_null())
+                    .col(ColumnDef::new(Table::Pk).blob().not_null())
                     .col(
                         ColumnDef::new(Table::DistributionKey)
                             .json_binary()
@@ -593,14 +589,14 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Table::DistKeyInPk).json_binary().not_null())
                     .col(ColumnDef::new(Table::DmlFragmentId).integer())
-                    .col(ColumnDef::new(Table::Cardinality).binary())
+                    .col(ColumnDef::new(Table::Cardinality).blob())
                     .col(
                         ColumnDef::new(Table::CleanedByWatermark)
                             .boolean()
                             .not_null(),
                     )
                     .col(ColumnDef::new(Table::Description).string())
-                    .col(ColumnDef::new(Table::Version).binary())
+                    .col(ColumnDef::new(Table::Version).blob())
                     .col(ColumnDef::new(Table::RetentionSeconds).integer())
                     .col(
                         ColumnDef::new(Table::IncomingSinks)
@@ -655,8 +651,8 @@ impl MigrationTrait for Migration {
                     .table(Sink::Table)
                     .col(ColumnDef::new(Sink::SinkId).integer().primary_key())
                     .col(ColumnDef::new(Sink::Name).string().not_null())
-                    .col(ColumnDef::new(Sink::Columns).binary().not_null())
-                    .col(ColumnDef::new(Sink::PlanPk).binary().not_null())
+                    .col(ColumnDef::new(Sink::Columns).blob().not_null())
+                    .col(ColumnDef::new(Sink::PlanPk).blob().not_null())
                     .col(
                         ColumnDef::new(Sink::DistributionKey)
                             .json_binary()
@@ -669,7 +665,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
-                    .col(ColumnDef::new(Sink::SinkFormatDesc).binary())
+                    .col(ColumnDef::new(Sink::SinkFormatDesc).blob())
                     .col(ColumnDef::new(Sink::TargetTable).integer())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -704,7 +700,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(View::Name).string().not_null())
                     .col(ColumnDef::new(View::Properties).json_binary().not_null())
                     .col(ColumnDef::new(View::Definition).text().not_null())
-                    .col(ColumnDef::new(View::Columns).binary().not_null())
+                    .col(ColumnDef::new(View::Columns).blob().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_view_object_id")
@@ -724,7 +720,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Index::Name).string().not_null())
                     .col(ColumnDef::new(Index::IndexTableId).integer().not_null())
                     .col(ColumnDef::new(Index::PrimaryTableId).integer().not_null())
-                    .col(ColumnDef::new(Index::IndexItems).binary().not_null())
+                    .col(ColumnDef::new(Index::IndexItems).blob().not_null())
                     .col(ColumnDef::new(Index::IndexColumnsLen).integer().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -760,8 +756,8 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::FunctionId).integer().primary_key())
                     .col(ColumnDef::new(Function::Name).string().not_null())
                     .col(ColumnDef::new(Function::ArgNames).string().not_null())
-                    .col(ColumnDef::new(Function::ArgTypes).binary().not_null())
-                    .col(ColumnDef::new(Function::ReturnType).binary().not_null())
+                    .col(ColumnDef::new(Function::ArgTypes).blob().not_null())
+                    .col(ColumnDef::new(Function::ReturnType).blob().not_null())
                     .col(ColumnDef::new(Function::Language).string().not_null())
                     .col(ColumnDef::new(Function::Link).string())
                     .col(ColumnDef::new(Function::Identifier).string())

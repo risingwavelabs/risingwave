@@ -67,8 +67,8 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Subscription::Name).string().not_null())
                     .col(ColumnDef::new(Subscription::Definition).string().not_null())
-                    .col(ColumnDef::new(Subscription::Columns).binary().not_null())
-                    .col(ColumnDef::new(Subscription::PlanPk).binary().not_null())
+                    .col(ColumnDef::new(Subscription::Columns).blob().not_null())
+                    .col(ColumnDef::new(Subscription::PlanPk).blob().not_null())
                     .col(
                         ColumnDef::new(Subscription::DistributionKey)
                             .json_binary()
