@@ -449,9 +449,15 @@ impl TableFunction {
                             MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
 
                             // Date time types
+                            MySqlColumnType::MYSQL_TYPE_YEAR => DataType::Int32,
                             MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_NEWDATE => DataType::Date,
                             MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
-                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_TIME2 => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME2 => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamptz,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
 
                             // String types
                             MySqlColumnType::MYSQL_TYPE_VARCHAR
@@ -473,13 +479,7 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_ENUM
                             | MySqlColumnType::MYSQL_TYPE_SET
                             | MySqlColumnType::MYSQL_TYPE_GEOMETRY
-                            | MySqlColumnType::MYSQL_TYPE_NULL
-                            | MySqlColumnType::MYSQL_TYPE_TIMESTAMP2
-                            | MySqlColumnType::MYSQL_TYPE_DATETIME
-                            | MySqlColumnType::MYSQL_TYPE_DATETIME2
-                            | MySqlColumnType::MYSQL_TYPE_TIME2
-                            | MySqlColumnType::MYSQL_TYPE_YEAR
-                            | MySqlColumnType::MYSQL_TYPE_NEWDATE => {
+                            | MySqlColumnType::MYSQL_TYPE_NULL => {
                                 return Err(crate::error::ErrorCode::BindError(
                                     format!("unsupported column type: {:?}", column.column_type())
                                         .to_string(),
