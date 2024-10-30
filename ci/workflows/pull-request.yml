@@ -333,6 +333,25 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "build-image-on-pr"
+    key: "build-image-on-pr"
+    if: build.pull_request.labels includes "build-image-on-pr" || build.env("CI_STEPS") =~ /(^|,)build-image-on-pr?(,|$$)/
+    command: |
+      # Sanitize branch name for Docker tag
+      export IMAGE_TAG=$(echo "$BUILDKITE_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
+      echo "publishing new image $IMAGE_TAG from branch $BUILDKITE_BRANCH ($BUILDKITE_COMMIT)"
+      # Trigger docker.yml pipeline
+      buildkite-agent pipeline upload ci/workflows/docker.yml
+    plugins:
+      - docker-compose#v5.1.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          propagate-environment: true
+      - ./ci/plugins/upload-failure-logs
+    retry: *auto-retry
+
+
   - label: "end-to-end time travel test"
     key: "e2e-time-travel-tests"
     command: "ci/scripts/e2e-time-travel-test.sh -p ci-dev"
