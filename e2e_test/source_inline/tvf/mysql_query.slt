@@ -30,7 +30,8 @@ CREATE TABLE test (
     v19 date,
     v20 time,
     v21 timestamp,
-    v22 json
+    v22 json,
+    v23 int
 );
 INSERT INTO test SELECT
   1 as id,
@@ -56,13 +57,14 @@ INSERT INTO test SELECT
   '2021-01-01' as v19,
   '12:34:56' as v20,
   '2021-01-01 12:34:56' as v21,
-  JSON_OBJECT('key1', 1, 'key2', 'abc');
+  JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
+  null as v23;
 "
 
 query
 select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
 ----
-1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"}
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL
 
 system ok
 mysql -e "
