@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::controller::IN_MEMORY_STORE;
@@ -80,7 +81,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
 use crate::backup_restore::BackupManager;
-use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::barrier::BarrierScheduler;
 use crate::controller::system_param::SystemParamsController;
 use crate::controller::SqlMetaStore;
 use crate::hummock::HummockManager;
@@ -438,11 +439,8 @@ pub async fn start_service_as_election_leader(
         None
     };
 
-    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.checkpoint_frequency() as usize,
-    );
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -489,17 +487,17 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
-    let barrier_manager = GlobalBarrierManager::new(
+    let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        meta_metrics.clone(),
         scale_controller.clone(),
     )
     .await;
+    sub_tasks.push((join_handle, shutdown_rx));
 
     {
         let source_manager = source_manager.clone();
@@ -536,7 +534,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager.context().clone(),
+        barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
     )
@@ -548,12 +546,11 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        barrier_manager.context().clone(),
+        barrier_manager.clone(),
         scale_controller.clone(),
     );
 
-    let cluster_srv =
-        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.context().clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
@@ -620,12 +617,11 @@ pub async fn start_service_as_election_leader(
         .await,
     );
 
-    if cfg!(not(test)) {
+    {
         sub_tasks.push(ClusterController::start_heartbeat_checker(
             metadata_manager.cluster_controller.clone(),
             Duration::from_secs(1),
         ));
-        sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
         if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());

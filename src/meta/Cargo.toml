@@ -42,7 +42,7 @@ jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
-notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+notify = { version = "7", default-features = false, features = ["macos_fsevent"] }
 num-integer = "0.1"
 num-traits = "0.2"
 otlp-embedded = { workspace = true }

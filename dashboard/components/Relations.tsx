@@ -101,6 +101,17 @@ export const primaryKeyColumn: Column<RwTable> = {
       .join(", "),
 }
 
+export const vnodeCountColumn: Column<RwTable> = {
+  name: "Vnode Count",
+  width: 1,
+  // The table catalogs retrieved here are constructed from SQL models,
+  // where the `vnode_count` column has already been populated during migration.
+  // Therefore, it should always be present and no need to specify a fallback.
+  content: (r) => r.maybeVnodeCount ?? "?",
+}
+
+export const tableColumns = [primaryKeyColumn, vnodeCountColumn]
+
 export const connectorColumnSource: Column<RwSource> = {
   name: "Connector",
   width: 3,
