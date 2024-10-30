@@ -169,13 +169,8 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `periodic_scheduling_compaction_group_interval_sec` for all compaction groups with this interval.
-    pub periodic_scheduling_compaction_group_interval_sec: u64,
-
-    /// The size limit to split a large compaction group.
-    pub split_group_size_limit: u64,
-    /// The size limit to move a state-table to other group.
-    pub min_table_split_size: u64,
+    /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
+    pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -183,9 +178,9 @@ pub struct MetaOpts {
     pub partition_vnode_count: u32,
 
     /// threshold of high write throughput of state-table, unit: B/sec
-    pub table_write_throughput_threshold: u64,
+    pub table_high_write_throughput_threshold: u64,
     /// threshold of low write throughput of state-table, unit: B/sec
-    pub min_table_split_write_throughput: u64,
+    pub table_low_write_throughput_threshold: u64,
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
@@ -216,6 +211,23 @@ pub struct MetaOpts {
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
     pub enable_dropped_column_reclaim: bool,
+
+    /// Whether to split the compaction group when the size of the group exceeds the threshold.
+    pub split_group_size_ratio: f64,
+
+    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
+    pub table_stat_high_write_throughput_ratio_for_split: f64,
+
+    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
+    pub table_stat_low_write_throughput_ratio_for_merge: f64,
+
+    /// The window seconds of table throughput statistic history for split compaction group.
+    pub table_stat_throuput_window_seconds_for_split: usize,
+
+    /// The window seconds of table throughput statistic history for merge compaction group.
+    pub table_stat_throuput_window_seconds_for_merge: usize,
+
+    /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
 
     /// The maximum number of trivial move tasks to be picked in a single loop
@@ -227,12 +239,12 @@ pub struct MetaOpts {
     pub compact_task_table_size_partition_threshold_low: u64,
     pub compact_task_table_size_partition_threshold_high: u64,
 
+    pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
     // The private key for the secret store, used when the secret is stored in the meta.
     pub secret_store_private_key: Option<Vec<u8>>,
     /// The path of the temp secret file directory.
     pub temp_secret_file_dir: String,
-
-    pub table_info_statistic_history_times: usize,
 
     // Cluster limits
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
@@ -278,13 +290,11 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
-            periodic_scheduling_compaction_group_interval_sec: 60,
-            split_group_size_limit: 5 * 1024 * 1024 * 1024,
-            min_table_split_size: 2 * 1024 * 1024 * 1024,
+            periodic_scheduling_compaction_group_split_interval_sec: 60,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
-            table_write_throughput_threshold: 128 * 1024 * 1024,
-            min_table_split_write_throughput: 64 * 1024 * 1024,
+            table_high_write_throughput_threshold: 128 * 1024 * 1024,
+            table_low_write_throughput_threshold: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
@@ -302,11 +312,18 @@ impl MetaOpts {
             object_store_config: ObjectStoreConfig::default(),
             max_trivial_move_task_count_per_loop: 256,
             max_get_task_probe_times: 5,
-            secret_store_private_key: Some("0123456789abcdef".as_bytes().to_vec()),
+            secret_store_private_key: Some(
+                hex::decode("0123456789abcdef0123456789abcdef").unwrap(),
+            ),
             temp_secret_file_dir: "./secrets".to_string(),
-            table_info_statistic_history_times: 240,
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
+            split_group_size_ratio: 0.9,
+            table_stat_high_write_throughput_ratio_for_split: 0.5,
+            table_stat_low_write_throughput_ratio_for_merge: 0.7,
+            table_stat_throuput_window_seconds_for_split: 60,
+            table_stat_throuput_window_seconds_for_merge: 240,
+            periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
             license_key_path: None,
         }
     }

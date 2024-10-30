@@ -16,7 +16,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use risingwave_sqlparser::ast::{
+    ExplainFormat, ExplainOptions, ExplainType, FetchCursorStatement, Statement,
+};
 use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
@@ -55,7 +57,7 @@ async fn do_handle_explain(
                 name,
                 columns,
                 constraints,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -65,12 +67,12 @@ async fn do_handle_explain(
                 wildcard_idx,
                 ..
             } => {
-                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+                let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
-                    source_schema,
+                    format_encode,
                     cdc_table_info,
                     name.clone(),
                     columns,
@@ -90,6 +92,18 @@ async fn do_handle_explain(
                 let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
                     .await
                     .map(|plan| plan.sink_plan)?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+
+            Statement::FetchCursor {
+                stmt: FetchCursorStatement { cursor_name, .. },
+            } => {
+                let cursor_manager = session.clone().get_cursor_manager();
+                let plan = cursor_manager
+                    .gen_batch_plan_with_subscription_cursor(cursor_name, handler_args)
+                    .await
+                    .map(|x| x.plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
@@ -179,6 +193,7 @@ async fn do_handle_explain(
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
         let explain_type = context.explain_type();
+        let explain_format = context.explain_format();
 
         if explain_trace {
             let trace = context.take_trace();
@@ -212,7 +227,10 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    blocks.push(plan.explain_to_string());
+                    match explain_format {
+                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Json => blocks.push(plan.explain_to_json()),
+                    }
                 }
             }
             ExplainType::Logical => {
@@ -247,6 +265,21 @@ pub async fn handle_explain(
 ) -> Result<RwPgResponse> {
     if analyze {
         bail_not_implemented!(issue = 4856, "explain analyze");
+    }
+    if options.trace && options.explain_format == ExplainFormat::Json {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
+    }
+    if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
+    {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
     }
 
     let mut blocks = Vec::new();

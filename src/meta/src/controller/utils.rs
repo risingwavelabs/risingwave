@@ -273,7 +273,7 @@ pub struct FragmentDesc {
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
     pub parallelism: i64,
-    pub vnode_count: i64,
+    pub vnode_count: i32,
 }
 
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
@@ -1082,7 +1082,13 @@ where
     ))
 }
 
-pub(crate) fn build_relation_group(relation_objects: Vec<PartialObject>) -> NotificationInfo {
+/// Build a relation group for notifying the deletion of the given objects.
+///
+/// Note that only id fields are filled in the relation info, as the arguments are partial objects.
+/// As a result, the returned notification info should only be used for deletion.
+pub(crate) fn build_relation_group_for_delete(
+    relation_objects: Vec<PartialObject>,
+) -> NotificationInfo {
     let mut relations = vec![];
     for obj in relation_objects {
         match obj.obj_type {

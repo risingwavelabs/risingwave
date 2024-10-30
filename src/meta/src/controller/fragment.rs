@@ -19,16 +19,17 @@ use std::mem::swap;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::hash::{VnodeCountCompat, WorkerSlotId};
+use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, sink, streaming_job, ActorId, ActorUpstreamActors,
-    ConnectorSplits, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
+    ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
+    ObjectId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -51,9 +52,11 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
+use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{
@@ -61,7 +64,7 @@ use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables,
 };
 use crate::manager::LocalNotification;
-use crate::model::{TableFragments, TableParallelism};
+use crate::model::TableParallelism;
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -69,17 +72,6 @@ use crate::{MetaError, MetaResult};
 pub struct InflightFragmentInfo {
     pub actors: HashMap<ActorId, WorkerNodeId>,
     pub state_table_ids: HashSet<TableId>,
-    pub is_injectable: bool,
-}
-
-pub struct ActorInfos {
-    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-}
-
-impl ActorInfos {
-    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
-        Self { fragment_infos }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +79,17 @@ pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
     pub actor_count: usize,
     pub vnode_count: usize,
+}
+
+#[derive(Clone, Debug, FromQueryResult, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")] // for dashboard
+pub struct StreamingJobInfo {
+    pub job_id: ObjectId,
+    pub obj_type: ObjectType,
+    pub name: String,
+    pub job_status: JobStatus,
+    pub parallelism: StreamingParallelism,
+    pub max_parallelism: i32,
 }
 
 impl CatalogControllerInner {
@@ -496,7 +499,7 @@ impl CatalogController {
             actors: pb_actors,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
-            maybe_vnode_count: Some(vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -700,19 +703,35 @@ impl CatalogController {
         )
     }
 
-    pub async fn list_streaming_job_states(
-        &self,
-    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism, i32)>> {
+    pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()
             .select_only()
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .column(object::Column::ObjType)
+            .join(JoinType::LeftJoin, table::Relation::Object1.def().rev())
+            .join(JoinType::LeftJoin, source::Relation::Object.def().rev())
+            .join(JoinType::LeftJoin, sink::Relation::Object.def().rev())
+            .column_as(
+                Expr::if_null(
+                    Expr::col((table::Entity, table::Column::Name)),
+                    Expr::if_null(
+                        Expr::col((source::Entity, source::Column::Name)),
+                        Expr::if_null(
+                            Expr::col((sink::Entity, sink::Column::Name)),
+                            Expr::val("<unknown>"),
+                        ),
+                    ),
+                ),
+                "name",
+            )
             .columns([
-                streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::MaxParallelism,
             ])
-            .into_tuple()
+            .into_model()
             .all(&inner.db)
             .await?;
         Ok(job_states)
@@ -720,11 +739,14 @@ impl CatalogController {
 
     pub async fn get_max_parallelism_by_id(&self, job_id: ObjectId) -> MetaResult<usize> {
         let inner = self.inner.read().await;
-        let job = StreamingJob::find_by_id(job_id)
+        let max_parallelism: i32 = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
             .one(&inner.db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
-        Ok(job.max_parallelism as usize)
+        Ok(max_parallelism as usize)
     }
 
     /// Get all actor ids in the target streaming jobs.
@@ -933,47 +955,71 @@ impl CatalogController {
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all running actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(&self) -> MetaResult<ActorInfos> {
+    pub async fn load_all_actors(
+        &self,
+    ) -> MetaResult<
+        HashMap<
+            risingwave_common::catalog::DatabaseId,
+            HashMap<
+                risingwave_common::catalog::TableId,
+                HashMap<crate::model::FragmentId, InflightFragmentInfo>,
+            >,
+        >,
+    > {
         let inner = self.inner.read().await;
-        let actor_info: Vec<(ActorId, WorkerId, FragmentId, i32, I32Array)> = Actor::find()
+        let actor_info: Vec<(
+            ActorId,
+            WorkerId,
+            FragmentId,
+            I32Array,
+            DatabaseId,
+            ObjectId,
+        )> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
             .column(actor::Column::WorkerId)
             .column(fragment::Column::FragmentId)
-            .column(fragment::Column::FragmentTypeMask)
             .column(fragment::Column::StateTableIds)
+            .column(object::Column::DatabaseId)
+            .column(object::Column::Oid)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def())
             .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
             .all(&inner.db)
             .await?;
 
-        let mut fragment_infos = HashMap::new();
+        let mut database_fragment_infos: HashMap<_, HashMap<_, HashMap<_, InflightFragmentInfo>>> =
+            HashMap::new();
 
-        for (actor_id, worker_id, fragment_id, type_mask, state_table_ids) in actor_info {
+        for (actor_id, worker_id, fragment_id, state_table_ids, database_id, job_id) in actor_info {
+            let fragment_infos = database_fragment_infos
+                .entry(risingwave_common::catalog::DatabaseId::new(
+                    database_id as _,
+                ))
+                .or_default()
+                .entry(risingwave_common::catalog::TableId::new(job_id as _))
+                .or_default();
             let state_table_ids = state_table_ids.into_inner();
-            match fragment_infos.entry(fragment_id) {
+            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
                     debug_assert_eq!(info.state_table_ids, state_table_ids.into_iter().collect());
                     assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
-                    assert_eq!(
-                        info.is_injectable,
-                        TableFragments::is_injectable(type_mask as _)
-                    );
                 }
                 Entry::Vacant(entry) => {
                     let state_table_ids = state_table_ids.into_iter().collect();
                     entry.insert(InflightFragmentInfo {
                         actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
                         state_table_ids,
-                        is_injectable: TableFragments::is_injectable(type_mask as _),
                     });
                 }
             }
         }
 
-        Ok(ActorInfos::new(fragment_infos))
+        debug!(?database_fragment_infos, "reload all actors");
+
+        Ok(database_fragment_infos)
     }
 
     pub async fn migrate_actors(
@@ -1497,7 +1543,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use itertools::Itertools;
-    use risingwave_common::hash::{ActorMapping, VirtualNode};
+    use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model::actor::ActorStatus;
@@ -1627,7 +1673,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
-            maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as _),
+            maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
         };
 
         let pb_actor_status = (0..actor_count)

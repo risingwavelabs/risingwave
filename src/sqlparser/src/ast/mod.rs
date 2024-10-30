@@ -42,7 +42,7 @@ pub use self::ddl::{
     ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::legacy_source::{
-    get_delimiter, AvroSchema, CompatibleSourceSchema, DebeziumAvroSchema, ProtobufSchema,
+    get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1136,6 +1136,22 @@ impl fmt::Display for ExplainType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ExplainFormat {
+    Text,
+    Json,
+}
+
+impl fmt::Display for ExplainFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExplainFormat::Text => f.write_str("TEXT"),
+            ExplainFormat::Json => f.write_str("JSON"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExplainOptions {
     /// Display additional information regarding the plan.
     pub verbose: bool,
@@ -1143,6 +1159,8 @@ pub struct ExplainOptions {
     pub trace: bool,
     // explain's plan type
     pub explain_type: ExplainType,
+    // explain's plan format
+    pub explain_format: ExplainFormat,
 }
 
 impl Default for ExplainOptions {
@@ -1151,6 +1169,7 @@ impl Default for ExplainOptions {
             verbose: false,
             trace: false,
             explain_type: ExplainType::Physical,
+            explain_format: ExplainFormat::Text,
         }
     }
 }
@@ -1170,6 +1189,9 @@ impl fmt::Display for ExplainOptions {
             }
             if self.explain_type == default.explain_type {
                 option_strs.push(self.explain_type.to_string());
+            }
+            if self.explain_format == default.explain_format {
+                option_strs.push(self.explain_format.to_string());
             }
             write!(f, "{}", option_strs.iter().format(","))
         }
@@ -1264,8 +1286,8 @@ pub enum Statement {
         wildcard_idx: Option<usize>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
-        /// Optional schema of the external source with which the table is created
-        source_schema: Option<CompatibleSourceSchema>,
+        /// `FORMAT ... ENCODE ...` for table with connector
+        format_encode: Option<CompatibleFormatEncode>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
@@ -1805,7 +1827,7 @@ impl fmt::Display for Statement {
                 or_replace,
                 if_not_exists,
                 temporary,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -1852,8 +1874,8 @@ impl fmt::Display for Statement {
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
-                if let Some(source_schema) = source_schema {
-                    write!(f, " {}", source_schema)?;
+                if let Some(format_encode) = format_encode {
+                    write!(f, " {}", format_encode)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;

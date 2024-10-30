@@ -12,3 +12,22 @@ drop table t;
 
 statement error Not supported: EXPLAIN CREATE VIEW
 explain create view v as select 1;
+
+query error
+explain (trace, format json) select 1;
+----
+    db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: EXPLAIN (TRACE, JSON FORMAT)
+HINT: Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.
+
+
+query error
+explain (distsql, format json) select 1;
+----
+    db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: EXPLAIN (TRACE, JSON FORMAT)
+HINT: Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.

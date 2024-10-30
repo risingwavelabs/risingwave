@@ -1,4 +1,5 @@
 services:
+  # TODO: Rename this to `postgres`
   db:
     image: postgres:15-alpine
     environment:
@@ -109,6 +110,14 @@ services:
 
   rw-build-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
+    volumes:
+      - ..:/risingwave
+
+  pg-mysql-backend-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
+    depends_on:
+      - mysql
+      - db
     volumes:
       - ..:/risingwave
 

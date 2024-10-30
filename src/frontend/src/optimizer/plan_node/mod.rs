@@ -53,6 +53,7 @@ use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Or
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
+use crate::utils::PrettySerde;
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -643,6 +644,9 @@ pub trait Explain {
 
     /// Explain the plan node and return a string.
     fn explain_to_string(&self) -> String;
+
+    /// Explain the plan node and return a json string.
+    fn explain_to_json(&self) -> String;
 }
 
 impl Explain for PlanRef {
@@ -664,6 +668,14 @@ impl Explain for PlanRef {
         let mut config = pretty_config();
         config.unicode(&mut output, &plan.explain());
         output
+    }
+
+    /// Explain the plan node and return a json string.
+    fn explain_to_json(&self) -> String {
+        let plan = reorganize_elements_id(self.clone());
+        let explain_ir = plan.explain();
+        serde_json::to_string_pretty(&PrettySerde(explain_ir))
+            .expect("failed to serialize plan to json")
     }
 }
 

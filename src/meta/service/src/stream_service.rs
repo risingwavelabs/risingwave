@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::SplitMetaData;
+use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
@@ -222,27 +223,35 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListTableFragmentStatesRequest>,
     ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
-        let job_states = self
+        let job_infos = self
             .metadata_manager
             .catalog_controller
-            .list_streaming_job_states()
+            .list_streaming_job_infos()
             .await?;
-        let states = job_states
+        let states = job_infos
             .into_iter()
-            .map(|(table_id, state, parallelism, max_parallelism)| {
-                let parallelism = match parallelism {
-                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
-                    StreamingParallelism::Custom => model::TableParallelism::Custom,
-                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
-                };
+            .map(
+                |StreamingJobInfo {
+                     job_id,
+                     job_status,
+                     parallelism,
+                     max_parallelism,
+                     ..
+                 }| {
+                    let parallelism = match parallelism {
+                        StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                        StreamingParallelism::Custom => model::TableParallelism::Custom,
+                        StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                    };
 
-                list_table_fragment_states_response::TableFragmentState {
-                    table_id: table_id as _,
-                    state: PbState::from(state) as _,
-                    parallelism: Some(parallelism.into()),
-                    max_parallelism: max_parallelism as _,
-                }
-            })
+                    list_table_fragment_states_response::TableFragmentState {
+                        table_id: job_id as _,
+                        state: PbState::from(job_status) as _,
+                        parallelism: Some(parallelism.into()),
+                        max_parallelism: max_parallelism as _,
+                    }
+                },
+            )
             .collect_vec();
 
         Ok(Response::new(ListTableFragmentStatesResponse { states }))
@@ -312,7 +321,7 @@ impl StreamManagerService for StreamServiceImpl {
         let dependencies = self
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_created_object_dependencies()
             .await?;
 
         Ok(Response::new(ListObjectDependenciesResponse {
