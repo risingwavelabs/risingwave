@@ -508,6 +508,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         log_reader.init().await?;
 
+        #[expect(irrefutable_let_patterns)] // false positive
         while let Err(e) = sink
             .new_log_sinker(sink_writer_param.clone())
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))

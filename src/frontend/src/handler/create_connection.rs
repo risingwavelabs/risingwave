@@ -45,7 +45,7 @@ fn resolve_create_connection_payload(
     with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
-    return match connection_type.as_str() {
+    match connection_type.as_str() {
         PRIVATELINK_CONNECTION => Err(RwError::from(ErrorCode::Deprecated(
             "CREATE CONNECTION to Private Link".to_string(),
             "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
@@ -53,7 +53,7 @@ fn resolve_create_connection_payload(
         _ => Err(RwError::from(ProtocolError(format!(
             "Connection type \"{connection_type}\" is not supported"
         )))),
-    };
+    }
 }
 
 pub async fn handle_create_connection(

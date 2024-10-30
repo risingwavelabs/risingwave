@@ -54,7 +54,7 @@ struct Node<'a, S, R> {
     peeked: Box<dyn NodePeek<R> + 'a + Send + Sync>,
 }
 
-impl<'a, S, R> PartialEq for Node<'a, S, R> {
+impl<S, R> PartialEq for Node<'_, S, R> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.vnode_key() == other.peeked.vnode_key() {
             true => unreachable!("primary key from different iters should be unique"),
@@ -62,15 +62,15 @@ impl<'a, S, R> PartialEq for Node<'a, S, R> {
         }
     }
 }
-impl<'a, S, R> Eq for Node<'a, S, R> {}
+impl<S, R> Eq for Node<'_, S, R> {}
 
-impl<'a, S, R> PartialOrd for Node<'a, S, R> {
+impl<S, R> PartialOrd for Node<'_, S, R> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a, S, R> Ord for Node<'a, S, R> {
+impl<S, R> Ord for Node<'_, S, R> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
         self.peeked

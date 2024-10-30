@@ -1190,7 +1190,7 @@ pub mod truncated_fmt {
         finished: bool,
         f: &'a mut Formatter<'b>,
     }
-    impl<'a, 'b> Write for TruncatedFormatter<'a, 'b> {
+    impl Write for TruncatedFormatter<'_, '_> {
         fn write_str(&mut self, s: &str) -> Result {
             if self.finished {
                 return Ok(());
@@ -1212,7 +1212,7 @@ pub mod truncated_fmt {
 
     pub struct TruncatedFmt<'a, T>(pub &'a T, pub usize);
 
-    impl<'a, T> Debug for TruncatedFmt<'a, T>
+    impl<T> Debug for TruncatedFmt<'_, T>
     where
         T: Debug,
     {
@@ -1226,7 +1226,7 @@ pub mod truncated_fmt {
         }
     }
 
-    impl<'a, T> Display for TruncatedFmt<'a, T>
+    impl<T> Display for TruncatedFmt<'_, T>
     where
         T: Display,
     {

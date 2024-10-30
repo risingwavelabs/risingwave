@@ -268,6 +268,7 @@ pub fn session_config(input: TokenStream) -> TokenStream {
 
 /// This proc macro recursively extracts rustdoc comments from the fields in a struct and generates a method
 /// that produces docs for each field.
+///
 /// Unlike rustdoc, this tool focuses solely on extracting rustdoc for struct fields, without methods.
 ///
 /// Example:

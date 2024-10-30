@@ -45,7 +45,7 @@ struct PlanWindowFunctionDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
+impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let window_function = self.window_function;
         if f.alternate() {

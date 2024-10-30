@@ -480,7 +480,7 @@ impl HashKeyDe for Int256 {
     }
 }
 
-impl<'a> HashKeySer<'a> for Serial {
+impl HashKeySer<'_> for Serial {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.as_row_id());
     }

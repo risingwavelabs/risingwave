@@ -426,7 +426,7 @@ pub enum TransactionStatus {
     InFailedTransaction,
 }
 
-impl<'a> BeMessage<'a> {
+impl BeMessage<'_> {
     /// Write message to the given buf.
     pub fn write(buf: &mut BytesMut, message: &BeMessage<'_>) -> Result<()> {
         match message {
