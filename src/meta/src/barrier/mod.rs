@@ -969,11 +969,12 @@ impl CheckpointControl {
             span,
         } = new_barrier;
 
-        let (mut command, mut notifiers) = if let Some((_, command, notifiers)) = command {
-            (Some(command), notifiers)
-        } else {
-            (None, vec![])
-        };
+        let (mut command, mut notifiers, database_id) =
+            if let Some((database_id, command, notifiers)) = command {
+                (Some(command), notifiers, Some(database_id))
+            } else {
+                (None, vec![], None)
+            };
 
         if let Some(table_to_cancel) = command.as_ref().and_then(Command::table_to_cancel)
             && self
@@ -1063,7 +1064,7 @@ impl CheckpointControl {
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
-        ) = self.state.apply_command(command.as_ref());
+        ) = self.state.apply_command(command.as_ref(), database_id);
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {

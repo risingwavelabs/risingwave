@@ -436,6 +436,7 @@ impl CatalogController {
     pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
         let inner = self.inner.read().await;
         let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
+            .select_only()
             .select_column(object::Column::DatabaseId)
             .into_tuple()
             .one(&inner.db)

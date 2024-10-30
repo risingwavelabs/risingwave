@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::mem::take;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
@@ -113,6 +113,7 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
+        database_id: Option<DatabaseId>,
     ) -> (
         InflightGraphInfo,
         InflightSubscriptionInfo,
@@ -128,7 +129,10 @@ impl BarrierWorkerState {
         {
             None
         } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
+            self.inflight_graph_info.pre_apply(
+                &fragment_changes,
+                database_id.expect("should exist when having fragment changes"),
+            );
             Some(fragment_changes)
         } else {
             None
@@ -141,7 +145,10 @@ impl BarrierWorkerState {
         let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
-            self.inflight_graph_info.post_apply(&fragment_changes);
+            self.inflight_graph_info.post_apply(
+                &fragment_changes,
+                database_id.expect("should exist when having fragment changes"),
+            );
         }
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();

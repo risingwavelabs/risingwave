@@ -655,7 +655,7 @@ impl CatalogController {
     ) -> MetaResult<Vec<(FragmentId, DatabaseId)>> {
         let inner = self.inner.read().await;
         let select = Fragment::find()
-            .select()
+            .select_only()
             .column(fragment::Column::FragmentId)
             .column(object::Column::DatabaseId)
             .join(JoinType::InnerJoin, fragment::Relation::Object.def());
