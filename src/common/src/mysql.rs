@@ -54,12 +54,10 @@ macro_rules! handle_data_type {
 }
 
 /// The decoding result can be interpreted as follows:
-/// None => No value was found in the column.
-/// Some(Ok(value)) => The value was found and successfully decoded.
-/// Some(Err(error)) => The value was found but could not be decoded,
-///                     either because it was not supported,
-///                     or there was an error during conversion.
-///                     This error is wrapped via anyhow, so it is opaque.
+/// Ok(value) => The value was found and successfully decoded.
+/// Err(error) => The value was found but could not be decoded,
+///               either because it was not supported,
+///               or there was an error during conversion.
 pub fn mysql_datum_to_rw_datum(
     mysql_row: &mut MysqlRow,
     mysql_datum_index: usize,
@@ -68,7 +66,7 @@ pub fn mysql_datum_to_rw_datum(
 ) -> Result<Datum, anyhow::Error> {
     match rw_data_type {
         DataType::Boolean => {
-            // Bit
+            // Bit(1)
             match mysql_row.take_opt::<Option<Vec<u8>>, _>(mysql_datum_index) {
                 None => bail!(
                     "no value found at column: {}, index: {}",

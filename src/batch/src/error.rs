@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
+use iceberg::Error as IcebergError;
 use mysql_async::Error as MySqlError;
 use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
@@ -194,7 +195,7 @@ def_anyhow_variant! {
     BatchError ExternalSystemError,
 
     PostgresError => "Postgres error",
-    iceberg::Error => "Iceberg error",
+    IcebergError => "Iceberg error",
     ParquetError => "Parquet error",
     MySqlError => "MySQL error",
 }
