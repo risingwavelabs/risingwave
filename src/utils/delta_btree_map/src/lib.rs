@@ -130,9 +130,11 @@ impl<'a, K: Ord, V> DeltaBTreeMap<'a, K, V> {
 ///
 /// A cursor always points at the gap of items in the map. For example:
 ///
-///     | Foo | Bar |
-///     ^     ^     ^
-///     1     2     3
+/// ```
+/// | Foo | Bar |
+/// ^     ^     ^
+/// 1     2     3
+/// ```
 ///
 /// The cursor can be at position 1, 2, or 3.
 /// If it's at position 1, `peek_prev` will return `None`, and `peek_next` will return `Foo`.
