@@ -4,7 +4,7 @@
 # and corresponding rw-build-env version in docker-compose.yml.                             #
 #############################################################################################
 
-FROM ubuntu:24.04 AS risingwave-build-env
+FROM ubuntu:24.10 AS risingwave-build-env
 
 ENV LANG en_US.utf8
 

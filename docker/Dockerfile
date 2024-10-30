@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS base
+FROM ubuntu:24.10 AS base
 
 ENV LANG en_US.utf8
 
