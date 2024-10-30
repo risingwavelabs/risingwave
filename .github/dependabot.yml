@@ -39,6 +39,13 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
+- package-ecosystem: maven
+  directory: /java
+  schedule:
+    interval: "daily"
+  open-pull-requests-limit: 10
+  rebase-strategy: "disabled"
+
 # Don't update these directories
 - package-ecosystem: cargo
   directory: /integration_tests/feature-store
