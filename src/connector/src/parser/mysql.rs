@@ -14,128 +14,27 @@
 
 use std::sync::LazyLock;
 
-use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{
-    DataType, Date, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-};
-use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 
 use crate::parser::util::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
-
-macro_rules! handle_data_type {
-    ($row:expr, $i:expr, $name:expr, $type:ty) => {{
-        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
-        match res {
-            Ok(val) => val.map(|v| ScalarImpl::from(v)),
-            Err(err) => {
-                log_error!($name, err, "parse column failed");
-                None
-            }
-        }
-    }};
-    ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
-        let res = $row.take_opt::<Option<$type>, _>($i).unwrap_or(Ok(None));
-        match res {
-            Ok(val) => val.map(|v| ScalarImpl::from(<$rw_type>::from(v))),
-            Err(err) => {
-                log_error!($name, err, "parse column failed");
-                None
-            }
-        }
-    }};
-}
+use risingwave_common::mysql::mysql_datum_to_rw_datum;
 
 pub fn mysql_row_to_owned_row(mysql_row: &mut MysqlRow, schema: &Schema) -> OwnedRow {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let name = rw_field.name.as_str();
-        let datum = {
-            match rw_field.data_type {
-                DataType::Boolean => {
-                    handle_data_type!(mysql_row, i, name, bool)
-                }
-                DataType::Int16 => {
-                    handle_data_type!(mysql_row, i, name, i16)
-                }
-                DataType::Int32 => {
-                    handle_data_type!(mysql_row, i, name, i32)
-                }
-                DataType::Int64 => {
-                    handle_data_type!(mysql_row, i, name, i64)
-                }
-                DataType::Float32 => {
-                    handle_data_type!(mysql_row, i, name, f32)
-                }
-                DataType::Float64 => {
-                    handle_data_type!(mysql_row, i, name, f64)
-                }
-                DataType::Decimal => {
-                    handle_data_type!(mysql_row, i, name, RustDecimal, Decimal)
-                }
-                DataType::Varchar => {
-                    handle_data_type!(mysql_row, i, name, String)
-                }
-                DataType::Date => {
-                    handle_data_type!(mysql_row, i, name, NaiveDate, Date)
-                }
-                DataType::Time => {
-                    handle_data_type!(mysql_row, i, name, chrono::NaiveTime, Time)
-                }
-                DataType::Timestamp => {
-                    handle_data_type!(mysql_row, i, name, chrono::NaiveDateTime, Timestamp)
-                }
-                DataType::Timestamptz => {
-                    let res = mysql_row
-                        .take_opt::<Option<chrono::NaiveDateTime>, _>(i)
-                        .unwrap_or(Ok(None));
-                    match res {
-                        Ok(val) => val.map(|v| {
-                            ScalarImpl::from(Timestamptz::from_micros(
-                                v.and_utc().timestamp_micros(),
-                            ))
-                        }),
-                        Err(err) => {
-                            log_error!(name, err, "parse column failed");
-                            None
-                        }
-                    }
-                }
-                DataType::Bytea => {
-                    let res = mysql_row
-                        .take_opt::<Option<Vec<u8>>, _>(i)
-                        .unwrap_or(Ok(None));
-                    match res {
-                        Ok(val) => val.map(|v| ScalarImpl::from(v.into_boxed_slice())),
-                        Err(err) => {
-                            log_error!(name, err, "parse column failed");
-                            None
-                        }
-                    }
-                }
-                DataType::Jsonb => {
-                    handle_data_type!(mysql_row, i, name, serde_json::Value, JsonbVal)
-                }
-                DataType::Interval
-                | DataType::Struct(_)
-                | DataType::List(_)
-                | DataType::Int256
-                | DataType::Serial
-                | DataType::Map(_) => {
-                    // Interval, Struct, List, Int256 are not supported
-                    // XXX: is this branch reachable?
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(column = rw_field.name, ?rw_field.data_type, suppressed_count, "unsupported data type, set to null");
-                    }
-                    None
-                }
+        let datum = match mysql_datum_to_rw_datum(mysql_row, i, name, &rw_field.data_type) {
+            Ok(val) => val,
+            Err(e) => {
+                log_error!(name, e, "parse column failed");
+                None
             }
         };
         datums.push(datum);

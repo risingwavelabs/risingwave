@@ -24,10 +24,10 @@ use crate::types::Datum;
 
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
-        let datum_opt = $row.take_opt::<Option<$type>, _>($i);
-        datum_opt.map(|res| match res {
-            Ok(val) => Ok(val.map(|v| ScalarImpl::from(v))),
-            Err(e) => Err(anyhow::Error::new(e.clone())
+        match $row.take_opt::<Option<$type>, _>($i) {
+            None => bail!("no value found at column: {}, index: {}", $name, $i),
+            Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(v))),
+            Some(Err(e)) => Err(anyhow::Error::new(e.clone())
                 .context("failed to deserialize MySQL value into rust value")
                 .context(format!(
                     "column: {}, index: {}, rust_type: {}",
@@ -35,13 +35,13 @@ macro_rules! handle_data_type {
                     $i,
                     stringify!($ty),
                 ))),
-        })
+        }
     }};
     ($row:expr, $i:expr, $name:expr, $type:ty, $rw_type:ty) => {{
-        let datum_opt = $row.take_opt::<Option<$type>, _>($i);
-        datum_opt.map(|res| match res {
-            Ok(val) => Ok(val.map(|v| ScalarImpl::from(<$rw_type>::from(v)))),
-            Err(e) => Err(anyhow::Error::new(e.clone())
+        match $row.take_opt::<Option<$type>, _>($i) {
+            None => bail!("no value found at column: {}, index: {}", $name, $i),
+            Some(Ok(val)) => Ok(val.map(|v| ScalarImpl::from(<$rw_type>::from(v)))),
+            Some(Err(e)) => Err(anyhow::Error::new(e.clone())
                 .context("failed to deserialize MySQL value into rust value")
                 .context(format!(
                     "column: {}, index: {}, rust_type: {}",
@@ -49,7 +49,7 @@ macro_rules! handle_data_type {
                     $i,
                     stringify!($ty),
                 ))),
-        })
+        }
     }};
 }
 
@@ -64,8 +64,8 @@ pub fn mysql_datum_to_rw_datum(
     mysql_row: &mut MysqlRow,
     mysql_datum_index: usize,
     column_name: &str,
-    rw_data_type: DataType,
-) -> Option<Result<Datum, anyhow::Error>> {
+    rw_data_type: &DataType,
+) -> Result<Datum, anyhow::Error> {
     match rw_data_type {
         DataType::Boolean => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, bool)
@@ -118,30 +118,38 @@ pub fn mysql_datum_to_rw_datum(
                 Timestamp
             )
         }
-        DataType::Timestamptz => mysql_row
-            .take_opt::<Option<chrono::NaiveDateTime>, _>(mysql_datum_index)
-            .map(|res| match res {
-                Ok(val) => Ok(val.map(|v| {
+        DataType::Timestamptz => {
+            match mysql_row.take_opt::<Option<chrono::NaiveDateTime>, _>(mysql_datum_index) {
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    column_name,
+                    mysql_datum_index
+                ),
+                Some(Ok(val)) => Ok(val.map(|v| {
                     ScalarImpl::from(Timestamptz::from_micros(v.and_utc().timestamp_micros()))
                 })),
-                Err(err) => Err(anyhow::Error::new(err.clone())
+                Some(Err(err)) => Err(anyhow::Error::new(err.clone())
                     .context("failed to deserialize MySQL value into rust value")
                     .context(format!(
                         "column: {}, index: {}, rust_type: chrono::NaiveDateTime",
                         column_name, mysql_datum_index,
                     ))),
-            }),
-        DataType::Bytea => mysql_row
-            .take_opt::<Option<Vec<u8>>, _>(mysql_datum_index)
-            .map(|res| match res {
-                Ok(val) => Ok(val.map(ScalarImpl::from)),
-                Err(err) => Err(anyhow::Error::new(err.clone())
-                    .context("failed to deserialize MySQL value into rust value")
-                    .context(format!(
-                        "column: {}, index: {}, rust_type: Vec<u8>",
-                        column_name, mysql_datum_index,
-                    ))),
-            }),
+            }
+        }
+        DataType::Bytea => match mysql_row.take_opt::<Option<Vec<u8>>, _>(mysql_datum_index) {
+            None => bail!(
+                "no value found at column: {}, index: {}",
+                column_name,
+                mysql_datum_index
+            ),
+            Some(Ok(val)) => Ok(val.map(ScalarImpl::from)),
+            Some(Err(err)) => Err(anyhow::Error::new(err.clone())
+                .context("failed to deserialize MySQL value into rust value")
+                .context(format!(
+                    "column: {}, index: {}, rust_type: Vec<u8>",
+                    column_name, mysql_datum_index,
+                ))),
+        },
         DataType::Jsonb => {
             handle_data_type!(
                 mysql_row,
@@ -156,9 +164,9 @@ pub fn mysql_datum_to_rw_datum(
         | DataType::List(_)
         | DataType::Int256
         | DataType::Serial
-        | DataType::Map(_) => Some(Err(anyhow!(
+        | DataType::Map(_) => Err(anyhow!(
             "unsupported data type: {}, set to null",
             rw_data_type
-        ))),
+        )),
     }
 }

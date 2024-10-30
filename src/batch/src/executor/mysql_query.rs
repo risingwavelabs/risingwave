@@ -15,14 +15,13 @@
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use mysql_async;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::mysql::mysql_datum_to_rw_datum;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use rust_decimal::Decimal as RustDecimal;
-use {chrono, mysql_async};
 
 use crate::error::{BatchError, BatchExternalSystemError};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
@@ -61,60 +60,16 @@ pub fn mysql_row_to_owned_row(
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let name = rw_field.name.as_str();
-        let datum = mysql_cell_to_scalar_impl(&mut row, &rw_field.data_type, i, name)?;
-        datums.push(datum);
-    }
-    Ok(OwnedRow::new(datums))
-}
-
-macro_rules! mysql_value_to_scalar {
-    ($row:ident, $i:ident, $name:ident, $ty:ty, $variant:ident) => {{
-        let val = $row.take_opt::<Option<$ty>, _>($i);
-        match val {
-            None => bail!("missing value for column {}, at index {}", $name, $i),
-            Some(Ok(Some(val))) => Some(ScalarImpl::$variant(val.into())),
-            Some(Ok(None)) => None,
-            Some(Err(e)) => {
-                let e: anyhow::Error = anyhow::Error::new(e.clone())
-                    .context("failed to deserialize MySQL value into rust value")
-                    .context(format!(
-                        "column: {}, index: {}, rust_type: {}",
-                        $name,
-                        $i,
-                        stringify!($ty),
-                    ));
+        let datum = match mysql_datum_to_rw_datum(&mut row, i, name, &rw_field.data_type) {
+            Ok(val) => val,
+            Err(e) => {
                 let e = BatchExternalSystemError(e);
                 return Err(e.into());
             }
-        }
-    }};
-}
-
-fn mysql_cell_to_scalar_impl(
-    row: &mut mysql_async::Row,
-    data_type: &DataType,
-    i: usize,
-    name: &str,
-) -> Result<Datum, BatchError> {
-    let datum = match data_type {
-        DataType::Boolean => mysql_value_to_scalar!(row, i, name, bool, Bool),
-        DataType::Int16 => mysql_value_to_scalar!(row, i, name, i16, Int16),
-        DataType::Int32 => mysql_value_to_scalar!(row, i, name, i32, Int32),
-        DataType::Int64 => mysql_value_to_scalar!(row, i, name, i64, Int64),
-        DataType::Float32 => mysql_value_to_scalar!(row, i, name, f32, Float32),
-        DataType::Float64 => mysql_value_to_scalar!(row, i, name, f64, Float64),
-        DataType::Decimal => mysql_value_to_scalar!(row, i, name, RustDecimal, Decimal),
-        DataType::Date => mysql_value_to_scalar!(row, i, name, chrono::NaiveDate, Date),
-        DataType::Time => mysql_value_to_scalar!(row, i, name, chrono::NaiveTime, Time),
-        DataType::Timestamp => {
-            mysql_value_to_scalar!(row, i, name, chrono::NaiveDateTime, Timestamp)
-        }
-        DataType::Varchar => mysql_value_to_scalar!(row, i, name, String, Utf8),
-        _ => {
-            bail!("unsupported data type: {}", data_type)
-        }
-    };
-    Ok(datum)
+        };
+        datums.push(datum);
+    }
+    Ok(OwnedRow::new(datums))
 }
 
 impl MySqlQueryExecutor {
