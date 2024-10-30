@@ -38,7 +38,7 @@ use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format,
+    CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
@@ -650,7 +650,7 @@ pub(crate) async fn reparse_table_for_sink(
         .unwrap();
     let Statement::CreateTable {
         name,
-        source_schema,
+        format_encode,
         ..
     } = &definition
     else {
@@ -658,9 +658,9 @@ pub(crate) async fn reparse_table_for_sink(
     };
 
     let table_name = name.clone();
-    let source_schema = source_schema
+    let format_encode = format_encode
         .clone()
-        .map(|source_schema| source_schema.into_v2_with_warning());
+        .map(|format_encode| format_encode.into_v2_with_warning());
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
@@ -683,7 +683,7 @@ pub(crate) async fn reparse_table_for_sink(
         session,
         table_name,
         table_catalog,
-        source_schema,
+        format_encode,
         handler_args,
         col_id_gen,
         columns,
@@ -814,7 +814,10 @@ pub(crate) fn derive_default_column_project_for_sink(
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
 /// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(
+    session: &SessionImpl,
+    value: FormatEncodeOptions,
+) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
     use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
@@ -929,7 +932,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         ))
     });
 
-pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
+pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(connector)
         .ok_or_else(|| {

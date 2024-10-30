@@ -440,11 +440,8 @@ pub async fn start_service_as_election_leader(
         None
     };
 
-    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.checkpoint_frequency() as usize,
-    );
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -498,7 +495,6 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        meta_metrics.clone(),
         scale_controller.clone(),
     )
     .await;

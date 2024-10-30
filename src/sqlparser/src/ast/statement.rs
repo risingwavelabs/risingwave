@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use winnow::PResult;
 
 use super::ddl::SourceWatermark;
-use super::legacy_source::{parse_source_schema, CompatibleSourceSchema};
+use super::legacy_source::{parse_format_encode, CompatibleFormatEncode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
@@ -76,7 +76,7 @@ macro_rules! impl_fmt_display {
 //     source_name: Ident,
 //     with_properties: AstOption<WithProperties>,
 //     [Keyword::ROW, Keyword::FORMAT],
-//     source_schema: SourceSchema,
+//     format_encode: SourceSchema,
 //     [Keyword::WATERMARK, Keyword::FOR] column [Keyword::AS] <expr>
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -90,7 +90,7 @@ pub struct CreateSourceStatement {
     pub constraints: Vec<TableConstraint>,
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
-    pub source_schema: CompatibleSourceSchema,
+    pub format_encode: CompatibleFormatEncode,
     pub source_watermarks: Vec<SourceWatermark>,
     pub include_column_options: IncludeOption,
 }
@@ -222,7 +222,7 @@ impl Encode {
 /// `FORMAT ... ENCODE ... [(a=b, ...)] [KEY ENCODE ...]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct ConnectorSchema {
+pub struct FormatEncodeOptions {
     pub format: Format,
     pub row_encode: Encode,
     pub row_options: Vec<SqlOption>,
@@ -232,33 +232,33 @@ pub struct ConnectorSchema {
 
 impl Parser<'_> {
     /// Peek the next tokens to see if it is `FORMAT` or `ROW FORMAT` (for compatibility).
-    fn peek_source_schema_format(&mut self) -> bool {
+    fn peek_format_encode_format(&mut self) -> bool {
         (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
             && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])) // ROW FORMAT
             || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) // FORMAT
     }
 
     /// Parse the source schema. The behavior depends on the `connector` type.
-    pub fn parse_source_schema_with_connector(
+    pub fn parse_format_encode_with_connector(
         &mut self,
         connector: &str,
         cdc_source_job: bool,
-    ) -> PResult<CompatibleSourceSchema> {
+    ) -> PResult<CompatibleFormatEncode> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
         // FIXME: parse input `connector` to enum type instead using string here
         if connector.contains("-cdc") {
             let expected = if cdc_source_job {
-                ConnectorSchema::plain_json()
+                FormatEncodeOptions::plain_json()
             } else if connector.contains("mongodb") {
-                ConnectorSchema::debezium_mongo_json()
+                FormatEncodeOptions::debezium_mongo_json()
             } else {
-                ConnectorSchema::debezium_json()
+                FormatEncodeOptions::debezium_json()
             };
 
-            if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_v2();
+            if self.peek_format_encode_format() {
+                let schema = parse_format_encode(self)?.into_v2();
                 if schema != expected {
                     parser_err!(
                         "Row format for CDC connectors should be \
@@ -268,9 +268,9 @@ impl Parser<'_> {
             }
             Ok(expected.into())
         } else if connector.contains("nexmark") {
-            let expected = ConnectorSchema::native();
-            if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_v2();
+            let expected = FormatEncodeOptions::native();
+            if self.peek_format_encode_format() {
+                let schema = parse_format_encode(self)?.into_v2();
                 if schema != expected {
                     parser_err!(
                         "Row format for nexmark connectors should be \
@@ -280,15 +280,15 @@ impl Parser<'_> {
             }
             Ok(expected.into())
         } else if connector.contains("datagen") {
-            Ok(if self.peek_source_schema_format() {
-                parse_source_schema(self)?
+            Ok(if self.peek_format_encode_format() {
+                parse_format_encode(self)?
             } else {
-                ConnectorSchema::native().into()
+                FormatEncodeOptions::native().into()
             })
         } else if connector.contains("iceberg") {
-            let expected = ConnectorSchema::none();
-            if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_v2();
+            let expected = FormatEncodeOptions::none();
+            if self.peek_format_encode_format() {
+                let schema = parse_format_encode(self)?.into_v2();
                 if schema != expected {
                     parser_err!(
                         "Row format for iceberg connectors should be \
@@ -298,12 +298,12 @@ impl Parser<'_> {
             }
             Ok(expected.into())
         } else {
-            Ok(parse_source_schema(self)?)
+            Ok(parse_format_encode(self)?)
         }
     }
 
     /// Parse `FORMAT ... ENCODE ... (...)`.
-    pub fn parse_schema(&mut self) -> PResult<Option<ConnectorSchema>> {
+    pub fn parse_schema(&mut self) -> PResult<Option<FormatEncodeOptions>> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
         }
@@ -325,7 +325,7 @@ impl Parser<'_> {
             None
         };
 
-        Ok(Some(ConnectorSchema {
+        Ok(Some(FormatEncodeOptions {
             format,
             row_encode,
             row_options,
@@ -334,9 +334,9 @@ impl Parser<'_> {
     }
 }
 
-impl ConnectorSchema {
+impl FormatEncodeOptions {
     pub const fn plain_json() -> Self {
-        ConnectorSchema {
+        FormatEncodeOptions {
             format: Format::Plain,
             row_encode: Encode::Json,
             row_options: Vec::new(),
@@ -346,7 +346,7 @@ impl ConnectorSchema {
 
     /// Create a new source schema with `Debezium` format and `Json` encoding.
     pub const fn debezium_json() -> Self {
-        ConnectorSchema {
+        FormatEncodeOptions {
             format: Format::Debezium,
             row_encode: Encode::Json,
             row_options: Vec::new(),
@@ -355,7 +355,7 @@ impl ConnectorSchema {
     }
 
     pub const fn debezium_mongo_json() -> Self {
-        ConnectorSchema {
+        FormatEncodeOptions {
             format: Format::DebeziumMongo,
             row_encode: Encode::Json,
             row_options: Vec::new(),
@@ -365,7 +365,7 @@ impl ConnectorSchema {
 
     /// Create a new source schema with `Native` format and encoding.
     pub const fn native() -> Self {
-        ConnectorSchema {
+        FormatEncodeOptions {
             format: Format::Native,
             row_encode: Encode::Native,
             row_options: Vec::new(),
@@ -376,7 +376,7 @@ impl ConnectorSchema {
     /// Create a new source schema with `None` format and encoding.
     /// Used for self-explanatory source like iceberg.
     pub const fn none() -> Self {
-        ConnectorSchema {
+        FormatEncodeOptions {
             format: Format::None,
             row_encode: Encode::None,
             row_options: Vec::new(),
@@ -389,7 +389,7 @@ impl ConnectorSchema {
     }
 }
 
-impl fmt::Display for ConnectorSchema {
+impl fmt::Display for FormatEncodeOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
 
@@ -467,7 +467,7 @@ impl fmt::Display for CreateSourceStatement {
             v.push(format!("{}", item));
         }
         impl_fmt_display!(with_properties, v, self);
-        impl_fmt_display!(source_schema, v, self);
+        impl_fmt_display!(format_encode, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -503,7 +503,7 @@ pub struct CreateSinkStatement {
     pub sink_from: CreateSink,
     pub columns: Vec<Ident>,
     pub emit_mode: Option<EmitMode>,
-    pub sink_schema: Option<ConnectorSchema>,
+    pub sink_schema: Option<FormatEncodeOptions>,
     pub into_table_name: Option<ObjectName>,
 }
 

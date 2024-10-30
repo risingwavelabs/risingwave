@@ -57,7 +57,7 @@ async fn do_handle_explain(
                 name,
                 columns,
                 constraints,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -67,12 +67,12 @@ async fn do_handle_explain(
                 wildcard_idx,
                 ..
             } => {
-                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+                let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
-                    source_schema,
+                    format_encode,
                     cdc_table_info,
                     name.clone(),
                     columns,
