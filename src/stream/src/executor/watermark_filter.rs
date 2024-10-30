@@ -100,6 +100,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let first_barrier = expect_first_barrier(&mut input).await?;
         let prev_epoch = first_barrier.epoch.prev;
         table.init_epoch(first_barrier.epoch);
+        let mut is_paused = first_barrier.is_pause_on_startup();
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
@@ -113,7 +114,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
         let mut last_checkpoint_watermark = None;
 
-        if let Some(watermark) = current_watermark.clone() {
+        if let Some(watermark) = current_watermark.clone()
+            && !is_paused
+        {
             yield Message::Watermark(Watermark::new(
                 event_time_col_idx,
                 watermark_type.clone(),
@@ -240,9 +243,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             }
                         }
                     }
-
                     table.commit(barrier.epoch).await?;
-                    yield Message::Barrier(barrier);
 
                     if need_update_global_max_watermark {
                         current_watermark = Self::get_global_max_watermark(
@@ -253,7 +254,21 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         .await?;
                     }
 
-                    if is_checkpoint {
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Pause => {
+                                is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                is_paused = false;
+                            }
+                            _ => (),
+                        }
+                    }
+
+                    yield Message::Barrier(barrier);
+
+                    if is_checkpoint && !is_paused {
                         if idle_input {
                             barrier_num_during_idle += 1;
 
