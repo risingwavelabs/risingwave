@@ -42,7 +42,7 @@ jsonbb = { workspace = true }
 maplit = "1.0.2"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
-moka = { version = "0.12.8", features = ["future"] }
+moka = { version = "0.12.3", features = ["future"] }
 notify = { version = "7", default-features = false, features = [
     "macos_fsevent",
 ] }
