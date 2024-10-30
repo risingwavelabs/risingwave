@@ -54,8 +54,12 @@ impl ViewCatalog {
     }
 
     /// Returns the SQL statement that can be used to create this view.
-    pub fn create_sql(&self) -> String {
-        format!("CREATE VIEW {} AS {}", self.name, self.sql)
+    pub fn create_sql(&self, schema: String) -> String {
+        if schema == "public" {
+            format!("CREATE VIEW {} AS {}", self.name, self.sql)
+        } else {
+            format!("CREATE VIEW {}.{} AS {}", schema, self.name, self.sql)
+        }
     }
 }
 

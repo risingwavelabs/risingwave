@@ -15,10 +15,10 @@
 use std::hash::{BuildHasher, Hasher};
 
 pub fn finalize_hashers<H: Hasher>(hashers: &[H]) -> Vec<u64> {
-    return hashers
+    hashers
         .iter()
         .map(|hasher| hasher.finish())
-        .collect::<Vec<u64>>();
+        .collect::<Vec<u64>>()
 }
 
 #[derive(Clone, Copy)]

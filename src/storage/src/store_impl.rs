@@ -844,11 +844,13 @@ pub mod boxed_state_store {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
+    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
+    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     impl<T: IterItem, I: StateStoreIter<T>> DynamicDispatchedStateStoreIter<T> for I {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
@@ -954,12 +956,14 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -1002,6 +1006,7 @@ pub mod boxed_state_store {
             self.get(key, read_options).await
         }
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1010,6 +1015,7 @@ pub mod boxed_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,

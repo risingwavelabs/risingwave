@@ -271,7 +271,7 @@ pub struct PartialBytesWriter<'a> {
     builder: &'a mut BytesArrayBuilder,
 }
 
-impl<'a> PartialBytesWriter<'a> {
+impl PartialBytesWriter<'_> {
     /// `write_ref` will append partial dirty data to `builder`.
     /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
     /// in that it allows us to call it multiple times.
@@ -287,7 +287,7 @@ impl<'a> PartialBytesWriter<'a> {
     }
 }
 
-impl<'a> Drop for PartialBytesWriter<'a> {
+impl Drop for PartialBytesWriter<'_> {
     fn drop(&mut self) {
         // If `finish` is not called, we should rollback the data.
         self.builder.rollback_partial();

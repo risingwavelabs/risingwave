@@ -16,15 +16,15 @@
  */
 
 import {
-  primaryKeyColumn,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getMaterializedViews } from "../lib/api/streaming"
 
 export default function MaterializedViews() {
   return Relations("Materialized Views", getMaterializedViews, [
     ...streamingJobColumns,
-    primaryKeyColumn,
+    ...tableColumns,
   ])
 }

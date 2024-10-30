@@ -33,7 +33,7 @@ fn create_equi_expr(left: String, right: String) -> Expr {
     create_binary_expr(BinaryOperator::Eq, left, right)
 }
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
         match self.rng.gen_range(1..=4) {
