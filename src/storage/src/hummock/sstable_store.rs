@@ -21,8 +21,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry,
+    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use itertools::Itertools;
