@@ -1124,8 +1124,8 @@ impl SourceManager {
             core_guard.reassign_splits().await?
         };
 
-        if !split_assignment.is_empty() {
-            for (database_id, split_assignment) in split_assignment {
+        for (database_id, split_assignment) in split_assignment {
+            if !split_assignment.is_empty() {
                 let command = Command::SourceSplitAssignment(split_assignment);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler

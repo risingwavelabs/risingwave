@@ -21,7 +21,7 @@ use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model::{SourceId, StreamingParallelism};
+use risingwave_meta_model::{ObjectId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -132,30 +132,29 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
-        for (database_id, actor_to_apply) in self
+        let database_id = self
             .metadata_manager
-            .split_fragment_map_by_database(actor_to_apply)
-            .await?
-        {
-            let database_id = DatabaseId::new(database_id as _);
-            // TODO: check whether shared source is correct
-            let mutation: ThrottleConfig = actor_to_apply
-                .iter()
-                .map(|(fragment_id, actors)| {
-                    (
-                        *fragment_id,
-                        actors
-                            .iter()
-                            .map(|actor_id| (*actor_id, request.rate))
-                            .collect::<HashMap<ActorId, Option<u32>>>(),
-                    )
-                })
-                .collect();
-            let _i = self
-                .barrier_scheduler
-                .run_command(database_id, Command::Throttle(mutation))
-                .await?;
-        }
+            .catalog_controller
+            .get_object_database_id(request.id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
+        // TODO: check whether shared source is correct
+        let mutation: ThrottleConfig = actor_to_apply
+            .iter()
+            .map(|(fragment_id, actors)| {
+                (
+                    *fragment_id,
+                    actors
+                        .iter()
+                        .map(|actor_id| (*actor_id, request.rate))
+                        .collect::<HashMap<ActorId, Option<u32>>>(),
+                )
+            })
+            .collect();
+        let _i = self
+            .barrier_scheduler
+            .run_command(database_id, Command::Throttle(mutation))
+            .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
     }
