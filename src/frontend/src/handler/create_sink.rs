@@ -22,9 +22,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
-};
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, TableId, UserId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
@@ -92,12 +90,7 @@ pub async fn gen_sink_plan(
 
     let mut with_options = handler_args.with_options.clone();
 
-    let connection_id = {
-        let conn_id =
-            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
-        conn_id.map(ConnectionId)
-    };
-
+    resolve_privatelink_in_with_option(&mut with_options)?;
     let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
 
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
@@ -266,7 +259,7 @@ pub async fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        connection_id,
+        None, // deprecated: private link connection id
         dependent_relations.into_iter().collect_vec(),
     );
 

@@ -151,7 +151,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 }
 
-impl<'a> ExprRewriter for LogicalOverWindowBuilder<'a> {
+impl ExprRewriter for LogicalOverWindowBuilder<'_> {
     fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
         let dummy = Literal::new(None, window_func.return_type()).into();
         match self.try_rewrite_window_function(window_func) {
@@ -226,7 +226,7 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+impl ExprVisitor for OverWindowProjectBuilder<'_> {
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {
             self.error = Some(e);

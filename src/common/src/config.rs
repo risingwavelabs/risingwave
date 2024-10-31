@@ -116,7 +116,7 @@ pub trait OverrideConfig {
     fn r#override(&self, config: &mut RwConfig);
 }
 
-impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+impl<T: OverrideConfig> OverrideConfig for &T {
     fn r#override(&self, config: &mut RwConfig) {
         T::r#override(self, config)
     }

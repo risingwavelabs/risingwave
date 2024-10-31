@@ -693,12 +693,10 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
 
 impl SinkImpl {
     pub fn new(mut param: SinkParam) -> Result<Self> {
-        const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
 
         // remove privatelink related properties if any
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
-        param.properties.remove(CONNECTION_NAME_KEY);
 
         let sink_type = param
             .properties

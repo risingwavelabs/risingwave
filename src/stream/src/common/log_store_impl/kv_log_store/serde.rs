@@ -1191,6 +1191,7 @@ mod tests {
         )
     }
 
+    #[expect(clippy::type_complexity)]
     fn gen_single_test_stream(
         serde: LogStoreRowSerde,
         seq_id: &mut SeqIdType,

@@ -161,7 +161,7 @@ where
     cache_filler: C::Filler<'filler>,
 }
 
-impl<'filler, C> AggStateCacheFiller for GenericAggStateCacheFiller<'filler, C>
+impl<C> AggStateCacheFiller for GenericAggStateCacheFiller<'_, C>
 where
     C: StateCache<Key = CacheKey, Value = CacheValue>,
 {

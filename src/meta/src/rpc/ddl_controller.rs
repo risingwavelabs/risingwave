@@ -43,13 +43,11 @@ use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
-use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
-use risingwave_pb::catalog::connection::PrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    connection, Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable,
-    Schema, Secret, Sink, Source, Subscription, Table, View,
+    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
+    Sink, Source, Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
@@ -67,7 +65,6 @@ use risingwave_pb::stream_plan::{
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
@@ -79,7 +76,6 @@ use crate::manager::{
     IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -188,7 +184,6 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
 
-    aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
@@ -258,7 +253,6 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -267,7 +261,6 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
-            aws_client,
             creating_streaming_job_permits,
         }
     }
@@ -544,21 +537,6 @@ impl DdlController {
             .catalog_controller
             .drop_secret(secret_id as _)
             .await
-    }
-
-    pub(crate) async fn delete_vpc_endpoint(&self, svc: &PrivateLinkService) -> MetaResult<()> {
-        // delete AWS vpc endpoint
-        if svc.get_provider()? == PbPrivateLinkProvider::Aws {
-            if let Some(aws_cli) = self.aws_client.as_ref() {
-                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
-            } else {
-                warn!(
-                    "AWS client is not initialized, skip deleting vpc endpoint {}",
-                    svc.endpoint_id
-                );
-            }
-        }
-        Ok(())
     }
 
     async fn create_subscription(
@@ -1169,14 +1147,11 @@ impl DdlController {
                     .await;
             }
             ObjectType::Connection => {
-                let (version, conn) = self
+                let (version, _conn) = self
                     .metadata_manager
                     .catalog_controller
                     .drop_connection(object_id)
                     .await?;
-                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                    self.delete_vpc_endpoint(svc).await?;
-                }
                 return Ok(version);
             }
             _ => {
@@ -1297,21 +1272,11 @@ impl DdlController {
             streaming_job_ids,
             state_table_ids,
             source_ids,
-            connections,
             source_fragments,
             removed_actors,
             removed_fragments,
+            ..
         } = release_ctx;
-
-        // delete vpc endpoints.
-        for conn in connections {
-            let _ = self
-                .delete_vpc_endpoint(&conn.to_protobuf())
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(err = ?err.as_report(), "failed to delete vpc endpoint");
-                });
-        }
 
         // unregister sources.
         self.source_manager
