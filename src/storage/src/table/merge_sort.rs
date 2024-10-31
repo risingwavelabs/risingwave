@@ -118,6 +118,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
     use risingwave_hummock_sdk::key::TableKey;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::error::StorageResult;
@@ -128,6 +129,7 @@ mod tests {
         Ok(KeyedRow::new(
             TableKey(key),
             OwnedRow::new(vec![Some(ScalarImpl::Int64(i as _))]),
+            EpochWithGap::new_min_epoch(),
         ))
     }
 

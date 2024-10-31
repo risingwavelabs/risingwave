@@ -20,7 +20,7 @@ use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnId, Schema, RW_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
@@ -322,6 +322,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             assert_eq!(scan_ranges.len(), 1);
         }
 
+        let select_rw_timestamp =
+            table.schema().fields().iter().any(|x| {
+                x.name == RW_TIMESTAMP_COLUMN_NAME && x.data_type == DataType::Timestamptz
+            });
+
         let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
             .into_iter()
             .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
@@ -337,8 +342,14 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         // Point Get
         for point_get in point_gets {
             let table = table.clone();
-            if let Some(row) =
-                Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+            if let Some(row) = Self::execute_point_get(
+                table,
+                point_get,
+                query_epoch,
+                select_rw_timestamp,
+                histogram,
+            )
+            .await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     returned += chunk.cardinality() as u64;
@@ -392,21 +403,43 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
         epoch: BatchQueryEpoch,
+        select_rw_timestamp: bool,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());
-
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-        // Point Get.
-        let row = table.get_row(&pk_prefix, epoch.into()).await?;
+        if select_rw_timestamp {
+            let range_bounds = (Bound::<OwnedRow>::Unbounded, Bound::Unbounded);
+            let iter = table
+                .batch_chunk_iter_with_pk_bounds(
+                    epoch.into(),
+                    &pk_prefix,
+                    range_bounds,
+                    false,
+                    1,
+                    PrefetchOptions::new(false, false),
+                )
+                .await?;
+            pin_mut!(iter);
+            let chunk = iter.next().await.transpose().map_err(BatchError::from)?;
+            if let Some(chunk) = chunk {
+                let row = chunk.row_at(0).0.to_owned_row();
+                Ok(Some(row))
+            } else {
+                Ok(None)
+            }
+        } else {
+            // Point Get.
+            let row = table.get_row(&pk_prefix, epoch.into()).await?;
 
-        if let Some(timer) = timer {
-            timer.observe_duration()
+            if let Some(timer) = timer {
+                timer.observe_duration()
+            }
+
+            Ok(row)
         }
-
-        Ok(row)
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]

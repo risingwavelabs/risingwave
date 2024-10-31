@@ -74,6 +74,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
+use crate::Explain;
 
 const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
@@ -214,15 +215,6 @@ impl IndexSelectionRule {
         // 1. logical_scan ->  logical_join
         //                      /        \
         //                index_scan   primary_table_scan
-        let predicate = logical_scan.predicate().clone();
-        let offset = index.index_item.len();
-        let mut rewriter = IndexPredicateRewriter::new(
-            index.primary_to_secondary_mapping(),
-            index.function_mapping(),
-            offset,
-        );
-        let new_predicate = predicate.rewrite_expr(&mut rewriter);
-
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
             index.index_table.clone(),
@@ -231,6 +223,9 @@ impl IndexSelectionRule {
             logical_scan.as_of().clone(),
             index.index_table.cardinality,
         );
+        // We use `table_catalog.columns.len` instead of `table_desc.columns.len` and `index_item.len` here,
+        // because table_catalog.columns.len contains system columns like `_rw_timestamp` column.
+        let offset = index_scan.table_catalog().columns.len();
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
@@ -240,6 +235,14 @@ impl IndexSelectionRule {
             logical_scan.as_of().clone(),
             index.primary_table.cardinality,
         );
+
+        let predicate = logical_scan.predicate().clone();
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
+            offset,
+        );
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
         let conjunctions = index
             .primary_table_pk_ref_to_index_table()
@@ -251,7 +254,7 @@ impl IndexSelectionRule {
                     index.index_table.columns[x.column_index]
                         .data_type()
                         .clone(),
-                    y.column_index + index.index_item.len(),
+                    y.column_index + offset,
                     index.primary_table.columns[y.column_index]
                         .data_type()
                         .clone(),

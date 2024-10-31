@@ -38,7 +38,7 @@ impl Planner {
                     .columns()
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, c)| (!c.is_generated()).then_some(i)),
+                    .filter_map(|(i, c)| (c.can_dml()).then_some(i)),
             )
             .into()
         } else {

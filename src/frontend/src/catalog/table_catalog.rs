@@ -570,7 +570,10 @@ impl From<PbTable> for TableCatalog {
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let version_column_index = tb.version_column_index.map(|value| value as usize);
-        let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        let mut columns: Vec<ColumnCatalog> =
+            tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        // add rw_timestamp column
+        columns.push(ColumnCatalog::rw_timestamp_column());
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
             if !col_names.insert(col_name.to_string()) {

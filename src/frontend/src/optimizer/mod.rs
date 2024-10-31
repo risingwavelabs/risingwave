@@ -722,7 +722,7 @@ impl PlanRoot {
 
         let column_descs = columns
             .iter()
-            .filter(|&c| (!c.is_generated()))
+            .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
 

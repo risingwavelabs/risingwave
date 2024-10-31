@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::{row_id_column_desc, USER_COLUMN_ID_OFFSET};
+use super::{row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 use crate::util::value_encoding::DatumToProtoExt;
@@ -372,6 +372,10 @@ impl ColumnCatalog {
         self.column_desc.is_generated()
     }
 
+    pub fn can_dml(&self) -> bool {
+        !self.is_generated() && !self.is_rw_timestamp_column()
+    }
+
     /// If the column is a generated column
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
@@ -422,6 +426,17 @@ impl ColumnCatalog {
             column_desc: row_id_column_desc(),
             is_hidden: true,
         }
+    }
+
+    pub fn rw_timestamp_column() -> Self {
+        Self {
+            column_desc: rw_timestamp_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn is_rw_timestamp_column(&self) -> bool {
+        self == &Self::rw_timestamp_column()
     }
 
     pub fn offset_column() -> Self {

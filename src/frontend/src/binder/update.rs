@@ -219,7 +219,8 @@ impl Binder {
             .iter()
             .enumerate()
             .filter_map(|(i, c)| {
-                (!c.is_generated()).then_some(InputRef::new(i, c.data_type().clone()).into())
+                c.can_dml()
+                    .then_some(InputRef::new(i, c.data_type().clone()).into())
             })
             .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
             .collect_vec();
