@@ -871,6 +871,12 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
     pub compactor_max_overlap_sst_count: usize,
 
+    /// The maximum number of meta files that can be preloaded.
+    /// If the number of meta files exceeds this value, the compactor will try to compute parallelism only through `SstableInfo`, no longer preloading `SstableMeta`.
+    /// This is to prevent the compactor from consuming too much memory, but it may cause the compactor to be less efficient.
+    #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
+    pub compactor_max_preload_meta_file_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -1793,6 +1799,10 @@ pub mod default {
 
         pub fn compactor_max_overlap_sst_count() -> usize {
             64
+        }
+
+        pub fn compactor_max_preload_meta_file_count() -> usize {
+            32
         }
 
         // deprecated
