@@ -25,7 +25,6 @@ use bytes::Bytes;
 use foyer::CacheContext;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
@@ -39,6 +38,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
+use crate::opts::StorageMemoryConfigType;
 use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
@@ -662,14 +662,14 @@ pub(crate) async fn wait_for_update(
 pub struct HummockMemoryCollector {
     sstable_store: SstableStoreRef,
     limiter: Arc<MemoryLimiter>,
-    storage_memory_config: StorageMemoryConfig,
+    storage_memory_config: StorageMemoryConfigType,
 }
 
 impl HummockMemoryCollector {
     pub fn new(
         sstable_store: SstableStoreRef,
         limiter: Arc<MemoryLimiter>,
-        storage_memory_config: StorageMemoryConfig,
+        storage_memory_config: StorageMemoryConfigType,
     ) -> Self {
         Self {
             sstable_store,
@@ -697,18 +697,36 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
-        self.sstable_store.get_meta_memory_usage() as f64
-            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+        match &self.storage_memory_config {
+            StorageMemoryConfigType::Hummock(config) => {
+                self.sstable_store.get_meta_memory_usage() as f64
+                    / (config.meta_cache_capacity_mb * 1024 * 1024) as f64
+            }
+            StorageMemoryConfigType::Compactor(config) => {
+                self.sstable_store.get_meta_memory_usage() as f64
+                    / (config.compactor_meta_cache_capacity_mb * 1024 * 1024) as f64
+            }
+        }
     }
 
     fn get_block_cache_memory_usage_ratio(&self) -> f64 {
-        self.get_data_memory_usage() as f64
-            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+        match &self.storage_memory_config {
+            StorageMemoryConfigType::Hummock(config) => {
+                self.get_data_memory_usage() as f64
+                    / (config.block_cache_capacity_mb * 1024 * 1024) as f64
+            }
+            StorageMemoryConfigType::Compactor(_config) => 0.0,
+        }
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {
-        self.limiter.get_memory_usage() as f64
-            / (self.storage_memory_config.shared_buffer_capacity_mb * 1024 * 1024) as f64
+        match &self.storage_memory_config {
+            StorageMemoryConfigType::Hummock(config) => {
+                self.limiter.get_memory_usage() as f64
+                    / (config.shared_buffer_capacity_mb * 1024 * 1024) as f64
+            }
+            StorageMemoryConfigType::Compactor(_config) => 0.0,
+        }
     }
 }
 

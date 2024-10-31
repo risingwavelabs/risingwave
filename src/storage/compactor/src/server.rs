@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
+    extract_compactor_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -49,7 +49,7 @@ use risingwave_storage::hummock::{MemoryLimiter, SstableObjectIdManager, Sstable
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS,
 };
-use risingwave_storage::opts::StorageOpts;
+use risingwave_storage::opts::{StorageMemoryConfigType, StorageOpts};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -75,15 +75,18 @@ pub async fn prepare_start_parameters(
 
     let state_store_url = system_params_reader.state_store();
 
-    let storage_memory_config = extract_storage_memory_config(&config);
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &storage_memory_config,
-    )));
     let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
+    let compactor_memory_config = StorageMemoryConfigType::Compactor(
+        extract_compactor_memory_config(&config, non_reserved_memory_bytes),
+    );
+
+    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
+        &config,
+        &system_params_reader,
+        &compactor_memory_config,
+    )));
     let meta_cache_capacity_bytes = storage_opts.compactor_meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
@@ -141,11 +144,10 @@ pub async fn prepare_start_parameters(
     );
 
     let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes));
-    let storage_memory_config = extract_storage_memory_config(&config);
     let memory_collector = Arc::new(HummockMemoryCollector::new(
         sstable_store.clone(),
         memory_limiter.clone(),
-        storage_memory_config,
+        compactor_memory_config,
     ));
 
     let heap_profiler = HeapProfiler::new(

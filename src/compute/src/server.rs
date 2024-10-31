@@ -61,7 +61,7 @@ use risingwave_storage::monitor::{
     global_hummock_state_store_metrics, global_storage_metrics, monitor_cache,
     GLOBAL_COMPACTOR_METRICS, GLOBAL_HUMMOCK_METRICS, GLOBAL_OBJECT_STORE_METRICS,
 };
-use risingwave_storage::opts::StorageOpts;
+use risingwave_storage::opts::{StorageMemoryConfigType, StorageOpts};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -162,6 +162,7 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
     );
 
+    let storage_memory_config = StorageMemoryConfigType::Hummock(storage_memory_config);
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
         &system_params,

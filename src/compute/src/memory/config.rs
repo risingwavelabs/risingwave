@@ -209,11 +209,11 @@ pub fn storage_memory_config(
     // The file cache flush buffer threshold is used as a emergency limitation.
     // On most cases the flush buffer is not supposed to be as large as the threshold.
     // So, the file cache flush buffer threshold size is not calculated in the memory usage.
-    let block_file_cache_flush_buffer_threshold_mb = storage_config
+    let data_file_cache_flush_buffer_threshold_mb = storage_config
         .data_file_cache
         .flush_buffer_threshold_mb
         .unwrap_or(
-            risingwave_common::config::default::storage::block_file_cache_flush_buffer_threshold_mb(
+            risingwave_common::config::default::storage::data_file_cache_flush_buffer_threshold_mb(
             ),
         );
     let meta_file_cache_flush_buffer_threshold_mb = storage_config
@@ -332,7 +332,7 @@ pub fn storage_memory_config(
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
-        block_file_cache_flush_buffer_threshold_mb,
+        data_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }
 }

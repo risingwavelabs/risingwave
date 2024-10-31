@@ -686,8 +686,7 @@ pub struct CacheConfig {
 
     /// Configure the capacity of the meta cache in MB explicitly for compactor.
     // TODO(li0k): `compactor_meta_cache_capacity_mb` is only used for compactor meta cache configuration, it is not involved in the calculation of CN reserved memory, we consider removing it in the future..
-    #[serde(default = "default::storage::compactor_meta_cache_capacity_mb")]
-    pub compactor_meta_cache_capacity_mb: usize,
+    pub compactor_meta_cache_capacity_mb: Option<usize>,
 }
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
@@ -1805,7 +1804,7 @@ pub mod default {
             240
         }
 
-        pub fn block_file_cache_flush_buffer_threshold_mb() -> usize {
+        pub fn data_file_cache_flush_buffer_threshold_mb() -> usize {
             256
         }
 
@@ -1815,10 +1814,6 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             32
-        }
-
-        pub fn compactor_meta_cache_capacity_mb() -> usize {
-            128
         }
     }
 
@@ -2433,15 +2428,41 @@ pub struct StorageMemoryConfig {
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
-    pub block_file_cache_flush_buffer_threshold_mb: usize,
+    pub data_file_cache_flush_buffer_threshold_mb: usize,
     pub meta_file_cache_flush_buffer_threshold_mb: usize,
+}
+
+pub struct CompactorMemoryConfig {
+    pub compactor_meta_cache_capacity_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
 pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
 pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
-pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
+// calculate the compactor meta cache capacity based on capacity and memory proportion
+// compactor_meta_cache_capacity_mb = min(MIN_COMPACTOR_META_CACHE_CAPACITY_MB, memory * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION)
+pub const MIN_COMPACTOR_META_CACHE_CAPACITY_MB: usize = 128;
+pub const MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION: f64 = 0.02;
+
+pub fn extract_compactor_memory_config(s: &RwConfig, memory: usize) -> CompactorMemoryConfig {
+    let compactor_meta_cache_capacity_mb = s
+        .storage
+        .cache
+        .compactor_meta_cache_capacity_mb
+        .unwrap_or_else(|| {
+            std::cmp::min(
+                MIN_COMPACTOR_META_CACHE_CAPACITY_MB,
+                (memory as f64 * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION) as usize,
+            )
+        });
+
+    CompactorMemoryConfig {
+        compactor_meta_cache_capacity_mb,
+    }
+}
+
+pub fn extract_storage_memory_config_for_test(s: &RwConfig) -> StorageMemoryConfig {
     let block_cache_capacity_mb = s.storage.cache.block_cache_capacity_mb.unwrap_or(
         // adapt to old version
         s.storage
@@ -2546,16 +2567,16 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
                 }
             });
 
-    let block_file_cache_flush_buffer_threshold_mb = s
+    let data_file_cache_flush_buffer_threshold_mb = s
         .storage
         .data_file_cache
         .flush_buffer_threshold_mb
-        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+        .unwrap_or(default::storage::data_file_cache_flush_buffer_threshold_mb());
     let meta_file_cache_flush_buffer_threshold_mb = s
         .storage
         .meta_file_cache
         .flush_buffer_threshold_mb
-        .unwrap_or(default::storage::block_file_cache_flush_buffer_threshold_mb());
+        .unwrap_or(default::storage::data_file_cache_flush_buffer_threshold_mb());
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
@@ -2567,7 +2588,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
-        block_file_cache_flush_buffer_threshold_mb,
+        data_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
     }
 }
