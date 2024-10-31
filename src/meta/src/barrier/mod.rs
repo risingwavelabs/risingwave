@@ -1090,7 +1090,6 @@ impl CheckpointControl {
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
-
     async fn failure_recovery(&mut self, err: MetaError) {
         self.clear_on_err(&err).await;
 

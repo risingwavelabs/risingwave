@@ -663,14 +663,14 @@ impl Condition {
         new_conds: &ScalarImpl,
         eq_conds: &[Option<ScalarImpl>],
     ) -> bool {
-        return !eq_conds.is_empty()
+        !eq_conds.is_empty()
             && eq_conds.iter().all(|l| {
                 if let Some(l) = l {
                     l != new_conds
                 } else {
                     true
                 }
-            });
+            })
     }
 
     fn merge_lower_bound_conjunctions(lb: Vec<Bound<ScalarImpl>>) -> Bound<ScalarImpl> {
