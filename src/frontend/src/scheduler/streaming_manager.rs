@@ -92,7 +92,7 @@ pub struct StreamingJobGuard<'a> {
     tracker: &'a StreamingJobTracker,
 }
 
-impl<'a> Drop for StreamingJobGuard<'a> {
+impl Drop for StreamingJobGuard<'_> {
     fn drop(&mut self) {
         self.tracker.delete_job(&self.task_id);
     }

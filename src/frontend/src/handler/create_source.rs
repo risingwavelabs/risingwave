@@ -162,9 +162,9 @@ async fn extract_avro_table_schema(
         if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
             &parser_config.encoding_config
             && matches!(avro_props.schema_location, SchemaLocation::File { .. })
-            && !format_encode_options
+            && format_encode_options
                 .get("with_deprecated_file_header")
-                .is_some_and(|v| v == "true")
+                .is_none_or(|v| v != "true")
         {
             bail_not_implemented!(issue = 12871, "avro without schema registry");
         }
@@ -1550,8 +1550,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
-    let connection_id =
-        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+    resolve_privatelink_in_with_option(&mut with_properties)?;
 
     let with_properties = resolve_secret_ref_in_with_options(with_properties, session)?;
 
@@ -1627,7 +1626,7 @@ pub async fn bind_create_source_or_table_with_connector(
         watermark_descs,
         associated_table_id,
         definition,
-        connection_id,
+        connection_id: None, // deprecated: private link connection id
         created_at_epoch: None,
         initialized_at_epoch: None,
         version: INITIAL_SOURCE_VERSION_ID,

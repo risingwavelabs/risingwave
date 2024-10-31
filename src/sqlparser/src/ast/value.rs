@@ -181,7 +181,7 @@ impl fmt::Display for DateTimeField {
 
 pub struct EscapeSingleQuoteString<'a>(&'a str);
 
-impl<'a> fmt::Display for EscapeSingleQuoteString<'a> {
+impl fmt::Display for EscapeSingleQuoteString<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for c in self.0.chars() {
             if c == '\'' {

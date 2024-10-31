@@ -129,7 +129,7 @@ pub trait HummockIterator: Send {
     fn seek<'a>(
         &'a mut self,
         key: FullKey<&'a [u8]>,
-    ) -> impl Future<Output = HummockResult<()>> + Send + '_;
+    ) -> impl Future<Output = HummockResult<()>> + Send;
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);

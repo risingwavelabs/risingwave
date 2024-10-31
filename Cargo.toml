@@ -285,6 +285,7 @@ new_without_default = "allow"
 # duplicated_attributes = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12436
 mixed_attributes_style = "allow"
+too_long_first_doc_paragraph = "allow"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

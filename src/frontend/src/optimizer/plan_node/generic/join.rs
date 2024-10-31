@@ -492,7 +492,6 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
 /// predicate.
 ///
 /// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
-
 pub fn push_down_into_join(
     predicate: &mut Condition,
     left_col_num: usize,
@@ -534,7 +533,6 @@ pub fn push_down_into_join(
 /// pushed part will be removed from the original join predicate.
 ///
 /// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
-
 pub fn push_down_join_condition(
     on_condition: &mut Condition,
     left_col_num: usize,
