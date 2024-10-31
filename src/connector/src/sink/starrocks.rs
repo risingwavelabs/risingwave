@@ -530,7 +530,10 @@ impl StarrocksSinkWriter {
 impl Drop for StarrocksSinkWriter {
     fn drop(&mut self) {
         if let Some(txn_label) = self.curr_txn_label.take() {
-            tokio::runtime::Handle::current()
+            tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap()
                 .block_on(self.txn_client.rollback(txn_label))
                 .ok();
         }
