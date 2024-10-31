@@ -39,7 +39,6 @@ use crate::optimizer::PlanRef;
 ///   /      \           /      \
 /// Domain   T1        Domain   T2
 /// ```
-
 pub struct ApplyUnionTransposeRule {}
 impl Rule for ApplyUnionTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

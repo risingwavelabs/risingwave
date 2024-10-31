@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{
 use crate::sql_gen::types::{FUNC_TABLE, IMPLICIT_CAST_TABLE, INVARIANT_FUNC_SET};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.gen_bool(0.1) {
             true => self.gen_special_func(ret, context),

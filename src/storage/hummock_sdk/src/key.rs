@@ -292,7 +292,6 @@ pub fn prev_epoch(epoch: &[u8]) -> Vec<u8> {
 /// compute the next full key of the given full key
 ///
 /// if the `user_key` has no successor key, the result will be a empty vec
-
 pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
     let prev_epoch = prev_epoch(epoch);
@@ -315,7 +314,6 @@ pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
 /// compute the prev full key of the given full key
 ///
 /// if the `user_key` has no predecessor key, the result will be a empty vec
-
 pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
     let next_epoch = next_epoch(epoch);
@@ -532,7 +530,7 @@ impl EstimateSize for TableKey<Bytes> {
     }
 }
 
-impl<'a> TableKey<&'a [u8]> {
+impl TableKey<&[u8]> {
     pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> TableKey<T> {
         TableKey(T::copy_from_slice(self.as_ref()))
     }
@@ -646,7 +644,7 @@ impl<'a> UserKey<&'a [u8]> {
     }
 }
 
-impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
+impl<T: AsRef<[u8]> + Clone> UserKey<&T> {
     pub fn cloned(self) -> UserKey<T> {
         UserKey {
             table_id: self.table_id,
@@ -941,7 +939,7 @@ impl EmptySliceRef for Vec<u8> {
 }
 
 const EMPTY_SLICE: &[u8] = b"";
-impl<'a> EmptySliceRef for &'a [u8] {
+impl EmptySliceRef for &[u8] {
     fn empty_slice_ref<'b>() -> &'b Self {
         &EMPTY_SLICE
     }

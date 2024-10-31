@@ -633,7 +633,7 @@ pub fn handle_show_create_object(
             let view = schema
                 .get_view_by_name(&object_name)
                 .ok_or_else(|| CatalogError::NotFound("view", name.to_string()))?;
-            view.create_sql()
+            view.create_sql(schema.name())
         }
         ShowCreateType::Table => {
             let table = schema

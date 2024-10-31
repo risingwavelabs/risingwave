@@ -419,13 +419,13 @@ impl PredicatePushdown for LogicalScan {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
         } else {
-            return LogicalFilter::create(
+            LogicalFilter::create(
                 self.clone_with_predicate(predicate.and(self.predicate().clone()))
                     .into(),
                 Condition {
                     conjunctions: non_pushable_predicate,
                 },
-            );
+            )
         }
     }
 }

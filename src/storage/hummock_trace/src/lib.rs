@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(cursor_remaining)]
+#![feature(cursor_split)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
 

@@ -32,7 +32,7 @@ impl TypeUrl for batch_plan::ExchangeNode {
 
 pub struct StackTraceResponseOutput<'a>(&'a StackTraceResponse);
 
-impl<'a> Deref for StackTraceResponseOutput<'a> {
+impl Deref for StackTraceResponseOutput<'_> {
     type Target = StackTraceResponse;
 
     fn deref(&self) -> &Self::Target {
@@ -40,7 +40,7 @@ impl<'a> Deref for StackTraceResponseOutput<'a> {
     }
 }
 
-impl<'a> Display for StackTraceResponseOutput<'a> {
+impl Display for StackTraceResponseOutput<'_> {
     fn fmt(&self, s: &mut Formatter<'_>) -> std::fmt::Result {
         if !self.actor_traces.is_empty() {
             writeln!(s, "--- Actor Traces ---")?;
