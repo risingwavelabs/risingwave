@@ -256,7 +256,7 @@ impl TableWatermarksIndex {
             }
         }
         if self.latest_epoch < committed_epoch {
-            warn!(
+            debug!(
                 latest_epoch = self.latest_epoch,
                 committed_epoch, "committed_epoch exceed table watermark latest_epoch"
             );
