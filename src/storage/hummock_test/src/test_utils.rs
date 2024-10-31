@@ -159,12 +159,12 @@ pub fn update_filter_key_extractor_for_table_ids(
     table_ids: &[u32],
 ) {
     for table_id in table_ids {
-        let mock_table = Arc::new(PbTable {
+        let mock_table = PbTable {
             id: *table_id,
             read_prefix_len_hint: 0,
             maybe_vnode_count: Some(VirtualNode::COUNT_FOR_TEST as u32),
             ..Default::default()
-        });
+        };
         compaction_catalog_manager_ref.update(*table_id, mock_table);
     }
 }
@@ -188,7 +188,7 @@ pub fn update_filter_key_extractor_for_tables(
     tables: &[PbTable],
 ) {
     for table in tables {
-        compaction_catalog_manager_ref.update(table.id, Arc::new(table.clone()))
+        compaction_catalog_manager_ref.update(table.id, table.clone())
     }
 }
 pub async fn register_tables_with_catalog_for_test(

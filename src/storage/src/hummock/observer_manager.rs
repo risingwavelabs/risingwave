@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
@@ -155,14 +153,14 @@ impl HummockObserverNode {
 
     fn handle_catalog_snapshot(&mut self, tables: Vec<Table>) {
         self.compaction_catalog_manager
-            .sync(tables.into_iter().map(|t| (t.id, Arc::new(t))).collect());
+            .sync(tables.into_iter().map(|t| (t.id, t)).collect());
     }
 
     fn handle_catalog_notification(&mut self, operation: Operation, table_catalog: Table) {
         match operation {
             Operation::Add | Operation::Update => {
                 self.compaction_catalog_manager
-                    .update(table_catalog.id, Arc::new(table_catalog));
+                    .update(table_catalog.id, table_catalog);
             }
 
             Operation::Delete => {

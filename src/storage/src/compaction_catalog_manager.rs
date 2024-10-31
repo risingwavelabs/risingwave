@@ -260,7 +260,7 @@ impl StateTableAccessor for FakeRemoteTableAccessor {
 /// `CompactionCatalogManager` is a manager to manage all `Table` which used in compaction
 pub struct CompactionCatalogManager {
     // `table_id_to_catalog` is a map to store all `Table` which used in compaction
-    table_id_to_catalog: RwLock<HashMap<StateTableId, Arc<Table>>>,
+    table_id_to_catalog: RwLock<HashMap<StateTableId, Table>>,
     // `table_accessor` is a accessor to fetch `Table` from meta when the table not found
     table_accessor: Box<dyn StateTableAccessor>,
 }
@@ -282,12 +282,12 @@ impl CompactionCatalogManager {
 
 impl CompactionCatalogManager {
     /// `update` is used to update `Table` in `table_id_to_catalog` from notification
-    pub fn update(&self, table_id: u32, catalog: Arc<Table>) {
+    pub fn update(&self, table_id: u32, catalog: Table) {
         self.table_id_to_catalog.write().insert(table_id, catalog);
     }
 
     /// `sync` is used to sync all `Table` in `table_id_to_catalog` from notification whole snapshot
-    pub fn sync(&self, catalog_map: HashMap<u32, Arc<Table>>) {
+    pub fn sync(&self, catalog_map: HashMap<u32, Table>) {
         let mut guard = self.table_id_to_catalog.write();
         guard.clear();
         guard.extend(catalog_map);
@@ -318,10 +318,8 @@ impl CompactionCatalogManager {
             let guard = self.table_id_to_catalog.read();
             table_ids.retain(|table_id| match guard.get(table_id) {
                 Some(table_catalog) => {
-                    multi_filter_key_extractor.register(
-                        *table_id,
-                        FilterKeyExtractorImpl::from_table(table_catalog.as_ref()),
-                    );
+                    multi_filter_key_extractor
+                        .register(*table_id, FilterKeyExtractorImpl::from_table(table_catalog));
                     table_id_to_vnode.insert(*table_id, table_catalog.vnode_count());
                     false
                 }
@@ -348,7 +346,7 @@ impl CompactionCatalogManager {
                     let table_id = table.id;
                     let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
-                    guard.insert(table_id, Arc::new(table));
+                    guard.insert(table_id, table);
                     multi_filter_key_extractor.register(table_id, key_extractor);
                     table_id_to_vnode.insert(table_id, vnode);
                 }
@@ -363,15 +361,13 @@ impl CompactionCatalogManager {
 
     /// `build_compaction_catalog_agent` is used to build `CompactionCatalogAgent` by `table_catalogs`
     pub fn build_compaction_catalog_agent(
-        table_catalogs: HashMap<StateTableId, Arc<Table>>,
+        table_catalogs: HashMap<StateTableId, Table>,
     ) -> CompactionCatalogAgentRef {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
         for (table_id, table_catalog) in table_catalogs {
-            multi_filter_key_extractor.register(
-                table_id,
-                FilterKeyExtractorImpl::from_table(table_catalog.as_ref()),
-            );
+            multi_filter_key_extractor
+                .register(table_id, FilterKeyExtractorImpl::from_table(&table_catalog));
             table_id_to_vnode.insert(table_id, table_catalog.vnode_count());
         }
 
