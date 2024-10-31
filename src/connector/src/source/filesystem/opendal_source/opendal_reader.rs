@@ -24,7 +24,7 @@ use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::FileMetaData;
-use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::arrow::arrow_schema_iceberg;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use tokio::io::{AsyncRead, BufReader};
@@ -269,10 +269,10 @@ pub fn extract_valid_column_indices(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_field = IcebergArrowConvert
-                                .to_arrow_field(&column.name, &column.data_type)
-                                .ok()?;
-                            if &arrow_field == converted_arrow_schema.field(pos) {
+                            if is_data_type_matching(
+                                &column.data_type,
+                                converted_arrow_schema.field(pos).data_type(),
+                            ) {
                                 Some(pos)
                             } else {
                                 None
@@ -283,5 +283,87 @@ pub fn extract_valid_column_indices(
             Ok(valid_column_indices)
         }
         None => Ok(vec![]),
+    }
+}
+
+/// Checks if the data type in RisingWave matches the data type in a Parquet(arrow) file.
+///
+/// This function compares the `DataType` from RisingWave with the `DataType` from
+/// Parquet file, returning `true` if they are compatible. Specifically, for `Timestamp`
+/// types, it ensures that any of the four `TimeUnit` variants from Parquet
+/// (i.e., `Second`, `Millisecond`, `Microsecond`, and `Nanosecond`) can be matched
+/// with the corresponding `Timestamp` type in RisingWave.
+pub fn is_data_type_matching(
+    rw_data_type: &risingwave_common::types::DataType,
+    arrow_data_type: &arrow_schema_iceberg::DataType,
+) -> bool {
+    match rw_data_type {
+        risingwave_common::types::DataType::Boolean => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Boolean)
+        }
+        risingwave_common::types::DataType::Int16 => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Int16)
+        }
+        risingwave_common::types::DataType::Int32 => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Int32)
+        }
+        risingwave_common::types::DataType::Int64 => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Int64)
+        }
+        risingwave_common::types::DataType::Float32 => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Float32)
+        }
+        risingwave_common::types::DataType::Float64 => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Float64)
+        }
+        risingwave_common::types::DataType::Decimal => {
+            matches!(
+                arrow_data_type,
+                arrow_schema_iceberg::DataType::Decimal128(_, _)
+            ) || matches!(
+                arrow_data_type,
+                arrow_schema_iceberg::DataType::Decimal256(_, _)
+            )
+        }
+        risingwave_common::types::DataType::Date => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Date32)
+                || matches!(arrow_data_type, arrow_schema_iceberg::DataType::Date64)
+        }
+        risingwave_common::types::DataType::Varchar => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Utf8)
+        }
+        risingwave_common::types::DataType::Time => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Time32(_))
+                || matches!(arrow_data_type, arrow_schema_iceberg::DataType::Time64(_))
+        }
+        risingwave_common::types::DataType::Timestamp => {
+            matches!(
+                arrow_data_type,
+                arrow_schema_iceberg::DataType::Timestamp(_, _)
+            )
+        }
+        risingwave_common::types::DataType::Timestamptz => {
+            matches!(
+                arrow_data_type,
+                arrow_schema_iceberg::DataType::Timestamp(_, _)
+            )
+        }
+        risingwave_common::types::DataType::Interval => {
+            matches!(arrow_data_type, arrow_schema_iceberg::DataType::Interval(_))
+        }
+        risingwave_common::types::DataType::List(inner_type) => {
+            if let arrow_schema_iceberg::DataType::List(field_ref) = arrow_data_type {
+                let inner_rw_type = inner_type.clone();
+                let inner_arrow_type = field_ref.data_type();
+                is_data_type_matching(&inner_rw_type, inner_arrow_type)
+            } else {
+                false
+            }
+        }
+        risingwave_common::types::DataType::Map(_) => {
+            // Directly return false for Map types
+            false
+        }
+        _ => false, // Handle other data types as necessary
     }
 }
