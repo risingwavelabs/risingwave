@@ -28,6 +28,7 @@ use super::elasticsearch_opensearch_config::{
 use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
 use crate::sink::Result;
 
+#[expect(clippy::large_enum_variant)]
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
     Other,

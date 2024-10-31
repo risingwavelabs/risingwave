@@ -45,7 +45,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
                 name: view.name().to_string(),
                 schema_id: schema.id() as i32,
                 owner: view.owner as i32,
-                definition: view.create_sql(),
+                definition: view.create_sql(schema.name()),
                 acl: get_acl_items(&Object::ViewId(view.id), false, &users, username_map),
             })
         })

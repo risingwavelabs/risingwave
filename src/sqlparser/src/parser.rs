@@ -2143,7 +2143,7 @@ impl Parser<'_> {
 
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = self.parse_source_schema_with_connector(&connector, cdc_source_job)?;
+        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
 
         let stmt = CreateSourceStatement {
             temporary,
@@ -2153,7 +2153,7 @@ impl Parser<'_> {
             constraints,
             source_name,
             with_properties: WithProperties(with_options),
-            source_schema,
+            format_encode,
             source_watermarks,
             include_column_options: include_options,
         };
@@ -2585,8 +2585,8 @@ impl Parser<'_> {
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
 
-        let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector, false)?)
+        let format_encode = if let Some(connector) = connector {
+            Some(self.parse_format_encode_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2621,7 +2621,7 @@ impl Parser<'_> {
             with_options,
             or_replace,
             if_not_exists,
-            source_schema,
+            format_encode,
             source_watermarks,
             append_only,
             on_conflict,
@@ -3475,11 +3475,11 @@ impl Parser<'_> {
                 return self.expected("SCHEMA after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
-            let connector_schema = self.parse_schema()?.unwrap();
-            if connector_schema.key_encode.is_some() {
+            let format_encode = self.parse_schema()?.unwrap();
+            if format_encode.key_encode.is_some() {
                 parser_err!("key encode clause is not supported in source schema");
             }
-            AlterSourceOperation::FormatEncode { connector_schema }
+            AlterSourceOperation::FormatEncode { format_encode }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema
         } else {

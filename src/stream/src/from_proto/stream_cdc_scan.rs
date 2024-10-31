@@ -79,9 +79,9 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             .columns
             .iter()
             .filter(|col| {
-                !col.additional_column
+                col.additional_column
                     .as_ref()
-                    .is_some_and(|a_col| a_col.column_type.is_some())
+                    .is_none_or(|a_col| a_col.column_type.is_none())
             })
             .map(Into::into)
             .collect();

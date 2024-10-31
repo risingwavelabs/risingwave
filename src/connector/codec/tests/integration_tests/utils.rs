@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::AdditionalColumn;
 /// More concise display for `DataType`, to use in tests.
 pub struct DataTypeTestDisplay<'a>(pub &'a DataType);
 
-impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
+impl std::fmt::Debug for DataTypeTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DataType::Struct(s) => {
@@ -68,7 +68,7 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
 /// More concise display for `ScalarRefImpl`, to use in tests.
 pub struct ScalarRefImplTestDisplay<'a>(pub ScalarRefImpl<'a>);
 
-impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
+impl std::fmt::Debug for ScalarRefImplTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             ScalarRefImpl::Struct(s) => {
@@ -112,7 +112,7 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
 /// More concise display for `ScalarImpl`, to use in tests.
 pub struct ScalarImplTestDisplay<'a>(pub &'a ScalarImpl);
 
-impl<'a> std::fmt::Debug for ScalarImplTestDisplay<'a> {
+impl std::fmt::Debug for ScalarImplTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         ScalarRefImplTestDisplay(self.0.as_scalar_ref_impl()).fmt(f)
     }
@@ -121,7 +121,7 @@ impl<'a> std::fmt::Debug for ScalarImplTestDisplay<'a> {
 /// More concise display for `DatumRef`, to use in tests.
 pub struct DatumRefTestDisplay<'a>(pub DatumRef<'a>);
 
-impl<'a> std::fmt::Debug for DatumRefTestDisplay<'a> {
+impl std::fmt::Debug for DatumRefTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Some(scalar) => ScalarRefImplTestDisplay(scalar).fmt(f),
@@ -133,7 +133,7 @@ impl<'a> std::fmt::Debug for DatumRefTestDisplay<'a> {
 /// More concise display for `Datum`, to use in tests.
 pub struct DatumTestDisplay<'a>(pub &'a Datum);
 
-impl<'a> std::fmt::Debug for DatumTestDisplay<'a> {
+impl std::fmt::Debug for DatumTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         DatumRefTestDisplay(self.0.to_datum_ref()).fmt(f)
     }
@@ -142,7 +142,7 @@ impl<'a> std::fmt::Debug for DatumTestDisplay<'a> {
 /// More concise display for `DatumCow`, to use in tests.
 pub struct DatumCowTestDisplay<'a>(pub &'a DatumCow<'a>);
 
-impl<'a> std::fmt::Debug for DatumCowTestDisplay<'a> {
+impl std::fmt::Debug for DatumCowTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DatumCow::Borrowed(datum_ref) => {
@@ -164,7 +164,7 @@ impl<'a> std::fmt::Debug for DatumCowTestDisplay<'a> {
 /// More concise display for `ColumnDesc`, to use in tests.
 pub struct ColumnDescTestDisplay<'a>(pub &'a ColumnDesc);
 
-impl<'a> std::fmt::Debug for ColumnDescTestDisplay<'a> {
+impl std::fmt::Debug for ColumnDescTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ColumnDesc {
             data_type,

@@ -325,7 +325,7 @@ impl Bitmap {
 
     /// Returns the length of vector to store `num_bits` bits.
     fn vec_len(num_bits: usize) -> usize {
-        (num_bits + BITS - 1) / BITS
+        num_bits.div_ceil(BITS)
     }
 
     /// Returns the number of valid bits in the bitmap,
@@ -468,7 +468,7 @@ impl From<usize> for Bitmap {
     }
 }
 
-impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
+impl<'b> BitAnd<&'b Bitmap> for &Bitmap {
     type Output = Bitmap;
 
     fn bitand(self, rhs: &'b Bitmap) -> Bitmap {
@@ -488,7 +488,7 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
     }
 }
 
-impl<'a> BitAnd<Bitmap> for &'a Bitmap {
+impl BitAnd<Bitmap> for &Bitmap {
     type Output = Bitmap;
 
     fn bitand(self, rhs: Bitmap) -> Self::Output {
@@ -524,7 +524,7 @@ impl BitAndAssign<Bitmap> for Bitmap {
     }
 }
 
-impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
+impl<'b> BitOr<&'b Bitmap> for &Bitmap {
     type Output = Bitmap;
 
     fn bitor(self, rhs: &'b Bitmap) -> Bitmap {
@@ -544,7 +544,7 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     }
 }
 
-impl<'a> BitOr<Bitmap> for &'a Bitmap {
+impl BitOr<Bitmap> for &Bitmap {
     type Output = Bitmap;
 
     fn bitor(self, rhs: Bitmap) -> Self::Output {
@@ -599,7 +599,7 @@ impl BitXor for &Bitmap {
     }
 }
 
-impl<'a> Not for &'a Bitmap {
+impl Not for &Bitmap {
     type Output = Bitmap;
 
     fn not(self) -> Self::Output {
@@ -700,7 +700,7 @@ pub struct BitmapIter<'a> {
     all_ones: bool,
 }
 
-impl<'a> BitmapIter<'a> {
+impl BitmapIter<'_> {
     fn next_always_load_usize(&mut self) -> Option<bool> {
         if self.idx >= self.num_bits {
             return None;
@@ -724,7 +724,7 @@ impl<'a> BitmapIter<'a> {
     }
 }
 
-impl<'a> iter::Iterator for BitmapIter<'a> {
+impl iter::Iterator for BitmapIter<'_> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -778,7 +778,7 @@ pub enum BitmapOnesIter<'a> {
     },
 }
 
-impl<'a> iter::Iterator for BitmapOnesIter<'a> {
+impl iter::Iterator for BitmapOnesIter<'_> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -674,6 +674,6 @@ pub fn calculate_task_parallelism_impl(
     compaction_size: u64,
     max_sub_compaction: u32,
 ) -> usize {
-    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
+    let parallelism = compaction_size.div_ceil(parallel_compact_size);
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
 }

@@ -489,6 +489,7 @@ impl CompactionGroupManager {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn start_owned_compaction_groups_txn<P: DerefMut<Target = Self>>(
         inner: P,
     ) -> BTreeMapTransactionInner<
@@ -591,7 +592,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
     }
 }
 
-impl<'a> CompactionGroupTransaction<'a> {
+impl CompactionGroupTransaction<'_> {
     /// Inserts compaction group configs if they do not exist.
     pub fn try_create_compaction_groups(
         &mut self,

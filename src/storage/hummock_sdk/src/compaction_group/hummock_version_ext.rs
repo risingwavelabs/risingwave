@@ -116,7 +116,7 @@ impl HummockVersion {
     pub fn get_sst_infos_from_groups<'a>(
         &'a self,
         select_group: &'a HashSet<CompactionGroupId>,
-    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+    ) -> impl Iterator<Item = &'a SstableInfo> + 'a {
         self.levels
             .iter()
             .filter_map(|(cg_id, level)| {
@@ -332,7 +332,7 @@ impl HummockVersion {
         let [parent_levels, cur_levels] = self
             .levels
             .get_many_mut([&parent_group_id, &group_id])
-            .unwrap();
+            .map(|res| res.unwrap());
         let l0 = &mut parent_levels.l0;
         {
             for sub_level in &mut l0.sub_levels {
@@ -895,7 +895,8 @@ impl HummockVersionCommon<SstableInfo> {
         let [parent_levels, cur_levels] = self
             .levels
             .get_many_mut([&parent_group_id, &group_id])
-            .unwrap();
+            .map(|res| res.unwrap());
+
         let l0 = &mut parent_levels.l0;
         {
             for sub_level in &mut l0.sub_levels {

@@ -40,7 +40,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightGraphInfo};
+use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{GlobalBarrierWorkerContextImpl, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -78,10 +78,6 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    /// Whether this fragment is injectable. The injectable means whether the fragment contains
-    /// any executors that are able to receive barrier.
-    pub injectable: bool,
-
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
@@ -109,28 +105,31 @@ impl ReplaceTablePlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
-                actors: fragment
-                    .actors
-                    .iter()
-                    .map(|actor| {
-                        (
-                            actor.actor_id as i32,
-                            self.new_table_fragments
-                                .actor_status
-                                .get(&actor.actor_id)
-                                .expect("should exist")
-                                .worker_id(),
-                        )
-                    })
-                    .collect(),
-                state_table_ids: fragment
-                    .state_table_ids
-                    .iter()
-                    .map(|table_id| *table_id as ObjectId)
-                    .collect(),
-                is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
-            });
+            let fragment_change = CommandFragmentChanges::NewFragment(
+                self.streaming_job.database_id().into(),
+                self.streaming_job.id().into(),
+                InflightFragmentInfo {
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .map(|actor| {
+                            (
+                                actor.actor_id as i32,
+                                self.new_table_fragments
+                                    .actor_status
+                                    .get(&actor.actor_id)
+                                    .expect("should exist")
+                                    .worker_id(),
+                            )
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| *table_id as ObjectId)
+                        .collect(),
+                },
+            );
             assert!(fragment_changes
                 .insert(fragment.fragment_id, fragment_change)
                 .is_none());
@@ -187,7 +186,6 @@ impl CreateStreamingJobCommandInfo {
                         .iter()
                         .map(|table_id| *table_id as ObjectId)
                         .collect(),
-                    is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
                 },
             )
         })
@@ -252,7 +250,9 @@ pub enum Command {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
     },
-    MergeSnapshotBackfillStreamingJobs(HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>),
+    MergeSnapshotBackfillStreamingJobs(
+        HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
+    ),
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -338,8 +338,15 @@ impl Command {
                 );
                 let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
-                    .map(|(fragment_id, info)| {
-                        (fragment_id, CommandFragmentChanges::NewFragment(info))
+                    .map(|(fragment_id, fragment_info)| {
+                        (
+                            fragment_id,
+                            CommandFragmentChanges::NewFragment(
+                                info.streaming_job.database_id().into(),
+                                info.streaming_job.id().into(),
+                                fragment_info,
+                            ),
+                        )
                     })
                     .collect();
 

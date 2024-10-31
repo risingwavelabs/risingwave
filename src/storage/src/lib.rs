@@ -27,7 +27,6 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
-#![feature(is_sorted)]
 #![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
