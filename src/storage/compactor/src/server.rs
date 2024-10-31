@@ -36,8 +36,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
-use risingwave_storage::filter_key_extractor::{
-    FilterKeyExtractorManager, RemoteTableAccessor, RpcFilterKeyExtractorManager,
+use risingwave_storage::compaction_catalog_manager::{
+    CompactionCatalogManager, RemoteTableAccessor,
 };
 use risingwave_storage::hummock::compactor::{
     new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactionExecutor,
@@ -212,12 +212,13 @@ pub async fn compactor_serve(
         compactor_metrics,
     ) = prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
 
-    let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
+    let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
     )));
+
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
     let compactor_observer_node = CompactorObserverNode::new(
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_manager_ref.clone(),
         system_params_manager.clone(),
     );
     let observer_manager =
@@ -234,9 +235,6 @@ pub async fn compactor_serve(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
-    let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-        filter_key_extractor_manager.clone(),
-    );
 
     let compaction_executor = Arc::new(CompactionExecutor::new(
         opts.compaction_worker_threads_number,
@@ -263,7 +261,7 @@ pub async fn compactor_serve(
             compactor_context.clone(),
             hummock_meta_client.clone(),
             sstable_object_id_manager.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_manager_ref,
         ),
     ];
 

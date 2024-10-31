@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -29,7 +30,10 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+use crate::compaction_catalog_manager::{
+    CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
+    FullKeyFilterKeyExtractor,
+};
 use crate::hummock::sstable::{utils, FilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -98,7 +102,8 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     writer: W,
     /// Current block builder.
     block_builder: BlockBuilder,
-    filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
 
@@ -126,13 +131,23 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
-    pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
+    pub fn for_test(
+        sstable_id: u64,
+        writer: W,
+        options: SstableBuilderOptions,
+        table_id_to_vnode: HashMap<StateTableId, usize>,
+    ) -> Self {
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
+            table_id_to_vnode,
+        ));
+
         Self::new(
             sstable_id,
             writer,
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            compaction_catalog_agent_ref,
             None,
         )
     }
@@ -144,7 +159,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         writer: W,
         filter_builder: F,
         options: SstableBuilderOptions,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         Self {
@@ -163,7 +178,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             raw_value: BytesMut::new(),
             last_full_key: vec![],
             sstable_id,
-            filter_key_extractor,
+            compaction_catalog_agent_ref,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
             epoch_set: BTreeSet::default(),
@@ -340,7 +355,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let table_id = full_key.user_key.table_id.table_id();
         let mut extract_key = user_key(&self.raw_key);
-        extract_key = self.filter_key_extractor.extract(extract_key);
+        extract_key = self.compaction_catalog_agent_ref.extract(extract_key);
         // add bloom_filter check
         if !extract_key.is_empty() {
             self.filter_builder.add_key(extract_key, table_id);
@@ -689,7 +704,7 @@ impl SstableBuilderOutputStats {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use std::collections::Bound;
+    use std::collections::{Bound, HashMap};
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
@@ -698,7 +713,9 @@ pub(super) mod tests {
 
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::filter_key_extractor::{DummyFilterKeyExtractor, MultiFilterKeyExtractor};
+    use crate::compaction_catalog_manager::{
+        CompactionCatalogAgent, DummyFilterKeyExtractor, MultiFilterKeyExtractor,
+    };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
@@ -718,7 +735,8 @@ pub(super) mod tests {
             ..Default::default()
         };
 
-        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
 
         b.finish().await.unwrap();
     }
@@ -726,7 +744,9 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_basic() {
         let opt = default_builder_opt_for_test();
-        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
+
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt, table_id_to_vnode);
 
         for i in 0..TEST_KEYS_COUNT {
             b.add_for_test(
@@ -815,24 +835,30 @@ pub(super) mod tests {
             .clone()
             .create_sst_writer(object_id, writer_opts);
         let mut filter = MultiFilterKeyExtractor::default();
-        filter.register(
-            1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
-        );
+        filter.register(1, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
         filter.register(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+            FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         );
-        filter.register(
-            3,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
-        );
+        filter.register(3, FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor));
+
+        let table_id_to_vnode = HashMap::from_iter(vec![
+            (1, VirtualNode::COUNT_FOR_TEST),
+            (2, VirtualNode::COUNT_FOR_TEST),
+            (3, VirtualNode::COUNT_FOR_TEST),
+        ]);
+
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            FilterKeyExtractorImpl::Multi(filter),
+            table_id_to_vnode,
+        ));
+
         let mut builder = SstableBuilder::new(
             object_id,
             writer,
             BlockedXor16FilterBuilder::new(1024),
             opts,
-            Arc::new(FilterKeyExtractorImpl::Multi(filter)),
+            compaction_catalog_agent_ref,
             None,
         );
 

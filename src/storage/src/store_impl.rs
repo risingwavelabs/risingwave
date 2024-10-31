@@ -26,8 +26,8 @@ use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
@@ -764,15 +764,17 @@ impl StateStoreImpl {
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
-                    RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
-                )));
+                let compaction_catalog_manager_ref =
+                    Arc::new(CompactionCatalogManager::new(Box::new(
+                        RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
+                    )));
+
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),
                     notification_client,
-                    key_filter_manager,
+                    compaction_catalog_manager_ref,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
                     await_tree_config,

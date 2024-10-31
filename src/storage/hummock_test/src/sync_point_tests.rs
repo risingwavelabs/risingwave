@@ -31,16 +31,16 @@ use risingwave_meta::hummock::compaction::selector::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{setup_compute_env, setup_compute_env_with_config};
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_storage::hummock::compactor::compactor_runner::compact;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
+use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::StateStore;
 use serial_test::serial;
 
-use super::compactor_tests::tests::{get_hummock_storage, prepare_compactor_and_filter};
-use crate::compactor_tests::tests::flush_and_commit;
+use super::compactor_tests::tests::get_hummock_storage;
+use crate::compactor_tests::tests::{flush_and_commit, get_compactor_context};
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::gen_key_from_bytes;
@@ -178,7 +178,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef,
     compact_ctx: CompactorContext,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) {
     // 2. get compact task
@@ -201,12 +201,12 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let ((result_task, task_stats, object_timestamps), _) = compact(
+    let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
         compact_ctx,
         compact_task.clone(),
         rx,
         Box::new(sstable_object_id_manager),
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
     )
     .await;
 
@@ -252,8 +252,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         &[existing_table_id],
     )
     .await;
-    let (compact_ctx, filter_key_extractor_manager) =
-        prepare_compactor_and_filter(&storage, existing_table_id);
+
+    let compact_ctx = get_compactor_context(&storage);
+    let compaction_catalog_agent_ref = storage
+        .compaction_catalog_manager_ref()
+        .acquire(vec![existing_table_id])
+        .await
+        .unwrap();
 
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
@@ -316,10 +321,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         local.table_id(),
     )
     .await;
+
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -360,7 +366,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -402,7 +408,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;
@@ -437,7 +443,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
         sstable_object_id_manager.clone(),
     )
     .await;

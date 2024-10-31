@@ -38,8 +38,10 @@ use tokio::sync::oneshot;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
+use crate::compaction_catalog_manager::{
+    CompactionCatalogManager, CompactionCatalogManagerRef, FakeRemoteTableAccessor,
+};
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::{
     new_compaction_await_tree_reg_ref, CompactionAwaitTreeRegRef, CompactorContext,
@@ -90,7 +92,7 @@ pub struct HummockStorage {
 
     context: CompactorContext,
 
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 
     sstable_object_id_manager: SstableObjectIdManagerRef,
 
@@ -148,7 +150,7 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        filter_key_extractor_manager: Arc<RpcFilterKeyExtractorManager>,
+        compaction_catalog_manager_ref: CompactionCatalogManagerRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
         await_tree_config: Option<await_tree::Config>,
@@ -170,7 +172,7 @@ impl HummockStorage {
         let observer_manager = ObserverManager::new(
             notification_client,
             HummockObserverNode::new(
-                filter_key_extractor_manager.clone(),
+                compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
                 version_update_tx.clone(),
                 write_limiter.clone(),
@@ -191,9 +193,6 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             options.max_version_pinning_duration_sec,
         ));
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            filter_key_extractor_manager.clone(),
-        );
 
         let await_tree_reg = await_tree_config.map(new_compaction_await_tree_reg_ref);
 
@@ -208,7 +207,7 @@ impl HummockStorage {
             version_update_rx,
             pinned_version,
             compactor_context.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_manager_ref.clone(),
             sstable_object_id_manager.clone(),
             state_store_metrics.clone(),
         );
@@ -217,7 +216,7 @@ impl HummockStorage {
 
         let instance = Self {
             context: compactor_context,
-            filter_key_extractor_manager: filter_key_extractor_manager.clone(),
+            compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
             sstable_object_id_manager,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
@@ -536,8 +535,8 @@ impl HummockStorage {
         &self.sstable_object_id_manager
     }
 
-    pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManager {
-        &self.filter_key_extractor_manager
+    pub fn compaction_catalog_manager_ref(&self) -> CompactionCatalogManagerRef {
+        self.compaction_catalog_manager_ref.clone()
     }
 
     pub fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
@@ -763,12 +762,16 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> HummockResult<Self> {
+        let compaction_catalog_manager = Arc::new(CompactionCatalogManager::new(Box::new(
+            FakeRemoteTableAccessor {},
+        )));
+
         Self::new(
             options,
             sstable_store,
             hummock_meta_client,
             notification_client,
-            Arc::new(RpcFilterKeyExtractorManager::default()),
+            compaction_catalog_manager,
             Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(CompactorMetrics::unused()),
             None,
