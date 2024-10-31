@@ -335,7 +335,7 @@ steps:
 
   - label: "build-image-on-pr"
     key: "build-image-on-pr"
-    if: build.pull_request.labels includes "build-image-on-pr" || build.env("CI_STEPS") =~ /(^|,)build-image-on-pr(,|$$)/
+    if: build.pull_request.labels includes "ci/pr/build-image-on-pr" || build.env("CI_STEPS") =~ /(^|,)ci\/pr\/build-image-on-pr(,|$$)/
     command: |
       # Sanitize branch name for Docker tag
       export IMAGE_TAG=$(echo "$BUILDKITE_BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g')
