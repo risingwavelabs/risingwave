@@ -28,7 +28,7 @@ use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_sqlparser::ast::{CompatibleSourceSchema, Statement, Value};
+use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
@@ -731,28 +731,28 @@ fn redact_all_sql_options(sql: &str) -> Option<String> {
         let options = match statement {
             Statement::CreateTable {
                 with_options,
-                source_schema,
+                format_encode,
                 ..
             } => {
-                let connector_schema = match source_schema {
-                    Some(CompatibleSourceSchema::V2(cs)) => Some(&mut cs.row_options),
+                let format_encode = match format_encode {
+                    Some(CompatibleFormatEncode::V2(cs)) => Some(&mut cs.row_options),
                     _ => None,
                 };
-                (Some(with_options), connector_schema)
+                (Some(with_options), format_encode)
             }
             Statement::CreateSource { stmt } => {
-                let connector_schema = match &mut stmt.source_schema {
-                    CompatibleSourceSchema::V2(cs) => Some(&mut cs.row_options),
+                let format_encode = match &mut stmt.format_encode {
+                    CompatibleFormatEncode::V2(cs) => Some(&mut cs.row_options),
                     _ => None,
                 };
-                (Some(&mut stmt.with_properties.0), connector_schema)
+                (Some(&mut stmt.with_properties.0), format_encode)
             }
             Statement::CreateSink { stmt } => {
-                let connector_schema = match &mut stmt.sink_schema {
+                let format_encode = match &mut stmt.sink_schema {
                     Some(cs) => Some(&mut cs.row_options),
                     _ => None,
                 };
-                (Some(&mut stmt.with_properties.0), connector_schema)
+                (Some(&mut stmt.with_properties.0), format_encode)
             }
             _ => (None, None),
         };

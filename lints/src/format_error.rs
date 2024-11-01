@@ -104,7 +104,7 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece
                         && let Ok(index) = placeholder.argument.index
                         && let Some(arg) = format_args.arguments.all_args().get(index)
-                        && let Ok(arg_expr) = find_format_arg_expr(expr, arg)
+                        && let Some(arg_expr) = find_format_arg_expr(expr, arg)
                     {
                         if in_tracing_event_macro {
                             check_fmt_arg_in_tracing_event(cx, arg_expr);

@@ -15,6 +15,7 @@
  *
  */
 import "bootstrap-icons/font/bootstrap-icons.css"
+import "reflect-metadata"
 import "../styles/global.css"
 
 import { ChakraProvider } from "@chakra-ui/react"

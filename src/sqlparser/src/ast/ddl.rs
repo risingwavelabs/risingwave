@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ConnectorSchema;
+use super::FormatEncodeOptions;
 use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
 };
@@ -182,7 +182,7 @@ pub enum AlterSourceOperation {
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
-    FormatEncode { connector_schema: ConnectorSchema },
+    FormatEncode { format_encode: FormatEncodeOptions },
     RefreshSchema,
     SetSourceRateLimit { rate_limit: i32 },
 }
@@ -413,8 +413,8 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSourceOperation::FormatEncode { connector_schema } => {
-                write!(f, "{connector_schema}")
+            AlterSourceOperation::FormatEncode { format_encode } => {
+                write!(f, "{format_encode}")
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
@@ -731,7 +731,7 @@ impl fmt::Display for ColumnOption {
 
 fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
     struct ConstraintName<'a>(&'a Option<Ident>);
-    impl<'a> fmt::Display for ConstraintName<'a> {
+    impl fmt::Display for ConstraintName<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some(name) = self.0 {
                 write!(f, "CONSTRAINT {} ", name)?;

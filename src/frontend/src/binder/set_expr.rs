@@ -78,7 +78,6 @@ impl From<SetOperator> for BoundSetOperation {
 
 impl BoundSetExpr {
     /// The schema returned by this [`BoundSetExpr`].
-
     pub fn schema(&self) -> Cow<'_, Schema> {
         match self {
             BoundSetExpr::Select(s) => Cow::Borrowed(s.schema()),

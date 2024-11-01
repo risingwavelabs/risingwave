@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{
 use crate::sql_gen::utils::{create_args, create_table_alias};
 use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates time window functions.
     pub(crate) fn gen_time_window_func(&mut self) -> (TableFactor, Table) {
         match self.flip_coin() {

@@ -58,7 +58,6 @@ use crate::store::*;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
-
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
@@ -779,7 +778,7 @@ impl<'a> HummockStorageIteratorInner<'a> {
     }
 }
 
-impl<'a> Drop for HummockStorageIteratorInner<'a> {
+impl Drop for HummockStorageIteratorInner<'_> {
     fn drop(&mut self) {
         self.inner
             .collect_local_statistic(&mut self.stats_guard.local_stats);
@@ -861,7 +860,7 @@ impl<'a> HummockStorageRevIteratorInner<'a> {
     }
 }
 
-impl<'a> Drop for HummockStorageRevIteratorInner<'a> {
+impl Drop for HummockStorageRevIteratorInner<'_> {
     fn drop(&mut self) {
         self.inner
             .collect_local_statistic(&mut self.stats_guard.local_stats);

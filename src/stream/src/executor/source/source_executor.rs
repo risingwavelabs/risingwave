@@ -508,6 +508,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
 
         // - For shared source, pause until there's a MV.
         // - If the first barrier requires us to pause on startup, pause the stream.
@@ -518,6 +519,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 "source paused on startup"
             );
             stream.pause_stream();
+            command_paused = true;
         }
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
@@ -551,8 +553,11 @@ impl<S: StateStore> SourceExecutor<S> {
                     last_barrier_time = Instant::now();
 
                     if self_paused {
-                        stream.resume_stream();
                         self_paused = false;
+                        // command_paused has a higher priority.
+                        if !command_paused {
+                            stream.resume_stream();
+                        }
                     }
 
                     let epoch = barrier.epoch;
@@ -567,9 +572,14 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
-                            Mutation::Pause => stream.pause_stream(),
-                            Mutation::Resume => stream.resume_stream(),
+                            Mutation::Pause => {
+                                command_paused = true;
+                                stream.pause_stream()
+                            }
+                            Mutation::Resume => {
+                                command_paused = false;
+                                stream.resume_stream()
+                            }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
                                     actor_id = self.actor_ctx.id,

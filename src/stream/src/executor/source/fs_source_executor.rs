@@ -367,8 +367,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
         if start_with_paused {
             stream.pause_stream();
+            command_paused = true;
         }
 
         // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
@@ -395,7 +397,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     Message::Barrier(barrier) => {
                         last_barrier_time = Instant::now();
                         if self_paused {
-                            stream.resume_stream();
+                            // command_paused has a higher priority.
+                            if !command_paused {
+                                stream.resume_stream();
+                            }
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
@@ -406,8 +411,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?
                                 }
-                                Mutation::Pause => stream.pause_stream(),
-                                Mutation::Resume => stream.resume_stream(),
+                                Mutation::Pause => {
+                                    command_paused = true;
+                                    stream.pause_stream()
+                                }
+                                Mutation::Resume => {
+                                    command_paused = false;
+                                    stream.resume_stream()
+                                }
                                 Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                     self.apply_split_change(
                                         &source_desc,

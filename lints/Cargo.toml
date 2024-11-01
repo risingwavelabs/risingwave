@@ -14,12 +14,12 @@ path = "ui/format_error.rs"
 # See `README.md` before bumping the version.
 # Remember to update the version in `ci/Dockerfile` as well.
 [dependencies]
-clippy_utils = { git = "https://github.com/risingwavelabs/clippy", rev = "61e1d2fd7062e46ccf1237707ee6da5aac018f70" }
-dylint_linting = "3.1.0"
+clippy_utils = { git = "https://github.com/risingwavelabs/clippy", rev = "755ee9dd292b354fed40dcb9e4cd92d1d604207b" }
+dylint_linting = "3.2.1"
 itertools = "0.12"
 
 [dev-dependencies]
-dylint_testing = "3.1.0"
+dylint_testing = "3.2.1"
 
 # UI test dependencies
 anyhow = "1"

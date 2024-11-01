@@ -445,22 +445,22 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
-                    return Ok(A::output_for(
+                    Ok(A::output_for(
                         self.row_meta
                             .as_ref()
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ));
+                    ))
                 }
                 (_, &Some(AdditionalColumnType::Offset(_))) => {
                     // the meta info does not involve spec connector
-                    return Ok(A::output_for(
+                    Ok(A::output_for(
                         self.row_meta
                             .as_ref()
                             .map(|ele| ScalarRefImpl::Utf8(ele.offset)),
-                    ));
+                    ))
                 }
                 (_, &Some(AdditionalColumnType::HeaderInner(ref header_inner))) => {
-                    return Ok(A::output_for(
+                    Ok(A::output_for(
                         self.row_meta
                             .as_ref()
                             .and_then(|ele| {
@@ -473,21 +473,19 @@ impl SourceStreamChunkRowWriter<'_> {
                             .unwrap_or(Datum::None.into()),
                     ))
                 }
-                (_, &Some(AdditionalColumnType::Headers(_))) => {
-                    return Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| extract_headers_from_meta(ele.meta))
-                            .unwrap_or(None),
-                    ))
-                }
+                (_, &Some(AdditionalColumnType::Headers(_))) => Ok(A::output_for(
+                    self.row_meta
+                        .as_ref()
+                        .and_then(|ele| extract_headers_from_meta(ele.meta))
+                        .unwrap_or(None),
+                )),
                 (_, &Some(AdditionalColumnType::Filename(_))) => {
                     // Filename is used as partition in FS connectors
-                    return Ok(A::output_for(
+                    Ok(A::output_for(
                         self.row_meta
                             .as_ref()
                             .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ));
+                    ))
                 }
                 (_, &Some(AdditionalColumnType::Payload(_))) => {
                     // ingest the whole payload as a single column

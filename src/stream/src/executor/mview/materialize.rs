@@ -702,11 +702,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::Overwrite
                         | ConflictBehavior::IgnoreConflict
                         | ConflictBehavior::DoUpdateIfNotNull => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    fixed_changes().delete(key.clone(), old_row.row.clone());
-                                }
-                                None => (), // delete a nonexistent value
+                            // delete a nonexistent value
+                            if let Some(old_row) = self.force_get(&key) {
+                                fixed_changes().delete(key.clone(), old_row.row.clone());
                             };
                         }
                         _ => unreachable!(),

@@ -53,7 +53,7 @@ where
     stmts_iter: core::iter::Rev<Iter<'b, String, String>>,
 }
 
-impl<'a, 'b> SetStmtsIterator<'a, 'b> {
+impl<'a> SetStmtsIterator<'a, '_> {
     fn new(stmts: &'a SetStmts) -> Self {
         Self {
             _stmts: stmts,
