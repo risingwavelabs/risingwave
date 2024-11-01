@@ -270,31 +270,7 @@ impl IcebergSplitEnumerator {
                     equality_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
-                    // Dont need to do anything here
-                }
-            }
-        }
-
-        let scan = table
-            .scan()
-            .snapshot_id(snapshot_id)
-            .select_all()
-            .build()
-            .map_err(|e| anyhow!(e))?;
-
-        let file_scan_stream = scan.plan_files().await.map_err(|e| anyhow!(e))?;
-
-        #[for_await]
-        for task in file_scan_stream {
-            let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            match task.data_file_content {
-                iceberg::spec::DataContentType::Data => {
-                    // Dont need to do anything here
-                }
-                iceberg::spec::DataContentType::EqualityDeletes => {
-                    // Dont need to do anything here
-                }
-                iceberg::spec::DataContentType::PositionDeletes => {
+                    task.project_field_ids = vec![];
                     position_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
             }
