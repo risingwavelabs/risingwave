@@ -14,8 +14,9 @@
 
 use foyer::{LfuConfig, LruConfig, S3FifoConfig};
 use risingwave_common::config::{
-    CacheEvictionConfig, EvictionConfig, StorageConfig, StorageMemoryConfig,
-    MAX_BLOCK_CACHE_SHARD_BITS, MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
+    extract_compactor_memory_config, CacheEvictionConfig, CompactorMemoryConfig, EvictionConfig,
+    StorageConfig, StorageMemoryConfig, COMPACTOR_MEMORY_PROPORTION, MAX_BLOCK_CACHE_SHARD_BITS,
+    MAX_META_CACHE_SHARD_BITS, MIN_BUFFER_SIZE_PER_SHARD,
 };
 use risingwave_common::util::pretty_bytes::convert;
 
@@ -32,8 +33,6 @@ const RESERVED_MEMORY_LEVELS: [usize; 2] = [16 << 30, usize::MAX];
 const RESERVED_MEMORY_PROPORTIONS: [f64; 2] = [0.3, 0.2];
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
-
-const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -103,12 +102,12 @@ fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
 
 /// Decide the memory limit for each storage cache. If not specified in `StorageConfig`, memory
 /// limits are calculated based on the proportions to total `non_reserved_memory_bytes`.
-pub fn storage_memory_config(
+pub fn extract_hummock_memory_config(
     non_reserved_memory_bytes: usize,
     embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
     is_serving: bool,
-) -> StorageMemoryConfig {
+) -> (StorageMemoryConfig, Option<CompactorMemoryConfig>) {
     let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
         (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
     } else {
@@ -202,9 +201,20 @@ pub fn storage_memory_config(
             .unwrap_or(default_block_cache_capacity_mb),
     );
 
-    let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
-    );
+    let (compactor_memory_limit_mb, compactor_memory_config) = if embedded_compactor_enabled {
+        let compactor_memory_config = extract_compactor_memory_config(
+            storage_config,
+            non_reserved_memory_bytes,
+            compactor_memory_proportion,
+        );
+
+        (
+            compactor_memory_config.compactor_memory_limit_mb,
+            Some(compactor_memory_config),
+        )
+    } else {
+        (0, None)
+    };
 
     // The file cache flush buffer threshold is used as a emergency limitation.
     // On most cases the flush buffer is not supposed to be as large as the threshold.
@@ -322,19 +332,20 @@ pub fn storage_memory_config(
         get_eviction_config(&storage_config.cache.block_cache_eviction);
     let meta_cache_eviction_config = get_eviction_config(&storage_config.cache.meta_cache_eviction);
 
-    StorageMemoryConfig {
+    let storage_memory_config = StorageMemoryConfig {
         block_cache_capacity_mb,
         block_cache_shard_num,
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
         data_file_cache_flush_buffer_threshold_mb,
         meta_file_cache_flush_buffer_threshold_mb,
-    }
+    };
+
+    (storage_memory_config, compactor_memory_config)
 }
 
 pub fn batch_mem_limit(compute_memory_bytes: usize, is_serving_node: bool) -> u64 {
@@ -350,7 +361,7 @@ mod tests {
     use clap::Parser;
     use risingwave_common::config::StorageConfig;
 
-    use super::{reserve_memory_bytes, storage_memory_config};
+    use super::{extract_hummock_memory_config, reserve_memory_bytes};
     use crate::ComputeNodeOpts;
 
     #[test]
@@ -391,58 +402,67 @@ mod tests {
         let total_non_reserved_memory_bytes = 8 << 30;
 
         // Embedded compactor enabled, streaming node
-        let memory_config = storage_memory_config(
+        let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
             total_non_reserved_memory_bytes,
             true,
             &storage_config,
             false,
         );
-        assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.compactor_memory_limit_mb, 819);
+        assert_eq!(storage_memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(storage_memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(storage_memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(
+            compactor_memory_config.unwrap().compactor_memory_limit_mb,
+            819
+        );
 
         // Embedded compactor disabled, serving node
-        let memory_config = storage_memory_config(
+        let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
             total_non_reserved_memory_bytes,
             false,
             &storage_config,
             true,
         );
-        assert_eq!(memory_config.block_cache_capacity_mb, 1966);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
-        assert_eq!(memory_config.compactor_memory_limit_mb, 0);
+        assert_eq!(storage_memory_config.block_cache_capacity_mb, 1966);
+        assert_eq!(storage_memory_config.meta_cache_capacity_mb, 1146);
+        assert_eq!(storage_memory_config.shared_buffer_capacity_mb, 1);
+        assert!(compactor_memory_config.is_none());
 
         // Embedded compactor enabled, streaming node, file cache
         storage_config.data_file_cache.dir = "data".to_string();
         storage_config.meta_file_cache.dir = "meta".to_string();
-        let memory_config = storage_memory_config(
+        let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
             total_non_reserved_memory_bytes,
             true,
             &storage_config,
             false,
         );
-        assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.compactor_memory_limit_mb, 819);
+        assert_eq!(storage_memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(storage_memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(storage_memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(
+            compactor_memory_config.unwrap().compactor_memory_limit_mb,
+            819
+        );
 
         // Embedded compactor enabled, streaming node, file cache, cache capacities specified
         storage_config.cache.block_cache_capacity_mb = Some(512);
         storage_config.cache.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
-        let memory_config = storage_memory_config(
+        let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
             total_non_reserved_memory_bytes,
             true,
             &storage_config,
             false,
         );
-        assert_eq!(memory_config.block_cache_capacity_mb, 512);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 128);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
-        assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+        assert_eq!(storage_memory_config.block_cache_capacity_mb, 512);
+        assert_eq!(storage_memory_config.meta_cache_capacity_mb, 128);
+        assert_eq!(storage_memory_config.shared_buffer_capacity_mb, 1024);
+        assert_eq!(
+            compactor_memory_config.unwrap().compactor_memory_limit_mb,
+            512
+        );
     }
 
     #[test]

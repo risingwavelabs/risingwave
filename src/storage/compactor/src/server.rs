@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_common::config::{
     extract_compactor_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
+    COMPACTOR_MEMORY_PROPORTION,
 };
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -61,6 +62,7 @@ use crate::CompactorOpts;
 pub async fn prepare_start_parameters(
     config: RwConfig,
     system_params_reader: SystemParamsReader,
+    is_standalone: bool,
 ) -> (
     Arc<SstableStore>,
     Arc<MemoryLimiter>,
@@ -74,23 +76,30 @@ pub async fn prepare_start_parameters(
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
     let state_store_url = system_params_reader.state_store();
-
     let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
-    let compactor_memory_config = StorageMemoryConfigType::Compactor(
-        extract_compactor_memory_config(&config, non_reserved_memory_bytes),
+    let compactor_memory_config = extract_compactor_memory_config(
+        &config.storage,
+        non_reserved_memory_bytes,
+        if is_standalone {
+            COMPACTOR_MEMORY_PROPORTION
+        } else {
+            1.0
+        },
     );
 
-    let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((
-        &config,
-        &system_params_reader,
-        &compactor_memory_config,
-    )));
-    let meta_cache_capacity_bytes = storage_opts.compactor_meta_cache_capacity_mb * (1 << 20);
+    let compactor_memory_limit_bytes =
+        compactor_memory_config.compactor_memory_limit_mb * (1 << 20);
+    let meta_cache_capacity_bytes =
+        compactor_memory_config.compactor_meta_cache_capacity_mb * (1 << 20);
+    let compactor_memory_config = StorageMemoryConfigType::Compactor(compactor_memory_config);
+
+    let storage_opts: Arc<StorageOpts> =
+        Arc::new(StorageOpts::from((&config, &system_params_reader)));
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => match non_reserved_memory_bytes.checked_sub(meta_cache_capacity_bytes) {
+        None => match compactor_memory_limit_bytes.checked_sub(meta_cache_capacity_bytes) {
             Some(compactor_memory_limit_bytes) => compactor_memory_limit_bytes as u64,
             None => {
                 panic!(
@@ -183,6 +192,7 @@ pub async fn compactor_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: CompactorOpts,
+    is_standalone: bool,
     shutdown: CancellationToken,
 ) {
     let config = load_config(&opts.config_path, &opts);
@@ -220,7 +230,7 @@ pub async fn compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
+    ) = prepare_start_parameters(config.clone(), system_params_reader.clone(), is_standalone).await;
 
     let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -350,7 +360,7 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params.into()).await;
+    ) = prepare_start_parameters(config.clone(), system_params.into(), false).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 

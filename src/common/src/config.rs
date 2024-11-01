@@ -2424,7 +2424,6 @@ pub struct StorageMemoryConfig {
     pub meta_cache_capacity_mb: usize,
     pub meta_cache_shard_num: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
@@ -2434,31 +2433,43 @@ pub struct StorageMemoryConfig {
 
 pub struct CompactorMemoryConfig {
     pub compactor_meta_cache_capacity_mb: usize,
+    pub compactor_memory_limit_mb: usize,
 }
 
 pub const MAX_META_CACHE_SHARD_BITS: usize = 4;
 pub const MIN_BUFFER_SIZE_PER_SHARD: usize = 256;
 pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 
+pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
+
 // calculate the compactor meta cache capacity based on capacity and memory proportion
 // compactor_meta_cache_capacity_mb = min(MIN_COMPACTOR_META_CACHE_CAPACITY_MB, memory * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION)
 pub const MIN_COMPACTOR_META_CACHE_CAPACITY_MB: usize = 128;
 pub const MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION: f64 = 0.02;
 
-pub fn extract_compactor_memory_config(s: &RwConfig, memory: usize) -> CompactorMemoryConfig {
-    let compactor_meta_cache_capacity_mb = s
-        .storage
+pub fn extract_compactor_memory_config(
+    storage_config: &StorageConfig,
+    non_reserved_memory_bytes: usize,
+    compactor_memory_proportion: f64,
+) -> CompactorMemoryConfig {
+    let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
+        ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
+    );
+
+    let compactor_meta_cache_capacity_mb = storage_config
         .cache
         .compactor_meta_cache_capacity_mb
         .unwrap_or_else(|| {
             std::cmp::min(
                 MIN_COMPACTOR_META_CACHE_CAPACITY_MB,
-                (memory as f64 * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION) as usize,
+                (compactor_memory_limit_mb as f64 * MAX_COMPACTOR_META_CACHE_CAPACITY_PROPORTION)
+                    as usize,
             )
         });
 
     CompactorMemoryConfig {
         compactor_meta_cache_capacity_mb,
+        compactor_memory_limit_mb,
     }
 }
 
@@ -2494,10 +2505,10 @@ pub fn extract_storage_memory_config_for_test(s: &RwConfig) -> StorageMemoryConf
         }
         shard_bits
     });
-    let compactor_memory_limit_mb = s
-        .storage
-        .compactor_memory_limit_mb
-        .unwrap_or(default::storage::compactor_memory_limit_mb());
+    // let compactor_memory_limit_mb = s
+    //     .storage
+    //     .compactor_memory_limit_mb
+    //     .unwrap_or(default::storage::compactor_memory_limit_mb());
 
     let get_eviction_config = |c: &CacheEvictionConfig| {
         match c {
@@ -2584,7 +2595,7 @@ pub fn extract_storage_memory_config_for_test(s: &RwConfig) -> StorageMemoryConf
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        compactor_memory_limit_mb,
+        // compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,

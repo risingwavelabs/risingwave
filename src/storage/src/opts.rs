@@ -71,8 +71,6 @@ pub struct StorageOpts {
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
-    /// Capacity of sstable meta cache.
-    pub compactor_memory_limit_mb: usize,
     /// compactor streaming iterator recreate timeout.
     /// deprecated
     pub compact_iter_recreate_timeout_ms: u64,
@@ -143,9 +141,6 @@ pub struct StorageOpts {
 
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
-
-    /// Capacity of sstable meta cache.
-    pub compactor_meta_cache_capacity_mb: usize,
 }
 
 impl Default for StorageOpts {
@@ -153,7 +148,7 @@ impl Default for StorageOpts {
         let c = RwConfig::default();
         let p = system_params_for_test();
         let s = extract_storage_memory_config_for_test(&c);
-        Self::from((&c, &p.into(), &StorageMemoryConfigType::Hummock(s)))
+        Self::from((&c, &p.into(), &s))
     }
 }
 
@@ -162,53 +157,50 @@ pub enum StorageMemoryConfigType {
     Compactor(CompactorMemoryConfig),
 }
 
-impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)> for StorageOpts {
-    fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)) -> Self {
+impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpts {
+    fn from((c, p, s): (&RwConfig, &SystemParamsReader, &StorageMemoryConfig)) -> Self {
         let (
             block_cache_capacity_mb,
             block_cache_shard_num,
             meta_cache_capacity_mb,
             meta_cache_shard_num,
             shared_buffer_capacity_mb,
-            compactor_memory_limit_mb,
             prefetch_buffer_capacity_mb,
             block_cache_eviction_config,
             meta_cache_eviction_config,
             data_file_cache_flush_buffer_threshold_mb,
             meta_file_cache_flush_buffer_threshold_mb,
-            compactor_meta_cache_capacity_mb,
-        ) = match s {
-            StorageMemoryConfigType::Hummock(s) => (
-                s.block_cache_capacity_mb,
-                s.block_cache_shard_num,
-                s.meta_cache_capacity_mb,
-                s.meta_cache_shard_num,
-                s.shared_buffer_capacity_mb,
-                s.compactor_memory_limit_mb,
-                s.prefetch_buffer_capacity_mb,
-                s.block_cache_eviction_config.clone(),
-                s.meta_cache_eviction_config.clone(),
-                s.data_file_cache_flush_buffer_threshold_mb,
-                s.meta_file_cache_flush_buffer_threshold_mb,
-                0,
-            ),
+        ) = (
+            s.block_cache_capacity_mb,
+            s.block_cache_shard_num,
+            s.meta_cache_capacity_mb,
+            s.meta_cache_shard_num,
+            s.shared_buffer_capacity_mb,
+            s.prefetch_buffer_capacity_mb,
+            s.block_cache_eviction_config.clone(),
+            s.meta_cache_eviction_config.clone(),
+            s.data_file_cache_flush_buffer_threshold_mb,
+            s.meta_file_cache_flush_buffer_threshold_mb,
+        );
 
-            StorageMemoryConfigType::Compactor(s) => (
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                EvictionConfig::for_test(),
-                EvictionConfig::for_test(),
-                0,
-                0,
-                s.compactor_meta_cache_capacity_mb,
-            ),
-        };
+        let mut opts = Self::from((c, p));
+        opts.block_cache_capacity_mb = block_cache_capacity_mb;
+        opts.block_cache_shard_num = block_cache_shard_num;
+        opts.meta_cache_capacity_mb = meta_cache_capacity_mb;
+        opts.meta_cache_shard_num = meta_cache_shard_num;
+        opts.shared_buffer_capacity_mb = shared_buffer_capacity_mb;
+        opts.prefetch_buffer_capacity_mb = prefetch_buffer_capacity_mb;
+        opts.block_cache_eviction_config = block_cache_eviction_config;
+        opts.meta_cache_eviction_config = meta_cache_eviction_config;
+        opts.data_file_cache_flush_buffer_threshold_mb = data_file_cache_flush_buffer_threshold_mb;
+        opts.meta_file_cache_flush_buffer_threshold_mb = meta_file_cache_flush_buffer_threshold_mb;
 
+        opts
+    }
+}
+
+impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
+    fn from((c, p): (&RwConfig, &SystemParamsReader)) -> Self {
         Self {
             parallel_compact_size_mb: p.parallel_compact_size_mb(),
             sstable_size_mb: p.sstable_size_mb(),
@@ -219,23 +211,14 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)> for Storag
             share_buffer_compaction_worker_threads_number: c
                 .storage
                 .share_buffer_compaction_worker_threads_number,
-            shared_buffer_capacity_mb,
             shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
             shared_buffer_min_batch_flush_size_mb: c.storage.shared_buffer_min_batch_flush_size_mb,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
-            block_cache_capacity_mb,
-            block_cache_shard_num,
-            block_cache_eviction_config,
-            meta_cache_capacity_mb,
-            meta_cache_shard_num,
-            meta_cache_eviction_config,
-            prefetch_buffer_capacity_mb,
             max_cached_recent_versions_number: c.storage.max_cached_recent_versions_number,
             max_prefetch_block_number: c.storage.max_prefetch_block_number,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
-            compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
@@ -250,7 +233,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)> for Storag
             data_file_cache_insert_rate_limit_mb: c.storage.data_file_cache.insert_rate_limit_mb,
             data_file_cache_indexer_shards: c.storage.data_file_cache.indexer_shards,
             data_file_cache_compression: c.storage.data_file_cache.compression,
-            data_file_cache_flush_buffer_threshold_mb,
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
@@ -262,7 +244,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)> for Storag
             meta_file_cache_insert_rate_limit_mb: c.storage.meta_file_cache.insert_rate_limit_mb,
             meta_file_cache_indexer_shards: c.storage.meta_file_cache.indexer_shards,
             meta_file_cache_compression: c.storage.meta_file_cache.compression,
-            meta_file_cache_flush_buffer_threshold_mb,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
@@ -297,7 +278,17 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfigType)> for Storag
                 .compactor_concurrent_uploading_sst_count,
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
-            compactor_meta_cache_capacity_mb,
+
+            block_cache_capacity_mb: 0,
+            block_cache_shard_num: 0,
+            meta_cache_capacity_mb: 0,
+            meta_cache_shard_num: 0,
+            shared_buffer_capacity_mb: 0,
+            prefetch_buffer_capacity_mb: 0,
+            block_cache_eviction_config: EvictionConfig::for_test(),
+            meta_cache_eviction_config: EvictionConfig::for_test(),
+            data_file_cache_flush_buffer_threshold_mb: 0,
+            meta_file_cache_flush_buffer_threshold_mb: 0,
         }
     }
 }

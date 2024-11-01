@@ -111,10 +111,26 @@ pub fn start(
     opts: CompactorOpts,
     shutdown: CancellationToken,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    start_impl(opts, false, shutdown)
+}
+
+pub fn start_standalone(
+    opts: CompactorOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    start_impl(opts, true, shutdown)
+}
+
+fn start_impl(
+    opts: CompactorOpts,
+    is_standalone: bool,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     match opts.compactor_mode {
         Some(CompactorMode::Shared) => Box::pin(async move {
+            assert!(!is_standalone);
             tracing::info!("Shared compactor pod options: {:?}", opts);
             tracing::info!("Proxy rpc endpoint: {}", opts.proxy_rpc_endpoint.clone());
 
@@ -123,7 +139,11 @@ pub fn start(
             shared_compactor_serve(listen_addr, opts, shutdown).await;
         }),
         None | Some(CompactorMode::Dedicated) => Box::pin(async move {
-            tracing::info!("Compactor node options: {:?}", opts);
+            tracing::info!(
+                "Compactor (standalone {}) node options: {:?}",
+                is_standalone,
+                opts
+            );
             tracing::info!("meta address: {}", opts.meta_address.clone());
 
             let listen_addr = opts.listen_addr.parse().unwrap();
@@ -139,7 +159,7 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
+            compactor_serve(listen_addr, advertise_addr, opts, is_standalone, shutdown).await;
         }),
     }
 }

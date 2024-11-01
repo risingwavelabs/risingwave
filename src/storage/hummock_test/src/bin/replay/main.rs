@@ -45,7 +45,7 @@ use risingwave_storage::filter_key_extractor::{
 };
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
-use risingwave_storage::opts::{StorageMemoryConfigType, StorageOpts};
+use risingwave_storage::opts::StorageOpts;
 
 // use a large offset to avoid collision with real sstables
 const SST_OFFSET: u64 = 2147383647000;
@@ -89,8 +89,7 @@ async fn run_replay(args: Args) -> Result<()> {
 
 async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
     let config = load_config(&args.config, NoOverride);
-    let storage_memory_config =
-        StorageMemoryConfigType::Hummock(extract_storage_memory_config_for_test(&config));
+    let storage_memory_config = extract_storage_memory_config_for_test(&config);
     let system_params_reader =
         SystemParamsReader::from(config.system.clone().into_init_system_params());
 

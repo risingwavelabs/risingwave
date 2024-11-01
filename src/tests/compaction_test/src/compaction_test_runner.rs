@@ -42,7 +42,7 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
-use risingwave_storage::opts::{StorageMemoryConfigType, StorageOpts};
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
@@ -357,8 +357,7 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_memory_config =
-        StorageMemoryConfigType::Hummock(extract_storage_memory_config_for_test(&config));
+    let storage_memory_config = extract_storage_memory_config_for_test(&config);
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
         &system_params,

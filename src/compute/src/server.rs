@@ -24,7 +24,7 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::spill::spill_op::SpillOp;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
+    load_config, AsyncStackTraceOption, CompactorMemoryConfig, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
 use risingwave_common::lru::init_global_sequencer_args;
@@ -70,7 +70,7 @@ use tokio::task::JoinHandle;
 use tower::Layer;
 
 use crate::memory::config::{
-    batch_mem_limit, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
+    batch_mem_limit, extract_hummock_memory_config, reserve_memory_bytes, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
@@ -140,14 +140,15 @@ pub async fn compute_node_serve(
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
 
     let (reserved_memory_bytes, non_reserved_memory_bytes) = reserve_memory_bytes(&opts);
-    let storage_memory_config = storage_memory_config(
+    let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
         non_reserved_memory_bytes,
         embedded_compactor_enabled,
         &config.storage,
         !opts.role.for_streaming(),
     );
 
-    let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
+    let storage_memory_bytes =
+        total_storage_memory_limit_bytes(&storage_memory_config, compactor_memory_config.as_ref());
     let compute_memory_bytes = validate_compute_node_memory_config(
         opts.total_memory_bytes,
         reserved_memory_bytes,
@@ -158,11 +159,10 @@ pub async fn compute_node_serve(
         compute_memory_bytes,
         storage_memory_bytes,
         &storage_memory_config,
-        embedded_compactor_enabled,
+        compactor_memory_config.as_ref(),
         reserved_memory_bytes,
     );
 
-    let storage_memory_config = StorageMemoryConfigType::Hummock(storage_memory_config);
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
         &system_params,
@@ -234,9 +234,10 @@ pub async fn compute_node_serve(
     if let Some(storage) = state_store.as_hummock() {
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
-            let memory_limiter = Arc::new(MemoryLimiter::new(
-                storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
-            ));
+            let compactor_memory_config = compactor_memory_config.unwrap();
+            let compactor_memory_limit_bytes =
+                compactor_memory_config.compactor_memory_limit_mb << 20;
+            let memory_limiter = Arc::new(MemoryLimiter::new(compactor_memory_limit_bytes as _));
 
             let compaction_executor = Arc::new(CompactionExecutor::new(Some(1)));
             let compactor_context = CompactorContext {
@@ -265,7 +266,7 @@ pub async fn compute_node_serve(
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
             flush_limiter,
-            storage_memory_config,
+            StorageMemoryConfigType::Hummock(storage_memory_config),
         ));
         monitor_cache(memory_collector);
         let backup_reader = storage.backup_reader();
@@ -516,11 +517,16 @@ fn validate_compute_node_memory_config(
 
 /// The maximal memory that storage components may use based on the configurations in bytes. Note
 /// that this is the total storage memory for one compute node instead of the whole cluster.
-fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig) -> usize {
+fn total_storage_memory_limit_bytes(
+    storage_memory_config: &StorageMemoryConfig,
+    compactor_memory_config: Option<&CompactorMemoryConfig>,
+) -> usize {
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.compactor_memory_limit_mb;
+        + compactor_memory_config
+            .map(|config| config.compactor_memory_limit_mb)
+            .unwrap_or(0);
     total_storage_memory_mb << 20
 }
 
@@ -539,7 +545,7 @@ fn print_memory_config(
     compute_memory_bytes: usize,
     storage_memory_bytes: usize,
     storage_memory_config: &StorageMemoryConfig,
-    embedded_compactor_enabled: bool,
+    compactor_memory_config: Option<&CompactorMemoryConfig>,
     reserved_memory_bytes: usize,
 ) {
     let memory_config = format!(
@@ -558,8 +564,8 @@ fn print_memory_config(
         convert((storage_memory_config.block_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.meta_cache_capacity_mb << 20) as _),
         convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _),
-        if embedded_compactor_enabled {
-            convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
+        if let Some(config) = compactor_memory_config {
+            convert((config.compactor_memory_limit_mb << 20) as _)
         } else {
             "Not enabled".to_string()
         },
