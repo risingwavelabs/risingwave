@@ -301,7 +301,7 @@ impl TableFunction {
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
                             tracing::error!(
-                                "postgres_query_executor: connection error: {:?}",
+                                "mysql_query_executor: connection error: {:?}",
                                 e.as_report()
                             );
                         }
@@ -406,15 +406,17 @@ impl TableFunction {
             let schema = tokio::task::block_in_place(|| {
                 RUNTIME.block_on(async {
                     let database_opts: mysql_async::Opts = {
-                        let port = evaled_args[1].parse::<u16>().context("failed to parse port")?;
+                        let port = evaled_args[1]
+                            .parse::<u16>()
+                            .context("failed to parse port")?;
                         mysql_async::OptsBuilder::default()
                             .ip_or_hostname(evaled_args[0].clone())
                             .tcp_port(port)
                             .user(Some(evaled_args[2].clone()))
                             .pass(Some(evaled_args[3].clone()))
                             .db_name(Some(evaled_args[4].clone()))
-                            .into();
-                    }
+                            .into()
+                    };
 
                     let pool = mysql_async::Pool::new(database_opts);
                     let mut conn = pool
