@@ -538,7 +538,11 @@ impl MigrationTrait for Migration {
                             .json_binary()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Source::Definition).text().not_null())
+                    .col(
+                        ColumnDef::new(Source::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Source::SourceInfo).rw_binary(manager))
                     .col(
                         ColumnDef::new(Source::WatermarkDescs)
@@ -596,7 +600,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::VnodeColIndex).integer())
                     .col(ColumnDef::new(Table::RowIdIndex).integer())
                     .col(ColumnDef::new(Table::ValueIndices).json_binary().not_null())
-                    .col(ColumnDef::new(Table::Definition).text().not_null())
+                    .col(
+                        ColumnDef::new(Table::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Table::HandlePkConflictBehavior)
                             .string()
@@ -686,7 +694,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Sink::DownstreamPk).json_binary().not_null())
                     .col(ColumnDef::new(Sink::SinkType).string().not_null())
                     .col(ColumnDef::new(Sink::Properties).json_binary().not_null())
-                    .col(ColumnDef::new(Sink::Definition).text().not_null())
+                    .col(
+                        ColumnDef::new(Sink::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Sink::ConnectionId).integer())
                     .col(ColumnDef::new(Sink::DbName).string().not_null())
                     .col(ColumnDef::new(Sink::SinkFromName).string().not_null())
@@ -724,7 +736,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(View::ViewId).integer().primary_key())
                     .col(ColumnDef::new(View::Name).string().not_null())
                     .col(ColumnDef::new(View::Properties).json_binary().not_null())
-                    .col(ColumnDef::new(View::Definition).text().not_null())
+                    .col(
+                        ColumnDef::new(View::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(View::Columns).rw_binary(manager).not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -798,8 +814,9 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Function::Language).string().not_null())
                     .col(ColumnDef::new(Function::Link).string())
                     .col(ColumnDef::new(Function::Identifier).string())
-                    .col(ColumnDef::new(Function::Body).string())
-                    .col(ColumnDef::new(Function::CompressedBinary).string())
+                    .col(ColumnDef::new(Function::Body).rw_long_text(manager))
+                    // XXX: should this be binary type instead?
+                    .col(ColumnDef::new(Function::CompressedBinary).rw_long_text(manager))
                     .col(ColumnDef::new(Function::Kind).string().not_null())
                     .col(
                         ColumnDef::new(Function::AlwaysRetryOnNetworkError)

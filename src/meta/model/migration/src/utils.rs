@@ -14,4 +14,16 @@ impl ColumnDef {
             DatabaseBackend::Postgres | DatabaseBackend::Sqlite => self.blob(),
         }
     }
+
+    /// Set column type as `longtext` for MySQL, and `text` for Postgres and Sqlite.
+    ///
+    /// Should be preferred over [`text`](ColumnDef::text) or [`string`](ColumnDef::string) for large text fields,
+    /// typically user-specified contents like UDF body or SQL definition. Otherwise, MySQL will return an error
+    /// when the length exceeds 65535 bytes.
+    pub fn rw_long_text(&mut self, manager: &SchemaManager) -> &mut Self {
+        match manager.get_database_backend() {
+            DatabaseBackend::MySql => self.custom(Alias::new("longtext")),
+            DatabaseBackend::Postgres | DatabaseBackend::Sqlite => self.text(),
+        }
+    }
 }

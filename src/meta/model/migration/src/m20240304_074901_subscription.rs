@@ -40,7 +40,11 @@ impl MigrationTrait for Migration {
                             .json_binary()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Subscription::SubscriptionFromName)
                             .string()
