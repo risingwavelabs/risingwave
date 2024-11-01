@@ -90,6 +90,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
+    is_standalone: bool,
     shutdown: CancellationToken,
 ) {
     // Load the configuration.
@@ -138,11 +139,12 @@ pub async fn compute_node_serve(
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
+    let is_compactor_hybrid_deployment = embedded_compactor_enabled || is_standalone;
 
     let (reserved_memory_bytes, non_reserved_memory_bytes) = reserve_memory_bytes(&opts);
     let (storage_memory_config, compactor_memory_config) = extract_hummock_memory_config(
         non_reserved_memory_bytes,
-        embedded_compactor_enabled,
+        is_compactor_hybrid_deployment,
         &config.storage,
         !opts.role.for_streaming(),
     );

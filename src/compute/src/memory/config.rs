@@ -104,11 +104,12 @@ fn gradient_reserve_memory_bytes(total_memory_bytes: usize) -> usize {
 /// limits are calculated based on the proportions to total `non_reserved_memory_bytes`.
 pub fn extract_hummock_memory_config(
     non_reserved_memory_bytes: usize,
-    embedded_compactor_enabled: bool,
+    is_compactor_hybird_deplyment: bool,
     storage_config: &StorageConfig,
     is_serving: bool,
 ) -> (StorageMemoryConfig, Option<CompactorMemoryConfig>) {
-    let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
+    let (storage_memory_proportion, compactor_memory_proportion) = if is_compactor_hybird_deplyment
+    {
         (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
     } else {
         (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)

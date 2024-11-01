@@ -278,7 +278,7 @@ pub async fn standalone(
     let compute = if let Some(opts) = compute_opts {
         tracing::info!("starting compute-node thread with cli args: {:?}", opts);
         let service = Service::spawn("compute", |shutdown| {
-            risingwave_compute::start(opts, shutdown)
+            risingwave_compute::start_standalone(opts, shutdown)
         });
         Some(service)
     } else {

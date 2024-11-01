@@ -206,9 +206,24 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 
 use crate::server::compute_node_serve;
 
-/// Start compute node
 pub fn start(
     opts: ComputeNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    start_impl(opts, false, shutdown)
+}
+
+pub fn start_standalone(
+    opts: ComputeNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    start_impl(opts, true, shutdown)
+}
+
+/// Start compute node
+fn start_impl(
+    opts: ComputeNodeOpts,
+    is_standalone: bool,
     shutdown: CancellationToken,
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
