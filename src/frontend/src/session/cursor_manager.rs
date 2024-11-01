@@ -23,6 +23,7 @@ use std::time::Instant;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::StreamExt;
+use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
@@ -30,6 +31,7 @@ use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
@@ -37,7 +39,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{ErrorCode, Result};
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
     gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
@@ -267,6 +269,7 @@ pub struct SubscriptionCursor {
     fields: Vec<Field>,
     cursor_metrics: Arc<CursorMetrics>,
     last_fetch: Instant,
+    pk_column_names: HashMap<String,bool>,
 }
 
 impl SubscriptionCursor {
@@ -278,7 +281,7 @@ impl SubscriptionCursor {
         handler_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
-        let (state, fields) = if let Some(start_timestamp) = start_timestamp {
+        let (state, fields,pk_column_names) = if let Some(start_timestamp) = start_timestamp {
             let table_catalog = handler_args.session.get_table_by_id(&dependent_table_id)?;
             let fields = table_catalog
                 .columns
@@ -286,6 +289,7 @@ impl SubscriptionCursor {
                 .filter(|c| !c.is_hidden)
                 .map(|c| Field::with_name(c.data_type().clone(), c.name()))
                 .collect();
+            let pk_column_names = get_pk_names(table_catalog.pk(), &table_catalog);
             let fields = Self::build_desc(fields, true);
             (
                 State::InitLogStoreQuery {
@@ -293,13 +297,14 @@ impl SubscriptionCursor {
                     expected_timestamp: None,
                 },
                 fields,
+                pk_column_names,
             )
         } else {
             // The query stream needs to initiated on cursor creation to make sure
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, fields, init_query_timer) =
+            let (chunk_stream, fields, init_query_timer,pk_column_names) =
                 Self::initiate_query(None, &dependent_table_id, handler_args.clone()).await?;
             let pinned_epoch = handler_args
                 .session
@@ -324,6 +329,7 @@ impl SubscriptionCursor {
                     init_query_timer,
                 },
                 fields,
+                pk_column_names,
             )
         };
 
@@ -338,6 +344,7 @@ impl SubscriptionCursor {
             fields,
             cursor_metrics,
             last_fetch: Instant::now(),
+            pk_column_names
         })
     }
 
@@ -363,7 +370,7 @@ impl SubscriptionCursor {
                         &self.subscription,
                     ) {
                         Ok((Some(rw_timestamp), expected_timestamp)) => {
-                            let (mut chunk_stream, fields, init_query_timer) =
+                            let (mut chunk_stream, fields, init_query_timer, pk_column_names) =
                                 Self::initiate_query(
                                     Some(rw_timestamp),
                                     &self.dependent_table_id,
@@ -392,8 +399,9 @@ impl SubscriptionCursor {
                                 expected_timestamp,
                                 init_query_timer,
                             };
-                            if self.fields.ne(&fields) {
+                            if self.fields.ne(&fields) || self.pk_column_names.ne(&pk_column_names) {
                                 self.fields = fields;
+                                self.pk_column_names = pk_column_names;
                                 return Ok(None);
                             }
                         }
@@ -546,6 +554,7 @@ impl SubscriptionCursor {
             }
         }
         self.last_fetch = Instant::now();
+        Self::process_output_desc_row(descs, row, pk_column_names)
         let desc = self.fields.iter().map(to_pg_field).collect();
 
         Ok((ans, desc))
@@ -653,21 +662,14 @@ impl SubscriptionCursor {
             let pk_names = pks
                 .iter()
                 .map(|f| {
-                    Ok::<String, RwError>(
                         table_catalog
                             .columns
                             .get(f.column_index)
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "columns not find in table schema, index is {:?}",
-                                    f.column_index
-                                )
-                            })?
+                            .unwrap()
                             .name()
-                            .to_string(),
-                    )
+                            .to_string()
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .collect_vec();
             let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
                 subscription_from_table_name,
                 pk_names,
@@ -680,8 +682,12 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handler_args: HandlerArgs,
-    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant)> {
+    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant, HashMap<String,bool>)> {
         let init_query_timer = Instant::now();
+        let session = handler_args.clone().session;
+        let table_catalog = session.get_table_by_id(dependent_table_id)?;
+        let pks = table_catalog.pk();
+        let pk_column_names = get_pk_names(pks, &table_catalog);
         let plan_result = Self::init_batch_plan_for_subscription_cursor(
             rw_timestamp,
             dependent_table_id,
@@ -694,6 +700,7 @@ impl SubscriptionCursor {
             chunk_stream,
             Self::build_desc(fields, rw_timestamp.is_none()),
             init_query_timer,
+            pk_column_names,
         ))
     }
 
@@ -740,6 +747,12 @@ impl SubscriptionCursor {
         Ok(row)
     }
 
+    pub fn process_output_desc_row(descs: Vec<Field>, row: Vec<Row>,pk_column_names: &HashSet<String>) -> (Vec<Field>,Vec<Row>) {
+        descs.into_iter().enumerate().filter_map(|(index, field)| {
+            
+        })
+    }
+
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
         if from_snapshot {
             descs.push(Field::with_name(DataType::Varchar, "op"));
@@ -770,14 +783,8 @@ impl SubscriptionCursor {
                 }
             })
             .collect::<Vec<_>>();
-        let output_col_idx_with_out_hidden = output_col_idx
-            .iter()
-            .filter(|index| !table_catalog.columns[**index].is_hidden)
-            .cloned()
-            .collect::<Vec<_>>();
         let core = generic::LogScan::new(
             table_catalog.name.clone(),
-            output_col_idx_with_out_hidden,
             output_col_idx,
             Rc::new(table_catalog.table_desc()),
             context,
@@ -789,7 +796,7 @@ impl SubscriptionCursor {
         let batch_log_seq_scan = BatchLogSeqScan::new(core);
 
         let out_fields = batch_log_seq_scan.core().out_fields();
-        let out_names = batch_log_seq_scan.core().column_names_without_hidden();
+        let out_names = batch_log_seq_scan.core().column_names();
 
         // order by pk, so don't need to sort
         let order = Order::new(pks.to_vec());
@@ -1042,4 +1049,18 @@ impl CursorManager {
             Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_string()).into()),
         }
     }
+}
+
+fn get_pk_names(pks: &[ColumnOrder], table_catalog: &TableCatalog) -> HashMap<String,bool> {
+    pks
+        .iter()
+        .map(|f| {
+            let column = 
+                table_catalog
+                    .columns
+                    .get(f.column_index)
+                    .unwrap();
+                (column.name().to_string(),column.is_hidden)
+        })
+        .collect()
 }

@@ -234,20 +234,44 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
+// Plan like 'select * , pk in table order by pk'
 pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
-    let mut query = gen_query_from_table_name(from_name);
-    query.order_by = pk_names
-        .into_iter()
-        .map(|pk| {
-            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
-            OrderByExpr {
-                expr,
-                asc: None,
-                nulls_first: None,
-            }
-        })
-        .collect();
-    query
+    let table_factor = TableFactor::Table {
+        name: from_name,
+        alias: None,
+        as_of: None,
+    };
+    let from = vec![TableWithJoins {
+        relation: table_factor,
+        joins: vec![],
+    }];
+    let mut projection = vec![SelectItem::Wildcard(None)];
+    projection.extend(pk_names.iter().map(|name| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked(name.clone())))));
+    let select = Select {
+        from,
+        projection,
+        ..Default::default()
+    };
+    let body = SetExpr::Select(Box::new(select));
+    let order_by = pk_names
+    .into_iter()
+    .map(|pk| {
+        let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
+        OrderByExpr {
+            expr,
+            asc: None,
+            nulls_first: None,
+        }
+    })
+    .collect();
+    Query {
+        with: None,
+        body,
+        order_by,
+        limit: None,
+        offset: None,
+        fetch: None,
+    }
 }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
