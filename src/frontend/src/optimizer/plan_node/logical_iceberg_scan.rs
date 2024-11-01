@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::ScalarImpl;
 
 use super::generic::GenericPlanRef;
@@ -118,7 +119,10 @@ impl PredicatePushdown for LogicalIcebergScan {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        fn rw_expr_to_iceberg_predicate(expr: &ExprImpl) -> Option<IcebergPredicate> {
+        fn rw_expr_to_iceberg_predicate(
+            expr: &ExprImpl,
+            fields: &[Field],
+        ) -> Option<IcebergPredicate> {
             match expr {
                 ExprImpl::Literal(l) => match l.get_data() {
                     Some(ScalarImpl::Bool(b)) => {
@@ -134,17 +138,17 @@ impl PredicatePushdown for LogicalIcebergScan {
                     let args = f.inputs();
                     match f.func_type() {
                         ExprType::Not => {
-                            let arg = rw_expr_to_iceberg_predicate(&args[0])?;
+                            let arg = rw_expr_to_iceberg_predicate(&args[0], fields)?;
                             Some(IcebergPredicate::negate(arg))
                         }
                         ExprType::And => {
-                            let arg0 = rw_expr_to_iceberg_predicate(&args[0])?;
-                            let arg1 = rw_expr_to_iceberg_predicate(&args[1])?;
+                            let arg0 = rw_expr_to_iceberg_predicate(&args[0], fields)?;
+                            let arg1 = rw_expr_to_iceberg_predicate(&args[1], fields)?;
                             Some(IcebergPredicate::and(arg0, arg1))
                         }
                         ExprType::Or => {
-                            let arg0 = rw_expr_to_iceberg_predicate(&args[0])?;
-                            let arg1 = rw_expr_to_iceberg_predicate(&args[1])?;
+                            let arg0 = rw_expr_to_iceberg_predicate(&args[0], fields)?;
+                            let arg1 = rw_expr_to_iceberg_predicate(&args[1], fields)?;
                             Some(IcebergPredicate::or(arg0, arg1))
                         }
                         ExprType::Equal => match [&args[0], &args[1]] {
@@ -186,22 +190,28 @@ impl PredicatePushdown for LogicalIcebergScan {
                 _ => None,
             }
         }
-        fn rw_predicate_to_iceberg_predicate(predicate: Condition) -> IcebergPredicate {
+        fn rw_predicate_to_iceberg_predicate(
+            predicate: Condition,
+            fields: &[Field],
+        ) -> IcebergPredicate {
             if predicate.always_true() {
                 return IcebergPredicate::AlwaysTrue;
             }
             let mut conjunctions = predicate.conjunctions;
             let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
             let rw_condition_root = conjunctions.pop().unwrap();
-            let iceberg_condition_root = rw_expr_to_iceberg_predicate(&rw_condition_root);
+            let iceberg_condition_root = rw_expr_to_iceberg_predicate(&rw_condition_root, fields);
             for rw_condition in conjunctions {
-                match rw_expr_to_iceberg_predicate(&rw_condition) {
+                match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
                     Some(iceberg_predicate) => ignored_conjunctions.push(rw_condition),
                     None => {}
                 }
             }
             todo!()
         }
+
+        let schema = self.schema();
+        let fields = &schema.fields;
         // No pushdown.
         LogicalFilter::create(self.clone().into(), predicate)
     }
