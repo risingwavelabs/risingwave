@@ -16,6 +16,7 @@ use std::alloc::Global;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::stream::{self, PollNext};
 use futures::TryStreamExt;
@@ -675,8 +676,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
-        let mut prev_epoch = None;
-
         let full_schema: Vec<_> = self
             .left
             .schema()
@@ -685,10 +684,32 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
             .chain(self.right.schema().data_types().into_iter())
             .collect();
 
-        let mut wait_first_barrier = true;
+        let input = align_input::<true>(self.left, self.right);
+        pin_mut!(input);
+
+        let first_barrier = match input
+            .try_next()
+            .await?
+            .ok_or_else(|| anyhow!("end of input"))?
+        {
+            InternalMessage::Barrier(chunks, barrier) => {
+                assert!(chunks.is_empty());
+                barrier
+            }
+            _ => {
+                unreachable!("should receive first barrier")
+            }
+        };
+
+        let first_epoch = first_barrier.epoch;
+        yield Message::Barrier(first_barrier);
+        if let Some(memo_table) = &mut self.memo_table {
+            memo_table.init_epoch(first_epoch);
+        }
+        let mut prev_epoch = first_epoch.prev;
 
         #[for_await]
-        for msg in align_input::<true>(self.left, self.right) {
+        for msg in input {
             self.right_table.cache.evict();
             self.metrics
                 .temporal_join_cached_entry_count
@@ -699,7 +720,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
+                    let epoch = prev_epoch;
 
                     let full_schema = full_schema.clone();
 
@@ -811,17 +832,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
-                    if !APPEND_ONLY {
-                        if wait_first_barrier {
-                            wait_first_barrier = false;
-                            self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);
-                        } else {
-                            self.memo_table
-                                .as_mut()
-                                .unwrap()
-                                .commit(barrier.epoch)
-                                .await?;
-                        }
+                    if let Some(memo_table) = &mut self.memo_table {
+                        memo_table.commit(barrier.epoch).await?;
                     }
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let prev_vnodes =
@@ -835,7 +847,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         &self.right_join_keys,
                         &right_stream_key_indices,
                     )?;
-                    prev_epoch = Some(barrier.epoch.curr);
+                    prev_epoch = barrier.epoch.curr;
                     yield Message::Barrier(barrier)
                 }
             }

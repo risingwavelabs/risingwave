@@ -15,6 +15,7 @@
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
@@ -91,13 +92,34 @@ impl<S: StateStore> NowExecutor<S> {
 
         let max_chunk_size = crate::config::chunk_size();
 
-        // Whether the executor is paused.
-        let mut paused = false;
-        // The last timestamp **sent** to the downstream.
-        let mut last_timestamp: Datum = None;
+        let mut barrier_stream = UnboundedReceiverStream::new(barrier_receiver);
+        let first_barrier = barrier_stream
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("end of barrier stream"))?;
 
-        // Whether the first barrier is handled and `last_timestamp` is initialized.
-        let mut initialized = false;
+        let first_epoch = first_barrier.epoch;
+
+        // Whether the executor is paused.
+        let mut paused = first_barrier.is_pause_on_startup();
+
+        yield Message::Barrier(first_barrier);
+
+        state_table.init_epoch(first_epoch);
+        // The last timestamp **sent** to the downstream.
+        let mut last_timestamp: Datum = {
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+            let data_iter = state_table
+                .iter_with_prefix(row::empty(), sub_range, Default::default())
+                .await?;
+            pin_mut!(data_iter);
+            let initial_state_row = if let Some(keyed_row) = data_iter.next().await {
+                Some(keyed_row?)
+            } else {
+                None
+            };
+            initial_state_row.and_then(|row| row[0].clone())
+        };
 
         let mut mode_vars = match &mode {
             NowMode::UpdateCurrent => ModeVars::UpdateCurrent,
@@ -116,9 +138,7 @@ impl<S: StateStore> NowExecutor<S> {
         const MAX_MERGE_BARRIER_SIZE: usize = 64;
 
         #[for_await]
-        for barriers in
-            UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
-        {
+        for barriers in barrier_stream.ready_chunks(MAX_MERGE_BARRIER_SIZE) {
             let mut curr_timestamp = None;
             if barriers.len() > 1 {
                 warn!(
@@ -127,28 +147,7 @@ impl<S: StateStore> NowExecutor<S> {
                 );
             }
             for barrier in barriers {
-                if !initialized {
-                    // Handle the initial barrier.
-                    state_table.init_epoch(barrier.epoch);
-                    let state_row = {
-                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
-                            &(Unbounded, Unbounded);
-                        let data_iter = state_table
-                            .iter_with_prefix(row::empty(), sub_range, Default::default())
-                            .await?;
-                        pin_mut!(data_iter);
-                        if let Some(keyed_row) = data_iter.next().await {
-                            Some(keyed_row?)
-                        } else {
-                            None
-                        }
-                    };
-                    last_timestamp = state_row.and_then(|row| row[0].clone());
-                    paused = barrier.is_pause_on_startup();
-                    initialized = true;
-                } else {
-                    state_table.commit(barrier.epoch).await?;
-                }
+                state_table.commit(barrier.epoch).await?;
 
                 // Extract timestamp from the current epoch.
                 curr_timestamp = Some(barrier.get_curr_epoch().as_scalar());
