@@ -162,6 +162,9 @@ itertools = "0.13.0"
 jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = { version = "53.2", features = ["async"] }
+mysql_async = { version = "0.34", default-features = false, features = [
+    "default",
+] }
 thiserror-ext = "0.1.2"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [

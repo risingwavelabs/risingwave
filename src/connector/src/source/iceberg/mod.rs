@@ -270,7 +270,7 @@ impl IcebergSplitEnumerator {
                     equality_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
                 iceberg::spec::DataContentType::PositionDeletes => {
-                    task.project_field_ids = vec![];
+                    task.project_field_ids = Vec::default();
                     position_delete_files.push(IcebergFileScanTaskJsonStr::serialize(&task));
                 }
             }

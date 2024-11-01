@@ -10540,6 +10540,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "bytes",
+ "chrono",
  "criterion",
  "either",
  "foyer",
@@ -10553,6 +10554,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
+ "mysql_async",
  "opendal 0.49.2",
  "parking_lot 0.12.1",
  "parquet 53.2.0",
@@ -10570,6 +10572,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "rust_decimal",
  "rw_futures_util",
  "scopeguard",
  "serde_json",
@@ -11423,6 +11426,7 @@ dependencies = [
  "maplit",
  "md5",
  "memcomparable",
+ "mysql_async",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
@@ -14908,9 +14912,9 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
-version = "0.5.2"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e9cd434a998747dd2c4276bc96ee2e0c7a2eadf3cae88e52be55a05fa9053f5"
+checksum = "8437150ab6bbc8c5f0f519e3d5ed4aa883a83dd4cdd3d1b21f9482936046cb97"
 dependencies = [
  "async-compression",
  "bitflags 2.6.0",
