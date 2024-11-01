@@ -242,7 +242,7 @@ if __name__ == "__main__":
 
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
-    
+
     test_batch_read(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     # clean up s3 files
