@@ -118,7 +118,6 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
     use risingwave_hummock_sdk::key::TableKey;
-    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::error::StorageResult;
