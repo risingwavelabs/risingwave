@@ -270,6 +270,7 @@ pub struct SubscriptionCursor {
     cursor_metrics: Arc<CursorMetrics>,
     last_fetch: Instant,
     pk_column_names: HashMap<String,bool>,
+    seek_pk_row: Option<Vec<Option<Bytes>>>,
 }
 
 impl SubscriptionCursor {
@@ -344,7 +345,8 @@ impl SubscriptionCursor {
             fields,
             cursor_metrics,
             last_fetch: Instant::now(),
-            pk_column_names
+            pk_column_names,
+            seek_pk_row: None,
         })
     }
 
@@ -554,10 +556,13 @@ impl SubscriptionCursor {
             }
         }
         self.last_fetch = Instant::now();
-        Self::process_output_desc_row(descs, row, pk_column_names)
-        let desc = self.fields.iter().map(to_pg_field).collect();
+        let (fields,rows,seek_pk_row) = Self::process_output_desc_row(&self.fields, ans, &self.pk_column_names);
+        if let Some(seek_pk_row) = seek_pk_row{
+            self.seek_pk_row = Some(seek_pk_row);
+        }
+        let desc = fields.iter().map(to_pg_field).collect();
 
-        Ok((ans, desc))
+        Ok((rows, desc))
     }
 
     fn get_next_rw_timestamp(
@@ -747,20 +752,29 @@ impl SubscriptionCursor {
         Ok(row)
     }
 
-    pub fn process_output_desc_row(descs: Vec<Field>, mut row: Vec<Row>,pk_column_names: &HashMap<String,bool>) -> (Vec<Field>,Vec<Row>) {
+    pub fn process_output_desc_row(descs: &Vec<Field>, mut rows: Vec<Row>,pk_column_names: &HashMap<String,bool>) -> (Vec<Field>,Vec<Row>,Option<Vec<Option<Bytes>>>) {
+        let last_row = rows.last_mut().map(|row|{
+            row.0.iter().zip_eq_fast(descs.iter()).filter_map(|(data,field)|{
+                if pk_column_names.contains_key(&field.name){
+                    Some(data.clone())
+                } else {
+                    None
+                }
+            }).collect_vec()
+        });
         let iter= descs.iter().map(|field| {
             if let Some(is_hidden) = pk_column_names.get(&field.name) && *is_hidden{
                 (false,field)
             } else {
                 (true,field)
             }
+        }).collect_vec();
+        let pk_fields = iter.iter().filter(|(is_hidden,_)| *is_hidden).map(|(_,field)| (*field).clone()).collect();
+        let mut pk_keep = iter.iter().map(|(is_hidden,_)| *is_hidden);
+        rows.iter_mut().for_each(|row| {
+            row.0.retain(|_| pk_keep.next().unwrap());
         });
-        let pk_fields = iter.filter(|(is_hidden,_)| *is_hidden).map(|(_,field)| field).cloned().collect();
-        let mut pk_keep = iter.map(|(is_hidden,_)| is_hidden);
-        row.iter_mut().for_each(|row| {
-            row.0.retain(|x| pk_keep.next().unwrap());
-        });
-        (pk_fields,row)
+        (pk_fields,rows,last_row)
     }
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
