@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::mem::take;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
@@ -77,11 +77,11 @@ impl BarrierWorkerState {
     /// Returns the `BarrierInfo` for the next barrier, and updates the state.
     pub fn next_barrier_info(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
         is_checkpoint: bool,
     ) -> Option<BarrierInfo> {
         if self.inflight_graph_info.is_empty()
-            && !matches!(&command, Command::CreateStreamingJob { .. })
+            && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
         };
@@ -112,7 +112,8 @@ impl BarrierWorkerState {
     /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_paused_reason`)
     pub fn apply_command(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
+        database_id: Option<DatabaseId>,
     ) -> (
         InflightGraphInfo,
         InflightSubscriptionInfo,
@@ -121,30 +122,38 @@ impl BarrierWorkerState {
         Option<PausedReason>,
     ) {
         // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Command::CreateStreamingJob {
+        let fragment_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
             ..
-        } = command
+        }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.fragment_changes() {
-            self.inflight_graph_info.pre_apply(&fragment_changes);
+        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
+            self.inflight_graph_info.pre_apply(
+                &fragment_changes,
+                database_id.expect("should exist when having fragment changes"),
+            );
             Some(fragment_changes)
         } else {
             None
         };
-        self.inflight_subscription_info.pre_apply(command);
+        if let Some(command) = &command {
+            self.inflight_subscription_info.pre_apply(command);
+        }
 
         let info = self.inflight_graph_info.clone();
         let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
-            self.inflight_graph_info.post_apply(&fragment_changes);
+            self.inflight_graph_info.post_apply(
+                &fragment_changes,
+                database_id.expect("should exist when having fragment changes"),
+            );
         }
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
-        if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+        if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
                 table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
@@ -154,10 +163,12 @@ impl BarrierWorkerState {
             }
         }
 
-        self.inflight_subscription_info.post_apply(command);
+        if let Some(command) = command {
+            self.inflight_subscription_info.post_apply(command);
+        }
 
         let prev_paused_reason = self.paused_reason;
-        let curr_paused_reason = command.next_paused_reason(prev_paused_reason);
+        let curr_paused_reason = Command::next_paused_reason(command, prev_paused_reason);
         self.set_paused_reason(curr_paused_reason);
 
         (
