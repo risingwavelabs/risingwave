@@ -1466,7 +1466,7 @@ pub fn bind_connector_props(
                 .to_string(),
         );
     }
-    if !is_create_source && with_properties.is_mysql_cdc_connector() {
+    if with_properties.is_mysql_cdc_connector() {
         // Generate a random server id for mysql cdc source if needed
         // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
         // group (that is, different from any other server id being used by any master or slave)
