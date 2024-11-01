@@ -40,6 +40,8 @@ struct Inner {
     nondecreasing_expr_indices: Vec<usize>,
     /// Last seen values of nondecreasing expressions, buffered to periodically produce watermarks.
     last_nondec_expr_values: Vec<Option<ScalarImpl>>,
+    /// Whether the stream is paused.
+    is_paused: bool,
 
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
@@ -65,6 +67,7 @@ impl ProjectExecutor {
                 watermark_derivations,
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
+                is_paused: false,
                 noop_update_hint,
             },
         }
@@ -132,8 +135,13 @@ impl Inner {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(mut self, input: Executor) {
+        let mut input = input.execute();
+        let first_barrier = expect_first_barrier(&mut input).await?;
+        self.is_paused = first_barrier.is_pause_on_startup();
+        yield Message::Barrier(first_barrier);
+
         #[for_await]
-        for msg in input.execute() {
+        for msg in input {
             let msg = msg?;
             match msg {
                 Message::Watermark(w) => {
@@ -163,21 +171,36 @@ impl Inner {
                     }
                     None => continue,
                 },
-                barrier @ Message::Barrier(_) => {
-                    for (&expr_idx, value) in self
-                        .nondecreasing_expr_indices
-                        .iter()
-                        .zip_eq_fast(&mut self.last_nondec_expr_values)
-                    {
-                        if let Some(value) = std::mem::take(value) {
-                            yield Message::Watermark(Watermark::new(
-                                expr_idx,
-                                self.exprs[expr_idx].return_type(),
-                                value,
-                            ))
+                Message::Barrier(barrier) => {
+                    if !self.is_paused {
+                        for (&expr_idx, value) in self
+                            .nondecreasing_expr_indices
+                            .iter()
+                            .zip_eq_fast(&mut self.last_nondec_expr_values)
+                        {
+                            if let Some(value) = std::mem::take(value) {
+                                yield Message::Watermark(Watermark::new(
+                                    expr_idx,
+                                    self.exprs[expr_idx].return_type(),
+                                    value,
+                                ))
+                            }
                         }
                     }
-                    yield barrier;
+
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Pause => {
+                                self.is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                self.is_paused = false;
+                            }
+                            _ => (),
+                        }
+                    }
+
+                    yield Message::Barrier(barrier);
                 }
             }
         }

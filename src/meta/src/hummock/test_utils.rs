@@ -336,6 +336,7 @@ pub async fn setup_compute_env_with_metric(
         compactor_streams_change_tx,
     )
     .await;
+
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,

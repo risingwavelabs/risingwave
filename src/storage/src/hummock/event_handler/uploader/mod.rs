@@ -655,6 +655,7 @@ impl TableUnsyncData {
         self.unsync_epochs.insert(epoch, ());
     }
 
+    #[expect(clippy::type_complexity)]
     fn sync(
         &mut self,
         epoch: HummockEpoch,

@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{
 use crate::sql_gen::types::AGG_FUNC_TABLE;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub fn gen_agg(&mut self, ret: &DataType) -> Expr {
         let funcs = match AGG_FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),

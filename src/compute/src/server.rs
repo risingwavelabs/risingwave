@@ -258,7 +258,7 @@ pub async fn compute_node_serve(
                 compactor_context,
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
-                storage.filter_key_extractor_manager().clone(),
+                storage.compaction_catalog_manager_ref().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }

@@ -321,6 +321,7 @@ impl fmt::Display for With {
 }
 
 /// A single CTE (used after `WITH`): `alias [(col1, col2, ...)] AS ( query )`
+///
 /// The names in the column list before `AS`, when specified, replace the names
 /// of the columns returned by the query. The parser does not validate that the
 /// number of columns in the query matches the number of columns in the query.
@@ -464,9 +465,8 @@ impl fmt::Display for TableFactor {
         match self {
             TableFactor::Table { name, alias, as_of } => {
                 write!(f, "{}", name)?;
-                match as_of {
-                    Some(as_of) => write!(f, "{}", as_of)?,
-                    None => (),
+                if let Some(as_of) = as_of {
+                    write!(f, "{}", as_of)?
                 }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
@@ -541,7 +541,7 @@ impl fmt::Display for Join {
         }
         fn suffix(constraint: &'_ JoinConstraint) -> impl fmt::Display + '_ {
             struct Suffix<'a>(&'a JoinConstraint);
-            impl<'a> fmt::Display for Suffix<'a> {
+            impl fmt::Display for Suffix<'_> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     match self.0 {
                         JoinConstraint::On(expr) => write!(f, " ON {}", expr),

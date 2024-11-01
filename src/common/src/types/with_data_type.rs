@@ -92,7 +92,7 @@ impl_with_data_type!(rust_decimal::Decimal, DataType::Decimal);
 impl_with_data_type!(Decimal, DataType::Decimal);
 impl_with_data_type!(Serial, DataType::Serial);
 
-impl<'a> WithDataType for &'a str {
+impl WithDataType for &str {
     fn default_data_type() -> DataType {
         DataType::Varchar
     }
@@ -109,7 +109,7 @@ impl_with_data_type!(Vec<u8>, DataType::Bytea);
 impl_with_data_type!(Bytes, DataType::Bytea);
 impl_with_data_type!(JsonbVal, DataType::Jsonb);
 
-impl<'a> WithDataType for JsonbRef<'a> {
+impl WithDataType for JsonbRef<'_> {
     fn default_data_type() -> DataType {
         DataType::Jsonb
     }
