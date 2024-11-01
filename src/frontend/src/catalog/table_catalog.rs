@@ -530,6 +530,10 @@ impl TableCatalog {
         self.columns.iter().any(|c| c.is_generated())
     }
 
+    pub fn has_rw_timestamp_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_rw_timestamp_column())
+    }
+
     pub fn column_schema(&self) -> Schema {
         Schema::new(
             self.columns
