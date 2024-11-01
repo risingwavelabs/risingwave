@@ -163,7 +163,7 @@ impl PlainParser {
             row_op.with_value(self.payload_builder.generate_accessor(data).await?);
         }
 
-        writer.do_insert(|column: &SourceColumnDesc| row_op.access_field(column))?;
+        writer.do_insert(|column: &SourceColumnDesc| row_op.access_field::<false>(column))?;
 
         Ok(ParseResult::Rows)
     }
