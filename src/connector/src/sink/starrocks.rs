@@ -531,7 +531,15 @@ impl Drop for StarrocksSinkWriter {
     fn drop(&mut self) {
         if let Some(txn_label) = self.curr_txn_label.take() {
             let txn_client = self.txn_client.clone();
-            tokio::spawn(async move { txn_client.rollback(txn_label).await.ok() });
+            tokio::spawn(async move {
+                if let Err(e) = txn_client.rollback(txn_label.clone()).await {
+                    tracing::error!(
+                        "starrocks rollback transaction error: {:?}, txn label: {}",
+                        e.as_report(),
+                        txn_label
+                    );
+                }
+            });
         }
     }
 }
