@@ -158,7 +158,7 @@ impl ChunkedData<Option<RowId>> {
     }
 }
 
-impl<'a> Iterator for RowIdIter<'a> {
+impl Iterator for RowIdIter<'_> {
     type Item = RowId;
 
     fn next(&mut self) -> Option<Self::Item> {

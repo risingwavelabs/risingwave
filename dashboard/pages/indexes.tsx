@@ -16,15 +16,15 @@
  */
 
 import {
-  primaryKeyColumn,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getIndexes } from "../lib/api/streaming"
 
 export default function Indexes() {
   return Relations("Indexes", getIndexes, [
     ...streamingJobColumns,
-    primaryKeyColumn,
+    ...tableColumns,
   ])
 }

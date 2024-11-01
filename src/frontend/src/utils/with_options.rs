@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
-    insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
+    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
 pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
@@ -28,7 +28,6 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::OverwriteOptions;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
@@ -186,8 +185,6 @@ pub(crate) fn resolve_secret_ref_in_with_options(
 
 pub(crate) fn resolve_privatelink_in_with_option(
     with_options: &mut WithOptions,
-    schema_name: &Option<String>,
-    session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
     let is_kafka = with_options.is_kafka_connector();
     let privatelink_endpoint = with_options.remove(PRIVATELINK_ENDPOINT_KEY);
@@ -201,28 +198,8 @@ pub(crate) fn resolve_privatelink_in_with_option(
         }
         insert_privatelink_broker_rewrite_map(with_options.inner_mut(), None, Some(endpoint))
             .map_err(RwError::from)?;
-        return Ok(None);
     }
-
-    let connection_name = with_options
-        .remove(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase());
-    let connection_id = match connection_name {
-        Some(connection_name) => {
-            let connection = session
-                .get_connection_by_name(schema_name.clone(), &connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Connection is only supported in kafka connector".to_string(),
-                )));
-            }
-            resolve_private_link_connection(&connection, with_options.inner_mut())?;
-            Some(connection.id)
-        }
-        None => None,
-    };
-    Ok(connection_id)
+    Ok(None)
 }
 
 impl TryFrom<&[SqlOption]> for WithOptions {

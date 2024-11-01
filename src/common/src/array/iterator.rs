@@ -47,8 +47,8 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     }
 }
 
-impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
+impl<A: Array> ExactSizeIterator for ArrayIterator<'_, A> {}
+unsafe impl<A: Array> TrustedLen for ArrayIterator<'_, A> {}
 
 #[cfg(test)]
 mod tests {

@@ -18,7 +18,6 @@
 )]
 #![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
@@ -35,7 +34,6 @@
 #![feature(iter_order_by)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(map_entry_replace)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(btree_cursors)]
@@ -93,6 +91,7 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
+
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
