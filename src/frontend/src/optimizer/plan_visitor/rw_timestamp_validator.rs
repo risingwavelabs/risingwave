@@ -24,9 +24,7 @@ pub struct RwTimestampValidator {}
 
 impl RwTimestampValidator {
     pub fn select_rw_timestamp_in_stream_query(plan: PlanRef) -> bool {
-        let mut decider = RwTimestampValidator::default();
-        let has_dangling_temporal_scan = decider.visit(plan);
-        has_dangling_temporal_scan
+        RwTimestampValidator::default().visit(plan)
     }
 }
 
