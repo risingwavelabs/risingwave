@@ -245,15 +245,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
                     table.commit(barrier.epoch).await?;
 
-                    if need_update_global_max_watermark {
-                        current_watermark = Self::get_global_max_watermark(
-                            &table,
-                            &global_watermark_table,
-                            HummockReadEpoch::Committed(prev_epoch),
-                        )
-                        .await?;
-                    }
-
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause => {
@@ -267,6 +258,15 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     }
 
                     yield Message::Barrier(barrier);
+
+                    if need_update_global_max_watermark {
+                        current_watermark = Self::get_global_max_watermark(
+                            &table,
+                            &global_watermark_table,
+                            HummockReadEpoch::Committed(prev_epoch),
+                        )
+                        .await?;
+                    }
 
                     if is_checkpoint && !is_paused {
                         if idle_input {
