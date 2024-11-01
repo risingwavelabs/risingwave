@@ -42,7 +42,7 @@ pub struct Int256(pub(crate) Box<i256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
-impl<'a> Display for Int256Ref<'a> {
+impl Display for Int256Ref<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.write(f)
     }
@@ -208,7 +208,7 @@ impl Int256 {
     }
 }
 
-impl<'a> Int256Ref<'a> {
+impl Int256Ref<'_> {
     pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,

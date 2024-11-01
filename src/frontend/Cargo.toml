@@ -32,7 +32,7 @@ easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.13.0"
+fancy-regex = "0.14.0"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
@@ -45,6 +45,9 @@ linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"
+mysql_async = { version = "0.34", default-features = false, features = [
+    "default",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"

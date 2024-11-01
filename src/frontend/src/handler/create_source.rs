@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use rand::Rng;
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
@@ -162,9 +163,9 @@ async fn extract_avro_table_schema(
         if let risingwave_connector::parser::EncodingProperties::Avro(avro_props) =
             &parser_config.encoding_config
             && matches!(avro_props.schema_location, SchemaLocation::File { .. })
-            && !format_encode_options
+            && format_encode_options
                 .get("with_deprecated_file_header")
-                .is_some_and(|v| v == "true")
+                .is_none_or(|v| v != "true")
         {
             bail_not_implemented!(issue = 12871, "avro without schema registry");
         }
@@ -1465,6 +1466,14 @@ pub fn bind_connector_props(
                 .to_string(),
         );
     }
+    if with_properties.is_mysql_cdc_connector() {
+        // Generate a random server id for mysql cdc source if needed
+        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+        // group (that is, different from any other server id being used by any master or slave)
+        with_properties
+            .entry("server.id".to_string())
+            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
+    }
     Ok(with_properties)
 }
 
@@ -1550,8 +1559,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
-    let connection_id =
-        resolve_privatelink_in_with_option(&mut with_properties, &schema_name, session)?;
+    resolve_privatelink_in_with_option(&mut with_properties)?;
 
     let with_properties = resolve_secret_ref_in_with_options(with_properties, session)?;
 
@@ -1627,7 +1635,7 @@ pub async fn bind_create_source_or_table_with_connector(
         watermark_descs,
         associated_table_id,
         definition,
-        connection_id,
+        connection_id: None, // deprecated: private link connection id
         created_at_epoch: None,
         initialized_at_epoch: None,
         version: INITIAL_SOURCE_VERSION_ID,

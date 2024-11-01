@@ -85,7 +85,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for DataChunkRefIter<'a> {}
+impl FusedIterator for DataChunkRefIter<'_> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
@@ -132,7 +132,7 @@ mod row_ref {
         idx: usize,
     }
 
-    impl<'a> std::fmt::Debug for RowRef<'a> {
+    impl std::fmt::Debug for RowRef<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_list().entries(self.iter()).finish()
         }

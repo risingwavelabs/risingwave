@@ -432,10 +432,10 @@ impl Binder {
                 ("current_catalog", current_database()),
                 ("current_database", current_database()),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
-                    return Ok(binder
+                    Ok(binder
                         .first_valid_schema()
                         .map(|schema| ExprImpl::literal_varchar(schema.name()))
-                        .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
+                        .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)))
                 }))),
                 ("current_schemas", raw(|binder, mut inputs| {
                     let no_match_err = ErrorCode::ExprError(

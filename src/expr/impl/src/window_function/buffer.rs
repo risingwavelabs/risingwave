@@ -132,6 +132,27 @@ impl<W: WindowImpl> WindowBuffer<W> {
             .map(|Entry { value, .. }| value)
     }
 
+    /// Get the first value in the current window. Time complexity is O(1).
+    pub fn curr_window_first_value(&self) -> Option<&W::Value> {
+        self.curr_window_values().next()
+    }
+
+    /// Get the last value in the current window. Time complexity is O(1).
+    pub fn curr_window_last_value(&self) -> Option<&W::Value> {
+        let (left, right) = self.curr_window_ranges();
+        if !right.is_empty() {
+            self.buffer
+                .get(right.end - 1)
+                .map(|Entry { value, .. }| value)
+        } else if !left.is_empty() {
+            self.buffer
+                .get(left.end - 1)
+                .map(|Entry { value, .. }| value)
+        } else {
+            None
+        }
+    }
+
     /// Consume the delta of values comparing the current window to the previous window.
     /// The delta is not guaranteed to be sorted, especially when frame exclusion is not `NoOthers`.
     pub fn consume_curr_window_values_delta(
