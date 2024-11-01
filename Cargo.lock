@@ -11692,6 +11692,7 @@ name = "risingwave_meta_model_migration"
 version = "2.2.0-alpha"
 dependencies = [
  "async-std",
+ "easy-ext",
  "sea-orm",
  "sea-orm-migration",
  "serde",

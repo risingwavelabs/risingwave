@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
+use crate::utils::ColumnDefExt;
 use crate::SubQueryStatement::SelectStatement;
 
 #[derive(DeriveMigrationName)]
@@ -12,7 +13,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::OriginalTargetColumns).blob())
+                    .add_column(ColumnDef::new(Sink::OriginalTargetColumns).rw_binary(manager))
                     .to_owned(),
             )
             .await?;

@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
+use crate::utils::ColumnDefExt;
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]
@@ -21,7 +22,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Secret::Name).string().not_null())
-                    .col(ColumnDef::new(Secret::Value).blob().not_null())
+                    .col(ColumnDef::new(Secret::Value).rw_binary(manager).not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_secret_object_id")
@@ -42,7 +43,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Sink::Table)
-                    .add_column(ColumnDef::new(Sink::SecretRef).blob())
+                    .add_column(ColumnDef::new(Sink::SecretRef).rw_binary(manager))
                     .to_owned(),
             )
             .await?;
@@ -52,7 +53,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Source::Table)
-                    .add_column(ColumnDef::new(Source::SecretRef).blob())
+                    .add_column(ColumnDef::new(Source::SecretRef).rw_binary(manager))
                     .to_owned(),
             )
             .await?;

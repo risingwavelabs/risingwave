@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::*;
 
+use crate::utils::ColumnDefExt;
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]
@@ -30,7 +31,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionTask::Task).blob().not_null())
+                    .col(
+                        ColumnDef::new(CompactionTask::Task)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(CompactionTask::ContextId)
                             .integer()
@@ -50,7 +55,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionConfig::Config).blob())
+                    .col(ColumnDef::new(CompactionConfig::Config).rw_binary(manager))
                     .to_owned(),
             )
             .await?;
@@ -65,7 +70,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CompactionStatus::Status).blob())
+                    .col(ColumnDef::new(CompactionStatus::Status).rw_binary(manager))
                     .to_owned(),
             )
             .await?;
@@ -138,7 +143,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).blob())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).rw_binary(manager))
                     .to_owned(),
             )
             .await?;

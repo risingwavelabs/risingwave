@@ -15,6 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 async-std = { version = "1", features = ["attributes", "tokio1"] }
+easy-ext = "1"
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde = { version = "1", features = ["derive"] }
