@@ -21,6 +21,7 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
+use rand::Rng;
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
@@ -1464,6 +1465,14 @@ pub fn bind_connector_props(
                 .cdc_source_wait_streaming_start_timeout()
                 .to_string(),
         );
+    }
+    if with_properties.is_mysql_cdc_connector() {
+        // Generate a random server id for mysql cdc source if needed
+        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+        // group (that is, different from any other server id being used by any master or slave)
+        with_properties
+            .entry("server.id".to_string())
+            .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
 }
