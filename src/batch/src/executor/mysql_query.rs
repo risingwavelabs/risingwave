@@ -37,6 +37,7 @@ pub struct MySqlQueryExecutor {
     database: String,
     query: String,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for MySqlQueryExecutor {
@@ -82,6 +83,7 @@ impl MySqlQueryExecutor {
         database: String,
         query: String,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         Self {
             schema,
@@ -92,6 +94,7 @@ impl MySqlQueryExecutor {
             database,
             query,
             identity,
+            chunk_size,
         }
     }
 
@@ -121,7 +124,7 @@ impl MySqlQueryExecutor {
             bail!("failed to get row stream from mysql query")
         };
 
-        let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+        let mut builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         tracing::debug!("mysql_query_executor: query executed, start deserializing rows");
         // deserialize the rows
         #[for_await]
@@ -161,6 +164,7 @@ impl BoxedExecutorBuilder for MySqlQueryExecutorBuilder {
             mysql_query_node.database.clone(),
             mysql_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }
