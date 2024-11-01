@@ -80,7 +80,7 @@ use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::TemporalJoinValidator;
+use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -518,6 +518,13 @@ impl PlanRoot {
             return Err(ErrorCode::NotSupported(
                 "exist dangling temporal scan".to_string(),
                 "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
+
+        if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "selecting `_rw_timestamp` in a streaming query is not allowed".to_string(),
+                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_string(),
             ).into());
         }
 

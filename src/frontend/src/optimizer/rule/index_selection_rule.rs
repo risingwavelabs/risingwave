@@ -74,7 +74,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
-use crate::Explain;
 
 const INDEX_MAX_LEN: usize = 5;
 const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
@@ -223,9 +222,9 @@ impl IndexSelectionRule {
             logical_scan.as_of().clone(),
             index.index_table.cardinality,
         );
-        // We use `table_catalog.columns.len` instead of `table_desc.columns.len` and `index_item.len` here,
-        // because table_catalog.columns.len contains system columns like `_rw_timestamp` column.
-        let offset = index_scan.table_catalog().columns.len();
+        // We use `schema.len` instead of `index_item.len` here,
+        // because schema contains system columns like `_rw_timestamp` column which is not represented in the index item.
+        let offset = index_scan.table_catalog().columns().len();
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),

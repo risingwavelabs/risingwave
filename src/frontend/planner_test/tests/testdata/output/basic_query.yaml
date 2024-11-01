@@ -72,7 +72,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: t.a }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - name: constant folding for IS NOT TRUE, IS NOT FALSE
   sql: |
     create table t(a Boolean);
@@ -80,7 +80,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: IsNotTrue(t.a) }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - name: constant folding IS NOT NULL
   sql: |
     create table t(a double precision);
@@ -88,7 +88,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: IsNotNull(t.a) }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
@@ -113,7 +113,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchDelete { table: t }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
@@ -122,7 +122,7 @@
     └─BatchDelete { table: t }
       └─BatchExchange { order: [], dist: Single }
         └─BatchFilter { predicate: (t.v1 = 1:Int32) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1;
@@ -164,7 +164,7 @@
     select * from t;
   logical_plan: |-
     LogicalProject { exprs: [] }
-    └─LogicalScan { table: t, columns: [t._row_id] }
+    └─LogicalScan { table: t, columns: [t._row_id, t._rw_timestamp] }
 - name: disallow subquery in values
   sql: |
     values(1, (select 1));
