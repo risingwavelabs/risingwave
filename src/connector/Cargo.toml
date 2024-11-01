@@ -187,7 +187,7 @@ assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 deltalake = { workspace = true }
 expect-test = "1"
-fs-err = "2"
+fs-err = "3"
 paste = "1"
 pretty_assertions = "1"
 proc-macro2 = "1.0"

@@ -5299,6 +5299,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb60e7409f34ef959985bc9d9c5ee8f5db24ee46ed9775850548021710f807f"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "fs-set-times"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10462,7 +10471,7 @@ dependencies = [
  "chrono",
  "clap",
  "console",
- "fs-err",
+ "fs-err 3.0.0",
  "glob",
  "google-cloud-pubsub",
  "indicatif",
@@ -10493,7 +10502,7 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
- "fs-err",
+ "fs-err 3.0.0",
  "itertools 0.13.0",
 ]
 
@@ -11060,7 +11069,7 @@ dependencies = [
  "elasticsearch",
  "enum-as-inner 0.6.0",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "futures-async-stream",
  "gcp-bigquery-client",
@@ -11164,7 +11173,7 @@ dependencies = [
  "chrono",
  "easy-ext",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "hex",
  "itertools 0.13.0",
  "jsonbb",
@@ -11592,7 +11601,7 @@ dependencies = [
  "chrono",
  "expect-test",
  "foyer",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "itertools 0.13.0",
  "jni",
@@ -11871,7 +11880,7 @@ name = "risingwave_pb"
 version = "2.2.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
- "fs-err",
+ "fs-err 3.0.0",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -12720,7 +12729,7 @@ dependencies = [
 name = "rw_resource_util"
 version = "0.0.0"
 dependencies = [
- "fs-err",
+ "fs-err 3.0.0",
  "sysinfo",
  "tempfile",
  "thiserror-ext",
@@ -13796,7 +13805,7 @@ checksum = "f2b6b8f606d3c4cdcaf2031c4320b79d7584e454b79562ba3d675f49701c160e"
 dependencies = [
  "async-trait",
  "educe",
- "fs-err",
+ "fs-err 2.11.0",
  "futures",
  "glob",
  "humantime",
