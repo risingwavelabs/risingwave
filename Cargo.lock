@@ -10663,8 +10663,6 @@ dependencies = [
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
- "mysql_async",
- "mysql_common",
  "num-integer",
  "num-traits",
  "number_prefix",

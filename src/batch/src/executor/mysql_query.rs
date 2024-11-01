@@ -18,9 +18,9 @@ use futures_util::stream::StreamExt;
 use mysql_async;
 use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::mysql::mysql_datum_to_rw_datum;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::parser::mysql_datum_to_rw_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, BatchExternalSystemError};
