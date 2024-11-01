@@ -2505,10 +2505,6 @@ pub fn extract_storage_memory_config_for_test(s: &RwConfig) -> StorageMemoryConf
         }
         shard_bits
     });
-    // let compactor_memory_limit_mb = s
-    //     .storage
-    //     .compactor_memory_limit_mb
-    //     .unwrap_or(default::storage::compactor_memory_limit_mb());
 
     let get_eviction_config = |c: &CacheEvictionConfig| {
         match c {
@@ -2595,7 +2591,6 @@ pub fn extract_storage_memory_config_for_test(s: &RwConfig) -> StorageMemoryConf
         meta_cache_capacity_mb,
         meta_cache_shard_num,
         shared_buffer_capacity_mb,
-        // compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
         meta_cache_eviction_config,
