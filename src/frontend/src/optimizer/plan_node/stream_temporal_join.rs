@@ -71,6 +71,8 @@ impl StreamTemporalJoin {
             let r2o = core.r2i_col_mapping().composite(&core.i2o_col_mapping());
             r2o.rewrite_provided_distribution(core.right.distribution())
         } else {
+            // Use left side distribution directly if it's hash temporal join.
+            // https://github.com/risingwavelabs/risingwave/pull/19201#discussion_r1824031780
             let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
             l2o.rewrite_provided_distribution(core.left.distribution())
         };
@@ -117,6 +119,10 @@ impl StreamTemporalJoin {
 
     pub fn append_only(&self) -> bool {
         self.append_only
+    }
+
+    pub fn is_nested_loop(&self) -> bool {
+        self.eq_join_predicate().has_eq()
     }
 
     /// Return memo-table catalog and its `pk_indices`.

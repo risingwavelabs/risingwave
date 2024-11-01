@@ -80,7 +80,7 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 < a2;
   stream_error: |-
-    Not supported: Temporal join requires the left hash side to be append only
+    Not supported: Nested-loop Temporal join requires the left hash side to be append only
     HINT: Please ensure the left hash side is append only
 - name: multi-way temporal join
   sql: |

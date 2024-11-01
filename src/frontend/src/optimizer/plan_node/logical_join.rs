@@ -1094,13 +1094,6 @@ impl LogicalJoin {
 
         let logical_scan = Self::check_temporal_rhs(&right)?;
 
-        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
-            )));
-        }
-
         let table_desc = logical_scan.table_desc();
         let output_column_ids = logical_scan.output_column_ids();
 
@@ -1222,7 +1215,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the left hash side to be append only".into(),
+                "Nested-loop Temporal join requires the left hash side to be append only".into(),
                 "Please ensure the left hash side is append only".into(),
             )));
         }
