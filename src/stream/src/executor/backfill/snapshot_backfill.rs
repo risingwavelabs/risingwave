@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::ops::Bound;
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::future::{pending, Future};
@@ -199,6 +200,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                                 barrier_epoch.prev,
                                 HummockReadEpoch::Committed(barrier_epoch.prev),
                                 false,
+                                (Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                                OwnedRow::default(),
                             ))
                             .await?;
                         let data_types = self.upstream_table.schema().data_types();

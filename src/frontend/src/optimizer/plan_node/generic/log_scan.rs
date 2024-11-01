@@ -18,7 +18,7 @@ use std::rc::Rc;
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
@@ -147,8 +147,7 @@ impl LogScan {
     }
 
     pub(crate) fn out_fields(&self) -> FixedBitSet {
-        let mut out_fields_vec = self
-            .output_col_idx.clone();
+        let mut out_fields_vec = self.output_col_idx.clone();
         // add op column
         out_fields_vec.push(self.output_col_idx.len());
         FixedBitSet::from_iter(out_fields_vec)
@@ -156,5 +155,25 @@ impl LogScan {
 
     pub(crate) fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
+    }
+
+    pub fn get_table_columns(&self) -> &[ColumnDesc] {
+        &self.table_desc.columns
+    }
+
+    pub(crate) fn order_names(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| self.get_table_columns()[i].name.clone())
+            .collect()
+    }
+
+    pub(crate) fn order_names_with_table_prefix(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
+            .collect()
     }
 }

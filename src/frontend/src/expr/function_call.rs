@@ -25,7 +25,7 @@ use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
-    pub(super) func_type: ExprType,
+    pub func_type: ExprType,
     pub(super) return_type: DataType,
     pub(super) inputs: Vec<ExprImpl>,
 }

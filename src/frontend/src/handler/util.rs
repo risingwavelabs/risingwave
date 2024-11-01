@@ -35,8 +35,8 @@ use risingwave_common::types::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, Expr, Ident, ObjectName, OrderByExpr, Query, Select,
-    SelectItem, SetExpr, TableFactor, TableWithJoins,
+    BinaryOperator, CompatibleSourceSchema, ConnectorSchema, Expr, Ident, ObjectName, OrderByExpr,
+    Query, Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
 };
 use thiserror_ext::AsReport;
 
@@ -235,7 +235,25 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
 }
 
 // Plan like 'select * , pk in table order by pk'
-pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
+pub fn gen_query_from_table_name_order_by(
+    from_name: ObjectName,
+    pks: Vec<(String, bool)>,
+    seek_pk_rows: Option<Vec<Option<Bytes>>>,
+) -> Query {
+    let select_pks = pks
+        .iter()
+        .filter_map(
+            |(name, is_hidden)| {
+                if *is_hidden {
+                    Some(name.clone())
+                } else {
+                    None
+                }
+            },
+        )
+        .collect_vec();
+    let order_pks = pks.iter().map(|(name, _)| name).collect_vec();
+
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
@@ -246,24 +264,67 @@ pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<S
         joins: vec![],
     }];
     let mut projection = vec![SelectItem::Wildcard(None)];
-    projection.extend(pk_names.iter().map(|name| SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked(name.clone())))));
+    projection.extend(
+        select_pks.iter().map(|name| {
+            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked(name.clone())))
+        }),
+    );
+    let selection = if let Some(seek_pk_rows) = seek_pk_rows {
+        let mut pk_rows = vec![];
+        let mut values = vec![];
+        for ((name, _), seek_pk) in pks.iter().zip_eq_fast(seek_pk_rows.iter()) {
+            if let Some(seek_pk) = seek_pk {
+                pk_rows.push(
+                    Expr::Identifier(Ident::with_quote_unchecked(
+                        '"',
+                        name.clone(),
+                    ))
+                );
+                values.push(String::from_utf8(seek_pk.clone().into()).unwrap());
+            }
+        }
+        if pk_rows.is_empty() {
+            None
+        } else if pk_rows.len() == 1 {
+            let left = pk_rows.pop().unwrap();
+            let right = Expr::Value(Value::SingleQuotedString(values.pop().unwrap()));
+            Some(Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinaryOperator::Eq,
+                right: Box::new(right),
+            })
+        }else{
+            let left = Expr::Row(pk_rows);
+            let values = values.join(",");
+            let right = Expr::Value(Value::SingleQuotedString(format!("({})", values)));
+            Some(Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinaryOperator::Gt,
+                right: Box::new(right),
+            })
+        }
+    } else{
+        None
+    };
+
     let select = Select {
         from,
         projection,
+        selection,
         ..Default::default()
     };
     let body = SetExpr::Select(Box::new(select));
-    let order_by = pk_names
-    .into_iter()
-    .map(|pk| {
-        let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
-        OrderByExpr {
-            expr,
-            asc: None,
-            nulls_first: None,
-        }
-    })
-    .collect();
+    let order_by = order_pks
+        .into_iter()
+        .map(|pk| {
+            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
+            OrderByExpr {
+                expr,
+                asc: None,
+                nulls_first: None,
+            }
+        })
+        .collect();
     Query {
         with: None,
         body,

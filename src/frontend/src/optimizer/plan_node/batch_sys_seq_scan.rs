@@ -23,7 +23,7 @@ use risingwave_pb::batch_plan::SysRowSeqScanNode;
 use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{childless_record, range_to_string, scan_ranges_as_strs, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
@@ -91,67 +91,9 @@ impl BatchSysSeqScan {
     pub fn scan_ranges(&self) -> &[ScanRange] {
         &self.scan_ranges
     }
-
-    fn scan_ranges_as_strs(&self, verbose: bool) -> Vec<String> {
-        let order_names = match verbose {
-            true => self.core.order_names_with_table_prefix(),
-            false => self.core.order_names(),
-        };
-        let mut range_strs = vec![];
-
-        let explain_max_range = 20;
-        for scan_range in self.scan_ranges.iter().take(explain_max_range) {
-            #[expect(clippy::disallowed_methods)]
-            let mut range_str = scan_range
-                .eq_conds
-                .iter()
-                .zip(order_names.iter())
-                .map(|(v, name)| match v {
-                    Some(v) => format!("{} = {:?}", name, v),
-                    None => format!("{} IS NULL", name),
-                })
-                .collect_vec();
-            if !is_full_range(&scan_range.range) {
-                let i = scan_range.eq_conds.len();
-                range_str.push(range_to_string(&order_names[i], &scan_range.range))
-            }
-            range_strs.push(range_str.join(" AND "));
-        }
-        if self.scan_ranges.len() > explain_max_range {
-            range_strs.push("...".to_string());
-        }
-        range_strs
-    }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSysSeqScan }
-
-fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-    let (op, v) = match lb {
-        Bound::Included(v) => (">=", v),
-        Bound::Excluded(v) => (">", v),
-        Bound::Unbounded => unreachable!(),
-    };
-    format!("{} {} {:?}", name, op, v)
-}
-fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-    let (op, v) = match ub {
-        Bound::Included(v) => ("<=", v),
-        Bound::Excluded(v) => ("<", v),
-        Bound::Unbounded => unreachable!(),
-    };
-    format!("{} {} {:?}", name, op, v)
-}
-fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-    match (&range.0, &range.1) {
-        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-        (Bound::Unbounded, ub) => ub_to_string(name, ub),
-        (lb, Bound::Unbounded) => lb_to_string(name, lb),
-        (lb, ub) => {
-            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
-        }
-    }
-}
 
 impl Distill for BatchSysSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -161,7 +103,11 @@ impl Distill for BatchSysSeqScan {
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if !self.scan_ranges.is_empty() {
-            let range_strs = self.scan_ranges_as_strs(verbose);
+            let order_names = match verbose {
+                true => self.core.order_names_with_table_prefix(),
+                false => self.core.order_names(),
+            };
+            let range_strs = scan_ranges_as_strs(order_names, &self.scan_ranges);
             vec.push((
                 "scan_ranges",
                 Pretty::Array(range_strs.into_iter().map(Pretty::from).collect()),

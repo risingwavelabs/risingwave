@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::ops::Bound;
 use std::vec;
 
 use anyhow::anyhow;
@@ -28,6 +29,8 @@ use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -461,4 +464,59 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     Ok(Some(PbAsOf {
         as_of_type: Some(as_of_type),
     }))
+}
+
+pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {
+    let mut range_strs = vec![];
+
+    let explain_max_range = 20;
+    for scan_range in scan_ranges.iter().take(explain_max_range) {
+        #[expect(clippy::disallowed_methods)]
+        let mut range_str = scan_range
+            .eq_conds
+            .iter()
+            .zip(order_names.iter())
+            .map(|(v, name)| match v {
+                Some(v) => format!("{} = {:?}", name, v),
+                None => format!("{} IS NULL", name),
+            })
+            .collect_vec();
+        if !is_full_range(&scan_range.range) {
+            let i = scan_range.eq_conds.len();
+            range_str.push(range_to_string(&order_names[i], &scan_range.range))
+        }
+        range_strs.push(range_str.join(" AND "));
+    }
+    if scan_ranges.len() > explain_max_range {
+        range_strs.push("...".to_string());
+    }
+    range_strs
+}
+
+pub fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => ub_to_string(name, ub),
+        (lb, Bound::Unbounded) => lb_to_string(name, lb),
+        (lb, ub) => {
+            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
+        }
+    }
+}
+
+fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match lb {
+        Bound::Included(v) => (">=", v),
+        Bound::Excluded(v) => (">", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match ub {
+        Bound::Included(v) => ("<=", v),
+        Bound::Excluded(v) => ("<", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
 }

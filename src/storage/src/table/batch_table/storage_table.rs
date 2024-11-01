@@ -756,10 +756,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         start_epoch: u64,
         end_epoch: HummockReadEpoch,
         ordered: bool,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        pk_prefix: impl Row,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
-        let pk_prefix = OwnedRow::default();
-        let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
+        let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
+        let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
 
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let table_key_ranges = {

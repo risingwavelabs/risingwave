@@ -27,19 +27,23 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
+use prost::Message;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::scan_range;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::expr::expr_node::Type;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
     gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
@@ -50,10 +54,11 @@ use crate::handler::util::{
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
-use crate::optimizer::plan_node::{generic, BatchLogSeqScan};
+use crate::optimizer::plan_node::{generic, BatchFilter, BatchLogSeqScan};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
+use crate::utils::Condition;
 use crate::{
     Binder, OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog,
 };
@@ -269,7 +274,7 @@ pub struct SubscriptionCursor {
     fields: Vec<Field>,
     cursor_metrics: Arc<CursorMetrics>,
     last_fetch: Instant,
-    pk_column_names: HashMap<String,bool>,
+    pk_column_names: HashMap<String, bool>,
     seek_pk_row: Option<Vec<Option<Bytes>>>,
 }
 
@@ -282,7 +287,7 @@ impl SubscriptionCursor {
         handler_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
-        let (state, fields,pk_column_names) = if let Some(start_timestamp) = start_timestamp {
+        let (state, fields, pk_column_names) = if let Some(start_timestamp) = start_timestamp {
             let table_catalog = handler_args.session.get_table_by_id(&dependent_table_id)?;
             let fields = table_catalog
                 .columns
@@ -305,8 +310,8 @@ impl SubscriptionCursor {
             // future fetch on the cursor starts from the snapshot when the cursor is declared.
             //
             // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, fields, init_query_timer,pk_column_names) =
-                Self::initiate_query(None, &dependent_table_id, handler_args.clone()).await?;
+            let (chunk_stream, fields, init_query_timer, pk_column_names) =
+                Self::initiate_query(None, &dependent_table_id, handler_args.clone(), None).await?;
             let pinned_epoch = handler_args
                 .session
                 .env
@@ -377,6 +382,7 @@ impl SubscriptionCursor {
                                     Some(rw_timestamp),
                                     &self.dependent_table_id,
                                     handler_args.clone(),
+                                    None,
                                 )
                                 .await?;
                             Self::init_row_stream(
@@ -386,6 +392,26 @@ impl SubscriptionCursor {
                                 &fields,
                                 handler_args.session.clone(),
                             );
+                            {
+                                let (mut chunk_stream, fields, init_query_timer, pk_column_names) =
+                                Self::initiate_query(
+                                    Some(rw_timestamp),
+                                    &self.dependent_table_id,
+                                    handler_args.clone(),
+                                    self.seek_pk_row.clone(),
+                                )
+                                .await?;
+                                Self::init_row_stream(
+                                    &mut chunk_stream,
+                                    formats,
+                                    &from_snapshot,
+                                    &fields,
+                                    handler_args.session.clone(),
+                                );
+                                while let Some(a) = chunk_stream.next().await? {
+                                    println!("testtest {:?}", a);
+                                }
+                            }
 
                             self.cursor_need_drop_time = Instant::now()
                                 + Duration::from_secs(self.subscription.retention_seconds);
@@ -401,7 +427,8 @@ impl SubscriptionCursor {
                                 expected_timestamp,
                                 init_query_timer,
                             };
-                            if self.fields.ne(&fields) || self.pk_column_names.ne(&pk_column_names) {
+                            if self.fields.ne(&fields) || self.pk_column_names.ne(&pk_column_names)
+                            {
                                 self.fields = fields;
                                 self.pk_column_names = pk_column_names;
                                 return Ok(None);
@@ -556,8 +583,9 @@ impl SubscriptionCursor {
             }
         }
         self.last_fetch = Instant::now();
-        let (fields,rows,seek_pk_row) = Self::process_output_desc_row(&self.fields, ans, &self.pk_column_names);
-        if let Some(seek_pk_row) = seek_pk_row{
+        let (fields, rows, seek_pk_row) =
+            Self::process_output_desc_row(&self.fields, ans, &self.pk_column_names);
+        if let Some(seek_pk_row) = seek_pk_row {
             self.seek_pk_row = Some(seek_pk_row);
         }
         let desc = fields.iter().map(to_pg_field).collect();
@@ -603,6 +631,7 @@ impl SubscriptionCursor {
                 Some(0),
                 &self.dependent_table_id,
                 handler_args,
+                self.seek_pk_row.clone(),
             ),
             State::Fetch {
                 from_snapshot,
@@ -614,12 +643,14 @@ impl SubscriptionCursor {
                         None,
                         &self.dependent_table_id,
                         handler_args,
+                        self.seek_pk_row.clone(),
                     )
                 } else {
                     Self::init_batch_plan_for_subscription_cursor(
                         Some(rw_timestamp),
                         &self.dependent_table_id,
                         handler_args,
+                        self.seek_pk_row.clone(),
                     )
                 }
             }
@@ -634,10 +665,10 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handler_args: HandlerArgs,
+        seek_pk_row: Option<Vec<Option<Bytes>>>,
     ) -> Result<BatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let pks = table_catalog.pk();
         let context = OptimizerContext::from_handler_args(handler_args.clone());
         if let Some(rw_timestamp) = rw_timestamp {
             let version_id = {
@@ -659,25 +690,23 @@ impl SubscriptionCursor {
                 rw_timestamp,
                 rw_timestamp,
                 version_id,
-                pks,
+                seek_pk_row,
             )
         } else {
-            let subscription_from_table_name =
-                ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
-            let pk_names = pks
+            let pks = table_catalog.pk();
+            let pks = pks
                 .iter()
                 .map(|f| {
-                        table_catalog
-                            .columns
-                            .get(f.column_index)
-                            .unwrap()
-                            .name()
-                            .to_string()
+                    let pk = table_catalog.columns.get(f.column_index).unwrap();
+                    (pk.name().to_string(), pk.is_hidden)
                 })
                 .collect_vec();
+            let subscription_from_table_name =
+                ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
             let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
                 subscription_from_table_name,
-                pk_names,
+                pks,
+                seek_pk_row,
             )));
             gen_batch_plan_by_statement(&session, context.into(), query_stmt)
         }
@@ -687,7 +716,13 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: &TableId,
         handler_args: HandlerArgs,
-    ) -> Result<(CursorDataChunkStream, Vec<Field>, Instant, HashMap<String,bool>)> {
+        seek_pk_row: Option<Vec<Option<Bytes>>>,
+    ) -> Result<(
+        CursorDataChunkStream,
+        Vec<Field>,
+        Instant,
+        HashMap<String, bool>,
+    )> {
         let init_query_timer = Instant::now();
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
@@ -697,6 +732,7 @@ impl SubscriptionCursor {
             rw_timestamp,
             dependent_table_id,
             handler_args.clone(),
+            seek_pk_row,
         )?;
         let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
         let (chunk_stream, fields) =
@@ -752,29 +788,46 @@ impl SubscriptionCursor {
         Ok(row)
     }
 
-    pub fn process_output_desc_row(descs: &Vec<Field>, mut rows: Vec<Row>,pk_column_names: &HashMap<String,bool>) -> (Vec<Field>,Vec<Row>,Option<Vec<Option<Bytes>>>) {
-        let last_row = rows.last_mut().map(|row|{
-            row.0.iter().zip_eq_fast(descs.iter()).filter_map(|(data,field)|{
-                if pk_column_names.contains_key(&field.name){
-                    Some(data.clone())
-                } else {
-                    None
-                }
-            }).collect_vec()
+    pub fn process_output_desc_row(
+        descs: &Vec<Field>,
+        mut rows: Vec<Row>,
+        pk_column_names: &HashMap<String, bool>,
+    ) -> (Vec<Field>, Vec<Row>, Option<Vec<Option<Bytes>>>) {
+        let last_row = rows.last_mut().map(|row| {
+            row.0
+                .iter()
+                .zip_eq_fast(descs.iter())
+                .filter_map(|(data, field)| {
+                    if pk_column_names.contains_key(&field.name) {
+                        Some(data.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec()
         });
-        let iter= descs.iter().map(|field| {
-            if let Some(is_hidden) = pk_column_names.get(&field.name) && *is_hidden{
-                (false,field)
-            } else {
-                (true,field)
-            }
-        }).collect_vec();
-        let pk_fields = iter.iter().filter(|(is_hidden,_)| *is_hidden).map(|(_,field)| (*field).clone()).collect();
-        let mut pk_keep = iter.iter().map(|(is_hidden,_)| *is_hidden);
+        let iter = descs
+            .iter()
+            .map(|field| {
+                if let Some(is_hidden) = pk_column_names.get(&field.name)
+                    && *is_hidden
+                {
+                    (false, field)
+                } else {
+                    (true, field)
+                }
+            })
+            .collect_vec();
+        let pk_fields = iter
+            .iter()
+            .filter(|(is_hidden, _)| *is_hidden)
+            .map(|(_, field)| (*field).clone())
+            .collect();
+        let mut pk_keep = iter.iter().map(|(is_hidden, _)| *is_hidden);
         rows.iter_mut().for_each(|row| {
             row.0.retain(|_| pk_keep.next().unwrap());
         });
-        (pk_fields,rows,last_row)
+        (pk_fields, rows, last_row)
     }
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
@@ -792,7 +845,7 @@ impl SubscriptionCursor {
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
-        pks: &[ColumnOrder],
+        seek_pk_row: Option<Vec<Option<Bytes>>>,
     ) -> Result<BatchQueryPlanResult> {
         // pk + all column without hidden
         let output_col_idx = table_catalog
@@ -807,6 +860,7 @@ impl SubscriptionCursor {
                 }
             })
             .collect::<Vec<_>>();
+        let max_split_range_gap = context.session_ctx().config().max_split_range_gap() as u64;
         let core = generic::LogScan::new(
             table_catalog.name.clone(),
             output_col_idx,
@@ -816,18 +870,105 @@ impl SubscriptionCursor {
             new_epoch,
             version_id,
         );
+        let pks = table_catalog.pk();
+        let pks = pks
+            .iter()
+            .map(|f| {
+                let pk = table_catalog.columns.get(f.column_index).unwrap();
+                (pk.name().to_string(), pk.data_type(), f.column_index)
+            })
+            .collect_vec();
+        // let selection = if let Some(seek_pk_rows) = seek_pk_rows {
+        //     let mut pk_rows = vec![];
+        //     let mut values = vec![];
+        //     for ((name, _), seek_pk) in pks.iter().zip_eq_fast(seek_pk_rows.iter()) {
+        //         if let Some(seek_pk) = seek_pk {
+        //             pk_rows.push(
+        //                 Expr::Identifier(Ident::with_quote_unchecked(
+        //                     '"',
+        //                     name.clone(),
+        //                 ))
+        //             );
+        //             values.push(String::from_utf8(seek_pk.clone().into()).unwrap());
+        //         }
+        //     }
+        //     if pk_rows.is_empty() {
+        //         None
+        //     } else if pk_rows.len() == 1 {
+        //         let left = pk_rows.pop().unwrap();
+        //         let right = Expr::Value(Value::SingleQuotedString(values.pop().unwrap()));
+        //         Some(Expr::BinaryOp {
+        //             left: Box::new(left),
+        //             op: BinaryOperator::Eq,
+        //             right: Box::new(right),
+        //         })
+        //     }else{
+        //         let left = Expr::Row(pk_rows);
+        //         let values = values.join(",");
+        //         let right = Expr::Value(Value::SingleQuotedString(format!("({})", values)));
+        //         Some(Expr::BinaryOp {
+        //             left: Box::new(left),
+        //             op: BinaryOperator::Gt,
+        //             right: Box::new(right),
+        //         })
+        //     }
+        // } else{
+        //     None
+        // };
+        let (scan, predicate) = match seek_pk_row {
+            Some(seek_pk_row) => {
+                let seek_pk_row = seek_pk_row
+                    .into_iter()
+                    .zip_eq_fast(pks.into_iter())
+                    .filter_map(|(pk, (name, data_type, column_index))| {
+                        if let Some(seek_pk) = pk {
+                            let column = InputRef {
+                                index: column_index,
+                                data_type: data_type.clone(),
+                            };
+                            let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
+                            let value_data =
+                                ScalarImpl::from_text(&value_string, data_type).unwrap();
+                            let value = Literal::new(Some(value_data), data_type.clone());
+                            Some(
+                                FunctionCall::new(
+                                    ExprType::LessThan,
+                                    vec![column.into(), value.into()],
+                                )
+                                .unwrap()
+                                .into(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec();
+                let (scan, predicate) = Condition {
+                    conjunctions: seek_pk_row,
+                }
+                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)
+                .unwrap();
+                (scan, Some(predicate))
+            }
+            None => (vec![], None),
+        };
 
-        let batch_log_seq_scan = BatchLogSeqScan::new(core);
-
+        let batch_log_seq_scan = BatchLogSeqScan::new(core, scan);
         let out_fields = batch_log_seq_scan.core().out_fields();
         let out_names = batch_log_seq_scan.core().column_names();
 
+        let plan = if let Some(predicate) = predicate {
+            BatchFilter::new(generic::Filter::new(predicate, batch_log_seq_scan.into())).into()
+        } else {
+            batch_log_seq_scan.into()
+        };
+
         // order by pk, so don't need to sort
-        let order = Order::new(pks.to_vec());
+        let order = Order::new(table_catalog.pk().to_vec());
 
         // Here we just need a plan_root to call the method, only out_fields and out_names will be used
         let plan_root = PlanRoot::new_with_batch_plan(
-            PlanRef::from(batch_log_seq_scan.clone()),
+            plan,
             RequiredDist::single(),
             order,
             out_fields,
@@ -1075,16 +1216,11 @@ impl CursorManager {
     }
 }
 
-fn get_pk_names(pks: &[ColumnOrder], table_catalog: &TableCatalog) -> HashMap<String,bool> {
-    pks
-        .iter()
+fn get_pk_names(pks: &[ColumnOrder], table_catalog: &TableCatalog) -> HashMap<String, bool> {
+    pks.iter()
         .map(|f| {
-            let column = 
-                table_catalog
-                    .columns
-                    .get(f.column_index)
-                    .unwrap();
-                (column.name().to_string(),column.is_hidden)
+            let column = table_catalog.columns.get(f.column_index).unwrap();
+            (column.name().to_string(), column.is_hidden)
         })
         .collect()
 }

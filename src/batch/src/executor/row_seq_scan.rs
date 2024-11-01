@@ -35,6 +35,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::{dispatch_state_store, StateStore};
 
+use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -57,15 +58,6 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     epoch: BatchQueryEpoch,
     limit: Option<u64>,
     as_of: Option<AsOf>,
-}
-
-/// Range for batch scan.
-pub struct ScanRange {
-    /// The prefix of the primary key.
-    pub pk_prefix: OwnedRow,
-
-    /// The range bounds of the next column.
-    pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -94,64 +86,6 @@ impl From<&AsOf> for PbAsOf {
             as_of_type: Some(AsOfType::Timestamp(as_of::Timestamp {
                 timestamp: v.timestamp,
             })),
-        }
-    }
-}
-
-impl ScanRange {
-    /// Create a scan range from the prost representation.
-    pub fn new(
-        scan_range: PbScanRange,
-        mut pk_types: impl Iterator<Item = DataType>,
-    ) -> Result<Self> {
-        let pk_prefix = OwnedRow::new(
-            scan_range
-                .eq_conds
-                .iter()
-                .map(|v| {
-                    let ty = pk_types.next().unwrap();
-                    deserialize_datum(v.as_slice(), &ty)
-                })
-                .try_collect()?,
-        );
-        if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
-            return Ok(Self {
-                pk_prefix,
-                ..Self::full()
-            });
-        }
-
-        let bound_ty = pk_types.next().unwrap();
-        let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-            let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
-            if bound.inclusive {
-                Bound::Included(datum)
-            } else {
-                Bound::Excluded(datum)
-            }
-        };
-
-        let next_col_bounds: (Bound<Datum>, Bound<Datum>) = match (
-            scan_range.lower_bound.as_ref(),
-            scan_range.upper_bound.as_ref(),
-        ) {
-            (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
-            (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
-            (None, None) => unreachable!(),
-        };
-
-        Ok(Self {
-            pk_prefix,
-            next_col_bounds,
-        })
-    }
-
-    /// Create a scan range for full table scan.
-    pub fn full() -> Self {
-        Self {
-            pk_prefix: OwnedRow::default(),
-            next_col_bounds: (Bound::Unbounded, Bound::Unbounded),
         }
     }
 }
@@ -419,55 +353,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         limit: Option<u64>,
         histogram: Option<impl Deref<Target = Histogram>>,
     ) {
-        let ScanRange {
-            pk_prefix,
-            next_col_bounds,
-        } = scan_range;
-
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
-        let (start_bound, end_bound) = if order_type.is_ascending() {
-            (next_col_bounds.0, next_col_bounds.1)
-        } else {
-            (next_col_bounds.1, next_col_bounds.0)
-        };
-
-        let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
-        let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
-
+        let pk_prefix = scan_range.pk_prefix.clone();
+        let range_bounds = scan_range.convert_to_range_bounds(table.clone());
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_chunk_iter_with_pk_bounds(
                 epoch.into(),
                 &pk_prefix,
-                (
-                    match start_bound {
-                        Bound::Unbounded => {
-                            if end_bound_is_bounded && order_type.nulls_are_first() {
-                                // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-                    },
-                    match end_bound {
-                        Bound::Unbounded => {
-                            if start_bound_is_bounded && order_type.nulls_are_last() {
-                                // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-                    },
-                ),
+                range_bounds,
                 ordered,
                 chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),
