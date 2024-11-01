@@ -58,7 +58,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         }
     }
 
-    pub async fn init(&mut self, init_epoch: EpochPair) -> StreamExecutorResult<()> {
+    pub async fn init_after_yield_barrier(
+        &mut self,
+        init_epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
         // Init state tables.
         self.count_state_table.init_epoch(init_epoch).await?;
         self.bucket_state_table.init_epoch(init_epoch).await?;
