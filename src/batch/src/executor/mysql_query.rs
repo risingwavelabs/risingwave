@@ -15,20 +15,20 @@
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use mysql_async;
+use mysql_async::prelude::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::parser::mysql_datum_to_rw_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use thiserror_ext::AsReport;
-use tokio_postgres;
 
-use crate::error::BatchError;
+use crate::error::{BatchError, BatchExternalSystemError};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
-/// `PostgresQuery` executor. Runs a query against a Postgres database.
-pub struct PostgresQueryExecutor {
+/// `MySqlQuery` executor. Runs a query against a `MySql` database.
+pub struct MySqlQueryExecutor {
     schema: Schema,
     host: String,
     port: String,
@@ -40,7 +40,7 @@ pub struct PostgresQueryExecutor {
     chunk_size: usize,
 }
 
-impl Executor for PostgresQueryExecutor {
+impl Executor for MySqlQueryExecutor {
     fn schema(&self) -> &risingwave_common::catalog::Schema {
         &self.schema
     }
@@ -53,60 +53,27 @@ impl Executor for PostgresQueryExecutor {
         self.do_execute().boxed()
     }
 }
-
-pub fn postgres_row_to_owned_row(
-    row: tokio_postgres::Row,
+pub fn mysql_row_to_owned_row(
+    mut row: mysql_async::Row,
     schema: &Schema,
 ) -> Result<OwnedRow, BatchError> {
     let mut datums = vec![];
     for i in 0..schema.fields.len() {
         let rw_field = &schema.fields[i];
         let name = rw_field.name.as_str();
-        let datum = postgres_cell_to_scalar_impl(&row, &rw_field.data_type, i, name)?;
+        let datum = match mysql_datum_to_rw_datum(&mut row, i, name, &rw_field.data_type) {
+            Ok(val) => val,
+            Err(e) => {
+                let e = BatchExternalSystemError(e);
+                return Err(e.into());
+            }
+        };
         datums.push(datum);
     }
     Ok(OwnedRow::new(datums))
 }
 
-// TODO(kwannoel): Support more types, see postgres connector's ScalarAdapter.
-fn postgres_cell_to_scalar_impl(
-    row: &tokio_postgres::Row,
-    data_type: &DataType,
-    i: usize,
-    name: &str,
-) -> Result<Datum, BatchError> {
-    let datum = match data_type {
-        DataType::Boolean
-        | DataType::Int16
-        | DataType::Int32
-        | DataType::Int64
-        | DataType::Float32
-        | DataType::Float64
-        | DataType::Date
-        | DataType::Time
-        | DataType::Timestamp
-        | DataType::Timestamptz
-        | DataType::Jsonb
-        | DataType::Interval
-        | DataType::Varchar
-        | DataType::Bytea => {
-            // ScalarAdapter is also fine. But ScalarImpl is more efficient
-            row.try_get::<_, Option<ScalarImpl>>(i)?
-        }
-        DataType::Decimal => {
-            // Decimal is more efficient than PgNumeric in ScalarAdapter
-            let val = row.try_get::<_, Option<Decimal>>(i)?;
-            val.map(ScalarImpl::from)
-        }
-        _ => {
-            tracing::warn!(name, ?data_type, "unsupported data type, set to null");
-            None
-        }
-    };
-    Ok(datum)
-}
-
-impl PostgresQueryExecutor {
+impl MySqlQueryExecutor {
     pub fn new(
         schema: Schema,
         host: String,
@@ -133,34 +100,37 @@ impl PostgresQueryExecutor {
 
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        tracing::debug!("postgres_query_executor: started");
-        let conn_str = format!(
-            "host={} port={} user={} password={} dbname={}",
-            self.host, self.port, self.username, self.password, self.database
-        );
-        let (client, conn) = tokio_postgres::connect(&conn_str, tokio_postgres::NoTls).await?;
+        tracing::debug!("mysql_query_executor: started");
+        let database_opts: mysql_async::Opts = mysql_async::OptsBuilder::default()
+            .ip_or_hostname(self.host)
+            .tcp_port(self.port.parse::<u16>().unwrap()) // FIXME
+            .user(Some(self.username))
+            .pass(Some(self.password))
+            .db_name(Some(self.database))
+            .into();
 
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                tracing::error!(
-                    "postgres_query_executor: connection error: {:?}",
-                    e.as_report()
-                );
-            }
-        });
-
-        let params: &[&str] = &[];
-        let row_stream = client
-            .query_raw(&self.query, params)
+        let pool = mysql_async::Pool::new(database_opts);
+        let mut conn = pool
+            .get_conn()
             .await
-            .context("postgres_query received error from remote server")?;
+            .context("failed to connect to mysql in batch executor")?;
+
+        let query = self.query;
+        let mut query_iter = conn
+            .query_iter(query)
+            .await
+            .context("failed to execute my_sql_query in batch executor")?;
+        let Some(row_stream) = query_iter.stream::<mysql_async::Row>().await? else {
+            bail!("failed to get row stream from mysql query")
+        };
+
         let mut builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
+        tracing::debug!("mysql_query_executor: query executed, start deserializing rows");
         // deserialize the rows
         #[for_await]
         for row in row_stream {
             let row = row?;
-            let owned_row = postgres_row_to_owned_row(row, &self.schema)?;
+            let owned_row = mysql_row_to_owned_row(row, &self.schema)?;
             if let Some(chunk) = builder.append_one_row(owned_row) {
                 yield chunk;
             }
@@ -172,27 +142,27 @@ impl PostgresQueryExecutor {
     }
 }
 
-pub struct PostgresQueryExecutorBuilder {}
+pub struct MySqlQueryExecutorBuilder {}
 
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
+impl BoxedExecutorBuilder for MySqlQueryExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<'_, C>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
-        let postgres_query_node = try_match_expand!(
+        let mysql_query_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::PostgresQuery
+            NodeBody::MysqlQuery
         )?;
 
-        Ok(Box::new(PostgresQueryExecutor::new(
-            Schema::from_iter(postgres_query_node.columns.iter().map(Field::from)),
-            postgres_query_node.hostname.clone(),
-            postgres_query_node.port.clone(),
-            postgres_query_node.username.clone(),
-            postgres_query_node.password.clone(),
-            postgres_query_node.database.clone(),
-            postgres_query_node.query.clone(),
+        Ok(Box::new(MySqlQueryExecutor::new(
+            Schema::from_iter(mysql_query_node.columns.iter().map(Field::from)),
+            mysql_query_node.hostname.clone(),
+            mysql_query_node.port.clone(),
+            mysql_query_node.username.clone(),
+            mysql_query_node.password.clone(),
+            mysql_query_node.database.clone(),
+            mysql_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
             source.context.get_config().developer.chunk_size,
         )))
