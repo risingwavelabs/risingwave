@@ -126,7 +126,7 @@ macro_rules! def_anyhow_newtype {
     ) => {
         #[derive(::thiserror::Error, ::std::fmt::Debug)]
         #[error(transparent)]
-        $(#[$attr])* $vis struct $name(#[from] #[backtrace] ::anyhow::Error);
+        $(#[$attr])* $vis struct $name(#[from] #[backtrace] pub ::anyhow::Error);
 
         impl $name {
             /// Unwrap the newtype to get the inner [`anyhow::Error`].
