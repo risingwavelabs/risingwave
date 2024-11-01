@@ -437,16 +437,12 @@ impl GlobalBarrierWorkerContextImpl {
         node: &WorkerNode,
         mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
     ) -> MetaResult<StreamingControlHandle> {
-        let initial_version_id = self
-            .hummock_manager
-            .on_current_version(|version| version.id)
-            .await;
         let handle = self
             .env
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
+            .start_streaming_control(mv_depended_subscriptions)
             .await?;
         Ok(handle)
     }

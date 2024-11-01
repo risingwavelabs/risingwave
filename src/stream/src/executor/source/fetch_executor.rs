@@ -193,6 +193,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     async fn into_stream(mut self) {
         let mut upstream = self.upstream.take().unwrap().execute();
         let barrier = expect_first_barrier(&mut upstream).await?;
+        let first_epoch = barrier.epoch;
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.take().unwrap();
         let mut state_store_handler = core.split_state_store;
@@ -209,13 +212,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             unreachable!("Partition and offset columns must be set.");
         };
         // Initialize state table.
-        state_store_handler.init_epoch(barrier.epoch);
+        state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
 
-        if barrier.is_pause_on_startup() {
+        if is_pause_on_startup {
             stream.pause_stream();
         }
 
@@ -232,8 +235,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
-
-        yield Message::Barrier(barrier);
 
         while let Some(msg) = stream.next().await {
             match msg {

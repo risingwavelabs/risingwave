@@ -232,9 +232,8 @@ where
         self.caches.evict()
     }
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.init_epoch(epoch);
-        Ok(())
+    async fn init_after_yield_barrier(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.managed_state.init_epoch(epoch).await
     }
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {

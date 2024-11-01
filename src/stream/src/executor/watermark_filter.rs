@@ -98,10 +98,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut input = input.execute();
 
         let first_barrier = expect_first_barrier(&mut input).await?;
-        let prev_epoch = first_barrier.epoch.prev;
-        table.init_epoch(first_barrier.epoch);
+        let first_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
+        let prev_epoch = first_epoch.prev;
+        table.init_epoch(first_epoch).await?;
 
         // Initiate and yield the first watermark.
         let mut current_watermark = Self::get_global_max_watermark(

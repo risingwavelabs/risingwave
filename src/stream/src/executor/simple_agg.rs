@@ -241,9 +241,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.all_state_tables_mut().for_each(|table| {
-            table.init_epoch(barrier.epoch);
-        });
+        let first_epoch = barrier.epoch;
+        yield Message::Barrier(barrier);
+
+        for table in this.all_state_tables_mut() {
+            table.init_epoch(first_epoch).await?;
+        }
 
         let distinct_dedup = DistinctDeduplicater::new(
             &this.agg_calls,
@@ -251,8 +254,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             &this.distinct_dedup_tables,
             &this.actor_ctx,
         );
-
-        yield Message::Barrier(barrier);
 
         // This will fetch previous agg states from the intermediate state table.
         let mut vars = ExecutionVars {

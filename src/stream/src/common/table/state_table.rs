@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
 use foyer::CacheContext;
-use futures::{pin_mut, FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
@@ -44,7 +44,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
+use risingwave_storage::error::{ErrorKind, StorageError};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
@@ -170,33 +170,17 @@ pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: boo
     StateTableInner<S, BasicSerde, false, USE_WATERMARK_CACHE>;
 
 // initialize
-impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, USE_WATERMARK_CACHE>
-where
-    S: StateStore,
-    SD: ValueRowSerde,
-{
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    /// async interface only used for replicated state table,
-    /// as it needs to wait for prev epoch to be committed.
-    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StorageResult<()> {
-        self.local_store.init(InitOptions::new(epoch)).await
-    }
-}
-
-// initialize
-impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, false, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
+    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
 where
     S: StateStore,
     SD: ValueRowSerde,
 {
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     /// No need to `wait_for_epoch`, so it should complete immediately.
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.local_store
-            .init(InitOptions::new(epoch))
-            .now_or_never()
-            .expect("non-replicated state store should start immediately.")
-            .expect("non-replicated state store should not wait_for_epoch, and fail because of it.")
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.local_store.init(InitOptions::new(epoch)).await?;
+        Ok(())
     }
 
     pub fn state_store(&self) -> &S {

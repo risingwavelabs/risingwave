@@ -603,11 +603,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.all_state_tables_mut().for_each(|table| {
-            table.init_epoch(barrier.epoch);
-        });
-
+        let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        for table in this.all_state_tables_mut() {
+            table.init_epoch(first_epoch).await?;
+        }
 
         #[for_await]
         for msg in input {

@@ -430,6 +430,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
+        let first_epoch = barrier.epoch;
+        let mut boot_state =
+            if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+                tracing::debug!(?splits, "boot with splits");
+                splits.to_vec()
+            } else {
+                Vec::default()
+            };
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -447,13 +458,7 @@ impl<S: StateStore> SourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut boot_state = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            tracing::debug!(?splits, "boot with splits");
-            boot_state = splits.to_vec();
-        }
-
-        core.split_state_store.init_epoch(barrier.epoch);
+        core.split_state_store.init_epoch(first_epoch).await?;
 
         for ele in &mut boot_state {
             if let Some(recover_state) = core
@@ -506,7 +511,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // - For shared source, pause until there's a MV.
         // - If the first barrier requires us to pause on startup, pause the stream.
-        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
+        if (self.is_shared && is_uninitialized) || is_pause_on_startup {
             tracing::info!(
                 is_shared = self.is_shared,
                 is_uninitialized = is_uninitialized,
@@ -514,8 +519,6 @@ impl<S: StateStore> SourceExecutor<S> {
             );
             stream.pause_stream();
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
         // milliseconds, considering some other latencies like network and cost in Meta.
@@ -1098,7 +1101,10 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
+            .await
+            .unwrap();
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -1137,7 +1143,10 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+            .await
+            .unwrap();
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])

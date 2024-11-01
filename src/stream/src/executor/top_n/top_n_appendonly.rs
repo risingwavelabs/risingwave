@@ -135,8 +135,8 @@ where
         self.managed_state.try_flush().await
     }
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.init_epoch(epoch);
+    async fn init_after_yield_barrier(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.managed_state.init_epoch(epoch).await?;
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await

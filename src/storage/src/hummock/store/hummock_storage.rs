@@ -511,10 +511,10 @@ impl HummockStorage {
         )
     }
 
-    pub async fn clear_shared_buffer(&self, version_id: HummockVersionId) {
+    pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::Clear(tx, version_id))
+            .send(HummockEvent::Clear(tx))
             .expect("should send success");
         rx.await.expect("should wait success");
     }
