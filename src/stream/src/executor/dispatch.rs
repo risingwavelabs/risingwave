@@ -1066,7 +1066,7 @@ mod tests {
     use super::*;
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
+    use crate::executor::{BarrierInner as Barrier, MergeExecutor, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
 
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_configuration_change() {
-        let _schema = Schema { fields: vec![] };
+        let schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let fragment_id = 666;
@@ -1249,7 +1249,13 @@ mod tests {
 
         let input = Executor::new(
             Default::default(),
-            MergeExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone()).boxed(),
+            MergeExecutor::for_test(
+                actor_id,
+                vec![rx],
+                barrier_test_env.shared_context.clone(),
+                schema,
+            )
+            .boxed(),
         );
         let executor = Box::new(DispatchExecutor::new(
             input,

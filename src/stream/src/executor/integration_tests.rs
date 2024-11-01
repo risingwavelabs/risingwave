@@ -118,7 +118,7 @@ async fn test_merger_sum_aggr() {
     // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel_for_test();
-        let (actor_future, channel) = make_actor(rx);
+        let (actor_future, channel) = make_actor(vec![rx]);
         outputs.push(channel);
         actor_futures.push(actor_future);
         inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
@@ -140,7 +140,7 @@ async fn test_merger_sum_aggr() {
                     pk_indices: PkIndices::new(),
                     identity: "MergeExecutor".to_string(),
                 },
-                MergeExecutor::for_test(actor_id, rx, shared_context.clone(), schema).boxed(),
+                MergeExecutor::for_test(actor_id, vec![rx], shared_context.clone(), schema).boxed(),
             );
             let dispatcher = DispatchExecutor::new(
                 receiver_op,
