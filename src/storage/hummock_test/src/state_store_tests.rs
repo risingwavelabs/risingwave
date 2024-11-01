@@ -1478,7 +1478,8 @@ async fn test_replicated_local_hummock_storage() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
 
-    local_hummock_storage_2.init_for_test(epoch2).await.unwrap();
+    local_hummock_storage_2.init_for_test(epoch1).await.unwrap();
+    local_hummock_storage_2.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
     // ingest 16B batch
     let mut batch2 = vec![

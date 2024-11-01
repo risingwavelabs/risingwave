@@ -514,7 +514,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -624,7 +624,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -713,7 +713,7 @@ mod tests {
             .storage
             .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch3), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
         reader.init().await.unwrap();
@@ -814,7 +814,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
@@ -930,7 +930,7 @@ mod tests {
             .storage
             .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch3), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
 
@@ -1043,11 +1043,11 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer1
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer2
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         reader1.init().await.unwrap();
@@ -1166,7 +1166,7 @@ mod tests {
             .storage
             .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new(epoch3, epoch2), false)
+            .init_after_yield_barrier(EpochPair::new(epoch3, epoch2), false)
             .await
             .unwrap();
         reader.init().await.unwrap();
@@ -1238,7 +1238,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -1378,7 +1378,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -1487,7 +1487,7 @@ mod tests {
             .storage
             .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new(epoch4, epoch3), false)
+            .init_after_yield_barrier(EpochPair::new(epoch4, epoch3), false)
             .await
             .unwrap();
 
@@ -1548,7 +1548,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
 
         writer
-            .init(EpochPair::new(epoch4, epoch3), false)
+            .init_after_yield_barrier(EpochPair::new(epoch4, epoch3), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk4.clone()).await.unwrap();
@@ -1718,7 +1718,7 @@ mod tests {
             .storage
             .start_epoch(epoch1, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch1), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -1787,7 +1787,7 @@ mod tests {
             .storage
             .start_epoch(epoch3, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch3), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
         reader.init().await.unwrap();
@@ -1851,7 +1851,7 @@ mod tests {
             .storage
             .start_epoch(epoch4, HashSet::from_iter([TableId::new(table.id)]));
         writer
-            .init(EpochPair::new_test_epoch(epoch4), false)
+            .init_after_yield_barrier(EpochPair::new_test_epoch(epoch4), false)
             .await
             .unwrap();
         reader.init().await.unwrap();

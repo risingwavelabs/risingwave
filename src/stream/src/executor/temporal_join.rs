@@ -830,6 +830,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                                 .await?;
                             yield Message::Barrier(barrier);
                         }
+                    } else {
+                        yield Message::Barrier(barrier);
                     }
                     if let Some(vnodes) = update_vnode_bitmap {
                         let prev_vnodes =

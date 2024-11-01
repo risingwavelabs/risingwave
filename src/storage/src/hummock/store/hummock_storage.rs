@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -787,7 +787,10 @@ impl HummockStorage {
         &self.hummock_version_reader
     }
 
-    pub async fn wait_version_update(&self, old_id: HummockVersionId) -> HummockVersionId {
+    pub async fn wait_version_update(
+        &self,
+        old_id: risingwave_hummock_sdk::HummockVersionId,
+    ) -> risingwave_hummock_sdk::HummockVersionId {
         use tokio::task::yield_now;
         loop {
             let cur_id = self.recent_versions.load().latest_version().id();

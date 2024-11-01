@@ -119,7 +119,7 @@ pub enum LogStoreReadItem {
 
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
-    fn init(
+    fn init_after_yield_barrier(
         &mut self,
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
@@ -354,7 +354,7 @@ pub struct LogWriterMetrics {
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
-    async fn init(
+    async fn init_after_yield_barrier(
         &mut self,
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
@@ -365,7 +365,9 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         self.metrics
             .log_store_latest_write_epoch
             .set(epoch.curr as _);
-        self.inner.init(epoch, pause_read_on_bootstrap).await
+        self.inner
+            .init_after_yield_barrier(epoch, pause_read_on_bootstrap)
+            .await
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {

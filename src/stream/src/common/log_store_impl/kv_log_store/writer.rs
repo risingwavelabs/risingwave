@@ -78,7 +78,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
 }
 
 impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
-    async fn init(
+    async fn init_after_yield_barrier(
         &mut self,
         epoch: EpochPair,
         pause_read_on_bootstrap: bool,
