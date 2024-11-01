@@ -747,10 +747,20 @@ impl SubscriptionCursor {
         Ok(row)
     }
 
-    pub fn process_output_desc_row(descs: Vec<Field>, row: Vec<Row>,pk_column_names: &HashSet<String>) -> (Vec<Field>,Vec<Row>) {
-        descs.into_iter().enumerate().filter_map(|(index, field)| {
-            
-        })
+    pub fn process_output_desc_row(descs: Vec<Field>, mut row: Vec<Row>,pk_column_names: &HashMap<String,bool>) -> (Vec<Field>,Vec<Row>) {
+        let iter= descs.iter().map(|field| {
+            if let Some(is_hidden) = pk_column_names.get(&field.name) && *is_hidden{
+                (false,field)
+            } else {
+                (true,field)
+            }
+        });
+        let pk_fields = iter.filter(|(is_hidden,_)| *is_hidden).map(|(_,field)| field).cloned().collect();
+        let mut pk_keep = iter.map(|(is_hidden,_)| is_hidden);
+        row.iter_mut().for_each(|row| {
+            row.0.retain(|x| pk_keep.next().unwrap());
+        });
+        (pk_fields,row)
     }
 
     pub fn build_desc(mut descs: Vec<Field>, from_snapshot: bool) -> Vec<Field> {
