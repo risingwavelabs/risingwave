@@ -221,6 +221,7 @@ impl SinkFormatDesc {
             options,
             key_encode,
             secret_refs: self.secret_refs.clone(),
+            connection_id: None,
         }
     }
 }
