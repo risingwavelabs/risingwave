@@ -14,7 +14,8 @@
 
 use std::rc::Rc;
 
-use iceberg::expr::Predicate as IcebergPredicate;
+use iceberg::expr::{Predicate as IcebergPredicate, Reference};
+use iceberg::spec::Datum as IcebergDatum;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::ScalarImpl;
@@ -27,7 +28,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprType};
+use crate::expr::{ExprImpl, ExprType, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -119,6 +120,20 @@ impl PredicatePushdown for LogicalIcebergScan {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
+            let Some(scalar) = literal.get_data() else {
+                return None;
+            };
+            match scalar {
+                ScalarImpl::Bool(b) => Some(IcebergDatum::bool(*b)),
+                ScalarImpl::Int32(i) => Some(IcebergDatum::int(*i)),
+                ScalarImpl::Int64(i) => Some(IcebergDatum::long(*i)),
+                ScalarImpl::Float32(f) => Some(IcebergDatum::float(*f)),
+                ScalarImpl::Float64(f) => Some(IcebergDatum::double(*f)),
+                _ => None,
+            }
+        }
+
         fn rw_expr_to_iceberg_predicate(
             expr: &ExprImpl,
             fields: &[Field],
@@ -152,11 +167,12 @@ impl PredicatePushdown for LogicalIcebergScan {
                             Some(IcebergPredicate::or(arg0, arg1))
                         }
                         ExprType::Equal => match [&args[0], &args[1]] {
-                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                                todo!()
-                            }
-                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                                todo!()
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
+                            | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.equal_to(datum))
                             }
                             _ => None,
                         },
