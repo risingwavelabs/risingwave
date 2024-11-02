@@ -138,7 +138,6 @@ pub async fn create_source_worker_handle(
 
         tokio::spawn(async move { worker.run(sync_call_rx).await })
     });
-
     Ok(ConnectorSourceWorkerHandle {
         handle,
         sync_call_tx,
@@ -1052,6 +1051,7 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
+
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {

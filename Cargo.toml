@@ -153,11 +153,7 @@ arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.20.1", features = [
-    "s3",
-    "gcs",
-    "datafusion",
-] }
+deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
@@ -347,7 +343,7 @@ opt-level = 2
 
 [patch.crates-io]
 # Patch third-party crates for deterministic simulation.
-quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
+quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "ea9ba802327b1d72c4b1c7202c759b0a5243271e" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.

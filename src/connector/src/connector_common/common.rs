@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::hash::Hash;
 use std::io::Write;
 use std::time::Duration;
 
@@ -61,7 +62,7 @@ use aws_types::SdkConfig;
 use risingwave_common::util::env_var::env_var_is_true;
 
 /// A flatten config map for aws auth.
-#[derive(Deserialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions, PartialEq)]
 pub struct AwsAuthProps {
     #[serde(rename = "aws.region", alias = "region")]
     pub region: Option<String>,
@@ -161,20 +162,10 @@ impl AwsAuthProps {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions)]
-pub struct KafkaCommon {
+#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
+pub struct KafkaConnection {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
-
-    #[serde(rename = "topic", alias = "kafka.topic")]
-    pub topic: String,
-
-    #[serde(
-        rename = "properties.sync.call.timeout",
-        deserialize_with = "deserialize_duration_from_string",
-        default = "default_kafka_sync_call_timeout"
-    )]
-    pub sync_call_timeout: Duration,
 
     /// Security protocol used for RisingWave to communicate with Kafka brokers. Could be
     /// PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
@@ -252,6 +243,20 @@ pub struct KafkaCommon {
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct KafkaCommon {
+    #[serde(rename = "topic", alias = "kafka.topic")]
+    pub topic: String,
+
+    #[serde(
+        rename = "properties.sync.call.timeout",
+        deserialize_with = "deserialize_duration_from_string",
+        default = "default_kafka_sync_call_timeout"
+    )]
+    pub sync_call_timeout: Duration,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq)]
 pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
@@ -269,7 +274,7 @@ pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
     /// produce time and may exceed the maximum size by one message in protocol ProduceRequests,
-    /// the broker will enforce the the topic's max.message.bytes limit
+    /// the broker will enforce the topic's max.message.bytes limit
     #[serde(rename = "properties.message.max.bytes")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub message_max_bytes: Option<usize>,
@@ -316,7 +321,7 @@ impl RdKafkaPropertiesCommon {
     }
 }
 
-impl KafkaCommon {
+impl KafkaConnection {
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
         // AWS_MSK_IAM
         if self.is_aws_msk_iam() {
