@@ -336,7 +336,7 @@
     StreamMaterialize { columns: [id1, a1, id2, v1, stream._row_id(hidden)], stream_key: [stream._row_id, id1], pk_columns: [stream._row_id, id1], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamProject { exprs: [stream.id1, stream.a1, version.id2, stream.v1, stream._row_id], output_watermarks: [stream.v1] }
       └─StreamDynamicFilter { predicate: (stream.v1 > now), output_watermarks: [stream.v1], output: [stream.id1, stream.a1, stream.v1, version.id2, stream._row_id], cleaned_by_watermark: true }
-        ├─StreamTemporalJoin { type: LeftOuter, append_only: true, predicate: stream.id1 = version.id2, output: [stream.id1, stream.a1, stream.v1, version.id2, stream._row_id] }
+        ├─StreamTemporalJoin { type: LeftOuter, append_only: true, predicate: stream.id1 = version.id2, nested_loop: false, output: [stream.id1, stream.a1, stream.v1, version.id2, stream._row_id] }
         │ ├─StreamExchange { dist: HashShard(stream.id1) }
         │ │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.v1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
         │ └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }

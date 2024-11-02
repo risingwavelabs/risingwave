@@ -44,7 +44,7 @@ use thiserror_ext::AsReport;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
-pub use self::mysql::mysql_row_to_owned_row;
+pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
