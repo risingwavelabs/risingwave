@@ -23,6 +23,7 @@ use crate::executor::exchange::input::{
 };
 use crate::executor::prelude::*;
 use crate::executor::DispatcherMessage;
+use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 use crate::task::{FragmentId, SharedContext};
 
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
@@ -78,7 +79,14 @@ impl ReceiverExecutor {
         }
     }
 
-    #[cfg(test)]
+    pub async fn for_bench(
+        input: super::exchange::permit::Receiver,
+    ) -> (LocalBarrierTestEnv, Self) {
+        let barrier_test_env = LocalBarrierTestEnv::for_test().await;
+        let shared_context = barrier_test_env.shared_context.clone();
+        (barrier_test_env, Self::for_test(1, input, shared_context))
+    }
+
     pub fn for_test(
         actor_id: ActorId,
         input: super::exchange::permit::Receiver,

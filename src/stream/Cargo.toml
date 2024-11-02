@@ -106,5 +106,9 @@ harness = false
 name = "bench_state_table"
 harness = false
 
+[[bench]]
+name = "merge"
+harness = false
+
 [lints]
 workspace = true

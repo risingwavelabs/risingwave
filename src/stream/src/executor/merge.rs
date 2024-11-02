@@ -32,6 +32,7 @@ use crate::executor::exchange::input::{
     assert_equal_dispatcher_barrier, new_input, process_dispatcher_msg,
 };
 use crate::executor::prelude::*;
+use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 use crate::task::SharedContext;
 
 pub(crate) enum MergeExecutorUpstream {
@@ -167,7 +168,18 @@ impl MergeExecutor {
         }
     }
 
-    #[cfg(test)]
+    pub async fn for_bench(
+        inputs: Vec<super::exchange::permit::Receiver>,
+        schema: Schema,
+    ) -> (LocalBarrierTestEnv, Self) {
+        let barrier_test_env = LocalBarrierTestEnv::for_test().await;
+        let shared_context = barrier_test_env.shared_context.clone();
+        (
+            barrier_test_env,
+            Self::for_test(1, inputs, shared_context, schema),
+        )
+    }
+
     pub fn for_test(
         actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,

@@ -88,7 +88,6 @@ impl StreamEnvironment {
     }
 
     // Create an instance for testing purpose.
-    #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
         use risingwave_dml::dml_manager::DmlManager;
