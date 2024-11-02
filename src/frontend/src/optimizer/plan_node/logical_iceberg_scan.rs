@@ -176,30 +176,112 @@ impl PredicatePushdown for LogicalIcebergScan {
                             }
                             _ => None,
                         },
-                        ExprType::NotEqual => {
-                            todo!()
-                        }
-                        ExprType::GreaterThan => {
-                            todo!()
-                        }
-                        ExprType::GreaterThanOrEqual => {
-                            todo!()
-                        }
-                        ExprType::LessThan => {
-                            todo!()
-                        }
-                        ExprType::LessThanOrEqual => {
-                            todo!()
-                        }
-                        ExprType::IsNull => {
-                            todo!()
-                        }
-                        ExprType::IsNotNull => {
-                            todo!()
-                        }
-                        ExprType::In => {
-                            todo!()
-                        }
+                        ExprType::NotEqual => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
+                            | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.not_equal_to(datum))
+                            }
+                            _ => None,
+                        },
+                        ExprType::GreaterThan => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.greater_than(datum))
+                            }
+                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.less_than_or_equal_to(datum))
+                            }
+                            _ => None,
+                        },
+                        ExprType::GreaterThanOrEqual => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.greater_than_or_equal_to(datum))
+                            }
+                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.less_than(datum))
+                            }
+                            _ => None,
+                        },
+                        ExprType::LessThan => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.less_than(datum))
+                            }
+                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.greater_than_or_equal_to(datum))
+                            }
+                            _ => None,
+                        },
+                        ExprType::LessThanOrEqual => match [&args[0], &args[1]] {
+                            [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.less_than_or_equal_to(datum))
+                            }
+                            [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let datum = rw_literal_to_iceberg_datum(rhs)?;
+                                Some(reference.greater_than(datum))
+                            }
+                            _ => None,
+                        },
+                        ExprType::IsNull => match &args[0] {
+                            ExprImpl::InputRef(lhs) => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                Some(reference.is_null())
+                            }
+                            _ => None,
+                        },
+                        ExprType::IsNotNull => match &args[1] {
+                            ExprImpl::InputRef(lhs) => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                Some(reference.is_not_null())
+                            }
+                            _ => None,
+                        },
+                        ExprType::In => match &args[1] {
+                            ExprImpl::InputRef(lhs) => {
+                                let column_name = &fields[lhs.index].name;
+                                let reference = Reference::new(column_name);
+                                let mut datums = Vec::with_capacity(args.len() - 1);
+                                for arg in &args[1..] {
+                                    if let ExprImpl::Literal(l) = arg {
+                                        if let Some(datum) = rw_literal_to_iceberg_datum(l) {
+                                            datums.push(datum);
+                                        } else {
+                                            return None;
+                                        }
+                                    } else {
+                                        return None;
+                                    }
+                                }
+                                Some(reference.is_in(datums))
+                            }
+                            _ => None,
+                        },
                         _ => None,
                     }
                 }
