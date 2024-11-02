@@ -32,7 +32,7 @@ mysql --protocol=tcp -u root mytest -e "
         c_time time,
         c_datetime datetime,
         c_timestamp timestamp,
-        c_enum ENUM('happy','sad','ok'),
+        c_enum ENUM('happy','sad','ok') DEFAULT 'ok',
         c_json JSON,
         PRIMARY KEY (c_boolean,c_Bigint,c_date)
     );

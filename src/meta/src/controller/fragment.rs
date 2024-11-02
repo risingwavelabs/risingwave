@@ -662,6 +662,24 @@ impl CatalogController {
         Ok(object_ids)
     }
 
+    pub async fn list_fragment_database_ids(
+        &self,
+        select_fragment_ids: Option<Vec<FragmentId>>,
+    ) -> MetaResult<Vec<(FragmentId, DatabaseId)>> {
+        let inner = self.inner.read().await;
+        let select = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .column(object::Column::DatabaseId)
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def());
+        let select = if let Some(select_fragment_ids) = select_fragment_ids {
+            select.filter(fragment::Column::FragmentId.is_in(select_fragment_ids))
+        } else {
+            select
+        };
+        Ok(select.into_tuple().all(&inner.db).await?)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
