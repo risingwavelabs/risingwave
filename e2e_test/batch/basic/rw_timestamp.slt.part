@@ -38,4 +38,7 @@ select ABS(EXTRACT(EPOCH FROM (_rw_timestamp - now()))) < 2, a, id from t where 
 t 11 1
 
 statement ok
+delete from t;
+
+statement ok
 drop table t;

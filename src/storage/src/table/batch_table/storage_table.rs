@@ -452,6 +452,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.distribution.update_vnode_bitmap(new_vnodes)
     }
+
+    pub fn has_epoch_idx(&self) -> bool {
+        self.epoch_idx.is_some()
+    }
 }
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;

@@ -141,17 +141,18 @@
     delete from t where a not in (select b from t);
   logical_plan: |-
     LogicalDelete { table: t }
-    └─LogicalApply { type: LeftAnti, on: (t.a = t.b), correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
-      └─LogicalProject { exprs: [t.b] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+    └─LogicalProject { exprs: [t.a, t.b, t._row_id] }
+      └─LogicalApply { type: LeftAnti, on: (t.a = t.b), correlated_id: 1 }
+        ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalProject { exprs: [t.b] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchDelete { table: t }
       └─BatchExchange { order: [], dist: Single }
         └─BatchHashJoin { type: LeftAnti, predicate: t.a = t.b, output: all }
           ├─BatchExchange { order: [], dist: HashShard(t.a) }
-          │ └─BatchScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
+          │ └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }
           └─BatchExchange { order: [], dist: HashShard(t.b) }
             └─BatchScan { table: t, columns: [t.b], distribution: SomeShard }
 - name: distributed update
