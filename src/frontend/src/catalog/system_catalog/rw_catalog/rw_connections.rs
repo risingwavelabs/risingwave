@@ -35,6 +35,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
 
+    // todo: redesign the internal table for connection params
     Ok(schemas
         .flat_map(|schema| {
             schema.iter_connections().map(|conn| RwConnection {

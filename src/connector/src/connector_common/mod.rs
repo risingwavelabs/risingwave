@@ -16,7 +16,6 @@
 
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
-use serde::Deserialize;
 
 mod common;
 pub use common::{

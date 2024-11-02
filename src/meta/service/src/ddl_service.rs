@@ -25,8 +25,9 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Comment, CreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -731,7 +732,22 @@ impl DdlService for DdlServiceImpl {
             create_connection_request::Payload::PrivateLink(_) => {
                 panic!("Private Link Connection has been deprecated")
             }
-        };
+            create_connection_request::Payload::ConnectionParams(params) => {
+                let pb_connection = Connection {
+                    id: 0,
+                    schema_id: req.schema_id,
+                    database_id: req.database_id,
+                    name: req.name,
+                    info: Some(ConnectionInfo::ConnectionParams(params)),
+                    owner: req.owner_id,
+                };
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateConnection(pb_connection))
+                    .await?;
+                Ok(Response::new(CreateConnectionResponse { version }))
+            }
+        }
     }
 
     async fn list_connections(

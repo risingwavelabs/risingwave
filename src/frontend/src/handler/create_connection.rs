@@ -15,7 +15,8 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
@@ -29,20 +30,17 @@ pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: &mut BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
-    with_properties
-        .get(property)
-        .map(|s| s.to_lowercase())
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "Required property \"{property}\" is not provided"
-            )))
-        })
+    with_properties.remove(property).ok_or_else(|| {
+        RwError::from(ProtocolError(format!(
+            "Required property \"{property}\" is not provided"
+        )))
+    })
 }
 fn resolve_create_connection_payload(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: &mut BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
     match connection_type.as_str() {
@@ -50,6 +48,8 @@ fn resolve_create_connection_payload(
             "CREATE CONNECTION to Private Link".to_string(),
             "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
         ))),
+        KAFKA_CONNECTOR => todo!(),
+        ICEBERG_CONNECTOR => todo!(),
         _ => Err(RwError::from(ProtocolError(format!(
             "Connection type \"{connection_type}\" is not supported"
         )))),
@@ -78,9 +78,9 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args.with_options.clone().into_connector_props();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
 
-    let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
+    let create_connection_payload = resolve_create_connection_payload(&mut with_properties)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer

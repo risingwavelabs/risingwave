@@ -30,13 +30,14 @@ impl ConnectionCatalog {
     pub fn connection_type(&self) -> &str {
         match &self.info {
             Info::PrivateLinkService(srv) => srv.get_provider().unwrap().as_str_name(),
-            Info::ConnectionImpl(connection_impl) => connection_impl.connection_type,
+            Info::ConnectionParams(params) => params.get_connection_type().unwrap().as_str_name(),
         }
     }
 
     pub fn provider(&self) -> &str {
         match &self.info {
             Info::PrivateLinkService(_) => "PRIVATELINK",
+            Info::ConnectionParams(_) => todo!(),
         }
     }
 }

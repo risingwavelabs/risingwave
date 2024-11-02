@@ -413,8 +413,8 @@ pub async fn handle_show_object(
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_string()
                         },
-                        connection::Info::ConnectionImpl(connection_impl) => {
-                            connection_impl.connection_type.to_string()
+                        connection::Info::ConnectionParams(params) => {
+                            format!("CONNECTION_PARAMS_{}", params.connection_type)
                         }
                     };
                     let source_names = schema
@@ -441,9 +441,9 @@ pub async fn handle_show_object(
                                 serde_json::to_string(&sink_names).unwrap(),
                             )
                         }
-                        connection::Info::ConnectionImpl(connection_impl) => {
+                        connection::Info::ConnectionParams(params) => {
                             // todo: check secrets are not exposed
-                            serde_json::to_string(&connection_impl.properties).unwrap()
+                            serde_json::to_string(&params.get_properties()).unwrap()
                         }
                     };
                     ShowConnectionRow {
