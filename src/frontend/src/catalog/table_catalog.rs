@@ -576,8 +576,11 @@ impl From<PbTable> for TableCatalog {
         let version_column_index = tb.version_column_index.map(|value| value as usize);
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
-        // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
-        columns.push(ColumnCatalog::rw_timestamp_column());
+        let rw_timestamp_column = ColumnCatalog::rw_timestamp_column();
+        if !columns.contains(&rw_timestamp_column) {
+            // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
+            columns.push(rw_timestamp_column);
+        }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
             if !col_names.insert(col_name.to_string()) {
@@ -764,7 +767,8 @@ mod tests {
                             version: ColumnDescVersion::Pr13707,
                         },
                         is_hidden: false
-                    }
+                    },
+                    ColumnCatalog::rw_timestamp_column(),
                 ],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
@@ -781,7 +785,7 @@ mod tests {
                 conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
-                watermark_columns: FixedBitSet::with_capacity(2),
+                watermark_columns: FixedBitSet::with_capacity(3),
                 dist_key_in_pk: vec![],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
