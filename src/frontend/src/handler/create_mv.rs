@@ -275,7 +275,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -327,7 +327,8 @@ pub mod tests {
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
-            )
+            ),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
         assert_eq!(columns, expected_columns);
     }
