@@ -14,11 +14,12 @@
 
 use std::rc::Rc;
 
+use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{Decimal, ScalarImpl};
 
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
@@ -130,6 +131,30 @@ impl PredicatePushdown for LogicalIcebergScan {
                 ScalarImpl::Int64(i) => Some(IcebergDatum::long(*i)),
                 ScalarImpl::Float32(f) => Some(IcebergDatum::float(*f)),
                 ScalarImpl::Float64(f) => Some(IcebergDatum::double(*f)),
+                ScalarImpl::Decimal(d) => {
+                    let Decimal::Normalized(d) = d else {
+                        return None;
+                    };
+                    let Ok(d) = IcebergDatum::decimal(*d) else {
+                        return None;
+                    };
+                    Some(d)
+                }
+                ScalarImpl::Date(d) => {
+                    let Ok(datum) = IcebergDatum::date_from_ymd(d.0.year(), d.0.month(), d.0.day())
+                    else {
+                        return None;
+                    };
+                    Some(datum)
+                }
+                ScalarImpl::Timestamp(t) => Some(IcebergDatum::timestamp_nanos(
+                    t.0.and_utc().timestamp_nanos_opt()?,
+                )),
+                ScalarImpl::Timestamptz(t) => {
+                    Some(IcebergDatum::timestamptz_micros(t.timestamp_micros()))
+                }
+                ScalarImpl::Utf8(s) => Some(IcebergDatum::string(s)),
+                ScalarImpl::Bytea(b) => Some(IcebergDatum::binary(b.clone())),
                 _ => None,
             }
         }
