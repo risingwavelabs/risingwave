@@ -248,12 +248,23 @@ message Connection {
     string endpoint_dns_name = 5;
   }
 
+  enum ConnectionType {
+    CONNECTION_TYPE_UNSPECIFIED = 0;
+    CONNECTION_TYPE_KAFKA = 1;
+  }
+
+  message ConnectionImpl {
+    ConnectionType connection_type = 1;
+    map<string, string> properties = 2;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
   oneof info {
     PrivateLinkService private_link_service = 5 [deprecated = true];
+    ConnectionImpl connection_impl = 7;
   }
   uint32 owner = 6;
 }

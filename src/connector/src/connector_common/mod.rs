@@ -16,6 +16,7 @@
 
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
+use serde::Deserialize;
 
 mod common;
 pub use common::{
@@ -26,3 +27,16 @@ pub use common::{
 
 mod iceberg;
 pub use iceberg::IcebergCommon;
+
+// #[derive(Debug, Clone, Deserialize)]
+// pub enum ConnectionImpl {
+//     Kafka(KafkaConnection),
+// }
+
+// macro_rules! impl_connection_enum {
+//     ($impl:expr, $inner_name:ident, $prop_type_name:ident, $body:expr) => {
+//         impl ConnectionImpl {
+//             pub fn get_
+//         }
+//     };
+// }
