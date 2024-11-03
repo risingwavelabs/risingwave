@@ -360,8 +360,20 @@ pub fn is_data_type_matching(
                 false
             }
         }
-        risingwave_common::types::DataType::Map(_) => {
-            // Directly return false for Map types
+        risingwave_common::types::DataType::Map(map_type) => {
+            if let arrow_schema_iceberg::DataType::Map(field_ref, _) = arrow_data_type {
+                let key_rw_type = map_type.key();
+                let value_rw_type = map_type.value();
+                let struct_type = field_ref.data_type();
+                if let arrow_schema_iceberg::DataType::Struct(fields) = struct_type {
+                    if fields.len() == 2 {
+                        let key_arrow_type = fields[0].data_type();
+                        let value_arrow_type = fields[1].data_type();
+                        return is_data_type_matching(key_rw_type, key_arrow_type)
+                            && is_data_type_matching(value_rw_type, value_arrow_type);
+                    }
+                }
+            }
             false
         }
         _ => false, // Handle other data types as necessary
