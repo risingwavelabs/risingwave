@@ -258,9 +258,14 @@ impl TableDistribution {
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     let is_set = vnodes.is_set(vnode.to_index());
-    assert!(
-        is_set,
-        "vnode {} should not be accessed by this table",
-        vnode
-    );
+
+    if !is_set {
+        let high_ranges = vnodes.high_ranges().map(|r| format!("{r:?}")).join(", ");
+        panic!(
+            "vnode {} should not be accessed by this table\nvnode count: {}\nallowed vnodes: {}",
+            vnode,
+            vnodes.len(),
+            high_ranges
+        );
+    }
 }
