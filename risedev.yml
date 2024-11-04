@@ -959,6 +959,25 @@ profile:
         address: schemaregistry
         port: 8082
 
+  local-inline-source-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pubsub
+        persist-data: true
+      - use: kafka
+        persist-data: true
+      - use: schema-registry
+      - use: mysql
+      - use: postgres
+
   ci-inline-source-test:
     config-path: src/config/ci-recovery.toml
     steps:

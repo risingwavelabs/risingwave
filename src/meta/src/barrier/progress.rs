@@ -384,7 +384,7 @@ impl CreateMviewProgressTracker {
     ) -> Vec<TrackingJob> {
         let command_ctx = &epoch_node.command_ctx;
         let new_tracking_job_info =
-            if let Command::CreateStreamingJob { info, job_type } = &command_ctx.command {
+            if let Some(Command::CreateStreamingJob { info, job_type }) = &command_ctx.command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
@@ -408,7 +408,11 @@ impl CreateMviewProgressTracker {
                 .flat_map(|resp| resp.create_mview_progress.iter()),
             version_stats,
         );
-        if let Some(table_id) = command_ctx.command.table_to_cancel() {
+        if let Some(table_id) = command_ctx
+            .command
+            .as_ref()
+            .and_then(Command::table_to_cancel)
+        {
             // the cancelled command is possibly stashed in `finished_commands` and waiting
             // for checkpoint, we should also clear it.
             self.cancel_command(table_id);

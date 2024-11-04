@@ -34,7 +34,6 @@
 #![feature(exact_size_is_empty)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(test)]
-#![feature(is_sorted)]
 #![feature(btree_cursors)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]

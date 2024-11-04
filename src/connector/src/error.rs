@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::def_anyhow_newtype;
 use risingwave_pb::PbFieldNotFound;
@@ -29,6 +31,7 @@ def_anyhow_newtype! {
 
     // Common errors
     std::io::Error => transparent,
+    Arc<ConnectorError> => transparent,
 
     // Fine-grained connector errors
     AccessError => transparent,

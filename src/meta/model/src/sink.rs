@@ -23,7 +23,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum SinkType {
     #[sea_orm(string_value = "APPEND_ONLY")]
     AppendOnly,

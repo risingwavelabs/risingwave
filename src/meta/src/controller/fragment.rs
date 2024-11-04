@@ -24,11 +24,12 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, object, sink, streaming_job, ActorId, ActorUpstreamActors,
-    ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus, ObjectId, SinkId,
-    SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
+    ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
+    ObjectId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -51,9 +52,10 @@ use risingwave_pb::stream_plan::{
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, DbErr, EntityTrait, JoinType, ModelTrait, PaginatorTrait, QueryFilter,
-    QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
+    ColumnTrait, DbErr, EntityTrait, FromQueryResult, JoinType, ModelTrait, PaginatorTrait,
+    QueryFilter, QuerySelect, RelationTrait, SelectGetableTuple, Selector, TransactionTrait, Value,
 };
+use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
@@ -77,6 +79,17 @@ pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
     pub actor_count: usize,
     pub vnode_count: usize,
+}
+
+#[derive(Clone, Debug, FromQueryResult, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")] // for dashboard
+pub struct StreamingJobInfo {
+    pub job_id: ObjectId,
+    pub obj_type: ObjectType,
+    pub name: String,
+    pub job_status: JobStatus,
+    pub parallelism: StreamingParallelism,
+    pub max_parallelism: i32,
 }
 
 impl CatalogControllerInner {
@@ -649,6 +662,24 @@ impl CatalogController {
         Ok(object_ids)
     }
 
+    pub async fn list_fragment_database_ids(
+        &self,
+        select_fragment_ids: Option<Vec<FragmentId>>,
+    ) -> MetaResult<Vec<(FragmentId, DatabaseId)>> {
+        let inner = self.inner.read().await;
+        let select = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .column(object::Column::DatabaseId)
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def());
+        let select = if let Some(select_fragment_ids) = select_fragment_ids {
+            select.filter(fragment::Column::FragmentId.is_in(select_fragment_ids))
+        } else {
+            select
+        };
+        Ok(select.into_tuple().all(&inner.db).await?)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
@@ -690,19 +721,35 @@ impl CatalogController {
         )
     }
 
-    pub async fn list_streaming_job_states(
-        &self,
-    ) -> MetaResult<Vec<(ObjectId, JobStatus, StreamingParallelism, i32)>> {
+    pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()
             .select_only()
+            .column(streaming_job::Column::JobId)
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .column(object::Column::ObjType)
+            .join(JoinType::LeftJoin, table::Relation::Object1.def().rev())
+            .join(JoinType::LeftJoin, source::Relation::Object.def().rev())
+            .join(JoinType::LeftJoin, sink::Relation::Object.def().rev())
+            .column_as(
+                Expr::if_null(
+                    Expr::col((table::Entity, table::Column::Name)),
+                    Expr::if_null(
+                        Expr::col((source::Entity, source::Column::Name)),
+                        Expr::if_null(
+                            Expr::col((sink::Entity, sink::Column::Name)),
+                            Expr::val("<unknown>"),
+                        ),
+                    ),
+                ),
+                "name",
+            )
             .columns([
-                streaming_job::Column::JobId,
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
                 streaming_job::Column::MaxParallelism,
             ])
-            .into_tuple()
+            .into_model()
             .all(&inner.db)
             .await?;
         Ok(job_states)

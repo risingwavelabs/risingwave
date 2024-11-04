@@ -22,9 +22,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, TableId, UserId,
-};
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, TableId, UserId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
@@ -38,7 +36,7 @@ use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_sqlparser::ast::{
-    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format,
+    CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
@@ -56,7 +54,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -92,12 +90,7 @@ pub async fn gen_sink_plan(
 
     let mut with_options = handler_args.with_options.clone();
 
-    let connection_id = {
-        let conn_id =
-            resolve_privatelink_in_with_option(&mut with_options, &sink_schema_name, session)?;
-        conn_id.map(ConnectionId)
-    };
-
+    resolve_privatelink_in_with_option(&mut with_options)?;
     let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
 
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
@@ -266,7 +259,7 @@ pub async fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        connection_id,
+        None, // deprecated: private link connection id
         dependent_relations.into_iter().collect_vec(),
     );
 
@@ -650,7 +643,7 @@ pub(crate) async fn reparse_table_for_sink(
         .unwrap();
     let Statement::CreateTable {
         name,
-        source_schema,
+        format_encode,
         ..
     } = &definition
     else {
@@ -658,9 +651,9 @@ pub(crate) async fn reparse_table_for_sink(
     };
 
     let table_name = name.clone();
-    let source_schema = source_schema
+    let format_encode = format_encode
         .clone()
-        .map(|source_schema| source_schema.into_v2_with_warning());
+        .map(|format_encode| format_encode.into_v2_with_warning());
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
@@ -679,11 +672,11 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, _) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
-        source_schema,
+        format_encode,
         handler_args,
         col_id_gen,
         columns,
@@ -814,7 +807,10 @@ pub(crate) fn derive_default_column_project_for_sink(
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
 /// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(
+    session: &SessionImpl,
+    value: FormatEncodeOptions,
+) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
     use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
@@ -929,7 +925,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         ))
     });
 
-pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
+pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(connector)
         .ok_or_else(|| {

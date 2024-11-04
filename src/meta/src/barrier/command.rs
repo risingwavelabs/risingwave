@@ -209,11 +209,9 @@ pub enum CreateStreamingJobType {
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
-    /// `Plain` command generates a barrier with the mutation it carries.
-    ///
-    /// Barriers from all actors marked as `Created` state will be collected.
-    /// After the barrier is collected, it does nothing.
-    Plain(Option<Mutation>),
+    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
+    /// all messages before the checkpoint barrier should have been committed.
+    Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
@@ -305,10 +303,6 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn barrier() -> Self {
-        Self::Plain(None)
-    }
-
     pub fn pause(reason: PausedReason) -> Self {
         Self::Pause(reason)
     }
@@ -319,7 +313,7 @@ impl Command {
 
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
-            Command::Plain(_) => None,
+            Command::Flush => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
             Command::DropStreamingJobs {
@@ -405,7 +399,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None) | Command::Resume(_))
+        !matches!(self, Command::Resume(_))
     }
 }
 
@@ -450,7 +444,7 @@ pub struct CommandContext {
 
     pub table_ids_to_commit: HashSet<TableId>,
 
-    pub command: Command,
+    pub command: Option<Command>,
 
     /// The tracing span of this command.
     ///
@@ -475,7 +469,7 @@ impl CommandContext {
         barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
-        command: Command,
+        command: Option<Command>,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -494,7 +488,7 @@ impl Command {
     pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
-                Command::Plain(mutation) => mutation.clone(),
+                Command::Flush => None,
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
@@ -896,11 +890,11 @@ impl Command {
 
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(
-        &self,
+        this: Option<&Self>,
         current_paused_reason: Option<PausedReason>,
     ) -> Option<PausedReason> {
-        match self {
-            Command::Pause(reason) => {
+        match this {
+            Some(Command::Pause(reason)) => {
                 // Only pause when the cluster is not already paused.
                 if current_paused_reason.is_none() {
                     Some(*reason)
@@ -909,7 +903,7 @@ impl Command {
                 }
             }
 
-            Command::Resume(reason) => {
+            Some(Command::Resume(reason)) => {
                 // Only resume when the cluster is paused with the same reason.
                 if current_paused_reason == Some(*reason) {
                     None
@@ -966,8 +960,11 @@ impl CommandContext {
         &self,
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
     ) -> MetaResult<()> {
-        match &self.command {
-            Command::Plain(_) => {}
+        let Some(command) = &self.command else {
+            return Ok(());
+        };
+        match command {
+            Command::Flush => {}
 
             Command::Throttle(_) => {}
 

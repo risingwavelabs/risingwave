@@ -93,6 +93,11 @@ impl Execute for ProjectSetExecutor {
 impl Inner {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(self, input: Executor) {
+        let mut input = input.execute();
+        let first_barrier = expect_first_barrier(&mut input).await?;
+        let mut is_paused = first_barrier.is_pause_on_startup();
+        yield Message::Barrier(first_barrier);
+
         assert!(!self.select_list.is_empty());
         // First column will be `projected_row_id`, which represents the index in the
         // output table
@@ -104,8 +109,9 @@ impl Inner {
         let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
 
         let mut last_nondec_expr_values = vec![None; self.nondecreasing_expr_indices.len()];
+
         #[for_await]
-        for msg in input.execute() {
+        for msg in input {
             match msg? {
                 Message::Watermark(watermark) => {
                     let watermarks = self.handle_watermark(watermark).await?;
@@ -113,21 +119,36 @@ impl Inner {
                         yield Message::Watermark(watermark)
                     }
                 }
-                m @ Message::Barrier(_) => {
-                    for (&expr_idx, value) in self
-                        .nondecreasing_expr_indices
-                        .iter()
-                        .zip_eq_fast(&mut last_nondec_expr_values)
-                    {
-                        if let Some(value) = std::mem::take(value) {
-                            yield Message::Watermark(Watermark::new(
-                                expr_idx + PROJ_ROW_ID_OFFSET,
-                                self.select_list[expr_idx].return_type(),
-                                value,
-                            ))
+                Message::Barrier(barrier) => {
+                    if !is_paused {
+                        for (&expr_idx, value) in self
+                            .nondecreasing_expr_indices
+                            .iter()
+                            .zip_eq_fast(&mut last_nondec_expr_values)
+                        {
+                            if let Some(value) = std::mem::take(value) {
+                                yield Message::Watermark(Watermark::new(
+                                    expr_idx + PROJ_ROW_ID_OFFSET,
+                                    self.select_list[expr_idx].return_type(),
+                                    value,
+                                ))
+                            }
                         }
                     }
-                    yield m
+
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Pause => {
+                                is_paused = true;
+                            }
+                            Mutation::Resume => {
+                                is_paused = false;
+                            }
+                            _ => (),
+                        }
+                    }
+
+                    yield Message::Barrier(barrier);
                 }
                 Message::Chunk(chunk) => {
                     let mut results = Vec::with_capacity(self.select_list.len());

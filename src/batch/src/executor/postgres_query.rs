@@ -37,6 +37,7 @@ pub struct PostgresQueryExecutor {
     database: String,
     query: String,
     identity: String,
+    chunk_size: usize,
 }
 
 impl Executor for PostgresQueryExecutor {
@@ -115,6 +116,7 @@ impl PostgresQueryExecutor {
         database: String,
         query: String,
         identity: String,
+        chunk_size: usize,
     ) -> Self {
         Self {
             schema,
@@ -125,6 +127,7 @@ impl PostgresQueryExecutor {
             database,
             query,
             identity,
+            chunk_size,
         }
     }
 
@@ -151,7 +154,7 @@ impl PostgresQueryExecutor {
             .query_raw(&self.query, params)
             .await
             .context("postgres_query received error from remote server")?;
-        let mut builder = DataChunkBuilder::new(self.schema.data_types(), 1024);
+        let mut builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
         // deserialize the rows
         #[for_await]
@@ -191,6 +194,7 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
             postgres_query_node.database.clone(),
             postgres_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.chunk_size,
         )))
     }
 }

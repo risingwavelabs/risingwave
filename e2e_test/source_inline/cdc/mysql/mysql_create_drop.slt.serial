@@ -45,7 +45,6 @@ create source s with (
   username = 'shared-cdc',
   password = 'abcdef',
   database.name = 'testdb1',
-  server.id = '114514'
 );
 
 sleep 2s

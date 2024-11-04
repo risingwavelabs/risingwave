@@ -15,6 +15,7 @@
  *
  */
 
+import { Expose, plainToInstance } from "class-transformer"
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
@@ -53,14 +54,6 @@ export async function getRelationIdInfos(): Promise<RelationIdInfos> {
   return fragmentIds
 }
 
-export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
-    TableFragments.fromJSON
-  )
-  fragmentList = sortBy(fragmentList, (x) => x.tableId)
-  return fragmentList
-}
-
 export interface Relation {
   id: number
   name: string
@@ -75,7 +68,43 @@ export interface Relation {
   databaseName?: string
 }
 
-export interface StreamingJob extends Relation {
+export class StreamingJob {
+  @Expose({ name: "jobId" })
+  id!: number
+  @Expose({ name: "objType" })
+  _objType!: string
+  name!: string
+  jobStatus!: string
+  @Expose({ name: "parallelism" })
+  _parallelism!: any
+  maxParallelism!: number
+
+  get parallelism() {
+    const parallelism = this._parallelism
+    if (typeof parallelism === "string") {
+      // `Adaptive`
+      return parallelism
+    } else if (typeof parallelism === "object") {
+      // `Fixed (64)`
+      let key = Object.keys(parallelism)[0]
+      let value = parallelism[key]
+      return `${key} (${value})`
+    } else {
+      // fallback
+      return JSON.stringify(parallelism)
+    }
+  }
+
+  get type() {
+    if (this._objType == "Table") {
+      return "Table / MV"
+    } else {
+      return this._objType
+    }
+  }
+}
+
+export interface StreamingRelation extends Relation {
   dependentRelations: number[]
 }
 
@@ -98,17 +127,15 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingJob {
+export function relationIsStreamingJob(x: Relation): x is StreamingRelation {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
-  let jobs = _.concat<StreamingJob>(
-    await getMaterializedViews(),
-    await getTables(),
-    await getIndexes(),
-    await getSinks()
+  let jobs = plainToInstance(
+    StreamingJob,
+    (await api.get("/streaming_jobs")) as any[]
   )
   jobs = sortBy(jobs, (x) => x.id)
   return jobs

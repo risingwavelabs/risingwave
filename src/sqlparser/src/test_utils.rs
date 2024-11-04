@@ -45,6 +45,7 @@ pub fn parse_sql_statements(sql: &str) -> Result<Vec<Statement>, ParserError> {
 }
 
 /// Ensures that `sql` parses as a single statement and returns it.
+///
 /// If non-empty `canonical` SQL representation is provided,
 /// additionally asserts that parsing `sql` results in the same parse
 /// tree as parsing `canonical`, and that serializing it back to string

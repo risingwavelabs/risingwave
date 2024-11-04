@@ -54,3 +54,9 @@
 ## Adding a migration
 
 - Add a new column to some catalogs. You can checkout the migration [m20240617_070131_index_column_properties.rs](src/m20240617_070131_index_column_properties.rs) as a reference.
+
+### Special notes on MySQL backend
+
+MySQL data types typically have stricter length limits compared to those in PostgreSQL or SQLite. For example, the `VARCHAR`, `TEXT`, `BLOB`, and `BINARY` data types have a maximum length of 65,535 bytes.
+
+If you need to store more data, e.g., SQL definition, UDF body, protobuf-encoded internal data, etc., please **avoid** using the built-in constructors like `ColumnDef::text` or `ColumnDef::blob`, but use the extensions defined in [`./src/utils.rs`](./src/utils.rs) instead.
