@@ -127,7 +127,7 @@ impl IcebergCommon {
             let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
                 bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
             };
-            let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+            let warehouse_path = format!("s3://{}/{}/nimtable/{}", s3_bucket, data_directory, self.database_name.clone().unwrap());
 
             let (bucket, _) = {
                 let url = Url::parse(&warehouse_path)

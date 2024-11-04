@@ -1480,7 +1480,7 @@ pub async fn handle_create_table(
                 }
             };
 
-            let warehouse_path = format!("s3://{}/{}/nimtable", s3_bucket, data_directory);
+            let warehouse_path = format!("s3://{}/{}/nimtable/{}", s3_bucket, data_directory, iceberg_catalog_name);
 
             let mut sink_handler_args = handler_args.clone();
             let mut with = BTreeMap::new();
