@@ -1,6 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 use crate::drop_tables;
+use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -26,7 +27,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockSstableInfo::SstableInfo)
-                            .blob(BlobSize::Long)
+                            .rw_binary(manager)
                             .null(),
                     )
                     .to_owned(),
@@ -46,7 +47,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockTimeTravelVersion::Version)
-                            .blob(BlobSize::Long)
+                            .rw_binary(manager)
                             .null(),
                     )
                     .to_owned(),
@@ -66,7 +67,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(HummockTimeTravelDelta::VersionDelta)
-                            .blob(BlobSize::Long)
+                            .rw_binary(manager)
                             .null(),
                     )
                     .to_owned(),

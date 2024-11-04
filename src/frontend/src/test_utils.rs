@@ -44,8 +44,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
-    PbTableJobType, ReplaceTablePlan, TableJobType,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, DdlProgress, PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -643,6 +643,10 @@ impl CatalogWriter for MockCatalogWriter {
         _parallelism: PbTableParallelism,
         _deferred: bool,
     ) -> Result<()> {
+        todo!()
+    }
+
+    async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
         todo!()
     }
 }
