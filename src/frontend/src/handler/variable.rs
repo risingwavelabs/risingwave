@@ -54,7 +54,7 @@ pub fn handle_set(
         status: &'a mut ParameterStatus,
     }
 
-    impl<'a> ConfigReporter for Reporter<'a> {
+    impl ConfigReporter for Reporter<'_> {
         fn report_status(&mut self, key: &str, new_val: String) {
             if key == "APPLICATION_NAME" {
                 self.status.application_name = Some(new_val);

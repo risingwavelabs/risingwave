@@ -371,7 +371,7 @@ pub struct StarrocksSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     client: Option<StarrocksClient>,
-    txn_client: StarrocksTxnClient,
+    txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
     executor_id: u64,
     curr_txn_label: Option<String>,
@@ -432,7 +432,7 @@ impl StarrocksSinkWriter {
             pk_indices,
             is_append_only,
             client: None,
-            txn_client: StarrocksTxnClient::new(txn_request_builder),
+            txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None),
             executor_id,
             curr_txn_label: None,
@@ -524,6 +524,23 @@ impl StarrocksSinkWriter {
             self.executor_id,
             chrono::Utc::now().timestamp_micros()
         )
+    }
+}
+
+impl Drop for StarrocksSinkWriter {
+    fn drop(&mut self) {
+        if let Some(txn_label) = self.curr_txn_label.take() {
+            let txn_client = self.txn_client.clone();
+            tokio::spawn(async move {
+                if let Err(e) = txn_client.rollback(txn_label.clone()).await {
+                    tracing::error!(
+                        "starrocks rollback transaction error: {:?}, txn label: {}",
+                        e.as_report(),
+                        txn_label
+                    );
+                }
+            });
+        }
     }
 }
 

@@ -461,17 +461,9 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let barrier_inject_actor_ids = table_fragments
-        .fragments
-        .values()
-        .filter(|fragment| TableFragments::is_injectable(fragment.fragment_type_mask))
-        .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
-        .sorted()
-        .collect_vec();
     let mview_actor_ids = table_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 

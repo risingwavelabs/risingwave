@@ -40,7 +40,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightGraphInfo};
+use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{GlobalBarrierWorkerContextImpl, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -78,10 +78,6 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    /// Whether this fragment is injectable. The injectable means whether the fragment contains
-    /// any executors that are able to receive barrier.
-    pub injectable: bool,
-
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
@@ -109,28 +105,31 @@ impl ReplaceTablePlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
-                actors: fragment
-                    .actors
-                    .iter()
-                    .map(|actor| {
-                        (
-                            actor.actor_id as i32,
-                            self.new_table_fragments
-                                .actor_status
-                                .get(&actor.actor_id)
-                                .expect("should exist")
-                                .worker_id(),
-                        )
-                    })
-                    .collect(),
-                state_table_ids: fragment
-                    .state_table_ids
-                    .iter()
-                    .map(|table_id| *table_id as ObjectId)
-                    .collect(),
-                is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
-            });
+            let fragment_change = CommandFragmentChanges::NewFragment(
+                self.streaming_job.database_id().into(),
+                self.streaming_job.id().into(),
+                InflightFragmentInfo {
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .map(|actor| {
+                            (
+                                actor.actor_id as i32,
+                                self.new_table_fragments
+                                    .actor_status
+                                    .get(&actor.actor_id)
+                                    .expect("should exist")
+                                    .worker_id(),
+                            )
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| *table_id as ObjectId)
+                        .collect(),
+                },
+            );
             assert!(fragment_changes
                 .insert(fragment.fragment_id, fragment_change)
                 .is_none());
@@ -187,7 +186,6 @@ impl CreateStreamingJobCommandInfo {
                         .iter()
                         .map(|table_id| *table_id as ObjectId)
                         .collect(),
-                    is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
                 },
             )
         })
@@ -211,11 +209,9 @@ pub enum CreateStreamingJobType {
 /// collected.
 #[derive(Debug, Clone, strum::Display)]
 pub enum Command {
-    /// `Plain` command generates a barrier with the mutation it carries.
-    ///
-    /// Barriers from all actors marked as `Created` state will be collected.
-    /// After the barrier is collected, it does nothing.
-    Plain(Option<Mutation>),
+    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
+    /// all messages before the checkpoint barrier should have been committed.
+    Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
@@ -252,7 +248,9 @@ pub enum Command {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
     },
-    MergeSnapshotBackfillStreamingJobs(HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>),
+    MergeSnapshotBackfillStreamingJobs(
+        HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
+    ),
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -305,10 +303,6 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn barrier() -> Self {
-        Self::Plain(None)
-    }
-
     pub fn pause(reason: PausedReason) -> Self {
         Self::Pause(reason)
     }
@@ -319,7 +313,7 @@ impl Command {
 
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
-            Command::Plain(_) => None,
+            Command::Flush => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
             Command::DropStreamingJobs {
@@ -338,8 +332,15 @@ impl Command {
                 );
                 let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
-                    .map(|(fragment_id, info)| {
-                        (fragment_id, CommandFragmentChanges::NewFragment(info))
+                    .map(|(fragment_id, fragment_info)| {
+                        (
+                            fragment_id,
+                            CommandFragmentChanges::NewFragment(
+                                info.streaming_job.database_id().into(),
+                                info.streaming_job.id().into(),
+                                fragment_info,
+                            ),
+                        )
                     })
                     .collect();
 
@@ -398,7 +399,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None) | Command::Resume(_))
+        !matches!(self, Command::Resume(_))
     }
 }
 
@@ -443,7 +444,7 @@ pub struct CommandContext {
 
     pub table_ids_to_commit: HashSet<TableId>,
 
-    pub command: Command,
+    pub command: Option<Command>,
 
     /// The tracing span of this command.
     ///
@@ -468,7 +469,7 @@ impl CommandContext {
         barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
-        command: Command,
+        command: Option<Command>,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -487,7 +488,7 @@ impl Command {
     pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
-                Command::Plain(mutation) => mutation.clone(),
+                Command::Flush => None,
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
@@ -889,11 +890,11 @@ impl Command {
 
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(
-        &self,
+        this: Option<&Self>,
         current_paused_reason: Option<PausedReason>,
     ) -> Option<PausedReason> {
-        match self {
-            Command::Pause(reason) => {
+        match this {
+            Some(Command::Pause(reason)) => {
                 // Only pause when the cluster is not already paused.
                 if current_paused_reason.is_none() {
                     Some(*reason)
@@ -902,7 +903,7 @@ impl Command {
                 }
             }
 
-            Command::Resume(reason) => {
+            Some(Command::Resume(reason)) => {
                 // Only resume when the cluster is paused with the same reason.
                 if current_paused_reason == Some(*reason) {
                     None
@@ -959,8 +960,11 @@ impl CommandContext {
         &self,
         barrier_manager_context: &GlobalBarrierWorkerContextImpl,
     ) -> MetaResult<()> {
-        match &self.command {
-            Command::Plain(_) => {}
+        let Some(command) = &self.command else {
+            return Ok(());
+        };
+        match command {
+            Command::Flush => {}
 
             Command::Throttle(_) => {}
 

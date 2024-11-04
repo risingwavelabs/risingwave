@@ -42,3 +42,7 @@ labels:
 - label: "ci/run-e2e-single-node-tests"
   files:
   - "src\\/meta\\/.*.rs"
+
+- label: "ci/run-e2e-test-other-backends"
+  files:
+  - "src\\/meta\\/.*.rs"

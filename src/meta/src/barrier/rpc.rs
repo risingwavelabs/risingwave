@@ -48,6 +48,7 @@ use super::{
     InflightSubscriptionInfo,
 };
 use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
 
@@ -252,13 +253,13 @@ impl ControlStreamManager {
 impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
         barrier_info: &BarrierInfo,
         prev_paused_reason: Option<PausedReason>,
         pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: Option<&InflightGraphInfo>,
+        applied_graph_info: &InflightGraphInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command.to_mutation(prev_paused_reason);
+        let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -273,21 +274,24 @@ impl ControlStreamManager {
             None,
             mutation,
             barrier_info,
-            pre_applied_graph_info,
-            applied_graph_info,
-            command.actors_to_create(),
+            pre_applied_graph_info.fragment_infos(),
+            applied_graph_info.fragment_infos(),
+            command
+                .as_ref()
+                .map(|command| command.actors_to_create())
+                .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
         )
     }
 
-    pub(super) fn inject_barrier(
+    pub(super) fn inject_barrier<'a>(
         &mut self,
         creating_table_id: Option<TableId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
-        pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: Option<&InflightGraphInfo>,
+        pre_applied_graph_info: impl IntoIterator<Item = &InflightFragmentInfo>,
+        applied_graph_info: impl IntoIterator<Item = &'a InflightFragmentInfo> + 'a,
         mut new_actors: Option<HashMap<WorkerId, Vec<StreamActor>>>,
         subscriptions_to_add: Vec<SubscriptionUpstreamInfo>,
         subscriptions_to_remove: Vec<SubscriptionUpstreamInfo>,
@@ -300,23 +304,18 @@ impl ControlStreamManager {
             .map(|table_id| table_id.table_id)
             .unwrap_or(u32::MAX);
 
-        for worker_id in pre_applied_graph_info
-            .worker_ids()
-            .chain(
-                applied_graph_info
-                    .into_iter()
-                    .flat_map(|info| info.worker_ids()),
-            )
-            .chain(
-                new_actors
-                    .iter()
-                    .flat_map(|new_actors| new_actors.keys().cloned()),
-            )
-        {
-            if !self.nodes.contains_key(&(worker_id as _)) {
+        let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
+
+        for worker_id in node_actors.keys() {
+            if !self.nodes.contains_key(worker_id) {
                 return Err(anyhow!("unconnected worker node {}", worker_id).into());
             }
         }
+
+        let table_ids_to_sync: HashSet<_> =
+            InflightFragmentInfo::existing_table_ids(applied_graph_info)
+                .map(|table_id| table_id.table_id)
+                .collect();
 
         let mut node_need_collect = HashSet::new();
         let new_actors_location_to_broadcast = new_actors
@@ -327,7 +326,7 @@ impl ControlStreamManager {
                     actor_id: actor_info.actor_id,
                     host: self
                         .nodes
-                        .get(&(*worker_id as _))
+                        .get(worker_id)
                         .expect("have checked exist previously")
                         .worker
                         .host
@@ -339,18 +338,12 @@ impl ControlStreamManager {
         self.nodes
             .iter()
             .try_for_each(|(node_id, node)| {
-                let actor_ids_to_collect: Vec<_> = pre_applied_graph_info
-                    .actor_ids_to_collect(*node_id as _)
+                let actor_ids_to_collect = node_actors
+                    .get(node_id)
+                    .map(|actors| actors.iter().cloned())
+                    .into_iter()
+                    .flatten()
                     .collect();
-                let table_ids_to_sync = if let Some(graph_info) = applied_graph_info {
-                    graph_info
-                        .existing_table_ids()
-                        .map(|table_id| table_id.table_id)
-                        .collect()
-                } else {
-                    Default::default()
-                };
-
                 {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
@@ -374,7 +367,10 @@ impl ControlStreamManager {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
                                         actor_ids_to_collect,
-                                        table_ids_to_sync,
+                                        table_ids_to_sync: table_ids_to_sync
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
                                         partial_graph_id,
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors

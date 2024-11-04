@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::ops::{Bound, RangeInclusive};
 
-use delta_btree_map::{Change, DeltaBTreeMap, PositionType};
+use delta_btree_map::{Change, DeltaBTreeMap};
 use educe::Educe;
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
@@ -470,12 +470,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             // Populate window states with the affected range of rows.
             {
                 let mut cursor = part_with_delta
-                    .find(first_frame_start)
+                    .before(first_frame_start)
                     .expect("first frame start key must exist");
-                while {
-                    let (key, row) = cursor
-                        .key_value()
-                        .expect("cursor must be valid until `last_frame_end`");
+
+                while let Some((key, row)) = cursor.next() {
+                    accessed_entry_count += 1;
 
                     for (call, state) in calls.iter().zip_eq_fast(states.iter_mut()) {
                         // TODO(rc): batch appending
@@ -488,28 +487,28 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                                 .into(),
                         );
                     }
-                    accessed_entry_count += 1;
-                    cursor.move_next();
 
-                    key != last_frame_end
-                } {}
+                    if key == last_frame_end {
+                        break;
+                    }
+                }
             }
 
             // Slide to the first affected key. We can safely pass in `first_curr_key` here
             // because it definitely exists in the states by the definition of affected range.
             states.just_slide_to(first_curr_key.as_normal_expect())?;
-            let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
+            let mut curr_key_cursor = part_with_delta.before(first_curr_key).unwrap();
             assert_eq!(
                 states.curr_key(),
-                curr_key_cursor.key().map(CacheKey::as_normal_expect)
+                curr_key_cursor
+                    .peek_next()
+                    .map(|(k, _)| k)
+                    .map(CacheKey::as_normal_expect)
             );
 
             // Slide and generate changes.
-            while {
-                let (key, row) = curr_key_cursor
-                    .key_value()
-                    .expect("cursor must be valid until `last_curr_key`");
-                let mut should_continue = true;
+            while let Some((key, row)) = curr_key_cursor.next() {
+                let mut should_stop = false;
 
                 let output = states.slide_no_evict_hint()?;
                 compute_count += 1;
@@ -524,11 +523,11 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                             // all the following rows, so we need to check the `order_key`.
                             if key.as_normal_expect().order_key > last_delta_key.order_key {
                                 // there won't be any more changes after this point, we can stop early
-                                should_continue = false;
+                                should_stop = true;
                             }
                         } else if key.as_normal_expect() >= last_delta_key {
                             // there won't be any more changes after this point, we can stop early
-                            should_continue = false;
+                            should_stop = true;
                         }
                     }
                 }
@@ -542,29 +541,23 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                         .collect(),
                 );
 
-                match curr_key_cursor.position() {
-                    PositionType::Ghost => unreachable!(),
-                    PositionType::Snapshot | PositionType::DeltaUpdate => {
-                        // update
-                        let old_row = snapshot.get(key).unwrap().clone();
-                        if old_row != new_row {
-                            part_changes.insert(
-                                key.as_normal_expect().clone(),
-                                Record::Update { old_row, new_row },
-                            );
-                        }
+                if let Some(old_row) = snapshot.get(key).cloned() {
+                    // update
+                    if old_row != new_row {
+                        part_changes.insert(
+                            key.as_normal_expect().clone(),
+                            Record::Update { old_row, new_row },
+                        );
                     }
-                    PositionType::DeltaInsert => {
-                        // insert
-                        part_changes
-                            .insert(key.as_normal_expect().clone(), Record::Insert { new_row });
-                    }
+                } else {
+                    // insert
+                    part_changes.insert(key.as_normal_expect().clone(), Record::Insert { new_row });
                 }
 
-                curr_key_cursor.move_next();
-
-                should_continue && key != last_curr_key
-            } {}
+                if should_stop || key == last_curr_key {
+                    break;
+                }
+            }
         }
 
         self.stats.accessed_entry_count += accessed_entry_count;

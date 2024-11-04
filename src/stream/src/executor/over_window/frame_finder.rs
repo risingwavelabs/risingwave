@@ -17,7 +17,7 @@
 
 use std::ops::Bound;
 
-use delta_btree_map::DeltaBTreeMap;
+use delta_btree_map::{CursorWithDelta, DeltaBTreeMap};
 use itertools::Itertools;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, Sentinelled, ToDatumRef};
@@ -284,6 +284,14 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     } else {
         part_with_delta.upper_bound(Bound::Included(delta_key))
     };
+    let pointed_key = |cursor: CursorWithDelta<'cache, CacheKey, OwnedRow>| {
+        if LEFT {
+            cursor.peek_next().map(|(k, _)| k)
+        } else {
+            cursor.peek_prev().map(|(k, _)| k)
+        }
+    };
+
     let n_rows_to_move = if LEFT {
         frame_bounds.n_following_rows().unwrap()
     } else {
@@ -291,8 +299,7 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     };
 
     if n_rows_to_move == 0 {
-        return cursor
-            .key()
+        return pointed_key(cursor)
             .or_else(|| {
                 if LEFT {
                     part_with_delta.last_key()
@@ -304,28 +311,16 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     }
 
     for _ in 0..n_rows_to_move {
-        // Note that we have to move before check, to handle situation where the
-        // cursor is at ghost position at first.
-        if LEFT {
-            cursor.move_prev();
-        } else {
-            cursor.move_next();
-        }
-        if cursor.position().is_ghost() {
+        let res = if LEFT { cursor.prev() } else { cursor.next() };
+        if res.is_none() {
+            // we reach the end
             break;
         }
     }
-    cursor
-        .key()
-        .or_else(|| {
-            // Note the difference between this with the `n_rows_to_move == 0` case.
-            if LEFT {
-                part_with_delta.first_key()
-            } else {
-                part_with_delta.last_key()
-            }
-        })
-        .unwrap()
+
+    // We always have a valid key here, because `part_with_delta` must not be empty,
+    // and `n_rows_to_move` is always larger than 0 when we reach here.
+    pointed_key(cursor).unwrap()
 }
 
 fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
@@ -350,8 +345,18 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     // have `curr_key` which definitely exists in the `part_with_delta`. We just find
     // the cursor pointing to it and move the cursor to frame boundary.
 
-    let mut cursor = part_with_delta.find(curr_key).unwrap();
-    assert!(!cursor.position().is_ghost());
+    let mut cursor = if LEFT {
+        part_with_delta.before(curr_key).unwrap()
+    } else {
+        part_with_delta.after(curr_key).unwrap()
+    };
+    let pointed_key = |cursor: CursorWithDelta<'cache, CacheKey, OwnedRow>| {
+        if LEFT {
+            cursor.peek_next().map(|(k, _)| k)
+        } else {
+            cursor.peek_prev().map(|(k, _)| k)
+        }
+    };
 
     let n_rows_to_move = if LEFT {
         frame_bounds.n_preceding_rows().unwrap()
@@ -360,25 +365,16 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     };
 
     for _ in 0..n_rows_to_move {
-        if LEFT {
-            cursor.move_prev();
-        } else {
-            cursor.move_next();
-        }
-        if cursor.position().is_ghost() {
+        let res = if LEFT { cursor.prev() } else { cursor.next() };
+        if res.is_none() {
+            // we reach the end
             break;
         }
     }
-    cursor
-        .key()
-        .or_else(|| {
-            if LEFT {
-                part_with_delta.first_key()
-            } else {
-                part_with_delta.last_key()
-            }
-        })
-        .unwrap()
+
+    // We always have a valid key here, because `cursor` must point to a valid key
+    // at the beginning.
+    pointed_key(cursor).unwrap()
 }
 
 /// Given a pair of left and right state keys, calculate the leftmost (smallest) and rightmost
@@ -497,11 +493,15 @@ fn find_for_range_frames<'cache, const LEFT: bool>(
             // the curr key.
             prev_key
         } else {
-            // If cursor is in ghost position, it simply means that the search key is larger
+            // If there's nothing on the left, it simply means that the search key is larger
             // than any existing key. Returning the last key in this case does no harm. Especially,
             // if the last key is largest sentinel, the caller should extend the cache rightward
             // to get possible entries with the same order value into the cache.
-            cursor.key().or_else(|| part_with_delta.last_key()).unwrap()
+            cursor
+                .peek_next()
+                .map(|(k, _)| k)
+                .or_else(|| part_with_delta.last_key())
+                .unwrap()
         }
     } else {
         let cursor = part_with_delta.upper_bound(Bound::Included(&search_key));
@@ -511,7 +511,8 @@ fn find_for_range_frames<'cache, const LEFT: bool>(
             next_key
         } else {
             cursor
-                .key()
+                .peek_prev()
+                .map(|(k, _)| k)
                 .or_else(|| part_with_delta.first_key())
                 .unwrap()
         }

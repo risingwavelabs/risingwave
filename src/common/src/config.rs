@@ -116,7 +116,7 @@ pub trait OverrideConfig {
     fn r#override(&self, config: &mut RwConfig);
 }
 
-impl<'a, T: OverrideConfig> OverrideConfig for &'a T {
+impl<T: OverrideConfig> OverrideConfig for &T {
     fn r#override(&self, config: &mut RwConfig) {
         T::r#override(self, config)
     }
@@ -318,6 +318,7 @@ pub struct MetaConfig {
     pub cut_table_size_limit: u64,
 
     #[serde(default, flatten)]
+    #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
@@ -659,22 +660,36 @@ pub use risingwave_common_metrics::MetricLevel;
 /// the section `[storage.cache]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheConfig {
+    /// Configure the capacity of the block cache in MB explicitly.
+    /// The overridden value will only be effective if:
+    /// 1. `meta_cache_capacity_mb` and `shared_buffer_capacity_mb` are also configured explicitly.
+    /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
     #[serde(default)]
     pub block_cache_capacity_mb: Option<usize>,
 
+    /// Configure the number of shards in the block cache explicitly.
+    /// If not set, the shard number will be determined automatically based on cache capacity.
     #[serde(default)]
     pub block_cache_shard_num: Option<usize>,
 
     #[serde(default)]
+    #[config_doc(omitted)]
     pub block_cache_eviction: CacheEvictionConfig,
 
+    /// Configure the capacity of the block cache in MB explicitly.
+    /// The overridden value will only be effective if:
+    /// 1. `block_cache_capacity_mb` and `shared_buffer_capacity_mb` are also configured explicitly.
+    /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
 
+    /// Configure the number of shards in the meta cache explicitly.
+    /// If not set, the shard number will be determined automatically based on cache capacity.
     #[serde(default)]
     pub meta_cache_shard_num: Option<usize>,
 
     #[serde(default)]
+    #[config_doc(omitted)]
     pub meta_cache_eviction: CacheEvictionConfig,
 }
 
@@ -718,8 +733,10 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::share_buffer_compaction_worker_threads_number")]
     pub share_buffer_compaction_worker_threads_number: u32,
 
-    /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
-    /// is enough space.
+    /// Configure the maximum shared buffer size in MB explicitly. Writes attempting to exceed the capacity
+    /// will stall until there is enough space. The overridden value will only be effective if:
+    /// 1. `block_cache_capacity_mb` and `meta_cache_capacity_mb` are also configured explicitly.
+    /// 2. `block_cache_capacity_mb` + `meta_cache_capacity_mb` + `meta_cache_capacity_mb` doesn't exceed 0.3 * non-reserved memory.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
 
@@ -743,6 +760,7 @@ pub struct StorageConfig {
     pub write_conflict_detection_enabled: bool,
 
     #[serde(default)]
+    #[config_doc(nested)]
     pub cache: CacheConfig,
 
     /// DEPRECATED: This config will be deprecated in the future version, use `storage.cache.block_cache_capacity_mb` instead.
@@ -797,12 +815,15 @@ pub struct StorageConfig {
     pub min_sstable_size_mb: u32,
 
     #[serde(default)]
+    #[config_doc(nested)]
     pub data_file_cache: FileCacheConfig,
 
     #[serde(default)]
+    #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
 
     #[serde(default)]
+    #[config_doc(nested)]
     pub cache_refill: CacheRefillConfig,
 
     /// Whether to enable streaming upload for sstable.

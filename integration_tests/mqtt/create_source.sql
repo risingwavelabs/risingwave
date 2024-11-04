@@ -4,7 +4,7 @@ CREATE TABLE
 CREATE TABLE mqtt_source_table
 (
   id integer,
-  name varchar,
+  name varchar
 )
 WITH (
     connector='mqtt',

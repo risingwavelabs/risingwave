@@ -26,8 +26,8 @@ use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
@@ -764,15 +764,17 @@ impl StateStoreImpl {
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
-                    RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
-                )));
+                let compaction_catalog_manager_ref =
+                    Arc::new(CompactionCatalogManager::new(Box::new(
+                        RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
+                    )));
+
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),
                     notification_client,
-                    key_filter_manager,
+                    compaction_catalog_manager_ref,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
                     await_tree_config,
@@ -844,11 +846,13 @@ pub mod boxed_state_store {
     use crate::store::*;
     use crate::store_impl::AsHummock;
 
+    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreIter<T: IterItem>: Send {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>>;
     }
 
+    #[expect(elided_named_lifetimes)] // false positive
     #[async_trait::async_trait]
     impl<T: IterItem, I: StateStoreIter<T>> DynamicDispatchedStateStoreIter<T> for I {
         async fn try_next(&mut self) -> StorageResult<Option<T::ItemRef<'_>>> {
@@ -954,12 +958,14 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,
@@ -1002,6 +1008,7 @@ pub mod boxed_state_store {
             self.get(key, read_options).await
         }
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn iter(
             &self,
             key_range: TableKeyRange,
@@ -1010,6 +1017,7 @@ pub mod boxed_state_store {
             Ok(Box::new(self.iter(key_range, read_options).await?))
         }
 
+        #[expect(elided_named_lifetimes)] // false positive
         async fn rev_iter(
             &self,
             key_range: TableKeyRange,

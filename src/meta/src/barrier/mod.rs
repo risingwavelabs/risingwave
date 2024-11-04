@@ -25,7 +25,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::{bail, must_match};
@@ -56,7 +56,7 @@ use tracing::{debug, error, info, warn, Instrument};
 use self::command::CommandContext;
 use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::{PeriodicBarriers, ScheduledBarriers};
@@ -129,13 +129,19 @@ enum BarrierManagerStatus {
     Running,
 }
 
-/// Scheduled command with its notifiers.
-struct Scheduled {
-    command: Command,
-    notifiers: Vec<Notifier>,
+struct NewBarrier {
+    command: Option<(DatabaseId, Command, Vec<Notifier>)>,
     span: tracing::Span,
     /// Choose a different barrier(checkpoint == true) according to it
     checkpoint: bool,
+}
+
+/// Scheduled command with its notifiers.
+struct Scheduled {
+    database_id: DatabaseId,
+    command: Command,
+    notifiers: Vec<Notifier>,
+    span: tracing::Span,
 }
 
 impl From<&BarrierManagerStatus> for PbRecoveryStatus {
@@ -399,7 +405,9 @@ impl CheckpointControl {
             .set(self.total_command_num() as i64);
     }
 
-    fn jobs_to_merge(&self) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>> {
+    fn jobs_to_merge(
+        &self,
+    ) -> Option<HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>> {
         let mut table_ids_to_merge = HashMap::new();
 
         for (table_id, creating_streaming_job) in &self.creating_streaming_job_controls {
@@ -506,7 +514,12 @@ impl CheckpointControl {
         let should_pause = self
             .command_ctx_queue
             .last_key_value()
-            .map(|(_, x)| x.command_ctx.command.should_pause_inject_barrier())
+            .and_then(|(_, x)| {
+                x.command_ctx
+                    .command
+                    .as_ref()
+                    .map(Command::should_pause_inject_barrier)
+            })
             .or(self
                 .completing_barrier
                 .map(|(_, should_pause)| should_pause))
@@ -514,7 +527,12 @@ impl CheckpointControl {
         debug_assert_eq!(
             self.command_ctx_queue
                 .values()
-                .map(|node| node.command_ctx.command.should_pause_inject_barrier())
+                .filter_map(|node| {
+                    node.command_ctx
+                        .command
+                        .as_ref()
+                        .map(Command::should_pause_inject_barrier)
+                })
                 .chain(
                     self.completing_barrier
                         .map(|(_, should_pause)| should_pause)
@@ -865,9 +883,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                     info!(?changed_worker, "worker changed");
 
-                    self.checkpoint_control.state.inflight_graph_info
-                        .on_new_worker_node_map(self.active_streaming_nodes.current());
-                    self.checkpoint_control.creating_streaming_job_controls.values().for_each(|job| job.on_new_worker_node_map(self.active_streaming_nodes.current()));
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
                         self.control_stream_manager.add_worker(node, &self.checkpoint_control.state.inflight_subscription_info, &*self.context).await;
                     }
@@ -926,11 +941,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                 }
-                scheduled = self.periodic_barriers.next_barrier(&*self.context),
+                new_barrier = self.periodic_barriers.next_barrier(&*self.context),
                     if self
                         .checkpoint_control
                         .can_inject_barrier(self.in_flight_barrier_nums) => {
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(scheduled, &mut self.control_stream_manager, &self.active_streaming_nodes) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager, &self.active_streaming_nodes) {
                         self.failure_recovery(e).await;
                     }
                 }
@@ -944,18 +959,24 @@ impl CheckpointControl {
     /// Handle the new barrier from the scheduled queue and inject it.
     fn handle_new_barrier(
         &mut self,
-        scheduled: Scheduled,
+        new_barrier: NewBarrier,
         control_stream_manager: &mut ControlStreamManager,
         active_streaming_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<()> {
-        let Scheduled {
-            mut command,
-            mut notifiers,
+        let NewBarrier {
+            command,
             checkpoint,
             span,
-        } = scheduled;
+        } = new_barrier;
 
-        if let Some(table_to_cancel) = command.table_to_cancel()
+        let (mut command, mut notifiers, database_id) =
+            if let Some((database_id, command, notifiers)) = command {
+                (Some(command), notifiers, Some(database_id))
+            } else {
+                (None, vec![], None)
+            };
+
+        if let Some(table_to_cancel) = command.as_ref().and_then(Command::table_to_cancel)
             && self
                 .creating_streaming_job_controls
                 .contains_key(&table_to_cancel)
@@ -971,7 +992,7 @@ impl CheckpointControl {
             return Ok(());
         }
 
-        if let Command::RescheduleFragment { .. } = &command {
+        if let Some(Command::RescheduleFragment { .. }) = &command {
             if !self.creating_streaming_job_controls.is_empty() {
                 warn!("ignore reschedule when creating streaming job with snapshot backfill");
                 for notifier in notifiers {
@@ -986,7 +1007,7 @@ impl CheckpointControl {
             }
         }
 
-        let Some(barrier_info) = self.state.next_barrier_info(&command, checkpoint) else {
+        let Some(barrier_info) = self.state.next_barrier_info(command.as_ref(), checkpoint) else {
             // skip the command when there is nothing to do with the barrier
             for mut notifier in notifiers {
                 notifier.notify_started();
@@ -996,10 +1017,10 @@ impl CheckpointControl {
         };
 
         // Insert newly added creating job
-        if let Command::CreateStreamingJob {
+        if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info),
             info,
-        } = &command
+        }) = &command
         {
             if self.state.paused_reason().is_some() {
                 warn!("cannot create streaming job with snapshot backfill when paused");
@@ -1012,6 +1033,8 @@ impl CheckpointControl {
                 return Ok(());
             }
             let mutation = command
+                .as_ref()
+                .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
             self.creating_streaming_job_controls.insert(
@@ -1027,10 +1050,10 @@ impl CheckpointControl {
         }
 
         // Collect the jobs to finish
-        if let (BarrierKind::Checkpoint(_), Command::Plain(None)) = (&barrier_info.kind, &command)
+        if let (BarrierKind::Checkpoint(_), None) = (&barrier_info.kind, &command)
             && let Some(jobs_to_merge) = self.jobs_to_merge()
         {
-            command = Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge);
+            command = Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge));
         }
 
         let command = command;
@@ -1041,7 +1064,7 @@ impl CheckpointControl {
             table_ids_to_commit,
             jobs_to_wait,
             prev_paused_reason,
-        ) = self.state.apply_command(&command);
+        ) = self.state.apply_command(command.as_ref(), database_id);
 
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
@@ -1050,15 +1073,15 @@ impl CheckpointControl {
         span.record("epoch", barrier_info.curr_epoch.value().0);
 
         for creating_job in &mut self.creating_streaming_job_controls.values_mut() {
-            creating_job.on_new_command(control_stream_manager, &command, &barrier_info)?;
+            creating_job.on_new_command(control_stream_manager, command.as_ref(), &barrier_info)?;
         }
 
         let node_to_collect = match control_stream_manager.inject_command_ctx_barrier(
-            &command,
+            command.as_ref(),
             &barrier_info,
             prev_paused_reason,
             &pre_applied_graph_info,
-            Some(&self.state.inflight_graph_info),
+            &self.state.inflight_graph_info,
         ) {
             Ok(node_to_collect) => node_to_collect,
             Err(err) => {
@@ -1091,7 +1114,6 @@ impl CheckpointControl {
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Set barrier manager status.
-
     async fn failure_recovery(&mut self, err: MetaError) {
         self.clear_on_err(&err).await;
 
@@ -1296,7 +1318,11 @@ impl CompleteBarrierTask {
             prev_epoch: command_ctx.barrier_info.prev_epoch(),
             cur_epoch: command_ctx.barrier_info.curr_epoch.value().0,
             duration_sec,
-            command: command_ctx.command.to_string(),
+            command: command_ctx
+                .command
+                .as_ref()
+                .map(|command| command.to_string())
+                .unwrap_or_else(|| "barrier".to_string()),
             barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_string(),
         };
         env.event_log_manager_ref()
@@ -1440,7 +1466,11 @@ impl CheckpointControl {
                 );
                 self.completing_barrier = Some((
                     node.command_ctx.barrier_info.prev_epoch(),
-                    node.command_ctx.command.should_pause_inject_barrier(),
+                    node.command_ctx
+                        .command
+                        .as_ref()
+                        .map(|c| c.should_pause_inject_barrier())
+                        .unwrap_or(false),
                 ));
                 task = Some(CompleteBarrierTask {
                     commit_info,
@@ -1603,13 +1633,7 @@ impl GlobalBarrierWorkerContextImpl {
             .load_all_actors()
             .await?;
 
-        Ok(InflightGraphInfo::new(
-            all_actor_infos
-                .fragment_infos
-                .into_iter()
-                .map(|(id, info)| (id as _, info))
-                .collect(),
-        ))
+        Ok(InflightGraphInfo::new(all_actor_infos))
     }
 }
 
@@ -1715,7 +1739,7 @@ fn collect_commit_epoch_info(
     let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
         collect_resp_info(resps);
 
-    let new_table_fragment_infos = if let Command::CreateStreamingJob { info, job_type } =
+    let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
         &command_ctx.command
         && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
     {

@@ -143,7 +143,7 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
     compaction_selectors
 }
 
-impl<'a> HummockVersionTransaction<'a> {
+impl HummockVersionTransaction<'_> {
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
         let trivial_move = CompactStatus::is_trivial_move_task(compact_task);
@@ -1097,7 +1097,6 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
-
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
         let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;

@@ -29,7 +29,7 @@ use crate::{
 #[derive(
     Clone, Debug, PartialEq, Hash, Copy, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize,
 )]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum TableType {
     #[sea_orm(string_value = "TABLE")]
     Table,
@@ -65,7 +65,7 @@ impl From<PbTableType> for TableType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum HandleConflictBehavior {
     #[sea_orm(string_value = "OVERWRITE")]
     Overwrite,
