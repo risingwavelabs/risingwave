@@ -136,7 +136,6 @@ pub struct Args {
 }
 
 #[tokio::main]
-#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 
@@ -186,7 +185,7 @@ async fn main() {
         cluster.create_kafka_producer(&datadir).await;
     }
 
-    let seed = madsim::runtime::Handle::current().seed();
+    let seed = sqlsmith_seed();
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -269,4 +268,9 @@ async fn main() {
     }
 
     cluster.graceful_shutdown().await;
+}
+
+#[cfg_or_panic(madsim)]
+fn sqlsmith_seed() -> u64 {
+    madsim::runtime::Handle::current().seed()
 }

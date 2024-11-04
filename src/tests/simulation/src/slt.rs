@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use itertools::Itertools;
+use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
@@ -84,6 +85,15 @@ impl SqlCmd {
         // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
         // are not transactional, we can't kill during `alter table add/drop columns` for now, will
         // remove it until transactional commit of table fragment and catalog is supported.
+    }
+
+    fn is_create(&self) -> bool {
+        matches!(
+            self,
+            SqlCmd::Create { .. }
+                | SqlCmd::CreateSink { .. }
+                | SqlCmd::CreateMaterializedView { .. }
+        )
     }
 }
 
@@ -229,7 +239,19 @@ pub async fn run_slt_task(
         // We can revert it back to false only if we encounter a record that sets background_ddl to false.
         let mut manual_background_ddl_enabled = false;
 
-        for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+        let records = sqllogictest::parse_file(path).expect("failed to parse file");
+        let can_use_random_vnode_count = records.iter().all(|record| {
+            if let Record::Statement { sql, .. } = record
+                && sql.to_lowercase().contains("max_parallelism")
+            {
+                tracing::debug!(path = %path.display(), "skip random vnode count");
+                false
+            } else {
+                true
+            }
+        });
+
+        for record in records {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
             // println!("{:#?}", metrics);
@@ -292,6 +314,32 @@ pub async fn run_slt_task(
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
             };
+
+            if let Record::Statement {
+                loc,
+                conditions,
+                connection,
+                ..
+            } = &record
+                && cmd.is_create()
+                && can_use_random_vnode_count
+            {
+                let sql = format!(
+                    "SET STREAMING_MAX_PARALLELISM = {};",
+                    ((1..=64).chain(224..=288).chain(992..=1056))
+                        .choose(&mut thread_rng())
+                        .unwrap()
+                );
+                println!("setting vnode count: {sql}");
+                let set_random_vnode_count = Record::Statement {
+                    loc: loc.clone(),
+                    conditions: conditions.clone(),
+                    connection: connection.clone(),
+                    sql,
+                    expected: StatementExpect::Ok,
+                };
+                tester.run_async(set_random_vnode_count).await.unwrap();
+            }
 
             if !cmd.allow_kill() {
                 for i in 0usize.. {
