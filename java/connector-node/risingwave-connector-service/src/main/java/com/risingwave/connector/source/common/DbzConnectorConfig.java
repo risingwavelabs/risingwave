@@ -212,6 +212,23 @@ public class DbzConnectorConfig {
                 }
             }
 
+            // adapt value of sslmode to the expected value
+            var sslMode = postgresProps.getProperty("database.sslmode");
+            if (sslMode != null) {
+                switch (sslMode) {
+                    case "disabled":
+                        sslMode = "disable";
+                        break;
+                    case "preferred":
+                        sslMode = "prefer";
+                        break;
+                    case "required":
+                        sslMode = "require";
+                        break;
+                }
+                postgresProps.setProperty("database.sslmode", sslMode);
+            }
+
             dbzProps.putAll(postgresProps);
 
             if (isCdcSourceJob) {

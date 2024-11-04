@@ -65,8 +65,8 @@ use tracing::info;
 
 use super::utils::{
     check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
+    rename_relation, rename_relation_refer,
 };
-use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
 use crate::controller::utils::{
     build_relation_group_for_delete, check_connection_name_duplicate,
     check_database_name_duplicate, check_function_signature_duplicate,
@@ -2485,139 +2485,104 @@ impl CatalogController {
         )
         .await?;
 
-        let mut to_update_relations = vec![];
         // rename relation.
-        macro_rules! rename_relation {
-            ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
-                let (mut relation, obj) = $entity::find_by_id($object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                let obj = obj.unwrap();
-                let old_name = relation.name.clone();
-                relation.name = object_name.into();
-                if obj.obj_type != ObjectType::View {
-                    relation.definition = alter_relation_rename(&relation.definition, object_name);
-                }
-                let active_model = $table::ActiveModel {
-                    $identity: Set(relation.$identity),
-                    name: Set(object_name.into()),
-                    definition: Set(relation.definition.clone()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::$entity(ObjectModel(relation, obj).into())),
-                });
-                old_name
-            }};
-        }
-
-        // TODO: check is there any thing to change for shared source?
-        let old_name = match object_type {
-            ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
-            ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-            ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
-            ObjectType::Subscription => {
-                rename_relation!(Subscription, subscription, subscription_id, object_id)
-            }
-            ObjectType::View => rename_relation!(View, view, view_id, object_id),
-            ObjectType::Index => {
-                let (mut index, obj) = Index::find_by_id(object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                index.name = object_name.into();
-                let index_table_id = index.index_table_id;
-                let old_name = rename_relation!(Table, table, table_id, index_table_id);
-
-                // the name of index and its associated table is the same.
-                let active_model = index::ActiveModel {
-                    index_id: Set(index.index_id),
-                    name: Set(object_name.into()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(
-                        ObjectModel(index, obj.unwrap()).into(),
-                    )),
-                });
-                old_name
-            }
-            _ => unreachable!("only relation name can be altered."),
-        };
-
+        let (mut to_update_relations, old_name) =
+            rename_relation(&txn, object_type, object_id, object_name).await?;
         // rename referring relation name.
-        macro_rules! rename_relation_ref {
-            ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
-                let (mut relation, obj) = $entity::find_by_id($object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                relation.definition =
-                    alter_relation_rename_refs(&relation.definition, &old_name, object_name);
-                let active_model = $table::ActiveModel {
-                    $identity: Set(relation.$identity),
-                    definition: Set(relation.definition.clone()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::$entity(
-                        ObjectModel(relation, obj.unwrap()).into(),
-                    )),
-                });
-            }};
-        }
-        let mut objs = get_referring_objects(object_id, &txn).await?;
-        if object_type == ObjectType::Table {
-            let incoming_sinks: I32Array = Table::find_by_id(object_id)
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, object_id, object_name, &old_name).await?,
+        );
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::RelationGroup(PbRelationGroup {
+                    relations: to_update_relations,
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_swap_rename(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        dst_object_id: ObjectId,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let dst_name: String = match object_type {
+            ObjectType::Table => Table::find_by_id(dst_object_id)
                 .select_only()
-                .column(table::Column::IncomingSinks)
+                .column(table::Column::Name)
                 .into_tuple()
                 .one(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-
-            objs.extend(
-                incoming_sinks
-                    .into_inner()
-                    .into_iter()
-                    .map(|id| PartialObject {
-                        oid: id,
-                        obj_type: ObjectType::Sink,
-                        schema_id: None,
-                        database_id: None,
-                    }),
-            );
-        }
-
-        for obj in objs {
-            match obj.obj_type {
-                ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
-                ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
-                ObjectType::Subscription => {
-                    rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
-                }
-                ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
-                ObjectType::Index => {
-                    let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
-                        .select_only()
-                        .column(index::Column::IndexTableId)
-                        .into_tuple()
-                        .one(&txn)
-                        .await?;
-                    rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
-                }
-                _ => {
-                    bail!("only table, sink, subscription, view and index depend on other objects.")
-                }
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Source => Source::find_by_id(dst_object_id)
+                .select_only()
+                .column(source::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Sink => Sink::find_by_id(dst_object_id)
+                .select_only()
+                .column(sink::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::View => View::find_by_id(dst_object_id)
+                .select_only()
+                .column(view::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Subscription => Subscription::find_by_id(dst_object_id)
+                .select_only()
+                .column(subscription::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            _ => {
+                return Err(MetaError::permission_denied(format!(
+                    "swap rename not supported for object type: {:?}",
+                    object_type
+                )));
             }
-        }
+        };
+
+        // rename relations.
+        let (mut to_update_relations, src_name) =
+            rename_relation(&txn, object_type, object_id, &dst_name).await?;
+        let (to_update_relations2, _) =
+            rename_relation(&txn, object_type, dst_object_id, &src_name).await?;
+        to_update_relations.extend(to_update_relations2);
+        // rename referring relation name.
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, object_id, &dst_name, &src_name).await?,
+        );
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, dst_object_id, &src_name, &dst_name).await?,
+        );
+
         txn.commit().await?;
 
         let version = self
