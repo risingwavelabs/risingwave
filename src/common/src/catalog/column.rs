@@ -117,6 +117,8 @@ pub struct ColumnDesc {
     pub description: Option<String>,
     pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
+    /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
+    /// so this field is not persisted.
     pub system_column: Option<SystemColumn>,
 }
 
