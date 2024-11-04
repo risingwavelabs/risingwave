@@ -34,7 +34,6 @@ use risingwave_meta_model::{
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
-use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -383,12 +382,7 @@ impl HummockManager {
                     sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                 };
                 hummock_sstable_info::Entity::insert(m)
-                    .on_conflict(
-                        OnConflict::column(hummock_sstable_info::Column::SstId)
-                            .do_nothing()
-                            .to_owned(),
-                    )
-                    .do_nothing()
+                    .on_conflict_do_nothing()
                     .exec(txn)
                     .await?;
                 count += 1;
@@ -437,12 +431,7 @@ impl HummockManager {
                     .into()),
             };
             hummock_time_travel_version::Entity::insert(m)
-                .on_conflict(
-                    OnConflict::column(hummock_time_travel_version::Column::VersionId)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .do_nothing()
+                .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
         }
@@ -468,12 +457,7 @@ impl HummockManager {
                     .into()),
             };
             hummock_time_travel_delta::Entity::insert(m)
-                .on_conflict(
-                    OnConflict::column(hummock_time_travel_delta::Column::VersionId)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .do_nothing()
+                .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
         }

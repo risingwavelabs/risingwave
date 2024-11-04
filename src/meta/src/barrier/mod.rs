@@ -1140,7 +1140,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .instrument(span)
                 .await;
         } else {
-            panic!("failed to execute barrier: {}", err.as_report());
+            panic!(
+                "a streaming error occurred while recovery is disabled, aborting: {:?}",
+                err.as_report()
+            );
         }
     }
 
