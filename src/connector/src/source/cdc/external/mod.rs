@@ -266,12 +266,12 @@ impl ExternalTableConfig {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
-    #[serde(alias = "disable")]
-    Disabled,
-    #[serde(alias = "prefer")]
-    Preferred,
-    #[serde(alias = "require")]
-    Required,
+    #[serde(alias = "disabled")]
+    Disable,
+    #[serde(alias = "preferred")]
+    Prefer,
+    #[serde(alias = "required")]
+    Require,
     /// verify that the server is trustworthy by checking the certificate chain
     /// up to the root certificate stored on the client.
     #[serde(alias = "verify-ca")]
