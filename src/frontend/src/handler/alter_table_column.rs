@@ -231,6 +231,7 @@ pub async fn get_replace_table_plan(
         .columns
         .iter()
         .map(|col| ColumnCatalog::from(col.clone()))
+        .filter(|col| !col.is_rw_timestamp_column())
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {

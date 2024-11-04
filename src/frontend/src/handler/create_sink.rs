@@ -265,8 +265,8 @@ pub async fn gen_sink_plan(
 
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {
-            if column.is_generated() {
-                unreachable!("can not derive generated columns in a sink's catalog, but meet one");
+            if !column.can_dml() {
+                unreachable!("can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one");
             }
         }
 
@@ -468,17 +468,18 @@ pub async fn handle_create_sink(
         let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
         let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
 
+        let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         for existing_sink in incoming_sinks {
             hijack_merger_for_target_table(
                 &mut graph,
-                table_catalog.columns(),
+                &columns_without_rw_timestamp,
                 &existing_sink,
                 Some(&existing_sink.unique_identity()),
             )?;
         }
 
         // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
-        hijack_merger_for_target_table(&mut graph, table_catalog.columns(), &sink, None)?;
+        hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
 
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
@@ -772,7 +773,7 @@ pub(crate) fn derive_default_column_project_for_sink(
         .collect::<BTreeMap<_, _>>();
 
     for (idx, column) in columns.iter().enumerate() {
-        if column.is_generated() {
+        if !column.can_dml() {
             continue;
         }
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
@@ -347,6 +348,10 @@ pub struct ColumnCatalog {
     pub is_hidden: bool,
 }
 
+static RW_TIMESTAMP_COLUMN: LazyLock<ColumnCatalog> = LazyLock::new(|| {
+    ColumnCatalog::rw_timestamp_column()
+});
+
 impl ColumnCatalog {
     pub fn visible(column_desc: ColumnDesc) -> Self {
         Self {
@@ -436,7 +441,7 @@ impl ColumnCatalog {
     }
 
     pub fn is_rw_timestamp_column(&self) -> bool {
-        self == &Self::rw_timestamp_column()
+        *self == *RW_TIMESTAMP_COLUMN
     }
 
     pub fn offset_column() -> Self {

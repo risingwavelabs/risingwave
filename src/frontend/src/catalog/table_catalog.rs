@@ -328,6 +328,14 @@ impl TableCatalog {
         &self.columns
     }
 
+    pub fn columns_without_rw_timestamp(&self) -> Vec<ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_rw_timestamp_column())
+            .cloned()
+            .collect()
+    }
+
     /// Get a reference to the table catalog's pk desc.
     pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()

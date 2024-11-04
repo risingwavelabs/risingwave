@@ -398,7 +398,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         assert!(pk_prefix.len() == table.pk_indices().len());
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-        if table.has_epoch_idx() {
+        let res = if table.has_epoch_idx() {
             // has epoch_idx means we need to select `_rw_timestamp` column which is unsupported by `get_row` interface, so use iterator interface instead.
             let range_bounds = (Bound::<OwnedRow>::Unbounded, Bound::Unbounded);
             let iter = table
@@ -422,13 +422,14 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } else {
             // Point Get.
             let row = table.get_row(&pk_prefix, epoch.into()).await?;
-
-            if let Some(timer) = timer {
-                timer.observe_duration()
-            }
-
             Ok(row)
+        };
+
+        if let Some(timer) = timer {
+            timer.observe_duration()
         }
+
+        res
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]
