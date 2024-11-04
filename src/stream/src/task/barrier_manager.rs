@@ -382,9 +382,7 @@ impl LocalBarrierWorker {
             }
             Request::RemovePartialGraph(req) => {
                 self.remove_partial_graphs(
-                    req.partial_graph_ids
-                        .into_iter()
-                        .map(PartialGraphId::from_protobuf),
+                    req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
                 Ok(())
             }
@@ -486,7 +484,7 @@ impl LocalBarrierWorker {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
                         request_id: "todo".to_string(),
-                        partial_graph_id: Some(partial_graph_id.to_protobuf()),
+                        partial_graph_id: partial_graph_id.into(),
                         epoch,
                         status: None,
                         create_mview_progress,
@@ -571,7 +569,10 @@ impl LocalBarrierWorker {
                     &graph
                 );
             } else {
-                warn!(?partial_graph_id, "no partial graph to remove");
+                warn!(
+                    partial_graph_id = partial_graph_id.0,
+                    "no partial graph to remove"
+                );
             }
         }
     }
@@ -881,11 +882,10 @@ pub(crate) mod barrier_test_utils {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use risingwave_pb::stream_service::partial_graph_id::{PbDatabase, PbGraphId};
     use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
-        PbPartialGraphId, StreamingControlStreamRequest, StreamingControlStreamResponse,
+        StreamingControlStreamRequest, StreamingControlStreamResponse,
     };
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
     use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -952,11 +952,7 @@ pub(crate) mod barrier_test_utils {
                             barrier: Some(barrier.to_protobuf()),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
-                            partial_graph_id: Some(PbPartialGraphId {
-                                graph_id: Some(PbGraphId::Database(PbDatabase {
-                                    database_id: u32::MAX,
-                                })),
-                            }),
+                            partial_graph_id: u64::MAX,
                             broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],

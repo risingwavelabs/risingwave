@@ -30,9 +30,6 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
-use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_pb::stream_service::partial_graph_id::{CreatingJob, Database, GraphId};
-use risingwave_pb::stream_service::PbPartialGraphId;
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
@@ -43,35 +40,17 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-enum PartialGraphId {
-    Database(DatabaseId),
-    CreatingJob(DatabaseId, TableId),
-}
+struct PartialGraphId(u64);
 
 impl PartialGraphId {
-    fn from_protobuf(pb: PbPartialGraphId) -> Self {
-        match pb.graph_id.unwrap() {
-            GraphId::Database(database) => Self::Database(DatabaseId::new(database.database_id)),
-            GraphId::CreatingJob(job) => {
-                Self::CreatingJob(DatabaseId::new(job.database_id), TableId::new(job.job_id))
-            }
-        }
+    fn new(id: u64) -> Self {
+        Self(id)
     }
+}
 
-    fn to_protobuf(self) -> PbPartialGraphId {
-        PbPartialGraphId {
-            graph_id: Some(match self {
-                PartialGraphId::Database(database_id) => GraphId::Database(Database {
-                    database_id: database_id.database_id,
-                }),
-                PartialGraphId::CreatingJob(database_id, job_id) => {
-                    GraphId::CreatingJob(CreatingJob {
-                        database_id: database_id.database_id,
-                        job_id: job_id.table_id,
-                    })
-                }
-            }),
-        }
+impl From<PartialGraphId> for u64 {
+    fn from(val: PartialGraphId) -> u64 {
+        val.0
     }
 }
 

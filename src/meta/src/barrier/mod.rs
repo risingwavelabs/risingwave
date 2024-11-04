@@ -44,8 +44,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::{PausedReason, PbRecoveryStatus};
 use risingwave_pb::stream_plan::{StreamActor, SubscriptionUpstreamInfo};
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::partial_graph_id::{GraphId, PbCreatingJob, PbGraphId};
-use risingwave_pb::stream_service::{BarrierCompleteResponse, PbPartialGraphId};
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::unbounded_channel;
@@ -59,7 +58,7 @@ use self::notifier::Notifier;
 use crate::barrier::creating_job::{CompleteJobType, CreatingStreamingJobControl};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
-use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::rpc::{from_partial_graph_id, merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::{PeriodicBarriers, ScheduledBarriers};
 use crate::barrier::state::BarrierWorkerState;
 use crate::error::MetaErrorInner;
@@ -436,16 +435,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
-        let database_id = match resp
-            .partial_graph_id
-            .expect("should exist")
-            .graph_id
-            .expect("should exist")
-        {
-            GraphId::Database(database) => database.database_id,
-            GraphId::CreatingJob(job) => job.database_id,
-        };
-        let database_id = DatabaseId::new(database_id);
+        let database_id = from_partial_graph_id(resp.partial_graph_id).0;
         self.databases
             .get_mut(&database_id)
             .expect("should exist")
@@ -716,17 +706,13 @@ impl DatabaseCheckpointControl {
         tracing::trace!(
             worker_id,
             prev_epoch,
-            partial_graph_id = ?resp.partial_graph_id,
+            partial_graph_id = resp.partial_graph_id,
             "barrier collected"
         );
-        match resp
-            .partial_graph_id
-            .expect("should exist")
-            .graph_id
-            .expect("should exist")
-        {
-            GraphId::Database(database) => {
-                assert_eq!(database.database_id, self.database_id.database_id);
+        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
+        assert_eq!(database_id, self.database_id);
+        match creating_job_id {
+            None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
                     assert!(node.state.node_to_collect.remove(&(worker_id as _)));
                     node.state.resps.push(resp);
@@ -737,11 +723,9 @@ impl DatabaseCheckpointControl {
                     );
                 }
             }
-            GraphId::CreatingJob(job) => {
-                assert_eq!(job.database_id, self.database_id.database_id);
-                let creating_table_id = TableId::new(job.job_id);
+            Some(creating_job_id) => {
                 self.creating_streaming_job_controls
-                    .get_mut(&creating_table_id)
+                    .get_mut(&creating_job_id)
                     .expect("should exist")
                     .collect(prev_epoch, worker_id as _, resp, control_stream_manager)?;
             }
@@ -1679,14 +1663,10 @@ impl DatabaseCheckpointControl {
                 && let Some((_, control_stream_manager)) = &mut context
             {
                 control_stream_manager.remove_partial_graph(
+                    self.database_id,
                     finished_jobs
                         .iter()
-                        .map(|(table_id, _, _)| PbPartialGraphId {
-                            graph_id: Some(PbGraphId::CreatingJob(PbCreatingJob {
-                                database_id: self.database_id.database_id,
-                                job_id: table_id.table_id,
-                            })),
-                        })
+                        .map(|(table_id, _, _)| *table_id)
                         .collect(),
                 );
             }

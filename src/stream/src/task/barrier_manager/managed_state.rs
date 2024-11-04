@@ -175,7 +175,7 @@ pub(super) struct ManagedBarrierStateDebugInfo<'a> {
 impl Display for ManagedBarrierStateDebugInfo<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (partial_graph_id, graph_states) in self.graph_states {
-            writeln!(f, "--- Partial Group {:?}", partial_graph_id)?;
+            writeln!(f, "--- Partial Group {}", partial_graph_id.0)?;
             write!(f, "{}", graph_states)?;
         }
         Ok(())
@@ -565,8 +565,7 @@ impl ManagedBarrierState {
     ) -> StreamResult<()> {
         self.add_subscriptions(request.subscriptions_to_add);
         self.remove_subscriptions(request.subscriptions_to_remove);
-        let partial_graph_id =
-            PartialGraphId::from_protobuf(request.partial_graph_id.expect("should exist"));
+        let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {
             actor_to_stop

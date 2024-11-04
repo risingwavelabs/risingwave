@@ -30,11 +30,10 @@ use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
-use risingwave_pb::stream_service::partial_graph_id::{PbCreatingJob, PbDatabase, PbGraphId};
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    InjectBarrierRequest, PbPartialGraphId, StreamingControlStreamRequest,
+    InjectBarrierRequest, StreamingControlStreamRequest,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use rw_futures_util::pending_on_none;
@@ -54,6 +53,27 @@ use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn to_partial_graph_id(database_id: DatabaseId, job_id: Option<TableId>) -> u64 {
+    ((database_id.database_id as u64) << u32::BITS)
+        | (job_id
+            .map(|table| {
+                assert_ne!(table.table_id, u32::MAX);
+                table.table_id
+            })
+            .unwrap_or(u32::MAX) as u64)
+}
+
+pub(super) fn from_partial_graph_id(partial_graph_id: u64) -> (DatabaseId, Option<TableId>) {
+    let database_id = DatabaseId::new((partial_graph_id >> u32::BITS) as u32);
+    let job_id = (partial_graph_id & (u32::MAX as u64)) as u32;
+    let job_id = if job_id == u32::MAX {
+        None
+    } else {
+        Some(TableId::new(job_id))
+    };
+    (database_id, job_id)
+}
 
 struct ControlStreamNode {
     worker: WorkerNode,
@@ -307,18 +327,7 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = PbPartialGraphId {
-            graph_id: Some(if let Some(creating_table_id) = creating_table_id {
-                PbGraphId::CreatingJob(PbCreatingJob {
-                    database_id: database_id.database_id,
-                    job_id: creating_table_id.table_id,
-                })
-            } else {
-                PbGraphId::Database(PbDatabase {
-                    database_id: database_id.database_id,
-                })
-            }),
-        };
+        let partial_graph_id = to_partial_graph_id(database_id, creating_table_id);
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
@@ -387,7 +396,7 @@ impl ControlStreamManager {
                                             .iter()
                                             .cloned()
                                             .collect(),
-                                        partial_graph_id: Some(partial_graph_id),
+                                        partial_graph_id,
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()
@@ -429,7 +438,18 @@ impl ControlStreamManager {
         Ok(node_need_collect)
     }
 
-    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<PbPartialGraphId>) {
+    pub(super) fn remove_partial_graph(
+        &mut self,
+        database_id: DatabaseId,
+        creating_job_ids: Vec<TableId>,
+    ) {
+        if creating_job_ids.is_empty() {
+            return;
+        }
+        let partial_graph_ids = creating_job_ids
+            .into_iter()
+            .map(|job_id| to_partial_graph_id(database_id, Some(job_id)))
+            .collect_vec();
         self.nodes.iter().for_each(|(_, node)| {
             if node.handle
                 .request_sender
@@ -537,4 +557,35 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
             s
         });
     anyhow!(concat).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DatabaseId, TableId};
+
+    use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
+
+    #[test]
+    fn test_partial_graph_id_convert() {
+        fn test_convert(database_id: u32, job_id: Option<u32>) {
+            let database_id = DatabaseId::new(database_id);
+            let job_id = job_id.map(TableId::new);
+            assert_eq!(
+                (database_id, job_id),
+                from_partial_graph_id(to_partial_graph_id(database_id, job_id))
+            );
+        }
+        for database_id in [0, 1, 2, u32::MAX - 1, u32::MAX >> 1] {
+            for job_id in [
+                Some(0),
+                Some(1),
+                Some(2),
+                None,
+                Some(u32::MAX >> 1),
+                Some(u32::MAX - 1),
+            ] {
+                test_convert(database_id, job_id);
+            }
+        }
+    }
 }
