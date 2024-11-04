@@ -164,7 +164,6 @@ async fn main() {
         } else {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
-        ..Default::default()
     };
     let kill_opts = KillOpts {
         kill_meta: false,

@@ -260,8 +260,43 @@ pub async fn run_slt_task(
                 break;
             }
 
+            let cmd = match &record {
+                sqllogictest::Record::Statement { sql, .. }
+                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                _ => SqlCmd::Others,
+            };
+
             // For normal records.
             if !kill {
+                if let Record::Statement {
+                    loc,
+                    conditions,
+                    connection,
+                    ..
+                } = &record
+                    && cmd.is_create()
+                    && can_use_random_vnode_count
+                {
+                    let sql = format!(
+                        "SET STREAMING_MAX_PARALLELISM = {};",
+                        ((1..=64)
+                            .chain(224..=288)
+                            .chain(992..=1056)
+                            .chain(std::iter::once(32768)))
+                        .choose(&mut thread_rng())
+                        .unwrap()
+                    );
+                    println!("setting vnode count: {sql}");
+                    let set_random_vnode_count = Record::Statement {
+                        loc: loc.clone(),
+                        conditions: conditions.clone(),
+                        connection: connection.clone(),
+                        sql,
+                        expected: StatementExpect::Ok,
+                    };
+                    tester.run_async(set_random_vnode_count).await.unwrap();
+                }
+
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
@@ -275,11 +310,6 @@ pub async fn run_slt_task(
             }
 
             // For kill enabled.
-            let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
-                _ => SqlCmd::Others,
-            };
             tracing::debug!(?cmd, "Running");
 
             if background_ddl_rate > 0.0
@@ -314,32 +344,6 @@ pub async fn run_slt_task(
                 tester.run_async(set_background_ddl).await.unwrap();
                 background_ddl_enabled = background_ddl_setting;
             };
-
-            if let Record::Statement {
-                loc,
-                conditions,
-                connection,
-                ..
-            } = &record
-                && cmd.is_create()
-                && can_use_random_vnode_count
-            {
-                let sql = format!(
-                    "SET STREAMING_MAX_PARALLELISM = {};",
-                    ((1..=64).chain(224..=288).chain(992..=1056))
-                        .choose(&mut thread_rng())
-                        .unwrap()
-                );
-                println!("setting vnode count: {sql}");
-                let set_random_vnode_count = Record::Statement {
-                    loc: loc.clone(),
-                    conditions: conditions.clone(),
-                    connection: connection.clone(),
-                    sql,
-                    expected: StatementExpect::Ok,
-                };
-                tester.run_async(set_random_vnode_count).await.unwrap();
-            }
 
             if !cmd.allow_kill() {
                 for i in 0usize.. {
