@@ -286,7 +286,7 @@ pub async fn run_slt_task(
                         .choose(&mut thread_rng())
                         .unwrap()
                     );
-                    println!("setting vnode count: {sql}");
+                    println!("[BUGEN] setting vnode count: {sql}");
                     let set_random_vnode_count = Record::Statement {
                         loc: loc.clone(),
                         conditions: conditions.clone(),
@@ -296,6 +296,8 @@ pub async fn run_slt_task(
                     };
                     tester.run_async(set_random_vnode_count).await.unwrap();
                 }
+
+                println!("[BUGEN] running record: {record}");
 
                 match tester
                     .run_async(record.clone())
