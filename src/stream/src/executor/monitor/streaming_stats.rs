@@ -150,8 +150,9 @@ pub struct StreamingMetrics {
     over_window_range_cache_lookup_count: LabelGuardedIntCounterVec<3>,
     over_window_range_cache_left_miss_count: LabelGuardedIntCounterVec<3>,
     over_window_range_cache_right_miss_count: LabelGuardedIntCounterVec<3>,
+    over_window_accessed_entry_count: LabelGuardedIntCounterVec<3>,
     over_window_compute_count: LabelGuardedIntCounterVec<3>,
-    over_window_same_result_count: LabelGuardedIntCounterVec<3>,
+    over_window_same_output_count: LabelGuardedIntCounterVec<3>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -790,6 +791,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let over_window_accessed_entry_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_accessed_entry_count",
+            "Over window accessed entry count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let over_window_compute_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_compute_count",
             "Over window compute count",
@@ -798,9 +807,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let over_window_same_result_count = register_guarded_int_counter_vec_with_registry!(
-            "stream_over_window_same_result_count",
-            "Over window same result count",
+        let over_window_same_output_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_same_output_count",
+            "Over window same output count",
             &["table_id", "actor_id", "fragment_id"],
             registry
         )
@@ -1096,8 +1105,9 @@ impl StreamingMetrics {
             over_window_range_cache_lookup_count,
             over_window_range_cache_left_miss_count,
             over_window_range_cache_right_miss_count,
+            over_window_accessed_entry_count,
             over_window_compute_count,
-            over_window_same_result_count,
+            over_window_same_output_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_manager_progress,
@@ -1451,11 +1461,14 @@ impl StreamingMetrics {
             over_window_range_cache_right_miss_count: self
                 .over_window_range_cache_right_miss_count
                 .with_guarded_label_values(label_list),
+            over_window_accessed_entry_count: self
+                .over_window_accessed_entry_count
+                .with_guarded_label_values(label_list),
             over_window_compute_count: self
                 .over_window_compute_count
                 .with_guarded_label_values(label_list),
-            over_window_same_result_count: self
-                .over_window_same_result_count
+            over_window_same_output_count: self
+                .over_window_same_output_count
                 .with_guarded_label_values(label_list),
         }
     }
@@ -1570,6 +1583,7 @@ pub struct OverWindowMetrics {
     pub over_window_range_cache_lookup_count: LabelGuardedIntCounter<3>,
     pub over_window_range_cache_left_miss_count: LabelGuardedIntCounter<3>,
     pub over_window_range_cache_right_miss_count: LabelGuardedIntCounter<3>,
+    pub over_window_accessed_entry_count: LabelGuardedIntCounter<3>,
     pub over_window_compute_count: LabelGuardedIntCounter<3>,
-    pub over_window_same_result_count: LabelGuardedIntCounter<3>,
+    pub over_window_same_output_count: LabelGuardedIntCounter<3>,
 }
