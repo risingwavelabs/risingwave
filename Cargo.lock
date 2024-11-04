@@ -5075,7 +5075,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=dfc8db754b93afbc19fcc2251ac5ba598bce1eec#dfc8db754b93afbc19fcc2251ac5ba598bce1eec"
+source = "git+https://github.com/mrcroxx/foyer?rev=b0b24a16fa3940e017798c56f2ac13e11cd1ea13#b0b24a16fa3940e017798c56f2ac13e11cd1ea13"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5093,7 +5093,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=dfc8db754b93afbc19fcc2251ac5ba598bce1eec#dfc8db754b93afbc19fcc2251ac5ba598bce1eec"
+source = "git+https://github.com/mrcroxx/foyer?rev=b0b24a16fa3940e017798c56f2ac13e11cd1ea13#b0b24a16fa3940e017798c56f2ac13e11cd1ea13"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5112,7 +5112,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=dfc8db754b93afbc19fcc2251ac5ba598bce1eec#dfc8db754b93afbc19fcc2251ac5ba598bce1eec"
+source = "git+https://github.com/mrcroxx/foyer?rev=b0b24a16fa3940e017798c56f2ac13e11cd1ea13#b0b24a16fa3940e017798c56f2ac13e11cd1ea13"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5121,7 +5121,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=dfc8db754b93afbc19fcc2251ac5ba598bce1eec#dfc8db754b93afbc19fcc2251ac5ba598bce1eec"
+source = "git+https://github.com/mrcroxx/foyer?rev=b0b24a16fa3940e017798c56f2ac13e11cd1ea13#b0b24a16fa3940e017798c56f2ac13e11cd1ea13"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5143,7 +5143,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=dfc8db754b93afbc19fcc2251ac5ba598bce1eec#dfc8db754b93afbc19fcc2251ac5ba598bce1eec"
+source = "git+https://github.com/mrcroxx/foyer?rev=b0b24a16fa3940e017798c56f2ac13e11cd1ea13#b0b24a16fa3940e017798c56f2ac13e11cd1ea13"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
