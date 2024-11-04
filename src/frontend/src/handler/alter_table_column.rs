@@ -436,7 +436,7 @@ pub async fn handle_alter_table_column(
         definition,
         &original_catalog,
         format_encode,
-        None
+        None,
     )
     .await?;
 
