@@ -466,7 +466,7 @@ fn replay_archive(
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
         debug_assert!(
             !should_mark_next_time_travel_version_snapshot(&d),
-            "unexpect time travel delta {:?}",
+            "unexpected time travel delta {:?}",
             d
         );
         // Need to work around the assertion in `apply_version_delta`.
