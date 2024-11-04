@@ -51,8 +51,8 @@ profile:
       # - use: compactor
 
       # If you want to create source from Kafka, uncomment the following lines
-      # - use: kafka
-      #   persist-data: true
+      - use: kafka
+        persist-data: true
 
       # To enable Confluent schema registry, uncomment the following line
       # - use: schema-registry

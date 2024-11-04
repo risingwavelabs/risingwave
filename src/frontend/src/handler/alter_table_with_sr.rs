@@ -14,18 +14,16 @@
 
 use anyhow::{anyhow, Context};
 use fancy_regex::Regex;
-use pgwire::pg_response::StatementType;
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail_not_implemented;
 use risingwave_sqlparser::ast::{ConnectorSchema, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
-use super::alter_table_column::{
-    fetch_table_catalog_for_alter, replace_table_with_definition, schema_has_schema_registry,
-};
+use super::alter_table_column::{fetch_table_catalog_for_alter, schema_has_schema_registry};
 use super::util::SourceSchemaCompatExt;
-use super::{HandlerArgs, RwPgResponse};
+use super::{get_replace_table_plan, HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
 use crate::TableCatalog;
 
@@ -76,31 +74,43 @@ pub async fn handle_refresh_schema(
         .try_into()
         .unwrap();
 
-    let result = replace_table_with_definition(
-        &session,
-        table_name,
-        definition,
-        &original_table,
-        Some(connector_schema),
-    )
-    .await;
-
-    match result {
-        Ok(_) => Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE)),
-        Err(e) => {
-            let report = e.to_report_string();
-            // This is a workaround for reporting errors when columns to drop is referenced by generated column.
-            // Finding the actual columns to drop requires generating `PbSource` from the sql definition
-            // and fetching schema from schema registry, which will cause a lot of unnecessary refactor.
-            // Here we match the error message to yield when failing to bind generated column exprs.
-            let re = Regex::new(r#"fail to bind expression in generated column "(.*?)""#).unwrap();
-            let captures = re.captures(&report).map_err(anyhow::Error::from)?;
-            if let Some(gen_col_name) = captures.and_then(|captures| captures.get(1)) {
-                Err(anyhow!(e).context(format!("failed to refresh schema because some of the columns to drop are referenced by a generated column \"{}\"",
-                    gen_col_name.as_str())).into())
-            } else {
-                Err(e)
+    let (source, table, graph, col_index_mapping, job_type) = {
+        let result = get_replace_table_plan(
+            &session,
+            table_name,
+            definition,
+            &original_table,
+            Some(connector_schema),
+            None,
+        )
+        .await;
+        match result {
+            Ok((source, table, graph, col_index_mapping, job_type)) => {
+                Ok((source, table, graph, col_index_mapping, job_type))
+            }
+            Err(e) => {
+                let report = e.to_report_string();
+                // NOTE(yuhao): This is a workaround for reporting errors when columns to drop is referenced by generated column.
+                // Finding the actual columns to drop requires generating `PbSource` from the sql definition
+                // and fetching schema from schema registry, which will cause a lot of unnecessary refactor.
+                // Here we match the error message to yield when failing to bind generated column exprs.
+                let re =
+                    Regex::new(r#"fail to bind expression in generated column "(.*?)""#).unwrap();
+                let captures = re.captures(&report).map_err(anyhow::Error::from)?;
+                if let Some(gen_col_name) = captures.and_then(|captures| captures.get(1)) {
+                    Err(anyhow!(e).context(format!("failed to refresh schema because some of the columns to drop are referenced by a generated column \"{}\"",
+                gen_col_name.as_str())).into())
+                } else {
+                    Err(e)
+                }
             }
         }
-    }
+    }?;
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }

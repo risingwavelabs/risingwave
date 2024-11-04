@@ -46,31 +46,6 @@ use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_w
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
 
-pub async fn replace_table_with_definition(
-    session: &Arc<SessionImpl>,
-    table_name: ObjectName,
-    definition: Statement,
-    original_catalog: &Arc<TableCatalog>,
-    source_schema: Option<ConnectorSchema>,
-) -> Result<()> {
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
-        session,
-        table_name,
-        definition,
-        original_catalog,
-        source_schema,
-        None,
-    )
-    .await?;
-
-    let catalog_writer = session.catalog_writer()?;
-
-    catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
-        .await?;
-    Ok(())
-}
-
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
     session: &Arc<SessionImpl>,
@@ -455,15 +430,21 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    replace_table_with_definition(
+    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
         &original_catalog,
         source_schema,
+        None,
     )
     .await?;
 
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
