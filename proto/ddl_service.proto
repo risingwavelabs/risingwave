@@ -127,15 +127,15 @@ message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
 
-  // If SERVERLESS, the materialized view should be created using serverless backfill
-  // For that the controller will create a new compute node, which does backfilling and then is deleted.
-  // May alleviate pressure on the cluster during backfill process.
-  enum BackfillType {
-    UNSPECIFIED = 0;
-    REGULAR = 1;
-    SERVERLESS = 2;
-  }
-  BackfillType backfill = 3;
+//  // If SERVERLESS, the materialized view should be created using serverless backfill
+//  // For that the controller will create a new compute node, which does backfilling and then is deleted.
+//  // May alleviate pressure on the cluster during backfill process.
+//  enum BackfillType {
+//    UNSPECIFIED = 0;
+//    REGULAR = 1;
+//    SERVERLESS = 2;
+//  }
+//  BackfillType backfill = 3;
 }
 
 message CreateMaterializedViewResponse {

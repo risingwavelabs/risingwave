@@ -20,6 +20,7 @@ use risingwave_connector::source::kafka::private_link::{
 };
 pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::PbBackfillType;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
@@ -36,6 +37,11 @@ use crate::Binder;
 mod options {
 
     pub const RETENTION_SECONDS: &str = "retention_seconds";
+
+    // todo: a better name
+    pub const BACKFILL_TYPE: &str = "backfill_type";
+
+    pub const BACKFILL_TYPE_SERVERLESS: &str = "serverless";
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
@@ -155,6 +161,16 @@ impl WithOptions {
                 "Secret reference is not allowed in OAuth options".to_string(),
             )))
         }
+    }
+
+    pub fn backfill_type(&self) -> PbBackfillType {
+        if let Some(inner_val) = self.inner.get(options::BACKFILL_TYPE) {
+            if inner_val.eq_ignore_ascii_case(options::BACKFILL_TYPE_SERVERLESS) {
+                return PbBackfillType::Serverless;
+            }
+        }
+
+        PbBackfillType::Regular
     }
 }
 

@@ -25,7 +25,7 @@ use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{BackfillType, PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -452,6 +452,7 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            backfill_type: BackfillType::Unspecified.into(),
         }
     }
 

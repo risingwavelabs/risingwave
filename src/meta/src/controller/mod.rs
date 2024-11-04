@@ -25,11 +25,7 @@ use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
-use risingwave_pb::catalog::{
-    PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
-    PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
-    PbView,
-};
+use risingwave_pb::catalog::{BackfillType, PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex, PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView};
 use sea_orm::{DatabaseConnection, ModelTrait};
 
 use crate::MetaError;
@@ -166,6 +162,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
+            backfill_type: BackfillType::Unspecified.into(),
         }
     }
 }

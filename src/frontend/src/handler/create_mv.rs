@@ -135,6 +135,8 @@ pub fn gen_create_mv_plan_bound(
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
+    let backfill_type = context.with_options().backfill_type();
+
     let mut plan_root = Planner::new(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
@@ -151,6 +153,8 @@ pub fn gen_create_mv_plan_bound(
         RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
 
     table.owner = session.user_id();
+
+    table.backfill_type = backfill_type.into();
 
     // record dependent relations.
     table.dependent_relations = dependent_relations
