@@ -3929,7 +3929,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "2.2.0-alpha"
 dependencies = [
- "educe",
+ "educe 0.6.0",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4452,6 +4452,18 @@ dependencies = [
  "signature 2.2.0",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "educe"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4bd92664bf78c4d3dba9b7cdafce6fa15b13ed3ed16175218196942e99168a8"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.79",
 ]
 
 [[package]]
@@ -10648,7 +10660,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10740,7 +10752,7 @@ name = "risingwave_common_estimate_size"
 version = "2.2.0-alpha"
 dependencies = [
  "bytes",
- "educe",
+ "educe 0.6.0",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -11055,7 +11067,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
- "sea-schema 0.15.0",
+ "sea-schema",
  "serde",
  "serde_derive",
  "serde_json",
@@ -11230,7 +11242,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11273,7 +11285,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.10.0",
  "criterion",
- "educe",
+ "educe 0.6.0",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -11340,7 +11352,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11593,7 +11605,7 @@ dependencies = [
  "comfy-table",
  "crepe",
  "easy-ext",
- "educe",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11695,6 +11707,7 @@ name = "risingwave_meta_model_migration"
 version = "2.2.0-alpha"
 dependencies = [
  "async-std",
+ "easy-ext",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -11708,7 +11721,7 @@ version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
- "educe",
+ "educe 0.6.0",
  "either",
  "futures",
  "hex",
@@ -12133,7 +12146,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe",
+ "educe 0.6.0",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -12781,9 +12794,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "0.12.15"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8814e37dc25de54398ee62228323657520b7f29713b8e238649385dbe473ee0"
+checksum = "ea1fee0cf8528dbe6eda29d5798afc522a63b75e44c5b15721e6e64af9c7cc4b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -12794,12 +12807,12 @@ dependencies = [
  "ouroboros",
  "rust_decimal",
  "sea-orm-macros",
- "sea-query 0.30.7",
- "sea-query-binder 0.5.0",
+ "sea-query",
+ "sea-query-binder",
  "serde",
  "serde_json",
  "sqlx",
- "strum 0.25.0",
+ "strum 0.26.3",
  "thiserror",
  "time",
  "tracing",
@@ -12809,16 +12822,16 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "0.12.15"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "620bc560062ae251b1366bde43b3f1508445cab5c2c8cbdb397034638ab1b357"
+checksum = "5f0b8869c75cf3fbb1bd860abb025033cd2e514c5f4fa43e792697cb1fe6c882"
 dependencies = [
  "chrono",
  "clap",
  "dotenvy",
  "glob",
  "regex",
- "sea-schema 0.14.2",
+ "sea-schema",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -12826,9 +12839,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "0.12.15"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e115c6b078e013aa963cc2d38c196c2c40b05f03d0ac872fe06b6e0d5265603"
+checksum = "8737b566799ed0444f278d13c300c4c6f1a91782f60ff5825a591852d5502030"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -12840,9 +12853,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "0.12.15"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8269bc6ff71afd6b78aa4333ac237a69eebd2cdb439036291e64fb4b8db23c"
+checksum = "216643749e26ce27ab6c51d3475f2692981d4a902d34455bcd322f412900df5c"
 dependencies = [
  "async-trait",
  "clap",
@@ -12850,20 +12863,20 @@ dependencies = [
  "futures",
  "sea-orm",
  "sea-orm-cli",
- "sea-schema 0.14.2",
+ "sea-schema",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "sea-query"
-version = "0.30.7"
+version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4166a1e072292d46dc91f31617c2a1cdaf55a8be4b5c9f4bf2ba248e3ac4999b"
+checksum = "b4fd043b8117af233e221f73e3ea8dfbc8e8c3c928017c474296db45c649105c"
 dependencies = [
  "bigdecimal 0.3.1",
  "chrono",
- "derivative",
+ "educe 0.5.11",
  "inherent",
  "ordered-float 3.9.1",
  "rust_decimal",
@@ -12874,39 +12887,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-query"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e5073b2cfed767511a57d18115f3b3d8bcb5690bf8c89518caec6cb22c0cd74"
-dependencies = [
- "inherent",
- "sea-query-derive",
-]
-
-[[package]]
-name = "sea-query-binder"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36bbb68df92e820e4d5aeb17b4acd5cc8b5d18b2c36a4dd6f4626aabfa7ab1b9"
-dependencies = [
- "bigdecimal 0.3.1",
- "chrono",
- "rust_decimal",
- "sea-query 0.30.7",
- "serde_json",
- "sqlx",
- "time",
- "uuid",
-]
-
-[[package]]
 name = "sea-query-binder"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "754965d4aee6145bec25d0898e5c931e6c22859789ce62fd85a42a15ed5a8ce3"
 dependencies = [
- "sea-query 0.31.0",
+ "bigdecimal 0.3.1",
+ "chrono",
+ "rust_decimal",
+ "sea-query",
+ "serde_json",
  "sqlx",
+ "time",
+ "uuid",
 ]
 
 [[package]]
@@ -12925,38 +12918,15 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d148608012d25222442d1ebbfafd1228dbc5221baf4ec35596494e27a2394e"
-dependencies = [
- "futures",
- "sea-query 0.30.7",
- "sea-schema-derive 0.2.0",
-]
-
-[[package]]
-name = "sea-schema"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad52149fc81836ea7424c3425d8f6ed8ad448dd16d2e4f6a3907ba46f3f2fd78"
 dependencies = [
  "futures",
- "sea-query 0.31.0",
- "sea-query-binder 0.6.0",
- "sea-schema-derive 0.3.0",
+ "sea-query",
+ "sea-query-binder",
+ "sea-schema-derive",
  "sqlx",
-]
-
-[[package]]
-name = "sea-schema-derive"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f686050f76bffc4f635cda8aea6df5548666b830b52387e8bc7de11056d11e"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -13711,7 +13681,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2b6b8f606d3c4cdcaf2031c4320b79d7584e454b79562ba3d675f49701c160e"
 dependencies = [
  "async-trait",
- "educe",
+ "educe 0.6.0",
  "fs-err",
  "futures",
  "glob",
