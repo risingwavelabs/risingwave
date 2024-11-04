@@ -268,6 +268,26 @@ message AlterOwnerResponse {
   WaitVersion version = 2;
 }
 
+message AlterSwapRenameRequest {
+  message ObjectNameSwapPair {
+    uint32 src_object_id = 1;
+    uint32 dst_object_id = 2;
+  }
+  oneof object {
+    ObjectNameSwapPair schema = 1;
+    ObjectNameSwapPair table = 2;
+    ObjectNameSwapPair view = 3;
+    ObjectNameSwapPair source = 4;
+    ObjectNameSwapPair sink = 5;
+    ObjectNameSwapPair subscription = 6;
+  }
+}
+
+message AlterSwapRenameResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message CreateFunctionRequest {
   catalog.Function function = 1;
 }
@@ -513,4 +533,5 @@ service DdlService {
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
   rpc AutoSchemaChange(AutoSchemaChangeRequest) returns (AutoSchemaChangeResponse);
+  rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
 }
