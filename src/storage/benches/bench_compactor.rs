@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::PbTableSchema;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
     ConcatSstableIterator, DummyCompactionFilter, TaskConfig, TaskProgress,
@@ -133,8 +135,13 @@ async fn build_table(
             policy: CachePolicy::Fill(CacheHint::Normal),
         },
     );
-    let mut builder =
-        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
+    let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+    let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
+        sstable_object_id,
+        writer,
+        opt,
+        table_id_to_vnode,
+    );
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch, TableId::new(0));
     let table_key_len = full_key.user_key.table_key.len();
@@ -177,8 +184,14 @@ async fn build_table_2(
             policy: CachePolicy::Fill(CacheHint::Normal),
         },
     );
-    let mut builder =
-        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
+
+    let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+    let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
+        sstable_object_id,
+        writer,
+        opt,
+        table_id_to_vnode,
+    );
     let mut full_key = test_key_of(0, epoch, TableId::new(table_id));
     let table_key_len = full_key.user_key.table_key.len();
 
@@ -273,8 +286,11 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         bloom_false_positive: 0.001,
         ..Default::default()
     };
-    let mut builder =
-        CapacitySplitTableBuilder::for_test(LocalTableBuilderFactory::new(32, sstable_store, opt));
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+    let mut builder = CapacitySplitTableBuilder::for_test(
+        LocalTableBuilderFactory::new(32, sstable_store, opt),
+        compaction_catalog_agent_ref,
+    );
 
     let task_config = task_config.unwrap_or_else(|| TaskConfig {
         key_range: KeyRange::inf(),

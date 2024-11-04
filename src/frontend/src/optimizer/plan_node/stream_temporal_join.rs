@@ -42,12 +42,19 @@ pub struct StreamTemporalJoin {
     core: generic::Join<PlanRef>,
     eq_join_predicate: EqJoinPredicate,
     append_only: bool,
+    is_nested_loop: bool,
 }
 
 impl StreamTemporalJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(
+        core: generic::Join<PlanRef>,
+        eq_join_predicate: EqJoinPredicate,
+        is_nested_loop: bool,
+    ) -> Self {
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
         let append_only = core.left.append_only();
+        assert!(!is_nested_loop || append_only);
+
         let right = core.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
@@ -59,8 +66,16 @@ impl StreamTemporalJoin {
             .expect("should be a stream table scan");
         assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
 
-        let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
-        let dist = l2o.rewrite_provided_distribution(core.left.distribution());
+        let dist = if is_nested_loop {
+            // Use right side distribution directly if it's nested loop temporal join.
+            let r2o = core.r2i_col_mapping().composite(&core.i2o_col_mapping());
+            r2o.rewrite_provided_distribution(core.right.distribution())
+        } else {
+            // Use left side distribution directly if it's hash temporal join.
+            // https://github.com/risingwavelabs/risingwave/pull/19201#discussion_r1824031780
+            let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
+            l2o.rewrite_provided_distribution(core.left.distribution())
+        };
 
         // Use left side watermark directly.
         let watermark_columns = core.i2o_col_mapping().rewrite_bitset(
@@ -89,6 +104,7 @@ impl StreamTemporalJoin {
             core,
             eq_join_predicate,
             append_only,
+            is_nested_loop,
         }
     }
 
@@ -103,6 +119,10 @@ impl StreamTemporalJoin {
 
     pub fn append_only(&self) -> bool {
         self.append_only
+    }
+
+    pub fn is_nested_loop(&self) -> bool {
+        self.eq_join_predicate().has_eq()
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -170,6 +190,8 @@ impl Distill for StreamTemporalJoin {
             }),
         ));
 
+        vec.push(("nested_loop", Pretty::debug(&self.is_nested_loop)));
+
         if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
@@ -196,7 +218,7 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.eq_join_predicate.clone(), self.is_nested_loop)
     }
 }
 
@@ -244,6 +266,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 memo_table = memo_table.with_id(state.gen_table_id_wrapped());
                 Some(memo_table.to_internal_table_prost())
             },
+            is_nested_loop: self.is_nested_loop,
         }))
     }
 }
@@ -256,7 +279,12 @@ impl ExprRewritable for StreamTemporalJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        Self::new(
+            core,
+            self.eq_join_predicate.rewrite_exprs(r),
+            self.is_nested_loop,
+        )
+        .into()
     }
 }
 

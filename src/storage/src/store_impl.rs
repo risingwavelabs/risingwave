@@ -26,8 +26,8 @@ use risingwave_common_service::RpcNotificationClient;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::build_remote_object_store;
 
+use crate::compaction_catalog_manager::{CompactionCatalogManager, RemoteTableAccessor};
 use crate::error::StorageResult;
-use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
     Block, BlockCacheEventListener, HummockError, HummockStorage, RecentFilter, Sstable,
@@ -635,16 +635,12 @@ impl StateStoreImpl {
                 .build_and_install();
         }
 
-        const SLAB_INITIAL_CAPACITY: usize = 4 * 1024 * 1024; // 4 MiB
-
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_slab_initial_capacity(SLAB_INITIAL_CAPACITY / opts.meta_cache_shard_num)
-                .with_slab_segment_size(64 * 1024)
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
@@ -693,8 +689,6 @@ impl StateStoreImpl {
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
-                .with_slab_initial_capacity(SLAB_INITIAL_CAPACITY / opts.block_cache_shard_num)
-                .with_slab_segment_size(64 * 1024)
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
@@ -768,15 +762,17 @@ impl StateStoreImpl {
                 }));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-                let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
-                    RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
-                )));
+                let compaction_catalog_manager_ref =
+                    Arc::new(CompactionCatalogManager::new(Box::new(
+                        RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
+                    )));
+
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),
                     notification_client,
-                    key_filter_manager,
+                    compaction_catalog_manager_ref,
                     state_store_metrics.clone(),
                     compactor_metrics.clone(),
                     await_tree_config,

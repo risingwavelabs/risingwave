@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -33,7 +34,9 @@ use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
     HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+use crate::compaction_catalog_manager::{
+    CompactionCatalogAgent, FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferItem, SharedBufferValue,
 };
@@ -153,7 +156,11 @@ pub async fn gen_test_sstable_data(
     opts: SstableBuilderOptions,
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
 ) -> (Bytes, SstableMeta) {
-    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
+    let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts, table_id_to_vnode);
     for (key, value) in kv_iter {
         b.add_for_test(key.to_ref(), value.as_slice())
             .await
@@ -231,12 +238,22 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let writer = sstable_store
         .clone()
         .create_sst_writer(object_id, writer_opts);
+
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
+    let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+        FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
+        table_id_to_vnode,
+    ));
+
     let mut b = SstableBuilder::<_, F>::new(
         object_id,
         writer,
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
-        Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        compaction_catalog_agent_ref,
         None,
     );
 

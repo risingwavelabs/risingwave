@@ -491,6 +491,8 @@ message TemporalJoinNode {
   repeated uint32 table_output_indices = 8;
   // The state table used for non-append-only temporal join.
   optional catalog.Table memo_table = 9;
+  // If it is a nested lool temporal join
+  bool is_nested_loop = 10;
 }
 
 message DynamicFilterNode {

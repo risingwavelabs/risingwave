@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Debug;
 use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -310,6 +311,47 @@ impl MetadataManager {
 
     pub async fn list_active_serving_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
         self.cluster_controller.list_active_serving_workers().await
+    }
+
+    pub async fn list_active_database_ids(&self) -> MetaResult<HashSet<DatabaseId>> {
+        Ok(self
+            .catalog_controller
+            .list_fragment_database_ids(None)
+            .await?
+            .into_iter()
+            .map(|(_, database_id)| database_id)
+            .collect())
+    }
+
+    pub async fn split_fragment_map_by_database<T: Debug>(
+        &self,
+        fragment_map: HashMap<FragmentId, T>,
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<FragmentId, T>>> {
+        let fragment_to_database_map: HashMap<_, _> = self
+            .catalog_controller
+            .list_fragment_database_ids(Some(
+                fragment_map
+                    .keys()
+                    .map(|fragment_id| *fragment_id as _)
+                    .collect(),
+            ))
+            .await?
+            .into_iter()
+            .map(|(fragment_id, database_id)| {
+                (fragment_id as FragmentId, database_id as DatabaseId)
+            })
+            .collect();
+        let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
+        for (fragment_id, value) in fragment_map {
+            let database_id = *fragment_to_database_map
+                .get(&fragment_id)
+                .ok_or_else(|| anyhow!("cannot get database_id of fragment {fragment_id}"))?;
+            ret.entry(database_id)
+                .or_default()
+                .try_insert(fragment_id, value)
+                .expect("non duplicate");
+        }
+        Ok(ret)
     }
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {

@@ -121,7 +121,19 @@ impl MySqlExternalTable {
                         DataType::Int16 => Some(ScalarImpl::Int16(val as _)),
                         DataType::Int32 => Some(ScalarImpl::Int32(val as _)),
                         DataType::Int64 => Some(ScalarImpl::Int64(val)),
-                        _ => Err(anyhow!("unexpected default value type for integer column"))?,
+                        DataType::Varchar => {
+                            // should be the Enum type which is mapped to Varchar
+                            Some(ScalarImpl::from(val.to_string()))
+                        }
+                        _ => {
+                            tracing::error!(
+                                column = col_name,
+                                ?data_type,
+                                default_val = val,
+                                "unexpected default value type for column, set default to null"
+                            );
+                            None
+                        }
                     },
                     ColumnDefault::Real(val) => match data_type {
                         DataType::Float32 => Some(ScalarImpl::Float32(F32::from(val as f32))),
@@ -131,7 +143,15 @@ impl MySqlExternalTable {
                                 anyhow!("failed to convert default value to decimal").context(err)
                             })?,
                         )),
-                        _ => Err(anyhow!("unexpected default value type for float column"))?,
+                        _ => {
+                            tracing::error!(
+                                column = col_name,
+                                ?data_type,
+                                default_val = val,
+                                "unexpected default value type for column, set default to null"
+                            );
+                            None
+                        }
                     },
                     ColumnDefault::String(mut val) => {
                         // mysql timestamp is mapped to timestamptz, we use UTC timezone to
