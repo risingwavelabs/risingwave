@@ -772,6 +772,7 @@ mod tests {
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
+                            system_column: None,
                         },
                         is_hidden: false
                     },
