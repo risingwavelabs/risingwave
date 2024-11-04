@@ -838,8 +838,10 @@ impl HummockManager {
         created_tables: &HashSet<u32>,
     ) -> Result<()> {
         // TODO: remove this check after refactor group id
-        if group.group_id == StaticCompactionGroupId::StateDefault as u64
-            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64
+        if (group.group_id == StaticCompactionGroupId::StateDefault as u64
+            && next_group.group_id == StaticCompactionGroupId::MaterializedView as u64)
+            || (group.group_id == StaticCompactionGroupId::MaterializedView as u64
+                && next_group.group_id == StaticCompactionGroupId::StateDefault as u64)
         {
             return Err(Error::CompactionGroup(format!(
                 "group-{} and group-{} are both StaticCompactionGroupId",
