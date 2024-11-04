@@ -52,6 +52,7 @@ pub struct LogRowSeqScanExecutor<S: StateStore> {
     old_epoch: u64,
     new_epoch: u64,
     version_id: HummockVersionId,
+    ordered: bool,
 }
 
 impl<S: StateStore> LogRowSeqScanExecutor<S> {
@@ -63,6 +64,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchMetrics>,
+        ordered: bool,
     ) -> Self {
         let mut schema = table.schema().clone();
         schema.fields.push(Field::with_name(
@@ -78,6 +80,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             old_epoch,
             new_epoch,
             version_id,
+            ordered,
         }
     }
 }
@@ -146,6 +149,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
                 chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
+                log_store_seq_scan_node.ordered,
             )))
         })
     }
@@ -175,6 +179,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             new_epoch,
             version_id,
             schema,
+            ordered,
             ..
         } = *self;
         let table = std::sync::Arc::new(table);
@@ -194,6 +199,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
             chunk_size,
             histogram,
             Arc::new(schema.clone()),
+            ordered,
         );
         #[for_await]
         for chunk in stream {
@@ -211,12 +217,14 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         chunk_size: usize,
         histogram: Option<impl Deref<Target = Histogram>>,
         schema: Arc<Schema>,
+        ordered: bool,
     ) {
         // Range Scan.
         let iter = table
             .batch_iter_log_with_pk_bounds(
                 old_epoch,
                 HummockReadEpoch::BatchQueryCommitted(new_epoch, version_id),
+                ordered,
             )
             .await?
             .flat_map(|r| {

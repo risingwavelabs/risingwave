@@ -41,22 +41,28 @@ backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
-periodic_scheduling_compaction_group_interval_sec = 10
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
-table_write_throughput_threshold = 16777216
-min_table_split_write_throughput = 4194304
+table_high_write_throughput_threshold = 16777216
+table_low_write_throughput_threshold = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
 hybrid_partition_vnode_count = 4
-compact_task_table_size_partition_threshold_low = 134217728
-compact_task_table_size_partition_threshold_high = 536870912
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
+split_group_size_ratio = 0.9
+table_stat_high_write_throughput_ratio_for_split = 0.5
+table_stat_low_write_throughput_ratio_for_merge = 0.7
+table_stat_throuput_window_seconds_for_split = 60
+table_stat_throuput_window_seconds_for_merge = 240
+compact_task_table_size_partition_threshold_low = 134217728
+compact_task_table_size_partition_threshold_high = 536870912
+periodic_scheduling_compaction_group_split_interval_sec = 10
+periodic_scheduling_compaction_group_merge_interval_sec = 600
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -86,6 +92,13 @@ meta_max_get_task_probe_times = 5
 meta_actor_cnt_per_worker_parallelism_soft_limit = 100
 meta_actor_cnt_per_worker_parallelism_hard_limit = 400
 meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
+
+[meta.meta_store_config]
+max_connections = 10
+min_connections = 1
+connection_timeout_sec = 10
+idle_timeout_sec = 30
+acquire_timeout_sec = 30
 
 [batch]
 enable_barrier_read = false

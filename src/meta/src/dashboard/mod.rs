@@ -76,6 +76,7 @@ pub(super) mod handlers {
     use thiserror_ext::AsReport;
 
     use super::*;
+    use crate::controller::fragment::StreamingJobInfo;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
@@ -191,20 +192,17 @@ pub(super) mod handlers {
         Ok(Json(views))
     }
 
-    pub async fn list_fragments(
+    pub async fn list_streaming_jobs(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<PbTableFragments>>> {
-        let table_fragments = srv
+    ) -> Result<Json<Vec<StreamingJobInfo>>> {
+        let streaming_jobs = srv
             .metadata_manager
             .catalog_controller
-            .table_fragments()
+            .list_streaming_job_infos()
             .await
-            .map_err(err)?
-            .values()
-            .cloned()
-            .collect_vec();
+            .map_err(err)?;
 
-        Ok(Json(table_fragments))
+        Ok(Json(streaming_jobs))
     }
 
     /// In the ddl backpressure graph, we want to compute the backpressure between relations.
@@ -508,7 +506,7 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters))
-            .route("/fragments2", get(list_fragments))
+            .route("/streaming_jobs", get(list_streaming_jobs))
             .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
             .route("/relation_id_infos", get(get_relation_id_infos))
             .route(

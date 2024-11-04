@@ -15,7 +15,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
@@ -41,8 +43,7 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{
-    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, PbTableFragments, Relation,
-    RelationGroup,
+    PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup, Relation, RelationGroup,
 };
 use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -69,7 +70,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
-use crate::model::{StreamContext, TableParallelism};
+use crate::model::{StreamContext, TableFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -395,14 +396,18 @@ impl CatalogController {
         Ok(table_id_map)
     }
 
+    // TODO: In this function, we also update the `Table` model in the meta store.
+    // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
+    // making them the source of truth and performing a full replacement for those in the meta store?
     pub async fn prepare_streaming_job(
         &self,
-        table_fragment: PbTableFragments,
+        table_fragments: &TableFragments,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_table_fragments(table_fragment)?;
+            Self::extract_fragment_and_actors_from_table_fragments(table_fragments.to_protobuf())?;
+        let all_tables = table_fragments.all_tables();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -414,7 +419,6 @@ impl CatalogController {
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
-            let vnode_count = fragment.vnode_count;
 
             let fragment = fragment.into_active_model();
             Fragment::insert(fragment).exec(&txn).await?;
@@ -423,10 +427,19 @@ impl CatalogController {
             // After table fragments are created, update them for all internal tables.
             if !for_replace {
                 for state_table_id in state_table_ids {
+                    // Table's vnode count is not always the fragment's vnode count, so we have to
+                    // look up the table from `TableFragments`.
+                    // See `ActorGraphBuilder::new`.
+                    let table = all_tables
+                        .get(&(state_table_id as u32))
+                        .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                    assert_eq!(table.fragment_id, fragment_id as u32);
+                    let vnode_count = table.vnode_count();
+
                     table::ActiveModel {
                         table_id: Set(state_table_id as _),
                         fragment_id: Set(Some(fragment_id)),
-                        vnode_count: Set(vnode_count),
+                        vnode_count: Set(vnode_count as _),
                         ..Default::default()
                     }
                     .update(&txn)
@@ -469,23 +482,27 @@ impl CatalogController {
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
-    /// It returns true if the job is not found or aborted.
+    /// It returns (true, _) if the job is not found or aborted.
+    /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
     pub async fn try_abort_creating_streaming_job(
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let cnt = Object::find_by_id(job_id).count(&txn).await?;
-        if cnt == 0 {
+        let obj = Object::find_by_id(job_id).one(&txn).await?;
+        let Some(obj) = obj else {
             tracing::warn!(
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok(true);
-        }
+            return Ok((true, None));
+        };
+        let database_id = obj
+            .database_id
+            .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
 
         if !is_cancelled {
             let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
@@ -499,7 +516,7 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok(false);
+                    return Ok((false, Some(database_id)));
                 }
             }
         }
@@ -585,7 +602,7 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }
-        Ok(true)
+        Ok((true, Some(database_id)))
     }
 
     pub async fn post_collect_table_fragments(
@@ -700,12 +717,33 @@ impl CatalogController {
             ));
         }
 
+        // 3. check parallelism.
+        let original_max_parallelism: i32 = StreamingJobModel::find_by_id(id as ObjectId)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
+
+        if original_max_parallelism != max_parallelism as i32 {
+            // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
+            // This should not happen in normal cases.
+            bail!(
+                "cannot use a different max parallelism \
+                 when altering or creating/dropping a sink into an existing table, \
+                 original: {}, new: {}",
+                original_max_parallelism,
+                max_parallelism
+            );
+        }
+
         let parallelism = match specified_parallelism {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
-        // 3. create streaming object for new replace table.
+        // 4. create streaming object for new replace table.
         let obj_id = Self::create_streaming_job_obj(
             &txn,
             ObjectType::Table,
@@ -719,7 +757,7 @@ impl CatalogController {
         )
         .await?;
 
-        // 4. record dependency for new replace table.
+        // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id as _),
             used_by: Set(obj_id as _),
@@ -1024,25 +1062,24 @@ impl CatalogController {
         table.incoming_sinks = Set(incoming_sinks.into());
         let table = table.update(txn).await?;
 
-        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // Fields including `fragment_id` were placeholder values before.
         // After table fragments are created, update them for all internal tables.
-        let fragment_info: Vec<(FragmentId, I32Array, i32)> = Fragment::find()
+        let fragment_info: Vec<(FragmentId, I32Array)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
                 fragment::Column::StateTableIds,
-                fragment::Column::VnodeCount,
             ])
             .filter(fragment::Column::JobId.eq(dummy_id))
             .into_tuple()
             .all(txn)
             .await?;
-        for (fragment_id, state_table_ids, vnode_count) in fragment_info {
+        for (fragment_id, state_table_ids) in fragment_info {
             for state_table_id in state_table_ids.into_inner() {
                 table::ActiveModel {
                     table_id: Set(state_table_id as _),
                     fragment_id: Set(Some(fragment_id)),
-                    vnode_count: Set(vnode_count),
+                    // No need to update `vnode_count` because it must remain the same.
                     ..Default::default()
                 }
                 .update(txn)
@@ -1462,7 +1499,6 @@ impl CatalogController {
                 removed_actors,
                 vnode_bitmap_updates,
                 actor_splits,
-                injectable: _,
                 newly_created_actors,
                 upstream_fragment_dispatcher_ids,
                 upstream_dispatcher_mapping,

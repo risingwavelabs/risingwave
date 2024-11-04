@@ -92,7 +92,7 @@ message TableFragments {
     // Duplicated from the length of the vnode bitmap in any actor of the fragment.
     //
     // Can be unset if the fragment is created in older versions where variable vnode count is not
-    // supported, in which case a default value of 256 should be used.
+    // supported, in which case a default value of 256 (or 1 for singleton) should be used.
     // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
   }
@@ -156,7 +156,7 @@ message MigrationPlan {
 }
 
 message FlushRequest {
-  bool checkpoint = 1;
+  uint32 database_id = 1;
 }
 
 message FlushResponse {

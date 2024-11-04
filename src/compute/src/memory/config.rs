@@ -37,7 +37,6 @@ const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
-const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
@@ -65,6 +64,14 @@ pub fn reserve_memory_bytes(opts: &ComputeNodeOpts) -> (usize, usize) {
 
     // Should have at least `MIN_SYSTEM_RESERVED_MEMORY_MB` for reserved memory.
     let reserved = std::cmp::max(reserved, MIN_SYSTEM_RESERVED_MEMORY_MB << 20);
+
+    if reserved >= opts.total_memory_bytes {
+        panic!(
+            "reserved memory ({}) >= total memory ({}).",
+            convert(reserved as _),
+            convert(opts.total_memory_bytes as _)
+        );
+    }
 
     (reserved, opts.total_memory_bytes - reserved)
 }
@@ -107,24 +114,60 @@ pub fn storage_memory_config(
     } else {
         (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
     };
-    let mut default_block_cache_capacity_mb = ((non_reserved_memory_bytes as f64
-        * storage_memory_proportion
-        * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION)
-        .ceil() as usize)
-        >> 20;
-    let default_meta_cache_capacity_mb = ((non_reserved_memory_bytes as f64
-        * storage_memory_proportion
-        * STORAGE_META_CACHE_MEMORY_PROPORTION)
-        .ceil() as usize)
-        >> 20;
-    let meta_cache_capacity_mb = storage_config.cache.meta_cache_capacity_mb.unwrap_or(
+
+    let storage_memory_bytes = non_reserved_memory_bytes as f64 * storage_memory_proportion;
+
+    // Only if the all cache capacities are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
+    // Other invalid combination of the cache capacities config will be ignored.
+    let (
+        config_block_cache_capacity_mb,
+        config_meta_cache_capacity_mb,
+        config_shared_buffer_capacity_mb,
+    ) = match (
+        storage_config.cache.block_cache_capacity_mb,
+        storage_config.cache.meta_cache_capacity_mb,
+        storage_config.shared_buffer_capacity_mb,
+    ) {
+        (
+            Some(block_cache_capacity_mb),
+            Some(meta_cache_capacity_mb),
+            Some(shared_buffer_capacity_mb),
+        ) => {
+            let config_storage_memory_bytes =
+                (block_cache_capacity_mb + meta_cache_capacity_mb + shared_buffer_capacity_mb)
+                    << 20;
+            if config_storage_memory_bytes as f64 > storage_memory_bytes {
+                tracing::warn!(
+                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
+                    block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb, convert(config_storage_memory_bytes as _), convert(storage_memory_bytes as _)
+                );
+                (None, None, None)
+            } else {
+                (
+                    Some(block_cache_capacity_mb),
+                    Some(meta_cache_capacity_mb),
+                    Some(shared_buffer_capacity_mb),
+                )
+            }
+        }
+        c => {
+            tracing::warn!(
+                "config (block_cache_capacity_mb, meta_cache_capacity_mb, shared_buffer_capacity_mb): {:?} should be set altogether. These configs will be ignored.",
+                c
+            );
+            (None, None, None)
+        }
+    };
+
+    let mut default_block_cache_capacity_mb =
+        ((storage_memory_bytes * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+    let default_meta_cache_capacity_mb =
+        ((storage_memory_bytes * STORAGE_META_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+    let meta_cache_capacity_mb = config_meta_cache_capacity_mb.unwrap_or(
         // adapt to old version
         storage_config
             .meta_cache_capacity_mb
-            .unwrap_or(std::cmp::min(
-                default_meta_cache_capacity_mb,
-                STORAGE_META_CACHE_MAX_MEMORY_MB,
-            )),
+            .unwrap_or(default_meta_cache_capacity_mb),
     );
 
     let prefetch_buffer_capacity_mb = storage_config
@@ -137,18 +180,12 @@ pub fn storage_memory_config(
             default_block_cache_capacity_mb.saturating_sub(meta_cache_capacity_mb);
     }
 
-    let default_shared_buffer_capacity_mb = ((non_reserved_memory_bytes as f64
-        * storage_memory_proportion
-        * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION)
-        .ceil() as usize)
-        >> 20;
-    let mut shared_buffer_capacity_mb =
-        storage_config
-            .shared_buffer_capacity_mb
-            .unwrap_or(std::cmp::min(
-                default_shared_buffer_capacity_mb,
-                STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
-            ));
+    let default_shared_buffer_capacity_mb =
+        ((storage_memory_bytes * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION).ceil() as usize) >> 20;
+    let mut shared_buffer_capacity_mb = config_shared_buffer_capacity_mb.unwrap_or(std::cmp::min(
+        default_shared_buffer_capacity_mb,
+        STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
+    ));
     if is_serving {
         default_block_cache_capacity_mb += default_shared_buffer_capacity_mb;
         // set 1 to pass internal check
@@ -158,7 +195,7 @@ pub fn storage_memory_config(
         default_block_cache_capacity_mb =
             default_block_cache_capacity_mb.saturating_sub(shared_buffer_capacity_mb);
     }
-    let block_cache_capacity_mb = storage_config.cache.block_cache_capacity_mb.unwrap_or(
+    let block_cache_capacity_mb = config_block_cache_capacity_mb.unwrap_or(
         // adapt to old version
         storage_config
             .block_cache_capacity_mb
@@ -353,6 +390,7 @@ mod tests {
 
         let total_non_reserved_memory_bytes = 8 << 30;
 
+        // Embedded compactor enabled, streaming node
         let memory_config = storage_memory_config(
             total_non_reserved_memory_bytes,
             true,
@@ -364,6 +402,7 @@ mod tests {
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
+        // Embedded compactor disabled, serving node
         let memory_config = storage_memory_config(
             total_non_reserved_memory_bytes,
             false,
@@ -375,6 +414,7 @@ mod tests {
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
         assert_eq!(memory_config.compactor_memory_limit_mb, 0);
 
+        // Embedded compactor enabled, streaming node, file cache
         storage_config.data_file_cache.dir = "data".to_string();
         storage_config.meta_file_cache.dir = "meta".to_string();
         let memory_config = storage_memory_config(
@@ -388,11 +428,17 @@ mod tests {
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
+        // Embedded compactor enabled, streaming node, file cache, cache capacities specified
         storage_config.cache.block_cache_capacity_mb = Some(512);
         storage_config.cache.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
         storage_config.compactor_memory_limit_mb = Some(512);
-        let memory_config = storage_memory_config(0, true, &storage_config, false);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);

@@ -204,7 +204,7 @@ pub struct PartialStringWriter<'a> {
     bytes: PartialBytesWriter<'a>,
 }
 
-impl<'a> PartialStringWriter<'a> {
+impl PartialStringWriter<'_> {
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) {

@@ -14,7 +14,10 @@
 
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use itertools::Itertools;
+use mysql_async::consts::ColumnType as MySqlColumnType;
+use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::source::iceberg::{create_parquet_stream_builder, list_s3_directory};
@@ -22,8 +25,8 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
-use tokio_postgres;
 use tokio_postgres::types::Type as TokioPgType;
+use {mysql_async, tokio_postgres};
 
 use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -298,7 +301,7 @@ impl TableFunction {
                     tokio::spawn(async move {
                         if let Err(e) = connection.await {
                             tracing::error!(
-                                "postgres_query_executor: connection error: {:?}",
+                                "mysql_query_executor: connection error: {:?}",
                                 e.as_report()
                             );
                         }
@@ -345,6 +348,162 @@ impl TableFunction {
                 args,
                 return_type: schema,
                 function_type: TableFunctionType::PostgresQuery,
+                user_defined: None,
+            })
+        }
+    }
+
+    pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
+        static MYSQL_ARGS_LEN: usize = 6;
+        let args = {
+            if args.len() != MYSQL_ARGS_LEN {
+                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_string()).into());
+            }
+            let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
+            for arg in args {
+                let arg = arg.cast_implicit(DataType::Varchar)?;
+                cast_args.push(arg);
+            }
+            cast_args
+        };
+        let evaled_args = {
+            let mut evaled_args: Vec<String> = Vec::with_capacity(MYSQL_ARGS_LEN);
+            for arg in &args {
+                match arg.try_fold_const() {
+                    Some(Ok(value)) => {
+                        let Some(scalar) = value else {
+                            return Err(BindError(
+                                "mysql_query function does not accept null arguments".to_string(),
+                            )
+                            .into());
+                        };
+                        evaled_args.push(scalar.into_utf8().into());
+                    }
+                    Some(Err(err)) => {
+                        return Err(err);
+                    }
+                    None => {
+                        return Err(BindError(
+                            "mysql_query function only accepts constant arguments".to_string(),
+                        )
+                        .into());
+                    }
+                }
+            }
+            evaled_args
+        };
+
+        #[cfg(madsim)]
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "postgres_query can't be used in the madsim mode".to_string(),
+            )
+            .into());
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let schema = tokio::task::block_in_place(|| {
+                RUNTIME.block_on(async {
+                    let database_opts: mysql_async::Opts = {
+                        let port = evaled_args[1]
+                            .parse::<u16>()
+                            .context("failed to parse port")?;
+                        mysql_async::OptsBuilder::default()
+                            .ip_or_hostname(evaled_args[0].clone())
+                            .tcp_port(port)
+                            .user(Some(evaled_args[2].clone()))
+                            .pass(Some(evaled_args[3].clone()))
+                            .db_name(Some(evaled_args[4].clone()))
+                            .into()
+                    };
+
+                    let pool = mysql_async::Pool::new(database_opts);
+                    let mut conn = pool
+                        .get_conn()
+                        .await
+                        .context("failed to connect to mysql in binder")?;
+
+                    let query = evaled_args[5].clone();
+                    let statement = conn
+                        .prep(query)
+                        .await
+                        .context("failed to prepare mysql_query in binder")?;
+
+                    let mut rw_types = vec![];
+                    #[allow(clippy::never_loop)]
+                    for column in statement.columns() {
+                        let name = column.name_str().to_string();
+                        let data_type = match column.column_type() {
+                            // Boolean types
+                            MySqlColumnType::MYSQL_TYPE_BIT if column.column_length() == 1 => {
+                                DataType::Boolean
+                            }
+
+                            // Numeric types
+                            // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
+                            // we treat it as Int16 here. It is better to be straightforward in our conversion.
+                            MySqlColumnType::MYSQL_TYPE_TINY => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
+                            MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
+                            MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
+                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+
+                            // Date time types
+                            MySqlColumnType::MYSQL_TYPE_YEAR => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_NEWDATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_TIME2 => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME2 => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamptz,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
+
+                            // String types
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR
+                            | MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => DataType::Varchar,
+
+                            // JSON types
+                            MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
+
+                            // Binary types
+                            MySqlColumnType::MYSQL_TYPE_BIT
+                            | MySqlColumnType::MYSQL_TYPE_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
+
+                            MySqlColumnType::MYSQL_TYPE_UNKNOWN
+                            | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
+                            | MySqlColumnType::MYSQL_TYPE_ENUM
+                            | MySqlColumnType::MYSQL_TYPE_SET
+                            | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                            | MySqlColumnType::MYSQL_TYPE_NULL => {
+                                return Err(crate::error::ErrorCode::BindError(
+                                    format!("unsupported column type: {:?}", column.column_type())
+                                        .to_string(),
+                                )
+                                .into());
+                            }
+                        };
+                        rw_types.push((name, data_type));
+                    }
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
+                        StructType::new(rw_types),
+                    ))
+                })
+            })?;
+
+            Ok(TableFunction {
+                args,
+                return_type: schema,
+                function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
             })
         }
