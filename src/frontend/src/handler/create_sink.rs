@@ -286,10 +286,11 @@ pub async fn gen_sink_plan(
             )));
         }
 
+        let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
-            table_catalog.columns(),
+            &table_columns_without_rw_timestamp,
             user_specified_columns,
         )?;
 
@@ -297,8 +298,9 @@ pub async fn gen_sink_plan(
 
         sink_plan = StreamProject::new(logical_project).into();
 
-        let exprs =
-            LogicalSource::derive_output_exprs_from_generated_columns(table_catalog.columns())?;
+        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(
+            &table_columns_without_rw_timestamp,
+        )?;
 
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, sink_plan);
