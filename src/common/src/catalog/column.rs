@@ -23,7 +23,10 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::{row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET};
+use super::{
+    row_id_column_desc, rw_timestamp_column_desc, RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME,
+    USER_COLUMN_ID_OFFSET,
+};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
 use crate::util::value_encoding::DatumToProtoExt;
@@ -338,6 +341,14 @@ impl From<PbColumnDesc> for ColumnDesc {
             .into_iter()
             .map(ColumnDesc::from)
             .collect();
+        // In case we convert a system column into proto and then back to ColumnDesc, we need to restore the system column meta.
+        let system_column = if prost.column_id == RW_TIMESTAMP_COLUMN_ID.get_id()
+            && prost.name == RW_TIMESTAMP_COLUMN_NAME
+        {
+            Some(SystemColumn::RwTimestamp)
+        } else {
+            None
+        };
         Self {
             data_type: DataType::from(prost.column_type.as_ref().unwrap()),
             column_id: ColumnId::new(prost.column_id),
@@ -348,7 +359,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             description: prost.description.clone(),
             additional_column,
             version,
-            system_column: None,
+            system_column,
         }
     }
 }
