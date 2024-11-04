@@ -83,11 +83,12 @@ pub(crate) fn gen_create_index_plan(
         );
     }
 
-    session.check_privileges(&[ObjectCheckItem::new(
-        table.owner,
-        AclMode::Select,
-        Object::TableId(table.id.table_id),
-    )])?;
+    if !session.is_super_user() && session.user_id() != table.owner {
+        return Err(ErrorCode::PermissionDenied(
+            format!("must be owner of table {}", table.name).into(),
+        )
+        .into());
+    }
 
     let mut binder = Binder::new_for_stream(session);
     binder.bind_table(Some(&schema_name), &table_name, None)?;
@@ -202,7 +203,7 @@ pub(crate) fn gen_create_index_plan(
         &index_columns_ordered_expr,
         &include_columns_expr,
         // We use the first index column as distributed key by default if users
-        // haven't specify the distributed by columns.
+        // haven't specified the distributed by columns.
         if distributed_columns_expr.is_empty() {
             1
         } else {
@@ -221,7 +222,7 @@ pub(crate) fn gen_create_index_plan(
         index_table_prost.retention_seconds = table.retention_seconds;
     }
 
-    index_table_prost.owner = session.user_id();
+    index_table_prost.owner = table.owner;
     index_table_prost.dependent_relations = vec![table.id.table_id];
 
     let index_columns_len = index_columns_ordered_expr.len() as u32;
