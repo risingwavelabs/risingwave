@@ -158,7 +158,7 @@ impl BuildingFragment {
             }
             NodeBody::Source(source_node) => {
                 match job {
-                    // Note: For table without connector, it has a dumb Source node.
+                    // Note: For table without connector, it has a dummy Source node.
                     // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
                     StreamingJob::Table(source, _table, _table_job_type) => {
                         if let Some(source_inner) = source_node.source_inner.as_mut() {
