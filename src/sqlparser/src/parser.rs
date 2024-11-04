@@ -3100,7 +3100,7 @@ impl Parser<'_> {
             let target_schema = self.parse_object_name()?;
             AlterSchemaOperation::SwapRenameSchema { target_schema }
         } else {
-            return self.expected("RENAME, OWNER TO OR SWAP WITH after ALTER SCHEMA");
+            return self.expected("RENAME, OWNER TO, OR SWAP WITH after ALTER SCHEMA");
         };
 
         Ok(Statement::AlterSchema {
