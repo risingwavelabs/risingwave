@@ -145,6 +145,7 @@ message IcebergRefPredicate {
   string reference = 2;
 }
 
+/// a in (...)
 message IcebergSetPredicate {
   enum IcebergSetType {
     ICEBERG_SET_TYPE_UNSPECIFIED = 0;

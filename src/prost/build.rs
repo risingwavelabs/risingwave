@@ -127,6 +127,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
+        .type_attribute("batch_plan.IcebergBinaryPredicate", "#[derive(Eq, Hash)]")
+        .type_attribute("batch_plan.IcebergUnaryPredicate", "#[derive(Eq, Hash)]")
+        .type_attribute("batch_plan.IcebergDatum", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "batch_plan.IcebergRefAndValuePredicate",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("batch_plan.IcebergRefPredicate", "#[derive(Eq, Hash)]")
+        .type_attribute("batch_plan.IcebergSetPredicate", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "batch_plan.IcebergPredicate.predicate_expr",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("batch_plan.IcebergPredicate", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",
             "#[derive(Eq, Hash)]",
