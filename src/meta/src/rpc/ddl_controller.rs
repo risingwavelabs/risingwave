@@ -48,7 +48,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request, DdlProgress,
+    TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -141,6 +142,7 @@ pub enum DdlCommand {
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceTableInfo>),
     AlterName(alter_name_request::Object, String),
+    AlterSwapRename(alter_swap_rename_request::Object),
     ReplaceTable(ReplaceTableInfo),
     AlterSourceColumn(Source),
     AlterObjectOwner(Object, UserId),
@@ -339,6 +341,7 @@ impl DdlController {
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
+                DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
             }
         }
         .in_current_span();
@@ -1875,6 +1878,55 @@ impl DdlController {
         self.metadata_manager
             .catalog_controller
             .alter_name(obj_type, id, new_name)
+            .await
+    }
+
+    async fn alter_swap_rename(
+        &self,
+        object: alter_swap_rename_request::Object,
+    ) -> MetaResult<NotificationVersion> {
+        let (obj_type, src_id, dst_id) = match object {
+            alter_swap_rename_request::Object::Schema(_) => unimplemented!("schema swap"),
+            alter_swap_rename_request::Object::Table(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Table, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::View(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::View, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Source(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Source, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Sink(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Sink, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Subscription(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Subscription, src_id, dst_id)
+            }
+        };
+
+        self.metadata_manager
+            .catalog_controller
+            .alter_swap_rename(obj_type, src_id, dst_id)
             .await
     }
 
