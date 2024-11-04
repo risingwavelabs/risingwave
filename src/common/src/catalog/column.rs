@@ -348,9 +348,8 @@ pub struct ColumnCatalog {
     pub is_hidden: bool,
 }
 
-static RW_TIMESTAMP_COLUMN: LazyLock<ColumnCatalog> = LazyLock::new(|| {
-    ColumnCatalog::rw_timestamp_column()
-});
+static RW_TIMESTAMP_COLUMN: LazyLock<ColumnCatalog> =
+    LazyLock::new(|| ColumnCatalog::rw_timestamp_column());
 
 impl ColumnCatalog {
     pub fn visible(column_desc: ColumnDesc) -> Self {
