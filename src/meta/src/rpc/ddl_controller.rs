@@ -481,6 +481,7 @@ impl DdlController {
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        // todo: do validation here
         self.metadata_manager
             .catalog_controller
             .create_connection(connection)

@@ -37,7 +37,7 @@ impl ConnectionCatalog {
     pub fn provider(&self) -> &str {
         match &self.info {
             Info::PrivateLinkService(_) => "PRIVATELINK",
-            Info::ConnectionParams(_) => todo!(),
+            Info::ConnectionParams(_) => panic!("ConnectionParams is not supported as provider."),
         }
     }
 }

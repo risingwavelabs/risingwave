@@ -414,7 +414,7 @@ pub async fn handle_show_object(
                             PRIVATELINK_CONNECTION.to_string()
                         },
                         connection::Info::ConnectionParams(params) => {
-                            format!("CONNECTION_PARAMS_{}", params.connection_type)
+                            format!("{}", params.get_connection_type().unwrap().as_str_name())
                         }
                     };
                     let source_names = schema
@@ -443,6 +443,7 @@ pub async fn handle_show_object(
                         }
                         connection::Info::ConnectionParams(params) => {
                             // todo: check secrets are not exposed
+                            // todo: show dep relations
                             serde_json::to_string(&params.get_properties()).unwrap()
                         }
                     };

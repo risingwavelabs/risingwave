@@ -28,6 +28,7 @@ struct RwConnection {
     type_: String,
     provider: String,
     acl: String,
+    connection_params: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_connections")]
@@ -38,14 +39,28 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
     // todo: redesign the internal table for connection params
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_connections().map(|conn| RwConnection {
-                id: conn.id as i32,
-                name: conn.name.clone(),
-                schema_id: schema.id() as i32,
-                owner: conn.owner as i32,
-                type_: conn.connection_type().into(),
-                provider: conn.provider().into(),
-                acl: "".into(),
+            schema.iter_connections().map(|conn| {
+                let mut rw_connection = RwConnection {
+                    id: conn.id as i32,
+                    name: conn.name.clone(),
+                    schema_id: schema.id() as i32,
+                    owner: conn.owner as i32,
+                    type_: conn.connection_type().into(),
+                    provider: "".to_string(),
+                    acl: "".into(),
+                    connection_params: "".to_string(),
+                };
+                match &conn.info {
+                    risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => {
+                        rw_connection.provider = conn.provider().into();
+                    }
+                    risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
+                        rw_connection.connection_params =
+                            serde_json::to_string(&params.get_properties()).unwrap();
+                    }
+                };
+
+                rw_connection
             })
         })
         .collect())

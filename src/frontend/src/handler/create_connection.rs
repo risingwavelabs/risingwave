@@ -17,6 +17,8 @@ use std::collections::BTreeMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
+use risingwave_pb::catalog::connection_params::ConnectionType;
+use risingwave_pb::catalog::ConnectionParams;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
@@ -43,17 +45,27 @@ fn resolve_create_connection_payload(
     with_properties: &mut BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
-    match connection_type.as_str() {
-        PRIVATELINK_CONNECTION => Err(RwError::from(ErrorCode::Deprecated(
+    let connection_type = match connection_type.as_str() {
+        PRIVATELINK_CONNECTION => {
+            return Err(RwError::from(ErrorCode::Deprecated(
             "CREATE CONNECTION to Private Link".to_string(),
             "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
-        ))),
-        KAFKA_CONNECTOR => todo!(),
-        ICEBERG_CONNECTOR => todo!(),
-        _ => Err(RwError::from(ProtocolError(format!(
-            "Connection type \"{connection_type}\" is not supported"
-        )))),
-    }
+        )));
+        }
+        KAFKA_CONNECTOR => ConnectionType::Kafka,
+        ICEBERG_CONNECTOR => ConnectionType::Iceberg,
+        _ => {
+            return Err(RwError::from(ProtocolError(format!(
+                "Connection type \"{connection_type}\" is not supported"
+            ))));
+        }
+    };
+    Ok(create_connection_request::Payload::ConnectionParams(
+        ConnectionParams {
+            connection_type: connection_type as i32,
+            properties: with_properties.clone().into_iter().collect(),
+        },
+    ))
 }
 
 pub async fn handle_create_connection(
