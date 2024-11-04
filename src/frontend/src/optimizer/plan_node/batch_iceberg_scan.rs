@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::IcebergScanNode;
+use risingwave_pb::batch_plan::{IcebergPredicate, IcebergScanNode};
 use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
@@ -33,10 +33,11 @@ use crate::optimizer::property::{Distribution, Order};
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
+    pub iceberg_predicate: IcebergPredicate,
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source) -> Self {
+    pub fn new(core: generic::Source, iceberg_predicate: IcebergPredicate) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -44,7 +45,11 @@ impl BatchIcebergScan {
             Order::any(),
         );
 
-        Self { base, core }
+        Self {
+            base,
+            core,
+            iceberg_predicate,
+        }
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -62,6 +67,7 @@ impl BatchIcebergScan {
         Self {
             base,
             core: self.core.clone(),
+            iceberg_predicate: self.iceberg_predicate.clone(),
         }
     }
 
@@ -109,6 +115,7 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
+            predicate: Some(self.iceberg_predicate.clone()),
         })
     }
 }
