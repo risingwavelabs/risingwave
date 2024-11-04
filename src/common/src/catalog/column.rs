@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
@@ -103,6 +102,11 @@ impl std::fmt::Display for ColumnId {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SystemColumn {
+    RwTimestamp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
@@ -113,6 +117,7 @@ pub struct ColumnDesc {
     pub description: Option<String>,
     pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
+    pub system_column: Option<SystemColumn>,
 }
 
 impl ColumnDesc {
@@ -127,6 +132,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -141,6 +147,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -181,6 +188,27 @@ impl ColumnDesc {
             description: None,
             additional_column: additional_column_type,
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
+        }
+    }
+
+    pub fn named_with_system_column(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        system_column: SystemColumn,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
+            system_column: Some(system_column),
         }
     }
 
@@ -230,6 +258,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -253,6 +282,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -271,6 +301,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -315,6 +346,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             description: prost.description.clone(),
             additional_column,
             version,
+            system_column: None,
         }
     }
 }
@@ -347,9 +379,6 @@ pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
 }
-
-static RW_TIMESTAMP_COLUMN: LazyLock<ColumnCatalog> =
-    LazyLock::new(|| ColumnCatalog::rw_timestamp_column());
 
 impl ColumnCatalog {
     pub fn visible(column_desc: ColumnDesc) -> Self {
@@ -440,7 +469,10 @@ impl ColumnCatalog {
     }
 
     pub fn is_rw_timestamp_column(&self) -> bool {
-        *self == *RW_TIMESTAMP_COLUMN
+        matches!(
+            self.column_desc.system_column,
+            Some(SystemColumn::RwTimestamp)
+        )
     }
 
     pub fn offset_column() -> Self {

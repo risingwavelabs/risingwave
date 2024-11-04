@@ -120,6 +120,7 @@ describe rw_customers;
 id bigint false NULL
 modified timestamp without time zone false NULL
 custinfo jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL

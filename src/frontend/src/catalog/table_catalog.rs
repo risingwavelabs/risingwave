@@ -584,10 +584,9 @@ impl From<PbTable> for TableCatalog {
         let version_column_index = tb.version_column_index.map(|value| value as usize);
         let mut columns: Vec<ColumnCatalog> =
             tb.columns.into_iter().map(ColumnCatalog::from).collect();
-        let rw_timestamp_column = ColumnCatalog::rw_timestamp_column();
-        if !columns.contains(&rw_timestamp_column) {
+        if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
             // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
-            columns.push(rw_timestamp_column);
+            columns.push(ColumnCatalog::rw_timestamp_column());
         }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();

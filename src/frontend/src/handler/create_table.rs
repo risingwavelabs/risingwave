@@ -216,6 +216,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
+                system_column: None,
             },
             is_hidden: false,
         });

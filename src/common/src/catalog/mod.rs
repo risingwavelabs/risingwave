@@ -123,10 +123,11 @@ pub fn row_id_column_desc() -> ColumnDesc {
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
 pub fn rw_timestamp_column_desc() -> ColumnDesc {
-    ColumnDesc::named(
+    ColumnDesc::named_with_system_column(
         RW_TIMESTAMP_COLUMN_NAME,
         RW_TIMESTAMP_COLUMN_ID,
         DataType::Timestamptz,
+        SystemColumn::RwTimestamp,
     )
 }
 
