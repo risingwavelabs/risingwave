@@ -14,6 +14,7 @@
 
 use anyhow::{anyhow, Context};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::Field;
 
 use crate::sink::{Result, SinkError};
 
@@ -28,6 +29,7 @@ use risingwave_common::types::DataType;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::bytes::BytesEncoder;
 use super::encoder::template::TemplateEncoder;
 use super::encoder::text::TextEncoder;
 use super::encoder::{
@@ -75,21 +77,27 @@ pub enum SinkFormatterImpl {
     // append-only
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     AppendOnlyTextJson(AppendOnlyFormatter<TextEncoder, JsonEncoder>),
+    AppendOnlyBytesJson(AppendOnlyFormatter<BytesEncoder, JsonEncoder>),
     AppendOnlyAvro(AppendOnlyFormatter<AvroEncoder, AvroEncoder>),
     AppendOnlyTextAvro(AppendOnlyFormatter<TextEncoder, AvroEncoder>),
+    AppendOnlyBytesAvro(AppendOnlyFormatter<BytesEncoder, AvroEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     AppendOnlyTextProto(AppendOnlyFormatter<TextEncoder, ProtoEncoder>),
+    AppendOnlyBytesProto(AppendOnlyFormatter<BytesEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
+    UpsertBytesJson(UpsertFormatter<BytesEncoder, JsonEncoder>),
     UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
     UpsertTextAvro(UpsertFormatter<TextEncoder, AvroEncoder>),
+    UpsertBytesAvro(UpsertFormatter<BytesEncoder, AvroEncoder>),
     // `UpsertFormatter<ProtoEncoder, ProtoEncoder>` is intentionally left out
     // to avoid using `ProtoEncoder` as key:
     // <https://docs.confluent.io/platform/7.7/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs>
     UpsertTextProto(UpsertFormatter<TextEncoder, ProtoEncoder>),
+    UpsertBytesProto(UpsertFormatter<BytesEncoder, ProtoEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
     UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
     // debezium
@@ -168,27 +176,55 @@ impl EncoderBuild for ProtoEncoder {
     }
 }
 
+fn ensure_only_one_pk<'a>(
+    data_type_name: &'a str,
+    params: &'a EncoderParams<'_>,
+    pk_indices: &'a Option<Vec<usize>>,
+) -> Result<(usize, &'a Field)> {
+    let Some(pk_indices) = pk_indices else {
+        return Err(SinkError::Config(anyhow!(
+            "{}Encoder requires primary key columns to be specified",
+            data_type_name
+        )));
+    };
+    if pk_indices.len() != 1 {
+        return Err(SinkError::Config(anyhow!(
+            "The key encode is {}, but the primary key has {} columns. The key encode {} requires the primary key to be a single column",
+            data_type_name,
+            pk_indices.len(),
+            data_type_name
+        )));
+    }
+
+    let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
+        SinkError::Config(anyhow!(
+            "The primary key column index {} is out of bounds in schema {:?}",
+            pk_indices[0],
+            params.schema
+        ))
+    })?;
+
+    Ok((pk_indices[0], schema_ref))
+}
+
+impl EncoderBuild for BytesEncoder {
+    async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        let (pk_index, schema_ref) = ensure_only_one_pk("BYTES", &params, &pk_indices)?;
+        if let DataType::Bytea = schema_ref.data_type() {
+            Ok(BytesEncoder::new(params.schema, pk_index))
+        } else {
+            Err(SinkError::Config(anyhow!(
+                "The key encode is BYTES, but the primary key column {} has type {}",
+                schema_ref.name,
+                schema_ref.data_type
+            )))
+        }
+    }
+}
+
 impl EncoderBuild for TextEncoder {
     async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let Some(pk_indices) = pk_indices else {
-            return Err(SinkError::Config(anyhow!(
-                "TextEncoder requires primary key columns to be specified"
-            )));
-        };
-        if pk_indices.len() != 1 {
-            return Err(SinkError::Config(anyhow!(
-                    "The key encode is TEXT, but the primary key has {} columns. The key encode TEXT requires the primary key to be a single column",
-                    pk_indices.len()
-                )));
-        }
-
-        let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "The primary key column index {} is out of bounds in schema {:?}",
-                pk_indices[0],
-                params.schema
-            ))
-        })?;
+        let (pk_index, schema_ref) = ensure_only_one_pk("TEXT", &params, &pk_indices)?;
         match &schema_ref.data_type() {
             DataType::Varchar
             | DataType::Boolean
@@ -209,7 +245,7 @@ impl EncoderBuild for TextEncoder {
             }
         }
 
-        Ok(Self::new(params.schema, pk_indices[0]))
+        Ok(Self::new(params.schema, pk_index))
     }
 }
 
@@ -401,17 +437,23 @@ macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesProto($name) => $body,
 
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertBytesJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro($name) => $body,
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertBytesAvro($name) => $body,
             SinkFormatterImpl::UpsertTextProto($name) => $body,
+            SinkFormatterImpl::UpsertBytesProto($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
@@ -426,17 +468,22 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyAvro(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesProto($name) => $body,
 
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertBytesAvro($name) => $body,
             SinkFormatterImpl::UpsertTextProto($name) => $body,
+            SinkFormatterImpl::UpsertBytesProto($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
