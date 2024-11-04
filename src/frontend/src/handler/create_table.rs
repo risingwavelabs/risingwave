@@ -1450,6 +1450,7 @@ pub async fn generate_stream_graph_for_replace_table(
         table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
             source_id.table_id,
         ));
+        source.as_mut().unwrap().id = source_id.table_id;
         source.as_mut().unwrap().optional_associated_table_id =
             Some(OptionalAssociatedTableId::AssociatedTableId(table.id))
     }
