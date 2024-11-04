@@ -200,12 +200,12 @@ impl CreatingStreamingJobControl {
     pub(super) fn on_new_command(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        command: &Command,
+        command: Option<&Command>,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<()> {
         let table_id = self.info.table_fragments.table_id();
         let start_consume_upstream =
-            if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+            if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
                 jobs_to_merge.contains_key(&table_id)
             } else {
                 false

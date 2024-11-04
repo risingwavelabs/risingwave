@@ -15,14 +15,14 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model::{SourceId, StreamingParallelism};
+use risingwave_meta_model::{ObjectId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -72,7 +72,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush(req.database_id.into()).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
@@ -81,17 +81,27 @@ impl StreamManagerService for StreamServiceImpl {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.barrier_scheduler
-            .run_command(Command::pause(PausedReason::Manual))
-            .await?;
+        for database_id in self.metadata_manager.list_active_database_ids().await? {
+            self.barrier_scheduler
+                .run_command(
+                    DatabaseId::new(database_id as _),
+                    Command::pause(PausedReason::Manual),
+                )
+                .await?;
+        }
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.barrier_scheduler
-            .run_command(Command::resume(PausedReason::Manual))
-            .await?;
+        for database_id in self.metadata_manager.list_active_database_ids().await? {
+            self.barrier_scheduler
+                .run_command(
+                    DatabaseId::new(database_id as _),
+                    Command::resume(PausedReason::Manual),
+                )
+                .await?;
+        }
         Ok(Response::new(ResumeResponse {}))
     }
 
@@ -123,6 +133,12 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -138,7 +154,7 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(Command::Throttle(mutation))
+            .run_command(database_id, Command::Throttle(mutation))
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))

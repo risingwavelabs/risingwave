@@ -253,13 +253,13 @@ impl ControlStreamManager {
 impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
         barrier_info: &BarrierInfo,
         prev_paused_reason: Option<PausedReason>,
         pre_applied_graph_info: &InflightGraphInfo,
         applied_graph_info: &InflightGraphInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
-        let mutation = command.to_mutation(prev_paused_reason);
+        let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
             add.subscriptions_to_add.clone()
         } else {
@@ -276,7 +276,10 @@ impl ControlStreamManager {
             barrier_info,
             pre_applied_graph_info.fragment_infos(),
             applied_graph_info.fragment_infos(),
-            command.actors_to_create(),
+            command
+                .as_ref()
+                .map(|command| command.actors_to_create())
+                .unwrap_or_default(),
             subscriptions_to_add,
             subscriptions_to_remove,
         )
