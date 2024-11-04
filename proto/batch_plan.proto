@@ -66,6 +66,106 @@ message SourceNode {
   map<string, secret.SecretRef> secret_refs = 6;
 }
 
+//enum IcebergPredicateType {
+//  ICEBERG_PREDICATE_UNSPECIFIED = 0;
+//  ICEBERG_PREDICATE_TRUE = 1;
+//  ICEBERG_PREDICATE_FALSE = 2;
+//  ICEBERG_PREDICATE_EQ = 3;
+//  ICEBERG_PREDICATE_NE = 4;
+//  ICEBERG_PREDICATE_LT = 5;
+//  ICEBERG_PREDICATE_LE = 6;
+//  ICEBERG_PREDICATE_GT = 7;
+//  ICEBERG_PREDICATE_GE = 8;
+//  ICEBERG_PREDICATE_IS_NULL = 9;
+//  ICEBERG_PREDICATE_IS_NOT_NULL = 10;
+//  ICEBERG_PREDICATE_IN = 11;
+//  ICEBERG_PREDICATE_NOT_IN = 12;
+//  ICEBERG_PREDICATE_AND = 13;
+//  ICEBERG_PREDICATE_OR = 14;
+//  ICEBERG_PREDICATE_NOT = 15;
+//}
+
+message IcebergBinaryPredicate {
+  enum IcebergBinaryExprType {
+    ICEBERG_BINARY_EXPR_TYPE_UNSPECIFIED = 0;
+    ICEBERG_BINARY_EXPR_TYPE_AND = 1;
+    ICEBERG_BINARY_EXPR_TYPE_OR = 2;
+  }
+  IcebergBinaryExprType expr_type = 1;
+  IcebergPredicate left = 2;
+  IcebergPredicate right = 3;
+}
+
+message IcebergUnaryPredicate {
+  enum IcebergUnaryExprType {
+    ICEBERG_UNARY_EXPR_TYPE_UNSPECIFIED = 0;
+    ICEBERG_UNARY_EXPR_TYPE_NOT = 1;
+  }
+  IcebergUnaryExprType expr_type = 1;
+  IcebergPredicate arg = 2;
+}
+
+message IcebergDatum {
+  data.DataType datatype = 1;
+  data.Datum value = 2;
+}
+
+message IcebergRefAndValuePredicate {
+  enum IcebergRefAndValueType {
+    ICEBERG_REF_AND_VALUE_TYPE_UNSPECIFIED = 0;
+    ICEBERG_REF_AND_VALUE_TYPE_EQ = 1;
+    ICEBERG_REF_AND_VALUE_TYPE_NE = 2;
+    ICEBERG_REF_AND_VALUE_TYPE_LT = 3;
+    ICEBERG_REF_AND_VALUE_TYPE_LE = 4;
+    ICEBERG_REF_AND_VALUE_TYPE_GT = 5;
+    ICEBERG_REF_AND_VALUE_TYPE_GE = 6;
+    ICEBERG_REF_AND_VALUE_TYPE_IS_NULL = 7;
+    ICEBERG_REF_AND_VALUE_TYPE_IS_NOT_NULL = 8;
+    ICEBERG_REF_AND_VALUE_TYPE_IN = 9;
+  }
+  IcebergRefAndValueType expr_type = 1;
+  string reference = 2;
+  IcebergDatum value = 3;
+}
+
+message IcebergRefPredicate {
+  enum IcebergRefType {
+    ICEBERG_REF_TYPE_UNSPECIFIED = 0;
+    ICEBERG_REF_TYPE_EQ = 1;
+    ICEBERG_REF_TYPE_NE = 2;
+    ICEBERG_REF_TYPE_LT = 3;
+    ICEBERG_REF_TYPE_LE = 4;
+    ICEBERG_REF_TYPE_GT = 5;
+    ICEBERG_REF_TYPE_GE = 6;
+    ICEBERG_REF_TYPE_IS_NULL = 7;
+    ICEBERG_REF_TYPE_IS_NOT_NULL = 8;
+    ICEBERG_REF_TYPE_IN = 9;
+  }
+  IcebergRefType expr_type = 1;
+  string reference = 2;
+}
+
+message IcebergSetPredicate {
+  enum IcebergSetType {
+    ICEBERG_SET_TYPE_UNSPECIFIED = 0;
+    ICEBERG_SET_TYPE_IN = 1;
+  }
+  IcebergSetType expr_type = 1;
+  string reference = 2;
+  repeated IcebergDatum values = 3;
+}
+
+message IcebergPredicate {
+  oneof predicate_expr {
+    bool boolean = 1;
+    IcebergBinaryPredicate binary_predicate = 3;
+    IcebergUnaryPredicate unary_predicate = 4;
+    IcebergRefPredicate ref_predicate = 5;
+    IcebergRefAndValuePredicate ref_and_value_predicate = 6;
+    IcebergSetPredicate set_predicate = 7;
+  }
+}
+
 message IcebergScanNode {
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
