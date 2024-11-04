@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use multimap::MultiMap;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::table_function::repeat;
 use risingwave_stream::executor::ProjectSetExecutor;
 use risingwave_stream::task::ActorEvalErrorReport;
@@ -60,6 +61,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
 async fn test_project_set() {
     let (mut tx, mut project_set) = create_executor();
 
+    tx.push_barrier(test_epoch(1), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I
         + 1 4
@@ -76,6 +78,7 @@ async fn test_project_set() {
     check_until_pending(
         &mut project_set,
         expect_test::expect![[r#"
+            - !barrier 1
             - !chunk |-
               +---+---+---+---+---+---+
               | + | 0 | 5 | 2 | 1 | 2 |
