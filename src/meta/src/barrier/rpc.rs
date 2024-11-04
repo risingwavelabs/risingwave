@@ -23,17 +23,18 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_service::partial_graph_id::{PbCreatingJob, PbDatabase, PbGraphId};
 use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    InjectBarrierRequest, StreamingControlStreamRequest,
+    InjectBarrierRequest, PbPartialGraphId, StreamingControlStreamRequest,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use rw_futures_util::pending_on_none;
@@ -47,7 +48,7 @@ use super::{
     Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
     InflightSubscriptionInfo,
 };
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
@@ -75,7 +76,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        subscription: &InflightSubscriptionInfo,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -87,10 +88,11 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
+        let subscriptions = subscriptions.collect_vec();
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context
-                .new_control_stream(&node, &subscription.mv_depended_subscriptions)
+                .new_control_stream(&node, subscriptions.iter().cloned())
                 .await
             {
                 Ok(handle) => {
@@ -121,13 +123,15 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        subscriptions: &InflightSubscriptionInfo,
+        subscriptions: impl Iterator<Item = &InflightSubscriptionInfo>,
         nodes: &HashMap<WorkerId, WorkerNode>,
         context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
+        let subscriptions = subscriptions.cloned().collect_vec();
+        let subscriptions = &subscriptions;
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
             let handle = context
-                .new_control_stream(node, &subscriptions.mv_depended_subscriptions)
+                .new_control_stream(node, subscriptions.iter().flatten())
                 .await?;
             Result::<_, MetaError>::Ok((
                 *worker_id,
@@ -253,11 +257,12 @@ impl ControlStreamManager {
 impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
+        database_id: DatabaseId,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
         prev_paused_reason: Option<PausedReason>,
-        pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: &InflightGraphInfo,
+        pre_applied_graph_info: &InflightDatabaseInfo,
+        applied_graph_info: &InflightDatabaseInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
         let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
@@ -271,6 +276,7 @@ impl ControlStreamManager {
             vec![]
         };
         self.inject_barrier(
+            database_id,
             None,
             mutation,
             barrier_info,
@@ -287,6 +293,7 @@ impl ControlStreamManager {
 
     pub(super) fn inject_barrier<'a>(
         &mut self,
+        database_id: DatabaseId,
         creating_table_id: Option<TableId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
@@ -300,9 +307,18 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = creating_table_id
-            .map(|table_id| table_id.table_id)
-            .unwrap_or(u32::MAX);
+        let partial_graph_id = PbPartialGraphId {
+            graph_id: Some(if let Some(creating_table_id) = creating_table_id {
+                PbGraphId::CreatingJob(PbCreatingJob {
+                    database_id: database_id.database_id,
+                    job_id: creating_table_id.table_id,
+                })
+            } else {
+                PbGraphId::Database(PbDatabase {
+                    database_id: database_id.database_id,
+                })
+            }),
+        };
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
@@ -371,7 +387,7 @@ impl ControlStreamManager {
                                             .iter()
                                             .cloned()
                                             .collect(),
-                                        partial_graph_id,
+                                        partial_graph_id: Some(partial_graph_id),
                                         broadcast_info: new_actors_location_to_broadcast.clone(),
                                         actors_to_build: new_actors
                                             .as_mut()
@@ -413,7 +429,7 @@ impl ControlStreamManager {
         Ok(node_need_collect)
     }
 
-    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
+    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<PbPartialGraphId>) {
         self.nodes.iter().for_each(|(_, node)| {
             if node.handle
                 .request_sender
@@ -438,7 +454,7 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn new_control_stream_impl(
         &self,
         node: &WorkerNode,
-        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> MetaResult<StreamingControlHandle> {
         let initial_version_id = self
             .hummock_manager
@@ -449,7 +465,7 @@ impl GlobalBarrierWorkerContextImpl {
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
+            .start_streaming_control(initial_version_id, subscriptions)
             .await?;
         Ok(handle)
     }

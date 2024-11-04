@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::pin::pin;
 use std::time::Duration;
 
@@ -61,6 +61,14 @@ pub struct ActiveStreamingWorkerNodes {
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
     meta_manager: MetadataManager,
+}
+
+impl Debug for ActiveStreamingWorkerNodes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveStreamingWorkerNodes")
+            .field("worker_nodes", &self.worker_nodes)
+            .finish()
+    }
 }
 
 impl ActiveStreamingWorkerNodes {
@@ -597,17 +605,15 @@ impl MetadataManager {
         Ok(table_fragments)
     }
 
-    pub async fn all_node_actors(
-        &self,
-        include_inactive: bool,
-    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
+    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
             let tf = TableFragments::from_protobuf(fragments);
-            for (node_id, actors) in tf.worker_actors(include_inactive) {
-                let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors)
+            for actor in tf.active_actors() {
+                actor_maps
+                    .try_insert(actor.actor_id, actor)
+                    .expect("non duplicate");
             }
         }
         Ok(actor_maps)
@@ -675,7 +681,7 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<u32, u64>>>> {
         self.catalog_controller
             .get_mv_depended_subscriptions()
             .await

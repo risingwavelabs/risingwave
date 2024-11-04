@@ -22,7 +22,7 @@ use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::{ObjectId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -106,7 +106,6 @@ impl ReplaceTablePlan {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
             let fragment_change = CommandFragmentChanges::NewFragment(
-                self.streaming_job.database_id().into(),
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
                     actors: fragment
@@ -114,19 +113,19 @@ impl ReplaceTablePlan {
                         .iter()
                         .map(|actor| {
                             (
-                                actor.actor_id as i32,
+                                actor.actor_id,
                                 self.new_table_fragments
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
-                                    .worker_id(),
+                                    .worker_id() as WorkerId,
                             )
                         })
                         .collect(),
                     state_table_ids: fragment
                         .state_table_ids
                         .iter()
-                        .map(|table_id| *table_id as ObjectId)
+                        .map(|table_id| TableId::new(*table_id))
                         .collect(),
                 },
             );
@@ -172,19 +171,19 @@ impl CreateStreamingJobCommandInfo {
                         .iter()
                         .map(|actor| {
                             (
-                                actor.actor_id as i32,
+                                actor.actor_id,
                                 self.table_fragments
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
-                                    .worker_id(),
+                                    .worker_id() as WorkerId,
                             )
                         })
                         .collect(),
                     state_table_ids: fragment
                         .state_table_ids
                         .iter()
-                        .map(|table_id| *table_id as ObjectId)
+                        .map(|table_id| TableId::new(*table_id))
                         .collect(),
                 },
             )
@@ -207,7 +206,7 @@ pub enum CreateStreamingJobType {
 /// [`Command`] is the input of [`crate::barrier::GlobalBarrierWorker`]. For different commands,
 /// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
-#[derive(Debug, Clone, strum::Display)]
+#[derive(Debug, strum::Display)]
 pub enum Command {
     /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
     /// all messages before the checkpoint barrier should have been committed.
@@ -336,7 +335,6 @@ impl Command {
                         (
                             fragment_id,
                             CommandFragmentChanges::NewFragment(
-                                info.streaming_job.database_id().into(),
                                 info.streaming_job.id().into(),
                                 fragment_info,
                             ),

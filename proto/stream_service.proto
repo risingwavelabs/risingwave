@@ -9,12 +9,27 @@ import "stream_plan.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message PartialGraphId {
+  message Database {
+    uint32 database_id = 1;
+  }
+  message CreatingJob {
+    uint32 database_id = 1;
+    uint32 job_id = 2;
+  }
+
+  oneof graph_id {
+    Database database = 1;
+    CreatingJob creating_job = 2;
+  }
+}
+
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
-  uint32 partial_graph_id = 6;
+  PartialGraphId partial_graph_id = 6;
 
   repeated common.ActorInfo broadcast_info = 8;
   repeated stream_plan.StreamActor actors_to_build = 9;
@@ -48,7 +63,7 @@ message BarrierCompleteResponse {
   uint32 worker_id = 5;
   map<uint32, hummock.TableWatermarks> table_watermarks = 6;
   repeated hummock.SstableInfo old_value_sstables = 7;
-  uint32 partial_graph_id = 8;
+  PartialGraphId partial_graph_id = 8;
   // prev_epoch of barrier
   uint64 epoch = 9;
 }
@@ -69,7 +84,7 @@ message StreamingControlStreamRequest {
   }
 
   message RemovePartialGraphRequest {
-    repeated uint32 partial_graph_ids = 1;
+    repeated PartialGraphId partial_graph_ids = 1;
   }
 
   oneof request {
