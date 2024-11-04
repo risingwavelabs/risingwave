@@ -19,14 +19,13 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbBackfillType, PbTable};
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::check_valid_column_name;
-use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
@@ -137,6 +136,14 @@ pub fn gen_create_mv_plan_bound(
 
     let backfill_type = context.with_options().backfill_type();
 
+    if PbBackfillType::Serverless == backfill_type
+        && !session.config().streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "Serverless backfill is not allowed without arrangement backfill".to_string(),
+        )));
+    }
+
     let mut plan_root = Planner::new(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
@@ -221,13 +228,13 @@ pub async fn handle_create_mv_bound(
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        if !context.with_options().is_empty() {
-            // get other useful fields by `remove`, the logic here is to reject unknown options.
-            return Err(RwError::from(ProtocolError(format!(
-                "unexpected options in WITH clause: {:?}",
-                context.with_options().keys()
-            ))));
-        }
+        // if !context.with_options().is_empty() {
+        //     // get other useful fields by `remove`, the logic here is to reject unknown options.
+        //     return Err(RwError::from(ProtocolError(format!(
+        //         "unexpected options in WITH clause: {:?}",
+        //         context.with_options().keys()
+        //     ))));
+        // }
 
         let has_order_by = !query.order.is_empty();
         if has_order_by {

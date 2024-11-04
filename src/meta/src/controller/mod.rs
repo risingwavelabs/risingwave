@@ -25,7 +25,11 @@ use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
-use risingwave_pb::catalog::{BackfillType, PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex, PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable, PbView};
+use risingwave_pb::catalog::{
+    BackfillType, PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior,
+    PbIndex, PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription,
+    PbTable, PbView,
+};
 use sea_orm::{DatabaseConnection, ModelTrait};
 
 use crate::MetaError;

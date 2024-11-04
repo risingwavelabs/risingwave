@@ -727,6 +727,7 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            backfill_type: BackfillType::Regular.into(),
         }
         .into();
 

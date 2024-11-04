@@ -16,13 +16,14 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
-use risingwave_meta_model::FragmentId;
+use risingwave_meta_model::{FragmentId, JobStatus};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
-    GetServerlessStreamingJobsStatusResponse, PbWorkerReschedule, RescheduleRequest,
-    RescheduleResponse, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
+    get_serverless_streaming_jobs_status_response, GetClusterInfoRequest, GetClusterInfoResponse,
+    GetServerlessStreamingJobsStatusRequest, GetServerlessStreamingJobsStatusResponse,
+    PbWorkerReschedule, RescheduleRequest, RescheduleResponse, UpdateStreamingJobNodeLabelsRequest,
+    UpdateStreamingJobNodeLabelsResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -184,6 +185,26 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _request: Request<GetServerlessStreamingJobsStatusRequest>,
     ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
-        todo!()
+        let jobs = self
+            .metadata_manager
+            .catalog_controller
+            .list_serverless_job_status()
+            .await?;
+
+        let statuses = jobs
+            .into_iter()
+            .map(|(job_id, status)| {
+                get_serverless_streaming_jobs_status_response::Status {
+                    table_id: job_id as u32,
+                    // todo
+                    node_label: format!("node-{}", job_id),
+                    backfill_done: status == JobStatus::Created,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(GetServerlessStreamingJobsStatusResponse {
+            streaming_job_statuses: statuses,
+        }))
     }
 }

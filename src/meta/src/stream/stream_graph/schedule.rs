@@ -224,13 +224,13 @@ impl Scheduler {
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
         streaming_job_id: u32,
-        workers: &HashMap<u32, WorkerNode>,
+        schedulable_workers: &HashMap<u32, WorkerNode>,
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,
     ) -> MetaResult<Self> {
         // Group worker slots with worker node.
 
-        let slots = workers
+        let slots = schedulable_workers
             .iter()
             .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.parallelism()))
             .collect();

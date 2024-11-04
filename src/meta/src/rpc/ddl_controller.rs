@@ -43,9 +43,10 @@ use risingwave_meta_model::{
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
-    Sink, Source, Subscription, Table, View,
+    BackfillType, Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable,
+    Schema, Secret, Sink, Source, Subscription, Table, View,
 };
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
@@ -61,6 +62,7 @@ use risingwave_pb::stream_plan::{
 };
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
+use tokio::time;
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -1599,7 +1601,9 @@ impl DdlController {
         )?;
 
         // 2. Build the actor graph.
-        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+        // todo
+        let label = format!("materialized_view_{}", id);
+        let cluster_info = self.waiting_for_label(&stream_job, label).await?;
 
         let parallelism =
             self.resolve_stream_parallelism(specified_parallelism, max_parallelism, &cluster_info)?;
@@ -1708,6 +1712,85 @@ impl DdlController {
         };
 
         Ok((ctx, table_fragments))
+    }
+
+    async fn waiting_for_label(
+        &self,
+        stream_job: &StreamingJob,
+        label: String,
+    ) -> MetaResult<StreamingClusterInfo> {
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        self.env
+            .notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+
+        let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+
+        println!(
+            "status {:#?}",
+            self.metadata_manager
+                .catalog_controller
+                .list_serverless_job_status()
+                .await
+        );
+
+        if let StreamingJob::MaterializedView(job) = stream_job
+            && job.backfill_type() == BackfillType::Serverless
+        {
+            time::timeout(Duration::from_secs(10), async {
+                let schedulable_worker_ids = cluster_info.filter_workers_by_label(&label);
+
+                if !schedulable_worker_ids.is_empty() {
+                    cluster_info.schedulable_workers = schedulable_worker_ids;
+                    // return Ok::<(), MetaError>(());
+                    return Ok(());
+                }
+
+                loop {
+                    let notification = local_notification_rx.recv().await;
+
+                    match notification {
+                        Some(LocalNotification::WorkerNodeActivated(worker))
+                            if worker.r#type() == WorkerType::ComputeNode
+                                && worker.node_label().unwrap_or_default() == label =>
+                        {
+                            tracing::info!("worker node activated with label {label}");
+
+                            cluster_info =
+                                self.metadata_manager.get_streaming_cluster_info().await?;
+
+                            let schedulable_worker_ids =
+                                cluster_info.filter_workers_by_label(&label);
+
+                            if !schedulable_worker_ids.is_empty() {
+                                cluster_info.schedulable_workers = schedulable_worker_ids;
+                                // return Ok::<(), MetaError>(());
+                                return Ok(());
+                            }
+
+                            break;
+                        }
+                        None => {
+                            return Err(MetaError::from(anyhow!(
+                                "local notification channel closed in loop of serverless backfill"
+                            )));
+                        }
+                        _ => {
+                            // do nothing
+                        }
+                    }
+                }
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| anyhow!("timeout {}", e))??;
+        }
+
+        Ok(cluster_info)
     }
 
     /// `build_replace_table` builds a table replacement and returns the context and new table

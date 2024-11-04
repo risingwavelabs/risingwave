@@ -425,7 +425,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes = std::iter::once((
+    let worker_nodes: HashMap<_, _> = std::iter::once((
         0,
         WorkerNode {
             id: 0,
@@ -439,6 +439,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
     ))
     .collect();
     StreamingClusterInfo {
+        schedulable_workers: worker_nodes.keys().copied().collect(),
         worker_nodes,
         unschedulable_workers: Default::default(),
     }

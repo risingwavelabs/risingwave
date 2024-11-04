@@ -23,6 +23,7 @@ pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+use crate::catalog::BackfillType;
 use crate::common::WorkerType;
 
 #[rustfmt::skip]
@@ -227,6 +228,10 @@ impl common::WorkerNode {
             .expect("property should be exist")
             .parallelism as usize
     }
+
+    pub fn node_label(&self) -> Option<String> {
+        self.property.as_ref().and_then(|p| p.node_label.clone())
+    }
 }
 
 impl stream_plan::SourceNode {
@@ -248,6 +253,16 @@ impl meta::table_fragments::ActorStatus {
             .as_ref()
             .expect("actor location should be exist")
             .worker_node_id
+    }
+}
+
+impl catalog::PbTable {
+    pub fn serverless_label(&self) -> Option<String> {
+        if let BackfillType::Serverless = self.backfill_type() {
+            Some(format!("_serverless_job_{}", self.id))
+        } else {
+            None
+        }
     }
 }
 

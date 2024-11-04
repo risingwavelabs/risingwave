@@ -671,10 +671,17 @@ impl ActorGraphBuilder {
         let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
+        let schedulable_workers: HashMap<_, _> = cluster_info
+            .worker_nodes
+            .iter()
+            .filter(|(id, _)| cluster_info.schedulable_workers.contains(id))
+            .map(|(id, worker)| (*id, worker.clone()))
+            .collect();
+
         // Schedule the distribution of all building fragments.
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,
-            &cluster_info.worker_nodes,
+            &schedulable_workers,
             default_parallelism,
             expected_vnode_count,
         )?;

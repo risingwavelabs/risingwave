@@ -15,7 +15,7 @@
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
-use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
+use risingwave_pb::catalog::{PbBackfillType, PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::NotSet;
@@ -102,6 +102,33 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum BackfillType {
+    #[sea_orm(string_value = "REGULAR")]
+    Regular,
+    #[sea_orm(string_value = "SERVERLESS")]
+    Serverless,
+}
+
+impl From<PbBackfillType> for BackfillType {
+    fn from(value: PbBackfillType) -> Self {
+        match value {
+            PbBackfillType::Unspecified | PbBackfillType::Regular => BackfillType::Regular,
+            PbBackfillType::Serverless => BackfillType::Serverless,
+        }
+    }
+}
+
+impl From<BackfillType> for PbBackfillType {
+    fn from(value: BackfillType) -> Self {
+        match value {
+            BackfillType::Regular => PbBackfillType::Regular,
+            BackfillType::Serverless => PbBackfillType::Serverless,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
@@ -135,6 +162,7 @@ pub struct Model {
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
+    pub backfill_type: BackfillType,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -237,6 +265,7 @@ impl From<PbTable> for ActiveModel {
                 NotSet
             };
 
+        let backfill_type = pb_table.backfill_type();
         Self {
             table_id: Set(pb_table.id as _),
             name: Set(pb_table.name),
@@ -267,6 +296,7 @@ impl From<PbTable> for ActiveModel {
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
+            backfill_type: Set(backfill_type.into()),
         }
     }
 }

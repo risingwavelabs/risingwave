@@ -27,7 +27,7 @@ use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
-use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::table::{BackfillType, TableType};
 use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
@@ -2777,6 +2777,23 @@ impl CatalogController {
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
+    }
+
+    pub async fn list_serverless_job_status(&self) -> MetaResult<Vec<(TableId, JobStatus)>> {
+        let inner = self.inner.read().await;
+
+        let jobs: Vec<(TableId, JobStatus)> = Table::find()
+            .select_only()
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(table::Column::BackfillType.eq(BackfillType::Serverless))
+            .column(table::Column::TableId)
+            .column(streaming_job::Column::JobStatus)
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+
+        Ok(jobs)
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
