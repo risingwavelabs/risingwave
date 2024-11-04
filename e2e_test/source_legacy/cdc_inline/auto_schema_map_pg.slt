@@ -139,6 +139,7 @@ c_interval_array interval[] false NULL
 c_jsonb_array jsonb[] false NULL
 c_uuid_array character varying[] false NULL
 c_enum_array character varying[] false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key c_boolean, c_bigint, c_date NULL NULL
 distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_postgres_types_test NULL NULL

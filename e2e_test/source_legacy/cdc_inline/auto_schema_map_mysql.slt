@@ -154,6 +154,7 @@ c_datetime timestamp without time zone false NULL
 c_timestamp timestamp with time zone false NULL
 c_enum character varying false NULL
 c_json jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key c_boolean, c_bigint, c_date NULL NULL
 distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_mysql_types_test NULL NULL
