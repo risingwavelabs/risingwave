@@ -35,7 +35,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
-use super::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -192,7 +192,7 @@ pub async fn get_replace_table_plan(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (mut graph, table, source, job_type) = generate_stream_graph_for_table(
+    let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         original_catalog,

@@ -385,12 +385,7 @@ impl HummockManager {
             .exec(db)
             .await?;
         hummock_gc_history::Entity::insert_many(models)
-            .on_conflict(
-                OnConflict::column(hummock_gc_history::Column::ObjectId)
-                    .do_nothing()
-                    .to_owned(),
-            )
-            .do_nothing()
+            .on_conflict_do_nothing()
             .exec(db)
             .await?;
         Ok(())

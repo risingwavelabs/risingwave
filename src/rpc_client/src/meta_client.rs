@@ -573,6 +573,19 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_swap_rename(
+        &self,
+        object: alter_swap_rename_request::Object,
+    ) -> Result<WaitVersion> {
+        let request = AlterSwapRenameRequest {
+            object: Some(object),
+        };
+        let resp = self.inner.alter_swap_rename(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -2096,6 +2109,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
+            ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

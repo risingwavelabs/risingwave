@@ -3929,7 +3929,7 @@ dependencies = [
 name = "delta_btree_map"
 version = "2.2.0-alpha"
 dependencies = [
- "educe 0.6.0",
+ "educe",
  "enum-as-inner 0.6.0",
 ]
 
@@ -4452,18 +4452,6 @@ dependencies = [
  "signature 2.2.0",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "educe"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4bd92664bf78c4d3dba9b7cdafce6fa15b13ed3ed16175218196942e99168a8"
-dependencies = [
- "enum-ordinalize",
- "proc-macro2",
- "quote",
- "syn 2.0.79",
 ]
 
 [[package]]
@@ -5884,9 +5872,9 @@ checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
 
 [[package]]
 name = "hashlink"
-version = "0.8.4"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown 0.14.5",
 ]
@@ -5919,9 +5907,6 @@ name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
-dependencies = [
- "unicode-segmentation",
-]
 
 [[package]]
 name = "heck"
@@ -7062,9 +7047,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.27.0"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf4e226dcd58b4be396f7bd3c20da8fdee2911400705297ba7d2d7cc2c30f716"
+checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
  "pkg-config",
@@ -8602,9 +8587,9 @@ dependencies = [
 
 [[package]]
 name = "ouroboros"
-version = "0.17.2"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2ba07320d39dfea882faa70554b4bd342a5f273ed59ba7c1c6b4c840492c954"
+checksum = "944fa20996a25aded6b4795c6d63f10014a7a83f8be9828a11860b08c5fc4a67"
 dependencies = [
  "aliasable",
  "ouroboros_macro",
@@ -8613,13 +8598,14 @@ dependencies = [
 
 [[package]]
 name = "ouroboros_macro"
-version = "0.17.2"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec4c6225c69b4ca778c0aea097321a64c421cf4577b331c61b229267edabb6f8"
+checksum = "39b0deead1528fd0e5947a8546a9642a9777c25f6e1e26f34c97b204bbb465bd"
 dependencies = [
  "heck 0.4.1",
- "proc-macro-error 1.0.4",
+ "itertools 0.12.1",
  "proc-macro2",
+ "proc-macro2-diagnostics",
  "quote",
  "syn 2.0.79",
 ]
@@ -9356,7 +9342,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af7cee1a6c8a5b9208b3cb1061f10c0cb689087b3d8ce85fb9d2dd7a29b6ba66"
 dependencies = [
  "diff",
- "yansi",
+ "yansi 0.5.1",
 ]
 
 [[package]]
@@ -9470,6 +9456,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3e4daa0dcf6feba26f985457cdf104d4b4256fc5a09547140f3631bb076b19a"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.79",
+ "version_check",
+ "yansi 1.0.1",
 ]
 
 [[package]]
@@ -10660,7 +10659,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "enumflags2",
@@ -10752,7 +10751,7 @@ name = "risingwave_common_estimate_size"
 version = "2.2.0-alpha"
 dependencies = [
  "bytes",
- "educe 0.6.0",
+ "educe",
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
@@ -11242,7 +11241,7 @@ dependencies = [
  "const-currying",
  "downcast-rs",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11285,7 +11284,7 @@ dependencies = [
  "chrono",
  "chrono-tz 0.10.0",
  "criterion",
- "educe 0.6.0",
+ "educe",
  "expect-test",
  "fancy-regex",
  "futures-async-stream",
@@ -11352,7 +11351,7 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11605,7 +11604,7 @@ dependencies = [
  "comfy-table",
  "crepe",
  "easy-ext",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -11721,7 +11720,7 @@ version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap",
- "educe 0.6.0",
+ "educe",
  "either",
  "futures",
  "hex",
@@ -12146,7 +12145,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
- "educe 0.6.0",
+ "educe",
  "either",
  "enum-as-inner 0.6.0",
  "expect-test",
@@ -12794,13 +12793,13 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea1fee0cf8528dbe6eda29d5798afc522a63b75e44c5b15721e6e64af9c7cc4b"
+checksum = "d5680a8b686985116607ef5f5af2b1f9e1cc2c228330e93101816a0baa279afa"
 dependencies = [
  "async-stream",
  "async-trait",
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
  "futures",
  "log",
@@ -12822,9 +12821,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f0b8869c75cf3fbb1bd860abb025033cd2e514c5f4fa43e792697cb1fe6c882"
+checksum = "70a157f42d291ccbd6e913b9d9b12dbe2ccbcf0472efc60c8715dd1254083aec"
 dependencies = [
  "chrono",
  "clap",
@@ -12839,9 +12838,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8737b566799ed0444f278d13c300c4c6f1a91782f60ff5825a591852d5502030"
+checksum = "3a239e3bb1b566ad4ec2654d0d193d6ceddfd733487edc9c21a64d214c773910"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -12853,9 +12852,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216643749e26ce27ab6c51d3475f2692981d4a902d34455bcd322f412900df5c"
+checksum = "63ba07e9f2479cc671758fcb1edee42ff2e32c34b3e67ab41d0af1e41f73c74e"
 dependencies = [
  "async-trait",
  "clap",
@@ -12870,13 +12869,12 @@ dependencies = [
 
 [[package]]
 name = "sea-query"
-version = "0.31.1"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4fd043b8117af233e221f73e3ea8dfbc8e8c3c928017c474296db45c649105c"
+checksum = "ff504d13b5e4b52fffcf2fb203d0352a5722fa5151696db768933e41e1e591bb"
 dependencies = [
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
- "educe 0.5.11",
  "inherent",
  "ordered-float 3.9.1",
  "rust_decimal",
@@ -12888,11 +12886,11 @@ dependencies = [
 
 [[package]]
 name = "sea-query-binder"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754965d4aee6145bec25d0898e5c931e6c22859789ce62fd85a42a15ed5a8ce3"
+checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
 dependencies = [
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
  "rust_decimal",
  "sea-query",
@@ -12918,9 +12916,9 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.15.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad52149fc81836ea7424c3425d8f6ed8ad448dd16d2e4f6a3907ba46f3f2fd78"
+checksum = "aab1592d17860a9a8584d9b549aebcd06f7bdc3ff615f71752486ba0b05b1e6e"
 dependencies = [
  "futures",
  "sea-query",
@@ -13681,7 +13679,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2b6b8f606d3c4cdcaf2031c4320b79d7584e454b79562ba3d675f49701c160e"
 dependencies = [
  "async-trait",
- "educe 0.6.0",
+ "educe",
  "fs-err",
  "futures",
  "glob",
@@ -13730,8 +13728,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13742,24 +13740,24 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
- "ahash 0.8.11",
  "atoi",
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "byteorder",
  "bytes",
  "chrono",
  "crc",
  "crossbeam-queue",
  "either",
- "event-listener 2.5.3",
+ "event-listener 5.3.1",
  "futures-channel",
  "futures-core",
  "futures-intrusive",
  "futures-io",
  "futures-util",
+ "hashbrown 0.14.5",
  "hashlink",
  "hex",
  "indexmap 2.6.0",
@@ -13786,24 +13784,24 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "proc-macro2",
  "quote",
  "sqlx-core",
  "sqlx-macros-core",
- "syn 1.0.109",
+ "syn 2.0.79",
 ]
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "dotenvy",
  "either",
- "heck 0.4.1",
+ "heck 0.5.0",
  "hex",
  "madsim-tokio",
  "once_cell",
@@ -13816,19 +13814,19 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
- "syn 1.0.109",
+ "syn 2.0.79",
  "tempfile",
  "url",
 ]
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.21.7",
- "bigdecimal 0.3.1",
+ "base64 0.22.0",
+ "bigdecimal 0.4.5",
  "bitflags 2.6.0",
  "byteorder",
  "bytes",
@@ -13869,12 +13867,12 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.21.7",
- "bigdecimal 0.3.1",
+ "base64 0.22.0",
+ "bigdecimal 0.4.5",
  "bitflags 2.6.0",
  "byteorder",
  "chrono",
@@ -13912,8 +13910,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
  "chrono",
@@ -13927,11 +13925,11 @@ dependencies = [
  "madsim-tokio",
  "percent-encoding",
  "serde",
+ "serde_urlencoded",
  "sqlx-core",
  "time",
  "tracing",
  "url",
- "urlencoding",
  "uuid",
 ]
 
@@ -16503,6 +16501,12 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yup-oauth2"
