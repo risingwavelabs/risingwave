@@ -73,6 +73,8 @@ pub type SecretId = u32;
 pub type UserId = u32;
 pub type ConnectionId = u32;
 
+static mut COUNTER: i32 = 0;
+
 pub enum RelationIdEnum {
     Table(TableId),
     Index(IndexId),
@@ -1363,7 +1365,13 @@ impl CatalogManager {
                 let mut version = self
                     .finish_create_sink_procedure(internal_tables, sink)
                     .await?;
-
+                tracing::info!("???");
+                unsafe {
+                    COUNTER += 1;
+                    if COUNTER > 3 {
+                        panic!("~~~");
+                    }
+                }
                 if let Some((table, source)) = target_table {
                     version = self
                         .finish_replace_table_procedure(
