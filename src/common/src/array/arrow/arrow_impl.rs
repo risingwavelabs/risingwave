@@ -974,9 +974,11 @@ converts!(SerialArray, arrow_array::Int64Array, @map);
 trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
-    type TimestampType: std::fmt::Debug;
+    /// The timestamp type used to distinguish different time units, only utilized when the Arrow type is a timestamp.
+    type TimestampType;
     fn from_arrow(value: Self::ArrowType) -> Self;
     fn into_arrow(self) -> Self::ArrowType;
+    /// Used for converting timestamp types and will not be used in conversions of other types.
     fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self;
 }
 
