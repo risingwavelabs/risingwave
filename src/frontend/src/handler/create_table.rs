@@ -1031,19 +1031,15 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-                let cdc_with_options = derive_with_options_for_cdc_table(
+                let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
 
-                let (columns, pk_names) = derive_schema_for_cdc_table(
-                    &column_defs,
-                    &constraints,
-                    cdc_with_options.clone(),
-                    wildcard_idx.is_some(),
-                    None,
-                )
-                .await?;
+                let (columns, pk_names) = match wildcard_idx {
+                    Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                    None => bind_cdc_table_schema(&column_defs, &constraints, None)?,
+                };
 
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
@@ -1156,76 +1152,77 @@ struct CdcSchemaChangeArgs {
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
-async fn derive_schema_for_cdc_table(
-    column_defs: &Vec<ColumnDef>,
-    constraints: &Vec<TableConstraint>,
+async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
-    need_auto_schema_map: bool,
-    schema_change_args: Option<CdcSchemaChangeArgs>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
-    if need_auto_schema_map {
-        Feature::CdcTableSchemaMap
-            .check_available()
-            .map_err(|err| {
-                ErrorCode::NotSupported(
-                    err.to_report_string(),
-                    "Please define the schema manually".to_owned(),
-                )
-            })?;
-        let (options, secret_refs) = cdc_with_options.into_parts();
-        let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-            .context("failed to extract external table config")?;
+    Feature::CdcTableSchemaMap.check_available().map_err(
+        |err: risingwave_common::license::FeatureNotAvailable| {
+            ErrorCode::NotSupported(
+                err.to_report_string(),
+                "Please define the schema manually".to_owned(),
+            )
+        },
+    )?;
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+        .context("failed to extract external table config")?;
 
-        let table = ExternalTableImpl::connect(config)
-            .await
-            .context("failed to auto derive table schema")?;
-        Ok((
-            table
-                .column_descs()
-                .iter()
-                .cloned()
-                .map(|column_desc| ColumnCatalog {
-                    column_desc,
-                    is_hidden: false,
-                })
-                .collect(),
-            table.pk_names().clone(),
-        ))
-    } else {
-        let mut columns = bind_sql_columns(column_defs)?;
-        let pk_names = if let Some(args) = schema_change_args {
-            // If new_version_columns is provided, we are in the process of auto schema change.
-            // update the default value column since the default value column is not set in the
-            // column sql definition.
-            if let Some(new_version_columns) = args.new_version_columns {
-                for (col, new_version_col) in columns
-                    .iter_mut()
-                    .zip_eq_fast(new_version_columns.into_iter())
-                {
-                    assert_eq!(col.name(), new_version_col.name());
-                    col.column_desc.generated_or_default_column =
-                        new_version_col.column_desc.generated_or_default_column;
-                }
+    let table = ExternalTableImpl::connect(config)
+        .await
+        .context("failed to auto derive table schema")?;
+    Ok((
+        table
+            .column_descs()
+            .iter()
+            .cloned()
+            .map(|column_desc| ColumnCatalog {
+                column_desc,
+                is_hidden: false,
+            })
+            .collect(),
+        table.pk_names().clone(),
+    ))
+}
+
+/// Derive schema for cdc table when create a new Table or alter an existing Table
+fn bind_cdc_table_schema(
+    column_defs: &Vec<ColumnDef>,
+    constraints: &Vec<TableConstraint>,
+    schema_change_args: Option<CdcSchemaChangeArgs>,
+) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+    let mut columns = bind_sql_columns(column_defs)?;
+    let pk_names = if let Some(args) = schema_change_args {
+        // If new_version_columns is provided, we are in the process of auto schema change.
+        // update the default value column since the default value column is not set in the
+        // column sql definition.
+        if let Some(new_version_columns) = args.new_version_columns {
+            for (col, new_version_col) in columns
+                .iter_mut()
+                .zip_eq_fast(new_version_columns.into_iter())
+            {
+                assert_eq!(col.name(), new_version_col.name());
+                col.column_desc.generated_or_default_column =
+                    new_version_col.column_desc.generated_or_default_column;
             }
+        }
 
-            // For table created by `create table t (*)` the constraint is empty, we need to
-            // retrieve primary key names from original table catalog if available
-            args.original_catalog
-                .pk
-                .iter()
-                .map(|x| {
-                    args.original_catalog.columns[x.column_index]
-                        .name()
-                        .to_string()
-                })
-                .collect()
-        } else {
-            bind_sql_pk_names(column_defs, constraints)?
-        };
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        args.original_catalog
+            .pk
+            .iter()
+            .map(|x| {
+                args.original_catalog.columns[x.column_index]
+                    .name()
+                    .to_string()
+            })
+            .collect()
+    } else {
+        bind_sql_pk_names(column_defs, constraints)?
+    };
 
-        Ok((columns, pk_names))
-    }
+    Ok((columns, pk_names))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1387,17 +1384,14 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) = derive_schema_for_cdc_table(
+            let (columns, pk_names) = bind_cdc_table_schema(
                 &column_defs,
                 &constraints,
-                cdc_with_options.clone(),
-                false,
                 Some(CdcSchemaChangeArgs {
                     original_catalog: original_catalog.clone(),
                     new_version_columns,
                 }),
-            )
-            .await?;
+            )?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
