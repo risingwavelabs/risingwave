@@ -74,7 +74,10 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{
+    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
+    IGNORED_NOTIFICATION_VERSION,
+};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -1214,6 +1217,9 @@ impl CatalogController {
         )
         .await?;
 
+        // handle secret ref
+        let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+
         let source_obj = Self::create_object(
             &txn,
             ObjectType::Source,
@@ -1226,6 +1232,19 @@ impl CatalogController {
         pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
+
+        // add secret dependency
+        if !secret_ids.is_empty() {
+            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+                object_dependency::ActiveModel {
+                    oid: Set(*id as _),
+                    used_by: Set(source_id as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
@@ -3507,6 +3526,8 @@ async fn update_internal_tables(
 #[cfg(test)]
 mod tests {
 
+    use risingwave_pb::catalog::StreamSourceInfo;
+
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -3666,6 +3687,9 @@ mod tests {
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
                 .to_string(),
+            info: Some(StreamSourceInfo {
+                ..Default::default()
+            }),
             ..Default::default()
         };
         mgr.create_source(pb_source).await?;
