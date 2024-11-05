@@ -414,7 +414,7 @@ pub async fn handle_show_object(
                             PRIVATELINK_CONNECTION.to_string()
                         },
                         connection::Info::ConnectionParams(params) => {
-                            format!("{}", params.get_connection_type().unwrap().as_str_name())
+                            params.get_connection_type().unwrap().as_str_name().to_string()
                         }
                     };
                     let source_names = schema

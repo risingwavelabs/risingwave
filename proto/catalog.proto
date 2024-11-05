@@ -243,6 +243,7 @@ message ConnectionParams {
 
   ConnectionType connection_type = 1;
   map<string, string> properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
 }
 
 message Connection {

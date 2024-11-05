@@ -36,6 +36,7 @@ use risingwave_meta_model::{
     SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
     ViewId,
 };
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -1443,6 +1444,16 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_connection.schema_id as _, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
+        let mut dep_secrets = HashSet::new();
+        if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
+            dep_secrets.extend(
+                params
+                    .secret_refs
+                    .values()
+                    .map(|secret_ref| secret_ref.secret_id),
+            );
+        }
+
         let conn_obj = Self::create_object(
             &txn,
             ObjectType::Connection,
@@ -1454,6 +1465,16 @@ impl CatalogController {
         pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
+
+        for secret_id in dep_secrets {
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(secret_id as _),
+                used_by: Set(conn_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 

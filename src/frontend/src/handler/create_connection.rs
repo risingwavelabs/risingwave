@@ -27,6 +27,9 @@ use crate::binder::Binder;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
+use crate::utils::resolve_secret_ref_in_with_options;
+use crate::WithOptions;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 
@@ -42,9 +45,12 @@ fn get_connection_property_required(
     })
 }
 fn resolve_create_connection_payload(
-    with_properties: &mut BTreeMap<String, String>,
+    with_properties: WithOptions,
+    session: &SessionImpl,
 ) -> Result<create_connection_request::Payload> {
-    let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
+    let (mut props, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties, session)?.into_parts();
+    let connection_type = get_connection_property_required(&mut props, CONNECTION_TYPE_PROP)?;
     let connection_type = match connection_type.as_str() {
         PRIVATELINK_CONNECTION => {
             return Err(RwError::from(ErrorCode::Deprecated(
@@ -63,7 +69,8 @@ fn resolve_create_connection_payload(
     Ok(create_connection_request::Payload::ConnectionParams(
         ConnectionParams {
             connection_type: connection_type as i32,
-            properties: with_properties.clone().into_iter().collect(),
+            properties: props.into_iter().collect(),
+            secret_refs: secret_refs.into_iter().collect(),
         },
     ))
 }
@@ -90,9 +97,8 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let mut with_properties = handler_args.with_options.clone().into_connector_props();
-
-    let create_connection_payload = resolve_create_connection_payload(&mut with_properties)?;
+    let with_properties = handler_args.with_options.clone().into_connector_props();
+    let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
