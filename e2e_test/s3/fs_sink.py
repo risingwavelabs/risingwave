@@ -71,9 +71,9 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_timestamp_us timestamp,
         test_timestamp_ns timestamp,
         test_timestamptz_s timestamptz,
-        test_timestamptz_ms timestamp,
-        test_timestamptz_us timestamp,
-        test_timestamptz_ns timestamp
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
         
     ) WITH (
         connector = 's3',
@@ -182,9 +182,9 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamp_us timestamp,
         test_timestamp_ns timestamp,
         test_timestamptz_s timestamptz,
-        test_timestamptz_ms timestamp,
-        test_timestamptz_us timestamp,
-        test_timestamptz_ns timestamp
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_parquet_sink/*.parquet',
@@ -262,9 +262,9 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamp_us timestamp,
         test_timestamp_ns timestamp,
         test_timestamptz_s timestamptz,
-        test_timestamptz_ms timestamp,
-        test_timestamptz_us timestamp,
-        test_timestamptz_ns timestamp
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_json_sink/*.json',

@@ -513,6 +513,12 @@ pub trait FromArrow {
             Time64(Microsecond) => DataType::Time,
             Timestamp(Microsecond, None) => DataType::Timestamp,
             Timestamp(Microsecond, Some(_)) => DataType::Timestamptz,
+            Timestamp(Second, None) => DataType::Timestamp,
+            Timestamp(Second, Some(_)) => DataType::Timestamptz,
+            Timestamp(Millisecond, None) => DataType::Timestamp,
+            Timestamp(Millisecond, Some(_)) => DataType::Timestamptz,
+            Timestamp(Nanosecond, None) => DataType::Timestamp,
+            Timestamp(Nanosecond, Some(_)) => DataType::Timestamptz,
             Interval(MonthDayNano) => DataType::Interval,
             Utf8 => DataType::Varchar,
             Binary => DataType::Bytea,
@@ -1085,6 +1091,19 @@ impl FromIntoArrow for Timestamp {
 
     fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
         match time_unit {
+            TimeUnit::Second => {
+                Timestamp(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
+            }
+            TimeUnit::Millisecond => Timestamp(
+                DateTime::from_timestamp((value / 1_000) as _, (value % 1_000 * 1000000) as _)
+                    .unwrap()
+                    .naive_utc(),
+            ),
+            TimeUnit::Microsecond => Timestamp(
+                DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000 * 1000) as _)
+                    .unwrap()
+                    .naive_utc(),
+            ),
             TimeUnit::Nanosecond => Timestamp(
                 DateTime::from_timestamp(
                     (value / 1_000_000_000) as _,
@@ -1093,19 +1112,6 @@ impl FromIntoArrow for Timestamp {
                 .unwrap()
                 .naive_utc(),
             ),
-            TimeUnit::Microsecond => Timestamp(
-                DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000) as _)
-                    .unwrap()
-                    .naive_utc(),
-            ),
-            TimeUnit::Millisecond => Timestamp(
-                DateTime::from_timestamp((value / 1_000) as _, (value % 1_000 * 1_000) as _)
-                    .unwrap()
-                    .naive_utc(),
-            ),
-            TimeUnit::Second => {
-                Timestamp(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
-            }
         }
     }
 }
