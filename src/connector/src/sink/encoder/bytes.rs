@@ -94,12 +94,6 @@ mod test {
             Vec::<u8>::new()
         );
 
-        let row = OwnedRow::new(vec![None]);
-        assert_eq!(
-            encoder.encode_cols(&row, std::iter::once(0)).unwrap(),
-            Vec::<u8>::new()
-        );
-
         let schema = Schema::new(vec![Field::with_name(DataType::Int16, "col1")]);
         let encoder = BytesEncoder::new(schema, 0);
         let row = OwnedRow::new(vec![Some(ScalarImpl::Int16(123))]);

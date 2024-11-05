@@ -432,6 +432,11 @@ impl SinkFormatterImpl {
     }
 }
 
+/// Macro to dispatch formatting implementation for all supported sink formatter types.
+/// Used when the message key can be either bytes or string.
+///
+/// Takes a formatter implementation ($impl), binds it to a name ($name),
+/// and executes the provided code block ($body) with that binding.
 #[macro_export]
 macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
@@ -463,31 +468,39 @@ macro_rules! dispatch_sink_formatter_impl {
     };
 }
 
+/// Macro to dispatch formatting implementation for sink formatters that require string keys.
+/// Used when the message key must be a string (excludes some Avro and bytes implementations).
+///
+/// Similar to `dispatch_sink_formatter_impl`, but excludes certain formatter types
+/// that don't support string keys (e.g., `AppendOnlyAvro`, `UpsertAvro`).
+/// These cases are marked as unreachable!() since they should never occur
+/// in contexts requiring string keys.
 #[macro_export]
 macro_rules! dispatch_sink_formatter_str_key_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesJson(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyAvro(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesAvro(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
-            SinkFormatterImpl::AppendOnlyBytesProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesProto(_) => unreachable!(),
 
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
-            SinkFormatterImpl::UpsertBytesAvro($name) => $body,
+            SinkFormatterImpl::UpsertBytesAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextProto($name) => $body,
-            SinkFormatterImpl::UpsertBytesProto($name) => $body,
+            SinkFormatterImpl::UpsertBytesProto(_) => unreachable!(),
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
             SinkFormatterImpl::UpsertTextTemplate($name) => $body,
+            SinkFormatterImpl::UpsertBytesJson(_) => unreachable!(),
             SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
