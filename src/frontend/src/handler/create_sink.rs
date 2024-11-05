@@ -26,8 +26,9 @@ use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, Ta
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkEncode, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
@@ -180,6 +181,18 @@ pub async fn gen_sink_plan(
             None => None,
         },
     };
+
+    // only allow Kafka connector work with `bytes` as key encode
+    if let Some(format_desc) = &format_desc
+        && let Some(encode) = &format_desc.key_encode
+        && connector != KAFKA_SINK
+        && matches!(encode, SinkEncode::Bytes)
+    {
+        return Err(ErrorCode::BindError(
+            "kafka connector only support bytes as key encode".to_string(),
+        )
+        .into());
+    }
 
     let definition = context.normalized_sql().to_owned();
     let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
@@ -836,13 +849,15 @@ fn bind_sink_format_desc(
 
     let mut key_encode = None;
     if let Some(encode) = value.key_encode {
-        if encode == E::Text {
-            key_encode = Some(SinkEncode::Text);
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "sink key encode unsupported: {encode}, only TEXT supported"
-            ))
-            .into());
+        match encode {
+            E::Text => key_encode = Some(SinkEncode::Text),
+            E::Bytes => key_encode = Some(SinkEncode::Bytes),
+            _ => {
+                return Err(ErrorCode::BindError(format!(
+                    "sink key encode unsupported: {encode}, only TEXT and BYTES supported"
+                ))
+                .into())
+            }
         }
     }
 
