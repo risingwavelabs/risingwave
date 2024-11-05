@@ -64,6 +64,7 @@ pub async fn handle_refresh_schema(
         format_encode.unwrap()
     };
 
+    // NOTE(st1page): since we have not implemented alter format encode for table, it is actually no use.
     let definition = alter_definition_format_encode(
         &original_table.definition,
         format_encode.row_options.clone(),
@@ -75,15 +76,8 @@ pub async fn handle_refresh_schema(
         .unwrap();
 
     let (source, table, graph, col_index_mapping, job_type) = {
-        let result = get_replace_table_plan(
-            &session,
-            table_name,
-            definition,
-            &original_table,
-            Some(format_encode),
-            None,
-        )
-        .await;
+        let result =
+            get_replace_table_plan(&session, table_name, definition, &original_table, None).await;
         match result {
             Ok((source, table, graph, col_index_mapping, job_type)) => {
                 Ok((source, table, graph, col_index_mapping, job_type))

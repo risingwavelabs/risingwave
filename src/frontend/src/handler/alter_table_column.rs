@@ -140,7 +140,6 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     new_definition: Statement,
     old_catalog: &Arc<TableCatalog>,
-    format_encode: Option<FormatEncodeOptions>,
     new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
@@ -161,11 +160,16 @@ pub async fn get_replace_table_plan(
         with_version_column,
         wildcard_idx,
         cdc_table_info,
+        format_encode,
         ..
     } = new_definition
     else {
         panic!("unexpected statement type: {:?}", new_definition);
     };
+
+    let format_encode = format_encode
+        .clone()
+        .map(|format_encode| format_encode.into_v2_with_warning());
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
@@ -307,6 +311,7 @@ pub async fn handle_alter_table_column(
     else {
         panic!("unexpected statement: {:?}", definition);
     };
+
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
@@ -430,15 +435,8 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
-        &session,
-        table_name,
-        definition,
-        &original_catalog,
-        format_encode,
-        None,
-    )
-    .await?;
+    let (source, table, graph, col_index_mapping, job_type) =
+        get_replace_table_plan(&session, table_name, definition, &original_catalog, None).await?;
 
     let catalog_writer = session.catalog_writer()?;
 
