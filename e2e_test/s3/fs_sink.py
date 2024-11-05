@@ -74,7 +74,7 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_timestamptz_ms timestamptz,
         test_timestamptz_us timestamptz,
         test_timestamptz_ns timestamptz
-        
+
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
