@@ -188,9 +188,10 @@ pub async fn gen_sink_plan(
         && connector != KAFKA_SINK
         && matches!(encode, SinkEncode::Bytes)
     {
-        return Err(ErrorCode::BindError(
-            "kafka connector only support bytes as key encode".to_string(),
-        )
+        return Err(ErrorCode::BindError(format!(
+            "key encode bytes only works with kafka connector, but found {}",
+            connector
+        ))
         .into());
     }
 
