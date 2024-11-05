@@ -3525,6 +3525,8 @@ async fn update_internal_tables(
 #[cfg(test)]
 mod tests {
 
+    use risingwave_pb::catalog::StreamSourceInfo;
+
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -3684,6 +3686,9 @@ mod tests {
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
                 .to_string(),
+            info: Some(StreamSourceInfo {
+                ..Default::default()
+            }),
             ..Default::default()
         };
         mgr.create_source(pb_source).await?;
