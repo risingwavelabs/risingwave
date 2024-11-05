@@ -138,8 +138,8 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
 pub async fn get_replace_table_plan(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,
-    definition: Statement,
-    original_catalog: &Arc<TableCatalog>,
+    new_definition: Statement,
+    old_catalog: &Arc<TableCatalog>,
     format_encode: Option<FormatEncodeOptions>,
     new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
@@ -150,8 +150,8 @@ pub async fn get_replace_table_plan(
     TableJobType,
 )> {
     // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
+    let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
+    let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
     let Statement::CreateTable {
         columns,
         constraints,
@@ -162,15 +162,15 @@ pub async fn get_replace_table_plan(
         wildcard_idx,
         cdc_table_info,
         ..
-    } = definition
+    } = new_definition
     else {
-        panic!("unexpected statement type: {:?}", definition);
+        panic!("unexpected statement type: {:?}", new_definition);
     };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
-        original_catalog,
+        old_catalog,
         format_encode,
         handler_args.clone(),
         col_id_gen,
@@ -188,7 +188,7 @@ pub async fn get_replace_table_plan(
 
     // Calculate the mapping from the original columns to the new columns.
     let col_index_mapping = ColIndexMapping::new(
-        original_catalog
+        old_catalog
             .columns()
             .iter()
             .map(|old_c| {
@@ -200,7 +200,7 @@ pub async fn get_replace_table_plan(
         table.columns.len(),
     );
 
-    let incoming_sink_ids: HashSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
+    let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
     let target_columns = table
         .columns
@@ -220,7 +220,7 @@ pub async fn get_replace_table_plan(
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
-    table.maybe_vnode_count = VnodeCount::set(original_catalog.vnode_count()).to_protobuf();
+    table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
 
     Ok((source, table, graph, col_index_mapping, job_type))
 }
