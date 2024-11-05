@@ -86,6 +86,7 @@ pub enum SinkFormatterImpl {
     AppendOnlyBytesProto(AppendOnlyFormatter<BytesEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
+    AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
@@ -100,6 +101,7 @@ pub enum SinkFormatterImpl {
     UpsertBytesProto(UpsertFormatter<BytesEncoder, ProtoEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
     UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
+    UpsertBytesTemplate(UpsertFormatter<BytesEncoder, TemplateEncoder>),
     // debezium
     DebeziumJson(DebeziumJsonFormatter),
 }
@@ -384,26 +386,50 @@ impl SinkFormatterImpl {
                 (F::AppendOnly, E::Json, Some(E::Text)) => {
                     Impl::AppendOnlyTextJson(build(p).await?)
                 }
+                (F::AppendOnly, E::Json, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesJson(build(p).await?)
+                }
                 (F::AppendOnly, E::Json, None) => Impl::AppendOnlyJson(build(p).await?),
                 (F::AppendOnly, E::Avro, Some(E::Text)) => {
                     Impl::AppendOnlyTextAvro(build(p).await?)
+                }
+                (F::AppendOnly, E::Avro, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesAvro(build(p).await?)
                 }
                 (F::AppendOnly, E::Avro, None) => Impl::AppendOnlyAvro(build(p).await?),
                 (F::AppendOnly, E::Protobuf, Some(E::Text)) => {
                     Impl::AppendOnlyTextProto(build(p).await?)
                 }
+                (F::AppendOnly, E::Protobuf, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesProto(build(p).await?)
+                }
                 (F::AppendOnly, E::Protobuf, None) => Impl::AppendOnlyProto(build(p).await?),
                 (F::AppendOnly, E::Template, Some(E::Text)) => {
                     Impl::AppendOnlyTextTemplate(build(p).await?)
                 }
+                (F::AppendOnly, E::Template, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesTemplate(build(p).await?)
+                }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
+                (F::Upsert, E::Json, Some(E::Bytes)) => {
+                    Impl::UpsertBytesJson(build(p).await?)
+                }
                 (F::Upsert, E::Json, None) => Impl::UpsertJson(build(p).await?),
                 (F::Upsert, E::Avro, Some(E::Text)) => Impl::UpsertTextAvro(build(p).await?),
+                (F::Upsert, E::Avro, Some(E::Bytes)) => {
+                    Impl::UpsertBytesAvro(build(p).await?)
+                }
                 (F::Upsert, E::Avro, None) => Impl::UpsertAvro(build(p).await?),
                 (F::Upsert, E::Protobuf, Some(E::Text)) => Impl::UpsertTextProto(build(p).await?),
+                (F::Upsert, E::Protobuf, Some(E::Bytes)) => {
+                    Impl::UpsertBytesProto(build(p).await?)
+                }
                 (F::Upsert, E::Template, Some(E::Text)) => {
                     Impl::UpsertTextTemplate(build(p).await?)
+                }
+                (F::Upsert, E::Template, Some(E::Bytes)) => {
+                    Impl::UpsertBytesTemplate(build(p).await?)
                 }
                 (F::Upsert, E::Template, None) => Impl::UpsertTemplate(build(p).await?),
                 (F::Debezium, E::Json, None) => Impl::DebeziumJson(build(p).await?),
@@ -416,6 +442,9 @@ impl SinkFormatterImpl {
                 | (F::Upsert, E::Protobuf, _)
                 | (F::Debezium, E::Json, Some(_))
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (F::AppendOnly, E::Bytes, _)
+                | (F::Upsert, E::Bytes, _)
+                | (F::Debezium, E::Bytes, _)
                 | (_, E::Parquet, _)
                 | (_, _, Some(E::Parquet))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
@@ -464,6 +493,8 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
             SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
+            SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
         }
     };
 }
@@ -502,6 +533,8 @@ macro_rules! dispatch_sink_formatter_str_key_impl {
             SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertBytesJson(_) => unreachable!(),
             SinkFormatterImpl::UpsertTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
+            SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
         }
     };
 }
