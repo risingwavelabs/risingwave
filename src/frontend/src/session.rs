@@ -699,13 +699,14 @@ impl SessionImpl {
             notices: Default::default(),
             exec_context: Mutex::new(None),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
         }
     }
 
     #[cfg(test)]
     pub fn mock() -> Self {
         let env = FrontendEnv::mock();
+        let cursor_metrics = env.cursor_metrics.clone();
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
@@ -727,7 +728,7 @@ impl SessionImpl {
             ))
             .into(),
             last_idle_instant: Default::default(),
-            cursor_manager: Arc::new(CursorManager::new(env.cursor_metrics.clone())),
+            cursor_manager: Arc::new(CursorManager::new(cursor_metrics)),
         }
     }
 
