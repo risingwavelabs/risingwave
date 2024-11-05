@@ -644,6 +644,7 @@ impl StateStoreImpl {
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
+                .with_object_pool_capacity(16 * 1024)
                 .storage(Engine::Large);
 
             if !opts.meta_file_cache_dir.is_empty() {
@@ -693,6 +694,7 @@ impl StateStoreImpl {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()
                 })
+                .with_object_pool_capacity(16 * 1024)
                 .storage(Engine::Large);
 
             if !opts.data_file_cache_dir.is_empty() {
