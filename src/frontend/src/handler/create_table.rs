@@ -35,6 +35,7 @@ use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -1322,7 +1323,7 @@ pub fn check_create_table_with_source(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn generate_stream_graph_for_table(
+pub async fn generate_stream_graph_for_replace_table(
     _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
@@ -1341,7 +1342,7 @@ pub async fn generate_stream_graph_for_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
-    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+    let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
                 handler_args,
@@ -1441,13 +1442,18 @@ pub async fn generate_stream_graph_for_table(
     let graph = build_graph(plan)?;
 
     // Fill the original table ID.
-    let table = Table {
+    let mut table = Table {
         id: original_catalog.id().table_id(),
-        optional_associated_source_id: original_catalog
-            .associated_source_id()
-            .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
         ..table
     };
+    if let Some(source_id) = original_catalog.associated_source_id() {
+        table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
+            source_id.table_id,
+        ));
+        source.as_mut().unwrap().id = source_id.table_id;
+        source.as_mut().unwrap().optional_associated_table_id =
+            Some(OptionalAssociatedTableId::AssociatedTableId(table.id))
+    }
 
     Ok((graph, table, source, job_type))
 }

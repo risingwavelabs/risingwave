@@ -54,7 +54,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -672,7 +672,7 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, _) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,

@@ -2,6 +2,7 @@ use sea_orm_migration::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sea_orm::{FromJsonQueryResult, FromQueryResult, Statement};
+use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -75,7 +76,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Fragment::Table)
-                    .add_column(ColumnDef::new(Fragment::VnodeMapping).binary().not_null())
+                    .add_column(
+                        ColumnDef::new(Fragment::VnodeMapping)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;
