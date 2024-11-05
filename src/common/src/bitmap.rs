@@ -42,6 +42,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, Ran
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::PbBuffer;
+use rw_iter_util::ZipEqFast;
 
 #[derive(Default, Debug, Clone, EstimateSize)]
 pub struct BitmapBuilder {
@@ -825,6 +826,15 @@ impl iter::Iterator for BitmapOnesIter<'_> {
         }
     }
 }
+
+pub trait FilterByBitmap: ExactSizeIterator + Sized {
+    fn filter_by_bitmap(self, bitmap: &Bitmap) -> impl Iterator<Item = Self::Item> {
+        self.zip_eq_fast(bitmap.iter())
+            .filter_map(|(item, bit)| bit.then_some(item))
+    }
+}
+
+impl<T> FilterByBitmap for T where T: ExactSizeIterator {}
 
 #[cfg(test)]
 mod tests {

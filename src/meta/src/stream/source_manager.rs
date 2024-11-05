@@ -1002,6 +1002,7 @@ impl SourceManager {
 
     /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
+        tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
         if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
             let handle = create_source_worker_handle(source, self.metrics.clone())
