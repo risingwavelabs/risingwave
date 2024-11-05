@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
+use risingwave_common::bitmap::FilterByBitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
@@ -198,16 +199,12 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             let chunk = Arc::new(chunk?);
             let keys = K::build_many(self.group_key.as_slice(), &chunk);
 
-            for (row_id, ((encoded_row, key), visible)) in
-                encode_chunk(&chunk, &self.column_orders)?
-                    .into_iter()
-                    .zip_eq_fast(keys.into_iter())
-                    .zip_eq_fast(chunk.visibility().iter())
-                    .enumerate()
+            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
+                .into_iter()
+                .zip_eq_fast(keys.into_iter())
+                .enumerate()
+                .filter_by_bitmap(chunk.visibility())
             {
-                if !visible {
-                    continue;
-                }
                 let heap = groups.entry(key).or_insert_with(|| {
                     TopNHeap::new(
                         self.limit,

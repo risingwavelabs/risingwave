@@ -23,7 +23,6 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub secret_id: i32,
     pub name: String,
-    #[sea_orm(column_type = "Binary(BlobSize::Blob(None))")]
     pub value: Vec<u8>,
 }
 

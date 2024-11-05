@@ -25,6 +25,7 @@ mod m20240911_083152_variable_vnode_count;
 mod m20241016_065621_hummock_gc_history;
 mod m20241025_062548_singleton_vnode_count;
 mod m20241103_043732_connection_params;
+mod utils;
 
 pub struct Migrator;
 
