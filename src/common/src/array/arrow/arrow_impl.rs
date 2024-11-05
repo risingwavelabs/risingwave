@@ -42,6 +42,7 @@
 
 use std::fmt::Write;
 
+use arrow_53_schema::TimeUnit;
 use arrow_array::array;
 use arrow_array::cast::AsArray;
 use arrow_buffer::OffsetBuffer;
@@ -848,6 +849,7 @@ impl From<&Bitmap> for arrow_buffer::NullBuffer {
 }
 
 /// Implement bi-directional `From` between concrete array types.
+
 macro_rules! converts {
     ($ArrayType:ty, $ArrowType:ty) => {
         impl From<&$ArrayType> for $ArrowType {
@@ -899,7 +901,43 @@ macro_rules! converts {
             }
         }
     };
+
+    ($ArrayType:ty, $ArrowType:ty, $time_unit:expr, @map) => {
+
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                array.iter().map(|o| o.map(|v| v.into_arrow())).collect()
+            }
+        }
+
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                array.iter().map(|o| {
+                    o.map(|v| {
+                        let timestamp = <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow_with_unit(v, $time_unit);
+                        timestamp
+                    })
+                }).collect()
+            }
+        }
+
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                arrays
+                    .iter()
+                    .flat_map(|a| a.iter())
+                    .map(|o| {
+                        o.map(|v| {
+                            <<$ArrayType as Array>::RefItem<'_> as FromIntoArrow>::from_arrow(v)
+                        })
+                    })
+                    .collect()
+            }
+        }
+
+    };
 }
+
 converts!(BoolArray, arrow_array::BooleanArray);
 converts!(I16Array, arrow_array::Int16Array);
 converts!(I32Array, arrow_array::Int32Array);
@@ -912,14 +950,17 @@ converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
-converts!(TimestampArray, arrow_array::TimestampSecondArray, @map);
-converts!(TimestampArray, arrow_array::TimestampMillisecondArray, @map);
-converts!(TimestampArray, arrow_array::TimestampMicrosecondArray, @map);
-converts!(TimestampArray, arrow_array::TimestampNanosecondArray, @map);
-converts!(TimestamptzArray, arrow_array::TimestampSecondArray, @map);
-converts!(TimestamptzArray, arrow_array::TimestampMillisecondArray, @map);
-converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, @map);
-converts!(TimestamptzArray, arrow_array::TimestampNanosecondArray, @map);
+
+converts!(TimestampArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
+converts!(TimestampArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
+converts!(TimestampArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
+converts!(TimestampArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+
+converts!(TimestamptzArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
+converts!(TimestamptzArray, arrow_array::TimestampMillisecondArray,TimeUnit::Millisecond, @map);
+converts!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
+converts!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
+
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
 
@@ -927,12 +968,15 @@ converts!(SerialArray, arrow_array::Int64Array, @map);
 trait FromIntoArrow {
     /// The corresponding element type in the Arrow array.
     type ArrowType;
+    type TimestampType: std::fmt::Debug;
     fn from_arrow(value: Self::ArrowType) -> Self;
     fn into_arrow(self) -> Self::ArrowType;
+    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self;
 }
 
 impl FromIntoArrow for Serial {
     type ArrowType = i64;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         value.into()
@@ -940,11 +984,16 @@ impl FromIntoArrow for Serial {
 
     fn into_arrow(self) -> Self::ArrowType {
         self.into()
+    }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
     }
 }
 
 impl FromIntoArrow for F32 {
     type ArrowType = f32;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         value.into()
@@ -952,11 +1001,16 @@ impl FromIntoArrow for F32 {
 
     fn into_arrow(self) -> Self::ArrowType {
         self.into()
+    }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
     }
 }
 
 impl FromIntoArrow for F64 {
     type ArrowType = f64;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         value.into()
@@ -965,10 +1019,15 @@ impl FromIntoArrow for F64 {
     fn into_arrow(self) -> Self::ArrowType {
         self.into()
     }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
+    }
 }
 
 impl FromIntoArrow for Date {
     type ArrowType = i32;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         Date(arrow_array::types::Date32Type::to_naive_date(value))
@@ -977,10 +1036,15 @@ impl FromIntoArrow for Date {
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::Date32Type::from_naive_date(self.0)
     }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
+    }
 }
 
 impl FromIntoArrow for Time {
     type ArrowType = i64;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         Time(
@@ -998,17 +1062,18 @@ impl FromIntoArrow for Time {
             .num_microseconds()
             .unwrap()
     }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
+    }
 }
 
 impl FromIntoArrow for Timestamp {
     type ArrowType = i64;
+    type TimestampType = TimeUnit;
 
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Timestamp(
-            DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000 * 1000) as _)
-                .unwrap()
-                .naive_utc(),
-        )
+    fn from_arrow(_value: Self::ArrowType) -> Self {
+        unreachable!()
     }
 
     fn into_arrow(self) -> Self::ArrowType {
@@ -1017,22 +1082,59 @@ impl FromIntoArrow for Timestamp {
             .num_microseconds()
             .unwrap()
     }
+
+    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
+        match time_unit {
+            TimeUnit::Nanosecond => Timestamp(
+                DateTime::from_timestamp(
+                    (value / 1_000_000_000) as _,
+                    (value % 1_000_000_000) as _,
+                )
+                .unwrap()
+                .naive_utc(),
+            ),
+            TimeUnit::Microsecond => Timestamp(
+                DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000) as _)
+                    .unwrap()
+                    .naive_utc(),
+            ),
+            TimeUnit::Millisecond => Timestamp(
+                DateTime::from_timestamp((value / 1_000) as _, (value % 1_000 * 1_000) as _)
+                    .unwrap()
+                    .naive_utc(),
+            ),
+            TimeUnit::Second => {
+                Timestamp(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
+            }
+        }
+    }
 }
 
 impl FromIntoArrow for Timestamptz {
     type ArrowType = i64;
+    type TimestampType = TimeUnit;
 
-    fn from_arrow(value: Self::ArrowType) -> Self {
-        Timestamptz::from_micros(value)
+    fn from_arrow(_value: Self::ArrowType) -> Self {
+        unreachable!()
     }
 
     fn into_arrow(self) -> Self::ArrowType {
         self.timestamp_micros()
     }
+
+    fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self {
+        match time_unit {
+            TimeUnit::Second => Timestamptz::from_secs(value).unwrap_or_default(),
+            TimeUnit::Millisecond => Timestamptz::from_millis(value).unwrap_or_default(),
+            TimeUnit::Microsecond => Timestamptz::from_micros(value),
+            TimeUnit::Nanosecond => Timestamptz::from_nans(value).unwrap_or_default(),
+        }
+    }
 }
 
 impl FromIntoArrow for Interval {
     type ArrowType = ArrowIntervalType;
+    type TimestampType = ();
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::to_interval(value)
@@ -1040,6 +1142,10 @@ impl FromIntoArrow for Interval {
 
     fn into_arrow(self) -> Self::ArrowType {
         <ArrowIntervalType as crate::array::arrow::ArrowIntervalTypeTrait>::from_interval(self)
+    }
+
+    fn from_arrow_with_unit(_value: Self::ArrowType, _time_unit: Self::TimestampType) -> Self {
+        unreachable!()
     }
 }
 
