@@ -15,20 +15,22 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
+use risingwave_common::catalog::ConnectionId;
 use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
 pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SecretRef, SecretRefAsType, SqlOption, Statement, Value,
+    ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
-use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
 use crate::Binder;
@@ -38,11 +40,14 @@ mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
+const CONNECTION_REF_KEY: &str = "profile";
+
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
-    secret_ref: BTreeMap<String, SecretRef>,
+    secret_ref: BTreeMap<String, SecretRefValue>,
+    connection_ref: BTreeMap<String, ConnectionRefValue>,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -65,12 +70,21 @@ impl WithOptions {
         Self {
             inner,
             secret_ref: Default::default(),
+            connection_ref: Default::default(),
         }
     }
 
     /// Create a new [`WithOptions`] from a option [`BTreeMap`] and secret ref.
-    pub fn new(inner: BTreeMap<String, String>, secret_ref: BTreeMap<String, SecretRef>) -> Self {
-        Self { inner, secret_ref }
+    pub fn new(
+        inner: BTreeMap<String, String>,
+        secret_ref: BTreeMap<String, SecretRefValue>,
+        connection_ref: BTreeMap<String, ConnectionRefValue>,
+    ) -> Self {
+        Self {
+            inner,
+            secret_ref,
+            connection_ref,
+        }
     }
 
     pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
@@ -78,8 +92,14 @@ impl WithOptions {
     }
 
     /// Take the value of the option map and secret refs.
-    pub fn into_parts(self) -> (BTreeMap<String, String>, BTreeMap<String, SecretRef>) {
-        (self.inner, self.secret_ref)
+    pub fn into_parts(
+        self,
+    ) -> (
+        BTreeMap<String, String>,
+        BTreeMap<String, SecretRefValue>,
+        BTreeMap<String, ConnectionRefValue>,
+    ) {
+        (self.inner, self.secret_ref, self.connection_ref)
     }
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
@@ -95,6 +115,7 @@ impl WithOptions {
         Self {
             inner,
             secret_ref: self.secret_ref,
+            connection_ref: self.connection_ref,
         }
     }
 
@@ -119,6 +140,7 @@ impl WithOptions {
         Self {
             inner,
             secret_ref: self.secret_ref.clone(),
+            connection_ref: self.connection_ref.clone(),
         }
     }
 
@@ -131,23 +153,26 @@ impl WithOptions {
         false
     }
 
-    pub fn secret_ref(&self) -> &BTreeMap<String, SecretRef> {
+    pub fn secret_ref(&self) -> &BTreeMap<String, SecretRefValue> {
         &self.secret_ref
     }
 
-    pub fn encode_options_to_map(sql_options: &[SqlOption]) -> RwResult<BTreeMap<String, String>> {
-        let WithOptions { inner, secret_ref } = WithOptions::try_from(sql_options)?;
-        if secret_ref.is_empty() {
-            Ok(inner)
-        } else {
-            Err(RwError::from(ErrorCode::InvalidParameterValue(
-                "Secret reference is not allowed in encode options".to_string(),
-            )))
-        }
+    pub fn secret_ref_mut(&mut self) -> &mut BTreeMap<String, SecretRefValue> {
+        &mut self.secret_ref
+    }
+
+    pub fn connection_ref(&self) -> &BTreeMap<String, ConnectionRefValue> {
+        &self.connection_ref
+    }
+
+    pub fn connection_ref_mut(&mut self) -> &mut BTreeMap<String, ConnectionRefValue> {
+        &mut self.connection_ref
     }
 
     pub fn oauth_options_to_map(sql_options: &[SqlOption]) -> RwResult<BTreeMap<String, String>> {
-        let WithOptions { inner, secret_ref } = WithOptions::try_from(sql_options)?;
+        let WithOptions {
+            inner, secret_ref, ..
+        } = WithOptions::try_from(sql_options)?;
         if secret_ref.is_empty() {
             Ok(inner)
         } else {
@@ -158,12 +183,88 @@ impl WithOptions {
     }
 }
 
+pub(crate) fn resolve_connection_ref_and_secret_ref(
+    with_options: WithOptions,
+    session: &SessionImpl,
+) -> RwResult<(WithOptionsSecResolved, PbConnectionType)> {
+    let db_name: &str = session.database();
+    let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
+
+    let mut connection_params = None;
+    for connection_ref in connection_refs.values() {
+        // at most one connection ref in the map
+        connection_params = {
+            // get connection params from catalog
+            let (schema_name, connection_name) = Binder::resolve_schema_qualified_name(
+                db_name,
+                connection_ref.connection_name.clone(),
+            )?;
+            let connection_catalog =
+                session.get_connection_by_name(schema_name, &connection_name)?;
+            if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
+                Some(params.clone())
+            } else {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                    "Private Link Service has been deprecated. Please create a new connection instead."
+                        .to_string(),
+        )));
+            }
+        };
+    }
+
+    let mut inner_secret_refs = {
+        let mut resolved_secret_refs = BTreeMap::new();
+        for (key, secret_ref) in secret_refs {
+            let (schema_name, secret_name) =
+                Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+            let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+            let ref_as = match secret_ref.ref_as {
+                SecretRefAsType::Text => PbRefAsType::Text,
+                SecretRefAsType::File => PbRefAsType::File,
+            };
+            let pb_secret_ref = PbSecretRef {
+                secret_id: secret_catalog.id.secret_id(),
+                ref_as: ref_as.into(),
+            };
+            resolved_secret_refs.insert(key.clone(), pb_secret_ref);
+        }
+        resolved_secret_refs
+    };
+
+    let mut connection_type = PbConnectionType::Unspecified;
+    if let Some(connection_params) = connection_params {
+        connection_type = connection_params.connection_type();
+        for (k, v) in connection_params.properties {
+            if options.insert(k.clone(), v).is_some() {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "Duplicated key: {}",
+                    k
+                ))));
+            }
+        }
+
+        for (k, v) in connection_params.secret_refs {
+            if inner_secret_refs.insert(k.clone(), v).is_some() {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "Duplicated key: {}",
+                    k
+                ))));
+            }
+        }
+    }
+
+    Ok((
+        WithOptionsSecResolved::new(options, inner_secret_refs),
+        connection_type,
+    ))
+}
+
 /// Get the secret id from the name.
 pub(crate) fn resolve_secret_ref_in_with_options(
     with_options: WithOptions,
     session: &SessionImpl,
 ) -> RwResult<WithOptionsSecResolved> {
-    let (options, secret_refs) = with_options.into_parts();
+    let (options, secret_refs, _) = with_options.into_parts();
     let mut resolved_secret_refs = BTreeMap::new();
     let db_name: &str = session.database();
     for (key, secret_ref) in secret_refs {
@@ -207,17 +308,40 @@ impl TryFrom<&[SqlOption]> for WithOptions {
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
-        let mut secret_ref: BTreeMap<String, SecretRef> = BTreeMap::new();
+        let mut secret_ref: BTreeMap<String, SecretRefValue> = BTreeMap::new();
+        let mut connection_ref: BTreeMap<String, ConnectionRefValue> = BTreeMap::new();
         for option in options {
             let key = option.name.real_value();
-            if let Value::Ref(r) = &option.value {
-                if secret_ref.insert(key.clone(), r.clone()).is_some() || inner.contains_key(&key) {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "Duplicated option: {}",
-                        key
-                    ))));
+            match &option.value {
+                Value::SecretRef(r) => {
+                    if secret_ref.insert(key.clone(), r.clone()).is_some()
+                        || inner.contains_key(&key)
+                    {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                            "Duplicated option: {}",
+                            key
+                        ))));
+                    }
+                    continue;
                 }
-                continue;
+                Value::ConnectionRef(r) => {
+                    if key != CONNECTION_REF_KEY {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                            "expect 'profile' as the key for connection ref, but got: {}",
+                            key
+                        ))));
+                    }
+                    if connection_ref.insert(key.clone(), r.clone()).is_some()
+                        || inner.contains_key(&key)
+                    {
+                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                            "Duplicated option: {}",
+                            key
+                        ))));
+                    }
+                    continue;
+                }
+                _ => {}
             }
             let value: String = match option.value.clone() {
                 Value::CstyleEscapedString(s) => s.value,
@@ -239,7 +363,11 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner, secret_ref })
+        Ok(Self {
+            inner,
+            secret_ref,
+            connection_ref,
+        })
     }
 }
 

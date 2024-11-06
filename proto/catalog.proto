@@ -241,6 +241,7 @@ message ConnectionParams {
     CONNECTION_TYPE_UNSPECIFIED = 0;
     CONNECTION_TYPE_KAFKA = 1;
     CONNECTION_TYPE_ICEBERG = 2;
+    CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
   }
 
   ConnectionType connection_type = 1;

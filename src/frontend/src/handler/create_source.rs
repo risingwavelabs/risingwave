@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
 use either::Either;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use rand::Rng;
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
@@ -59,6 +59,7 @@ use risingwave_connector::source::{
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -86,7 +87,8 @@ use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::{
-    resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions,
+    resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
+    resolve_secret_ref_in_with_options, OverwriteOptions,
 };
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
 
@@ -308,16 +310,36 @@ pub(crate) async fn bind_columns_from_source(
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
     let options_with_secret = match with_properties {
-        Either::Left(options) => resolve_secret_ref_in_with_options(options.clone(), session)?,
+        Either::Left(options) => {
+            let (sec_resolve_props, connection_type) =
+                resolve_connection_ref_and_secret_ref(options.clone(), session)?;
+            if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+                return Err(RwError::from(ProtocolError(format!(
+                    "connection type {:?} is not allowed, allowed types: {:?}",
+                    connection_type, ALLOWED_CONNECTION_CONNECTOR
+                ))));
+            }
+
+            sec_resolve_props
+        }
         Either::Right(options_with_secret) => options_with_secret.clone(),
     };
 
     let is_kafka: bool = options_with_secret.is_kafka_connector();
-    let (format_encode_options, format_encode_secret_refs) = resolve_secret_ref_in_with_options(
+
+    // todo: need to resolve connection ref for schema registry
+    let (sec_resolve_props, connection_type) = resolve_connection_ref_and_secret_ref(
         WithOptions::try_from(format_encode.row_options())?,
         session,
-    )?
-    .into_parts();
+    )?;
+    if !ALLOWED_CONNECTION_SCHEMA_REGISTRY.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, ALLOWED_CONNECTION_SCHEMA_REGISTRY
+        ))));
+    }
+
+    let (format_encode_options, format_encode_secret_refs) = sec_resolve_props.into_parts();
     // Need real secret to access the schema registry
     let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
         format_encode_options.clone(),
@@ -542,11 +564,15 @@ fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
-    let (format_encode_options, format_encode_secret_refs) = resolve_secret_ref_in_with_options(
-        WithOptions::try_from(format_encode.row_options())?,
-        session,
-    )?
-    .into_parts();
+    let with_options = WithOptions::try_from(format_encode.row_options())?;
+    if !with_options.connection_ref().is_empty() {
+        return Err(RwError::from(NotSupported(
+            "CDC connector does not support connection ref yet".to_string(),
+            "Explicitly specify the connection in WITH clause".to_string(),
+        )));
+    }
+    let (format_encode_options, format_encode_secret_refs) =
+        resolve_secret_ref_in_with_options(with_options, session)?.into_parts();
 
     // Need real secret to access the schema registry
     let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
@@ -1048,6 +1074,20 @@ pub(super) fn bind_source_watermark(
         .try_collect()?;
     Ok(watermark_descs)
 }
+
+static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
+    hashset! {
+        PbConnectionType::Kafka,
+        PbConnectionType::Iceberg,
+    }
+});
+
+static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+    LazyLock::new(|| {
+        hashset! {
+            PbConnectionType::SchemaRegistry,
+        }
+    });
 
 // TODO: Better design if we want to support ENCODE KEY where we will have 4 dimensional array
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
@@ -1561,7 +1601,21 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    let with_properties = resolve_secret_ref_in_with_options(with_properties, session)?;
+    let connector = with_properties.get_connector().unwrap();
+    let (with_properties, connection_type) =
+        resolve_connection_ref_and_secret_ref(with_properties, session)?;
+    if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, ALLOWED_CONNECTION_CONNECTOR
+        ))));
+    }
+    if !connector.eq(connection_type_to_connector(&connection_type)) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {} and connection type {:?} are not compatible",
+            connector, connection_type
+        ))));
+    }
 
     let pk_names = bind_source_pk(
         &format_encode,
@@ -1769,6 +1823,14 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Parquet => EncodeType::Parquet,
         Encode::None => EncodeType::None,
         Encode::Text => EncodeType::Text,
+    }
+}
+
+fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
+    match connection_type {
+        PbConnectionType::Kafka => KAFKA_CONNECTOR,
+        PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
+        _ => unreachable!(),
     }
 }
 

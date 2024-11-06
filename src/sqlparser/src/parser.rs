@@ -3641,10 +3641,14 @@ impl Parser<'_> {
                     } else {
                         SecretRefAsType::Text
                     };
-                    Ok(Value::Ref(SecretRef {
+                    Ok(Value::SecretRef(SecretRefValue {
                         secret_name,
                         ref_as,
                     }))
+                }
+                Keyword::CONNECTION => {
+                    let connection_name = self.parse_object_name()?;
+                    Ok(Value::ConnectionRef(ConnectionRefValue { connection_name }))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },

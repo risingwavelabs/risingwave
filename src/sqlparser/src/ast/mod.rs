@@ -52,8 +52,8 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, SecretRef,
-    SecretRefAsType, TrimWhereField, Value,
+    ConnectionRefValue, CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType,
+    SecretRefAsType, SecretRefValue, TrimWhereField, Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,

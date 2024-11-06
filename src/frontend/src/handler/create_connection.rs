@@ -48,6 +48,12 @@ fn resolve_create_connection_payload(
     with_properties: WithOptions,
     session: &SessionImpl,
 ) -> Result<create_connection_request::Payload> {
+    if !with_properties.connection_ref().is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "Connection reference is not allowed in options in CREATE CONNECTION".to_string(),
+        )));
+    }
+
     let (mut props, secret_refs) =
         resolve_secret_ref_in_with_options(with_properties, session)?.into_parts();
     let connection_type = get_connection_property_required(&mut props, CONNECTION_TYPE_PROP)?;

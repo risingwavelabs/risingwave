@@ -60,7 +60,9 @@ pub enum Value {
     /// `NULL` value
     Null,
     /// name of the reference to secret
-    Ref(SecretRef),
+    SecretRef(SecretRefValue),
+    /// name of the reference to connection
+    ConnectionRef(ConnectionRefValue),
 }
 
 impl fmt::Display for Value {
@@ -115,7 +117,8 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
-            Value::Ref(v) => write!(f, "secret {}", v),
+            Value::SecretRef(v) => write!(f, "secret {}", v),
+            Value::ConnectionRef(v) => write!(f, "connection {}", v),
         }
     }
 }
@@ -240,12 +243,12 @@ impl fmt::Display for JsonPredicateType {
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SecretRef {
+pub struct SecretRefValue {
     pub secret_name: ObjectName,
     pub ref_as: SecretRefAsType,
 }
 
-impl fmt::Display for SecretRef {
+impl fmt::Display for SecretRefValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.ref_as {
             SecretRefAsType::Text => write!(f, "{}", self.secret_name),
@@ -259,4 +262,16 @@ impl fmt::Display for SecretRef {
 pub enum SecretRefAsType {
     Text,
     File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ConnectionRefValue {
+    pub connection_name: ObjectName,
+}
+
+impl fmt::Display for ConnectionRefValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.connection_name)
+    }
 }

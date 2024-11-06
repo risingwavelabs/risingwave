@@ -425,9 +425,9 @@ message CreateConnectionRequest {
   uint32 schema_id = 3;
   oneof payload {
     PrivateLink private_link = 4 [deprecated = true];
-    catalog.ConnectionParams connection_params = 7;
+    catalog.ConnectionParams connection_params = 6;
   }
-  uint32 owner_id = 6;
+  uint32 owner_id = 5;
 }
 
 message CreateConnectionResponse {
