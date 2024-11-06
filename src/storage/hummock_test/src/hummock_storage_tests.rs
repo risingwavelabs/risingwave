@@ -2826,3 +2826,129 @@ async fn test_commit_multi_epoch() {
         assert_eq!(info.committed_epoch, epoch3);
     }
 }
+
+#[tokio::test]
+async fn test_commit_with_large_size() {
+    let test_env = prepare_hummock_test_env().await;
+    let context_id = test_env.meta_client.context_id();
+    let existing_table_id = TableId::new(1);
+    let initial_epoch = INVALID_EPOCH;
+
+    let commit_epoch =
+        |epoch, ssts: Vec<SstableInfo>, new_table_fragment_infos, tables_to_commit: &[TableId]| {
+            let manager = &test_env.manager;
+            let tables_to_commit = tables_to_commit
+                .iter()
+                .map(|table_id| (*table_id, epoch))
+                .collect();
+            let sst_to_context = ssts.iter().map(|sst| (sst.object_id, context_id)).collect();
+
+            let sstables = ssts
+                .into_iter()
+                .map(|sst| LocalSstableInfo {
+                    table_stats: sst
+                        .table_ids
+                        .iter()
+                        .map(|&table_id| {
+                            (
+                                table_id,
+                                TableStats {
+                                    total_compressed_size: 10,
+                                    ..Default::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    sst_info: sst,
+                    created_at: u64::MAX,
+                })
+                .collect_vec();
+
+            async move {
+                manager
+                    .commit_epoch(CommitEpochInfo {
+                        new_table_watermarks: Default::default(),
+                        sst_to_context,
+                        sstables,
+                        new_table_fragment_infos,
+                        change_log_delta: Default::default(),
+                        tables_to_commit,
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
+
+    let epoch1 = initial_epoch.next_epoch();
+    let sst1_epoch1 = SstableInfo {
+        sst_id: 11,
+        object_id: 1,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    let sst1_epoch2 = SstableInfo {
+        sst_id: 12,
+        object_id: 2,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    let sst1_epoch3 = SstableInfo {
+        sst_id: 13,
+        object_id: 3,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    commit_epoch(
+        epoch1,
+        vec![
+            sst1_epoch1.clone(),
+            sst1_epoch2.clone(),
+            sst1_epoch3.clone(),
+        ],
+        vec![NewTableFragmentInfo {
+            table_ids: HashSet::from_iter([existing_table_id]),
+        }],
+        &[existing_table_id],
+    )
+    .await;
+
+    let cg_id =
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
+            .await;
+
+    let l0_sub_levels = test_env
+        .manager
+        .get_current_version()
+        .await
+        .levels
+        .get(&cg_id)
+        .unwrap()
+        .l0
+        .clone();
+
+    assert_eq!(3, l0_sub_levels.sub_levels.len());
+    assert_eq!(1, l0_sub_levels.sub_levels[0].table_infos.len());
+    assert_eq!(
+        sst1_epoch1.object_id,
+        l0_sub_levels.sub_levels[0].table_infos[0].object_id
+    );
+    assert_eq!(1, l0_sub_levels.sub_levels[1].table_infos.len());
+    assert_eq!(
+        sst1_epoch2.object_id,
+        l0_sub_levels.sub_levels[1].table_infos[0].object_id
+    );
+    assert_eq!(1, l0_sub_levels.sub_levels[2].table_infos.len());
+    assert_eq!(
+        sst1_epoch3.object_id,
+        l0_sub_levels.sub_levels[2].table_infos[0].object_id
+    );
+}

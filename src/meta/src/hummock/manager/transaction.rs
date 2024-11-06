@@ -111,7 +111,7 @@ impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn pre_commit_epoch(
         &mut self,
         tables_to_commit: &HashMap<TableId, u64>,
-        new_compaction_groups: HashMap<CompactionGroupId, Arc<CompactionConfig>>,
+        compaction_groups: HashMap<CompactionGroupId, (bool, Arc<CompactionConfig>)>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -121,18 +121,22 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        for (compaction_group_id, compaction_group_config) in new_compaction_groups {
+        for (compaction_group_id, (is_new, compaction_group_config)) in &compaction_groups {
             {
+                if !is_new {
+                    continue;
+                }
+
                 let group_deltas = &mut new_version_delta
                     .group_deltas
-                    .entry(compaction_group_id)
+                    .entry(*compaction_group_id)
                     .or_default()
                     .group_deltas;
 
                 #[expect(deprecated)]
                 group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some((*compaction_group_config).clone()),
-                    group_id: compaction_group_id,
+                    group_config: Some((**compaction_group_config).clone()),
+                    group_id: *compaction_group_id,
                     parent_group_id: StaticCompactionGroupId::NewCompactionGroup
                         as CompactionGroupId,
                     new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
@@ -145,14 +149,41 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, inserted_table_infos) in commit_sstables {
+            let mut accumulated_size = 0;
+            let mut ssts = vec![];
+            let (_, config) = compaction_groups
+                .get(&compaction_group_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "compaction group {:?} not found in compaction_groups",
+                        compaction_group_id
+                    )
+                });
+            let sub_level_size_limit = config.sub_level_max_compaction_bytes * 2;
+
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let group_delta = GroupDelta::NewL0SubLevel(inserted_table_infos);
 
-            group_deltas.push(group_delta);
+            for sst in inserted_table_infos {
+                accumulated_size += sst.sst_size;
+                ssts.push(sst);
+                if accumulated_size > sub_level_size_limit {
+                    let group_delta = GroupDelta::NewL0SubLevel(ssts);
+                    group_deltas.push(group_delta);
+
+                    // reset the accumulated size and ssts
+                    accumulated_size = 0;
+                    ssts = vec![];
+                }
+            }
+
+            if accumulated_size != 0 {
+                let group_delta = GroupDelta::NewL0SubLevel(ssts);
+                group_deltas.push(group_delta);
+            }
         }
 
         // update state table info

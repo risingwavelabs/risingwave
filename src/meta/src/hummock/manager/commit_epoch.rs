@@ -112,7 +112,7 @@ impl HummockManager {
         let state_table_info = &version.latest_version().state_table_info;
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
         let mut new_table_ids = HashMap::new();
-        let mut new_compaction_groups = HashMap::new();
+        let mut compaction_groups = HashMap::new();
         let mut compaction_group_manager_txn = None;
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
@@ -143,7 +143,10 @@ impl HummockManager {
                     )
                 };
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-            new_compaction_groups.insert(new_compaction_group_id, compaction_group_config.clone());
+            compaction_groups.insert(
+                new_compaction_group_id,
+                (true, compaction_group_config.clone()),
+            );
             compaction_group_manager.insert(
                 new_compaction_group_id,
                 CompactionGroup {
@@ -166,10 +169,33 @@ impl HummockManager {
             .await?;
 
         let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
+        // fill compaction_groups
+        if let Some(compaction_group_manager) = compaction_group_manager_txn.as_ref() {
+            for cg_id in &modified_compaction_groups {
+                if !compaction_groups.contains_key(cg_id) {
+                    let compaction_group = compaction_group_manager
+                        .get(cg_id)
+                        .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                        .compaction_config();
+                    compaction_groups.insert(*cg_id, (false, compaction_group));
+                }
+            }
+        } else {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            for cg_id in &modified_compaction_groups {
+                if !compaction_groups.contains_key(cg_id) {
+                    let compaction_group = compaction_group_manager
+                        .try_get_compaction_group_config(*cg_id)
+                        .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                        .compaction_config();
+                    compaction_groups.insert(*cg_id, (false, compaction_group));
+                }
+            }
+        }
 
         let time_travel_delta = version.pre_commit_epoch(
             &tables_to_commit,
-            new_compaction_groups,
+            compaction_groups,
             commit_sstables,
             &new_table_ids,
             new_table_watermarks,
