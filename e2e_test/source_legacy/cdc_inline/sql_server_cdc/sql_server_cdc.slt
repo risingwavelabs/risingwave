@@ -17,6 +17,8 @@ sqlcmd -C -d UpperDB -Q "CREATE SCHEMA UpperSchema;" -b
 system ok
 sqlcmd -C -d UpperDB -Q "EXEC sys.sp_cdc_enable_db; CREATE TABLE UpperSchema.UpperTable (ID INT PRIMARY KEY, Name VARCHAR(100)); EXEC sys.sp_cdc_enable_table @source_schema = 'UpperSchema', @source_name = 'UpperTable', @role_name = NULL; INSERT INTO UpperSchema.UpperTable VALUES (1, 'Alice');" -b
 
+sleep 10s
+
 # ------------ validate stage ------------
 
 # invalid address, comment this test out because it takes long to wait for TCP connection timeout.
