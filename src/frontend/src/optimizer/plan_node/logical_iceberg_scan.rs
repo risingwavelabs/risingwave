@@ -50,7 +50,6 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-    pub iceberg_predicate: IcebergPredicate,
 }
 
 impl LogicalIcebergScan {
@@ -62,13 +61,7 @@ impl LogicalIcebergScan {
 
         assert!(logical_source.output_exprs.is_none());
 
-        LogicalIcebergScan {
-            base,
-            core,
-            iceberg_predicate: IcebergPredicate {
-                predicate_expr: Some(PredicateExpr::Boolean(true)),
-            },
-        }
+        LogicalIcebergScan { base, core }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -83,32 +76,8 @@ impl LogicalIcebergScan {
             .map(|idx| core.column_catalog[*idx].clone())
             .collect();
         let base = PlanBase::new_logical_with_core(&core);
-        let iceberg_predicate = self.iceberg_predicate.clone();
 
-        LogicalIcebergScan {
-            base,
-            core,
-            iceberg_predicate,
-        }
-    }
-
-    fn clone_with_iceberg_predicate(&self, iceberg_predicate: IcebergPredicate) -> Self {
-        let base = self.base.clone();
-        let core = self.core.clone();
-        let iceberg_predicate = IcebergPredicate {
-            predicate_expr: Some(PredicateExpr::BinaryPredicate(Box::new(
-                IcebergBinaryPredicate {
-                    expr_type: IcebergBinaryExprType::And as i32,
-                    left: Some(Box::new(self.iceberg_predicate.clone())),
-                    right: Some(Box::new(iceberg_predicate)),
-                },
-            ))),
-        };
-        LogicalIcebergScan {
-            base,
-            core,
-            iceberg_predicate,
-        }
+        LogicalIcebergScan { base, core }
     }
 }
 
@@ -186,7 +155,7 @@ impl PredicatePushdown for LogicalIcebergScan {
                     value: datum.to_protobuf().into(),
                 }),
                 ScalarImpl::Decimal(d) => {
-                    let Decimal::Normalized(_) = d else {
+                    let Decimal::Normalized(d) = d else {
                         return None;
                     };
                     Some(IcebergDatum {
@@ -268,10 +237,6 @@ impl PredicatePushdown for LogicalIcebergScan {
                         })
                     }
 
-                    /// predicate: a < 1
-                    ///
-                    /// a: reference
-                    /// 1: value.
                     fn create_ref_and_value_predicate(
                         expr_type: IcebergRefAndValueType,
                         reference: &InputRef,
@@ -509,16 +474,8 @@ impl PredicatePushdown for LogicalIcebergScan {
 
         let schema = self.schema();
         let fields = &schema.fields;
-
-        let (rw_predicate, iceberg_predicate_opt) =
-            rw_predicate_to_iceberg_predicate(predicate, fields);
         // No pushdown.
-        let this = if let Some(iceberg_predicate) = iceberg_predicate_opt {
-            self.clone_with_iceberg_predicate(iceberg_predicate).into()
-        } else {
-            self.clone().into()
-        };
-        LogicalFilter::create(this, rw_predicate)
+        LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
