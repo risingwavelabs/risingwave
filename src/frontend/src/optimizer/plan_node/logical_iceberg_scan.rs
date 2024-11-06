@@ -14,8 +14,9 @@
 
 use std::rc::Rc;
 
+use chrono::Datelike;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_pb::batch_plan::iceberg_binary_predicate::IcebergBinaryExprType;
@@ -24,8 +25,9 @@ use risingwave_pb::batch_plan::iceberg_ref_and_value_predicate::IcebergRefAndVal
 use risingwave_pb::batch_plan::iceberg_ref_predicate::IcebergRefType;
 use risingwave_pb::batch_plan::iceberg_unary_predicate::IcebergUnaryExprType;
 use risingwave_pb::batch_plan::{
-    IcebergBinaryPredicate, IcebergDatum, IcebergPredicate, IcebergRefAndValuePredicate,
-    IcebergRefPredicate, IcebergSetPredicate, IcebergUnaryPredicate,
+    IcebergBinaryExprType, IcebergBinaryPredicate, IcebergDatum, IcebergPredicate,
+    IcebergRefAndValuePredicate, IcebergRefAndValueType, IcebergSetPredicate, IcebergUnaryExprType,
+    IcebergUnaryPredicate,
 };
 
 use super::generic::GenericPlanRef;
@@ -134,23 +136,23 @@ impl PredicatePushdown for LogicalIcebergScan {
             };
 
             match scalar {
-                ScalarImpl::Bool(_) => Some(IcebergDatum {
+                ScalarImpl::Bool(b) => Some(IcebergDatum {
                     datatype: DataType::Boolean.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Int32(_) => Some(IcebergDatum {
+                ScalarImpl::Int32(i) => Some(IcebergDatum {
                     datatype: DataType::Int32.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Int64(_) => Some(IcebergDatum {
+                ScalarImpl::Int64(i) => Some(IcebergDatum {
                     datatype: DataType::Int64.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Float32(_) => Some(IcebergDatum {
+                ScalarImpl::Float32(f) => Some(IcebergDatum {
                     datatype: DataType::Float32.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Float64(_) => Some(IcebergDatum {
+                ScalarImpl::Float64(f) => Some(IcebergDatum {
                     datatype: DataType::Float64.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
@@ -163,23 +165,23 @@ impl PredicatePushdown for LogicalIcebergScan {
                         value: datum.to_protobuf().into(),
                     })
                 }
-                ScalarImpl::Date(_) => Some(IcebergDatum {
+                ScalarImpl::Date(d) => Some(IcebergDatum {
                     datatype: DataType::Date.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Timestamp(_) => Some(IcebergDatum {
+                ScalarImpl::Timestamp(t) => Some(IcebergDatum {
                     datatype: DataType::Timestamp.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Timestamptz(_) => Some(IcebergDatum {
+                ScalarImpl::Timestamptz(t) => Some(IcebergDatum {
                     datatype: DataType::Timestamptz.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Utf8(_) => Some(IcebergDatum {
+                ScalarImpl::Utf8(s) => Some(IcebergDatum {
                     datatype: DataType::Varchar.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
-                ScalarImpl::Bytea(_) => Some(IcebergDatum {
+                ScalarImpl::Bytea(b) => Some(IcebergDatum {
                     datatype: DataType::Bytea.to_protobuf().into(),
                     value: datum.to_protobuf().into(),
                 }),
@@ -429,16 +431,16 @@ impl PredicatePushdown for LogicalIcebergScan {
         fn rw_predicate_to_iceberg_predicate(
             predicate: Condition,
             fields: &[Field],
-        ) -> (Condition, Option<IcebergPredicate>) {
+        ) -> (Option<(IcebergPredicate, Condition)>) {
             if predicate.always_true() {
-                return (predicate, None);
+                return None;
             }
             let mut conjunctions = predicate.conjunctions;
             let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
             let mut iceberg_condition_root;
             loop {
                 let Some(rw_condition_root) = conjunctions.pop() else {
-                    return (Condition { conjunctions }, None);
+                    return None;
                 };
                 match rw_expr_to_iceberg_predicate(&rw_condition_root, fields) {
                     Some(iceberg_predicate) => {
@@ -451,25 +453,18 @@ impl PredicatePushdown for LogicalIcebergScan {
             for rw_condition in conjunctions {
                 match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
                     Some(iceberg_predicate) => {
-                        iceberg_condition_root = IcebergPredicate {
-                            predicate_expr: Some(PredicateExpr::BinaryPredicate(Box::new(
-                                IcebergBinaryPredicate {
-                                    expr_type: IcebergBinaryExprType::And as i32,
-                                    left: Some(Box::new(iceberg_condition_root)),
-                                    right: Some(Box::new(iceberg_predicate)),
-                                },
-                            ))),
-                        }
+                        iceberg_condition_root =
+                            IcebergPredicate::and(iceberg_condition_root, iceberg_predicate);
                     }
                     None => ignored_conjunctions.push(rw_condition),
                 }
             }
-            (
+            Some((
+                iceberg_condition_root,
                 Condition {
                     conjunctions: ignored_conjunctions,
                 },
-                Some(iceberg_condition_root),
-            )
+            ))
         }
 
         let schema = self.schema();
