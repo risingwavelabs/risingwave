@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
+use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
@@ -189,6 +190,7 @@ impl IcebergSplitEnumerator {
         schema: Schema,
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
+        predicate: IcebergPredicate,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
@@ -252,6 +254,7 @@ impl IcebergSplitEnumerator {
         // TODO(kwannoel): add filter here.
         let scan = table
             .scan()
+            .with_filter(predicate)
             .snapshot_id(snapshot_id)
             .select(require_names)
             .build()

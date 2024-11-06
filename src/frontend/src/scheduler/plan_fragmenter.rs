@@ -358,7 +358,10 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(res))
             }
-            (ConnectorProperties::Iceberg(prop), SourceFetchParameters::IcebergPredicate(_)) => {
+            (
+                ConnectorProperties::Iceberg(prop),
+                SourceFetchParameters::IcebergPredicate(predicate),
+            ) => {
                 let iceberg_enumerator =
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
@@ -387,7 +390,12 @@ impl SourceScanInfo {
                 };
 
                 let split_info = iceberg_enumerator
-                    .list_splits_batch(fetch_info.schema, time_travel_info, batch_parallelism)
+                    .list_splits_batch(
+                        fetch_info.schema,
+                        time_travel_info,
+                        batch_parallelism,
+                        predicate,
+                    )
                     .await?
                     .into_iter()
                     .map(SplitImpl::Iceberg)
@@ -1103,7 +1111,9 @@ impl BatchPlanFragmenter {
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
-                    fetch_parameters: SourceFetchParameters::Empty,
+                    fetch_parameters: SourceFetchParameters::IcebergPredicate(
+                        batch_iceberg_scan.predicate.clone(),
+                    ),
                     as_of,
                 })));
             }
