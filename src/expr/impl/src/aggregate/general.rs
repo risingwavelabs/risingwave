@@ -124,13 +124,47 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
+/// Note that different from `min` and `max`, `first_value` doesn't ignore `NULL` values.
+///
+/// ```slt
+/// statement ok
+/// create table t(v1 int, ts int);
+///
+/// statement ok
+/// insert into t values (null, 1), (2, 2), (null, 3);
+///
+/// query I
+/// select first_value(v1 order by ts) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// drop table t;
+/// ```
 #[aggregate("first_value(*) -> auto", state = "ref")]
-fn first_value<T>(state: T, _: T) -> T {
+fn first_value<T>(state: Option<T>, _: Option<T>) -> Option<T> {
     state
 }
 
+/// Note that different from `min` and `max`, `last_value` doesn't ignore `NULL` values.
+///
+/// ```slt
+/// statement ok
+/// create table t(v1 int, ts int);
+///
+/// statement ok
+/// insert into t values (null, 1), (2, 2), (null, 3);
+///
+/// query I
+/// select last_value(v1 order by ts) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// drop table t;
+/// ```
 #[aggregate("last_value(*) -> auto", state = "ref")]
-fn last_value<T>(_: T, input: T) -> T {
+fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     input
 }
 
