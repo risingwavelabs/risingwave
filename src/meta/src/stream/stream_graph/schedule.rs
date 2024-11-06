@@ -43,9 +43,7 @@ use crate::MetaResult;
 
 type HashMappingId = usize;
 
-/// The internal distribution structure for processing in the scheduler.
-///
-/// See [`Distribution`] for the public interface.
+/// The internal structure for processing scheduling requirements in the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Req {
     Singleton(WorkerSlotId),
@@ -63,7 +61,7 @@ enum Fact {
         to: Id,
         dt: DispatcherType,
     },
-    /// A distribution requirement for an external(existing) fragment.
+    /// A scheduling requirement for a fragment.
     Req { id: Id, req: Req },
 }
 
@@ -88,7 +86,7 @@ crepe::crepe! {
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 }
 
-/// The distribution of a fragment.
+/// The distribution (scheduling result) of a fragment.
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
     /// The fragment is singleton and is scheduled to the given worker slot.
@@ -168,6 +166,7 @@ impl Distribution {
 
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
+    /// Worker slots to schedule. Use to generate mapping if a vnode count other than the default is required.
     scheduled_worker_slots: Vec<WorkerSlotId>,
 
     /// The default hash mapping for hash-distributed fragments, if there's no requirement derived.
@@ -309,7 +308,7 @@ impl Scheduler {
             });
         }
 
-        // Run the algorithm.
+        // Run the algorithm to propagate requirements.
         let mut crepe = Crepe::new();
         crepe.extend(facts.into_iter().map(Input));
         let (reqs,) = crepe.run();
@@ -318,12 +317,15 @@ impl Scheduler {
             .map(|Requirement(id, req)| (id, req))
             .into_group_map();
 
+        // Derive scheudling result from requirements.
         let mut distributions = HashMap::new();
         for &id in graph.building_fragments().keys() {
             let dist = match reqs.get(&id) {
+                // Merge all requirements.
                 Some(reqs) => {
                     let req = (reqs.iter().copied())
                         .try_reduce(|a, b| {
+                            // Note that a and b are never the same as they originate from a set.
                             let merge = |a, b| match (a, b) {
                                 (Req::AnySingleton, Req::Singleton(id)) => Some(Req::Singleton(id)),
                                 (Req::AnyVnodeCount(count), Req::Hash(mapping))
@@ -341,6 +343,7 @@ impl Scheduler {
                         })?
                         .unwrap();
 
+                    // Derive distribution from the merged requirement.
                     match req {
                         Req::Singleton(worker_slot) => Distribution::Singleton(worker_slot),
                         Req::Hash(mapping) => {
@@ -359,6 +362,7 @@ impl Scheduler {
                         }
                     }
                 }
+                // No requirement, use the default.
                 None => Distribution::Hash(self.default_hash_mapping.clone()),
             };
 
