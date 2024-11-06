@@ -4999,6 +4999,7 @@ impl Parser<'_> {
                 Keyword::SCHEMA,
                 Keyword::TABLE,
                 Keyword::SOURCE,
+                Keyword::SINK,
             ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
@@ -5006,6 +5007,7 @@ impl Parser<'_> {
                 Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
                 Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }

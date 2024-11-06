@@ -34,8 +34,8 @@ use sea_orm::{
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
-    extract_grant_obj_id, get_internal_tables_by_id, get_object_owner,
-    get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
+    extract_grant_obj_id, get_index_state_tables_by_table_id, get_internal_tables_by_id,
+    get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
     PartialUserPrivilege,
 };
 use crate::manager::{NotificationVersion, IGNORED_NOTIFICATION_VERSION};
@@ -232,6 +232,7 @@ impl CatalogController {
         for gp in new_grant_privileges {
             let id = extract_grant_obj_id(gp.get_object()?);
             let internal_table_ids = get_internal_tables_by_id(id, &txn).await?;
+            let index_state_table_ids = get_index_state_tables_by_table_id(id, &txn).await?;
             for action_with_opt in &gp.action_with_opts {
                 let action = action_with_opt.get_action()?.into();
                 privileges.push(user_privilege::ActiveModel {
@@ -242,15 +243,18 @@ impl CatalogController {
                     ..Default::default()
                 });
                 if action == Action::Select {
-                    privileges.extend(internal_table_ids.iter().map(|&tid| {
-                        user_privilege::ActiveModel {
-                            oid: Set(tid),
-                            granted_by: Set(grantor),
-                            action: Set(Action::Select),
-                            with_grant_option: Set(action_with_opt.with_grant_option),
-                            ..Default::default()
-                        }
-                    }));
+                    privileges.extend(
+                        internal_table_ids
+                            .iter()
+                            .chain(index_state_table_ids.iter())
+                            .map(|&tid| user_privilege::ActiveModel {
+                                oid: Set(tid),
+                                granted_by: Set(grantor),
+                                action: Set(Action::Select),
+                                with_grant_option: Set(action_with_opt.with_grant_option),
+                                ..Default::default()
+                            }),
+                    );
                 }
             }
         }
@@ -366,6 +370,7 @@ impl CatalogController {
         for privilege in revoke_grant_privileges {
             let obj = extract_grant_obj_id(privilege.get_object()?);
             let internal_table_ids = get_internal_tables_by_id(obj, &txn).await?;
+            let index_state_table_ids = get_index_state_tables_by_table_id(obj, &txn).await?;
             let mut include_select = false;
             let actions = privilege
                 .action_with_opts
@@ -383,6 +388,7 @@ impl CatalogController {
                 revoke_items.extend(
                     internal_table_ids
                         .iter()
+                        .chain(index_state_table_ids.iter())
                         .map(|&tid| (tid, vec![Action::Select])),
                 );
             }
