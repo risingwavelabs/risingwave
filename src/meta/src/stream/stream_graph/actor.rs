@@ -543,8 +543,7 @@ impl ActorGraphBuildStateInner {
                         .collect();
                     let actor_mapping = downstream
                         .distribution
-                        .as_hash()
-                        .unwrap()
+                        .mapping()
                         .to_actor(&downstream_locations);
 
                     Self::new_hash_dispatcher(
@@ -877,16 +876,18 @@ impl ActorGraphBuilder {
             // For building fragments, we need to generate the actor builders.
             EitherFragment::Building(current_fragment) => {
                 let node = Arc::new(current_fragment.node.clone().unwrap());
-                let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
+                let vnode_count = distribution.vnode_count();
+                let bitmaps = distribution.mapping().to_bitmaps();
 
                 distribution
                     .worker_slots()
                     .map(|worker_slot| {
                         let actor_id = state.next_actor_id();
-                        let vnode_bitmap = bitmaps
-                            .as_ref()
-                            .map(|m: &HashMap<WorkerSlotId, Bitmap>| &m[&worker_slot])
-                            .cloned();
+                        let vnode_bitmap = if vnode_count == 1 {
+                            None
+                        } else {
+                            Some(bitmaps[&worker_slot].clone())
+                        };
 
                         state.inner.add_actor(
                             actor_id,
