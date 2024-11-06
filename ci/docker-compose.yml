@@ -218,7 +218,7 @@ services:
 
   sqlserver-server:
     container_name: sqlserver-server
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2017-latest
     hostname: sqlserver-server
     ports:
       - 1433:1433
