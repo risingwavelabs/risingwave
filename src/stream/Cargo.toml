@@ -66,7 +66,7 @@ smallvec = "1"
 static_assertions = "1"
 strum = "0.26"
 strum_macros = "0.26"
-thiserror = "1"
+thiserror = "2"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
   "rt",

@@ -24,7 +24,7 @@ normal = ["workspace-hack"]
 [dependencies]
 itertools = { workspace = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-thiserror = "1.0.61"
+thiserror = "2.0.0"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

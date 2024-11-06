@@ -142,7 +142,7 @@ sqlx = { workspace = true }
 strum = "0.26"
 strum_macros = "0.26"
 tempfile = "3"
-thiserror = "1"
+thiserror = "2"
 
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
