@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use chrono::Datelike;
+use educe::Educe;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
 use pretty_xmlish::{Pretty, XmlNode};
@@ -39,10 +40,14 @@ use crate::optimizer::plan_node::{
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Educe, Debug, Clone, PartialEq)]
+#[educe(Eq, Hash)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
+    /// TODO(kwannoel): If we support plan sharing, we can't just ignore the predicate.
+    #[educe(Hash(ignore))]
+    pub predicate: IcebergPredicate,
 }
 
 impl LogicalIcebergScan {
@@ -54,7 +59,11 @@ impl LogicalIcebergScan {
 
         assert!(logical_source.output_exprs.is_none());
 
-        LogicalIcebergScan { base, core }
+        LogicalIcebergScan {
+            base,
+            core,
+            predicate: IcebergPredicate::AlwaysTrue,
+        }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -70,7 +79,21 @@ impl LogicalIcebergScan {
             .collect();
         let base = PlanBase::new_logical_with_core(&core);
 
-        LogicalIcebergScan { base, core }
+        LogicalIcebergScan {
+            base,
+            core,
+            predicate: self.predicate.clone(),
+        }
+    }
+
+    pub fn clone_with_predicate(&self, predicate: IcebergPredicate) -> Self {
+        let base = PlanBase::new_logical_with_core(&self.core);
+        let predicate = predicate.and(self.predicate.clone());
+        LogicalIcebergScan {
+            base,
+            core: self.core.clone(),
+            predicate,
+        }
     }
 }
 
@@ -316,27 +339,63 @@ impl PredicatePushdown for LogicalIcebergScan {
         fn rw_predicate_to_iceberg_predicate(
             predicate: Condition,
             fields: &[Field],
-        ) -> IcebergPredicate {
+        ) -> (IcebergPredicate, Condition) {
             if predicate.always_true() {
-                return IcebergPredicate::AlwaysTrue;
+                return (IcebergPredicate::AlwaysTrue, predicate);
             }
+
             let mut conjunctions = predicate.conjunctions;
             let mut ignored_conjunctions: Vec<ExprImpl> = Vec::with_capacity(conjunctions.len());
-            let rw_condition_root = conjunctions.pop().unwrap();
-            let iceberg_condition_root = rw_expr_to_iceberg_predicate(&rw_condition_root, fields);
-            for rw_condition in conjunctions {
-                match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
-                    Some(iceberg_predicate) => ignored_conjunctions.push(rw_condition),
-                    None => {}
+
+            let mut iceberg_condition_root = None;
+            while let Some(conjunction) = conjunctions.pop() {
+                match rw_expr_to_iceberg_predicate(&conjunction, fields) {
+                    iceberg_predicate @ Some(_) => {
+                        iceberg_condition_root = iceberg_predicate;
+                        break;
+                    }
+                    None => {
+                        ignored_conjunctions.push(conjunction);
+                        continue;
+                    }
                 }
             }
-            todo!()
+
+            let mut iceberg_condition_root = match iceberg_condition_root {
+                Some(p) => p,
+                None => {
+                    return (
+                        IcebergPredicate::AlwaysTrue,
+                        Condition {
+                            conjunctions: ignored_conjunctions,
+                        },
+                    )
+                }
+            };
+
+            for rw_condition in conjunctions {
+                match rw_expr_to_iceberg_predicate(&rw_condition, fields) {
+                    Some(iceberg_predicate) => {
+                        iceberg_condition_root = iceberg_condition_root.and(iceberg_predicate)
+                    }
+                    None => ignored_conjunctions.push(rw_condition),
+                }
+            }
+            (
+                iceberg_condition_root,
+                Condition {
+                    conjunctions: ignored_conjunctions,
+                },
+            )
         }
 
         let schema = self.schema();
         let fields = &schema.fields;
+        let (iceberg_predicate, rw_predicate) =
+            rw_predicate_to_iceberg_predicate(predicate, fields);
         // No pushdown.
-        LogicalFilter::create(self.clone().into(), predicate)
+        let this = self.clone_with_predicate(iceberg_predicate);
+        LogicalFilter::create(this.into(), rw_predicate)
     }
 }
 
