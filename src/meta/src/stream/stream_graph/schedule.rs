@@ -651,6 +651,20 @@ mod tests {
 
     // 1 -|~> 101
     #[test]
+    fn test_no_shuffle_backfill_mismatched_vnode_count() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Req { id: 1.into(), req: Req::Hash(1) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+        ];
+
+        // Not specifying `mapping_len` should fail.
+        test_failed(facts);
+    }
+
+    // 1 -|~> 101
+    #[test]
     fn test_backfill_singleton_vnode_count() {
         #[rustfmt::skip]
         let facts = [
