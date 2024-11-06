@@ -61,10 +61,13 @@ impl Req {
     #[allow(non_upper_case_globals)]
     const AnySingleton: Self = Self::AnyVnodeCount(1);
 
-    fn merge(a: Self, b: Self, mapping_len: impl Fn(usize) -> usize) -> MetaResult<Self> {
+    /// Merge two requirements. Returns an error if the requirements are incompatible.
+    ///
+    /// The `mapping_len` function is used to get the vnode count of a hash mapping by its id.
+    fn merge(a: Self, b: Self, mapping_len: impl Fn(HashMappingId) -> usize) -> MetaResult<Self> {
         // Note that a and b are always different, as they come from a set.
         let merge = |a, b| match (a, b) {
-            (Self::AnyVnodeCount(1), Self::Singleton(id)) => Some(Self::Singleton(id)),
+            (Self::AnySingleton, Self::Singleton(id)) => Some(Self::Singleton(id)),
             (Self::AnyVnodeCount(count), Self::Hash(id)) if mapping_len(id) == count => {
                 Some(Self::Hash(id))
             }
@@ -287,7 +290,8 @@ impl Scheduler {
                 });
             }
         }
-        // Vnode count requirements if looking up existing tables.
+        // Vnode count requirements: if a fragment is going to look up an existing table,
+        // it must have the same vnode count as that table.
         for (&id, fragment) in graph.building_fragments() {
             visit_fragment(&mut (*fragment).clone(), |node| {
                 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -343,7 +347,7 @@ impl Scheduler {
             .map(|Requirement(id, req)| (id, req))
             .into_group_map();
 
-        // Derive scheudling result from requirements.
+        // Derive scheduling result from requirements.
         let mut distributions = HashMap::new();
         for &id in graph.building_fragments().keys() {
             let dist = match reqs.get(&id) {
@@ -362,7 +366,7 @@ impl Scheduler {
                         Req::Hash(mapping) => {
                             Distribution::Hash(all_hash_mappings[mapping].clone())
                         }
-                        Req::AnyVnodeCount(1) => {
+                        Req::AnySingleton => {
                             Distribution::Singleton(self.default_singleton_worker_slot)
                         }
                         Req::AnyVnodeCount(vnode_count) => {
@@ -434,7 +438,10 @@ mod tests {
         const DefaultSingleton: Self = Self::Required(Req::AnySingleton);
     }
 
-    fn run_and_merge(facts: impl IntoIterator<Item = Fact>) -> MetaResult<HashMap<Id, Req>> {
+    fn run_and_merge(
+        facts: impl IntoIterator<Item = Fact>,
+        mapping_len: impl Fn(HashMappingId) -> usize,
+    ) -> MetaResult<HashMap<Id, Req>> {
         let mut crepe = Crepe::new();
         crepe.extend(facts.into_iter().map(Input));
         let (reqs,) = crepe.run();
@@ -447,7 +454,7 @@ mod tests {
         let mut merged = HashMap::new();
         for (id, reqs) in reqs {
             let req = (reqs.iter().copied())
-                .try_reduce(|a, b| Req::merge(a, b, |_| todo!()))
+                .try_reduce(|a, b| Req::merge(a, b, &mapping_len))
                 .with_context(|| {
                     format!("cannot fulfill scheduling requirements for fragment {id:?}")
                 })?
@@ -459,7 +466,15 @@ mod tests {
     }
 
     fn test_success(facts: impl IntoIterator<Item = Fact>, expected: HashMap<Id, Result>) {
-        let reqs = run_and_merge(facts).unwrap();
+        test_success_with_mapping_len(facts, expected, |_| 0);
+    }
+
+    fn test_success_with_mapping_len(
+        facts: impl IntoIterator<Item = Fact>,
+        expected: HashMap<Id, Result>,
+        mapping_len: impl Fn(HashMappingId) -> usize,
+    ) {
+        let reqs = run_and_merge(facts, mapping_len).unwrap();
 
         for (id, expected) in expected {
             match (reqs.get(&id), expected) {
@@ -471,7 +486,7 @@ mod tests {
     }
 
     fn test_failed(facts: impl IntoIterator<Item = Fact>) {
-        run_and_merge(facts).unwrap_err();
+        run_and_merge(facts, |_| 0).unwrap_err();
     }
 
     // 101
@@ -595,5 +610,59 @@ mod tests {
         ];
 
         test_failed(facts);
+    }
+
+    // 1 -|~> 101
+    #[test]
+    fn test_arrangment_backfill_vnode_count() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Req { id: 1.into(), req: Req::Hash(1) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: Hash },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(Req::AnyVnodeCount(128)),
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 1 -|~> 101
+    #[test]
+    fn test_no_shuffle_backfill_vnode_count() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Req { id: 1.into(), req: Req::Hash(1) },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(128) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(Req::Hash(1)),
+        };
+
+        test_success_with_mapping_len(facts, expected, |id| {
+            assert_eq!(id, 1);
+            128
+        });
+    }
+
+    // 1 -|~> 101
+    #[test]
+    fn test_backfill_singleton_vnode_count() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Req { id: 1.into(), req: Req::Singleton(WorkerSlotId::new(0, 2)) },
+            Fact::Req { id: 101.into(), req: Req::AnySingleton },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle }, // or `Simple`
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(Req::Singleton(WorkerSlotId::new(0, 2))),
+        };
+
+        test_success(facts, expected);
     }
 }
