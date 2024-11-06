@@ -71,7 +71,6 @@ message IcebergScanNode {
   map<string, string> with_properties = 2;
   repeated bytes split = 3;
   map<string, secret.SecretRef> secret_refs = 4;
-  IcebergPredicate predicate = 5;
 }
 
 message FileScanNode {

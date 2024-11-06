@@ -342,8 +342,7 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<PlanRef> {
-        let plan: PlanRef =
-            BatchIcebergScan::new(self.core.clone(), self.iceberg_predicate.clone()).into();
+        let plan: PlanRef = BatchIcebergScan::new(self.core.clone()).into();
         Ok(plan)
     }
 }
