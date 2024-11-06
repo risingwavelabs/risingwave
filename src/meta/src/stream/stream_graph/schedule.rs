@@ -614,7 +614,7 @@ mod tests {
 
     // 1 -|~> 101
     #[test]
-    fn test_arrangment_backfill_vnode_count() {
+    fn test_arrangement_backfill_vnode_count() {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
