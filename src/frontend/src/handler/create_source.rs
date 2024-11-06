@@ -1085,6 +1085,7 @@ static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyL
 static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
     LazyLock::new(|| {
         hashset! {
+            PbConnectionType::Unspecified,
             PbConnectionType::SchemaRegistry,
         }
     });
