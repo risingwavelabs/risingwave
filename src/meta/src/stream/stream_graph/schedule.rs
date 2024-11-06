@@ -58,9 +58,8 @@ enum Req {
 
 impl Req {
     /// Equivalent to `Req::AnyVnodeCount(1)`.
-    const fn any_singleton() -> Self {
-        Self::AnyVnodeCount(1)
-    }
+    #[allow(non_upper_case_globals)]
+    const AnySingleton: Self = Self::AnyVnodeCount(1);
 
     fn merge(a: Self, b: Self, mapping_len: impl Fn(usize) -> usize) -> MetaResult<Self> {
         // Note that a and b are always different, as they come from a set.
@@ -107,7 +106,7 @@ crepe::crepe! {
     Requirement(id, req) <- Input(f), let Fact::Req { id, req } = f;
 
     // The downstream fragment of a `Simple` edge must be singleton.
-    Requirement(y, Req::any_singleton()) <- Edge(_, y, Simple);
+    Requirement(y, Req::AnySingleton) <- Edge(_, y, Simple);
     // Requirements propagate through `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
@@ -284,7 +283,7 @@ impl Scheduler {
             if fragment.requires_singleton {
                 facts.push(Fact::Req {
                     id,
-                    req: Req::any_singleton(),
+                    req: Req::AnySingleton,
                 });
             }
         }
@@ -431,9 +430,8 @@ mod tests {
     }
 
     impl Result {
-        fn default_singleton() -> Self {
-            Result::Required(Req::any_singleton())
-        }
+        #[allow(non_upper_case_globals)]
+        const DefaultSingleton: Self = Self::Required(Req::AnySingleton);
     }
 
     fn run_and_merge(facts: impl IntoIterator<Item = Fact>) -> MetaResult<HashMap<Id, Req>> {
@@ -494,11 +492,11 @@ mod tests {
     fn test_single_fragment_singleton() {
         #[rustfmt::skip]
         let facts = [
-            Fact::Req { id: 101.into(), req: Req::any_singleton() },
+            Fact::Req { id: 101.into(), req: Req::AnySingleton },
         ];
 
         let expected = maplit::hashmap! {
-            101.into() => Result::default_singleton(),
+            101.into() => Result::DefaultSingleton,
         };
 
         test_success(facts, expected);
@@ -524,7 +522,7 @@ mod tests {
             101.into() => Result::Required(Req::Hash(1)),
             102.into() => Result::Required(Req::Singleton(WorkerSlotId::new(0, 2))),
             103.into() => Result::DefaultHash,
-            104.into() => Result::default_singleton(),
+            104.into() => Result::DefaultSingleton,
         };
 
         test_success(facts, expected);
@@ -569,14 +567,14 @@ mod tests {
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
-            Fact::Req { id: 102.into(), req: Req::any_singleton() }, // like `Now`
+            Fact::Req { id: 102.into(), req: Req::AnySingleton }, // like `Now`
             Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
             Fact::Edge { from: 102.into(), to: 103.into(), dt: Broadcast },
         ];
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(Req::Hash(1)),
-            102.into() => Result::default_singleton(),
+            102.into() => Result::DefaultSingleton,
             103.into() => Result::DefaultHash,
         };
 
