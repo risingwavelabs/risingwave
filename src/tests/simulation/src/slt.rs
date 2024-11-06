@@ -242,7 +242,7 @@ pub async fn run_slt_task(
         let records = sqllogictest::parse_file(path).expect("failed to parse file");
         let can_use_random_vnode_count = records.iter().all(|record| {
             if let Record::Statement { sql, .. } = record
-                && sql.to_lowercase().contains("max_parallelism")
+                && sql.to_lowercase().contains("parallelism")
             {
                 tracing::debug!(path = %path.display(), "skip random vnode count");
                 false
