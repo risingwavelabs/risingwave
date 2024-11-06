@@ -31,13 +31,13 @@ use prost::Message;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::{BinaryOperator, Expr, Ident, ObjectName, Statement, Value};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
@@ -845,7 +845,7 @@ impl SubscriptionCursor {
         old_epoch: u64,
         new_epoch: u64,
         version_id: HummockVersionId,
-        seek_pk_row: Option<Vec<Option<Bytes>>>,
+        seek_pk_rows: Option<Vec<Option<Bytes>>>,
     ) -> Result<BatchQueryPlanResult> {
         // pk + all column without hidden
         let output_col_idx = table_catalog
@@ -878,79 +878,57 @@ impl SubscriptionCursor {
                 (pk.name().to_string(), pk.data_type(), f.column_index)
             })
             .collect_vec();
-        // let selection = if let Some(seek_pk_rows) = seek_pk_rows {
-        //     let mut pk_rows = vec![];
-        //     let mut values = vec![];
-        //     for ((name, _), seek_pk) in pks.iter().zip_eq_fast(seek_pk_rows.iter()) {
-        //         if let Some(seek_pk) = seek_pk {
-        //             pk_rows.push(
-        //                 Expr::Identifier(Ident::with_quote_unchecked(
-        //                     '"',
-        //                     name.clone(),
-        //                 ))
-        //             );
-        //             values.push(String::from_utf8(seek_pk.clone().into()).unwrap());
-        //         }
-        //     }
-        //     if pk_rows.is_empty() {
-        //         None
-        //     } else if pk_rows.len() == 1 {
-        //         let left = pk_rows.pop().unwrap();
-        //         let right = Expr::Value(Value::SingleQuotedString(values.pop().unwrap()));
-        //         Some(Expr::BinaryOp {
-        //             left: Box::new(left),
-        //             op: BinaryOperator::Eq,
-        //             right: Box::new(right),
-        //         })
-        //     }else{
-        //         let left = Expr::Row(pk_rows);
-        //         let values = values.join(",");
-        //         let right = Expr::Value(Value::SingleQuotedString(format!("({})", values)));
-        //         Some(Expr::BinaryOp {
-        //             left: Box::new(left),
-        //             op: BinaryOperator::Gt,
-        //             right: Box::new(right),
-        //         })
-        //     }
-        // } else{
-        //     None
-        // };
-        let (scan, predicate) = match seek_pk_row {
-            Some(seek_pk_row) => {
-                let seek_pk_row = seek_pk_row
-                    .into_iter()
-                    .zip_eq_fast(pks.into_iter())
-                    .filter_map(|(pk, (name, data_type, column_index))| {
-                        if let Some(seek_pk) = pk {
-                            let column = InputRef {
-                                index: column_index,
-                                data_type: data_type.clone(),
-                            };
-                            let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
-                            let value_data =
-                                ScalarImpl::from_text(&value_string, data_type).unwrap();
-                            let value = Literal::new(Some(value_data), data_type.clone());
-                            Some(
-                                FunctionCall::new(
-                                    ExprType::LessThan,
-                                    vec![column.into(), value.into()],
-                                )
-                                .unwrap()
-                                .into(),
-                            )
-                        } else {
-                            None
+        let (scan, predicate) = if let Some(seek_pk_rows) = seek_pk_rows {
+            let mut pk_rows = vec![];
+            let mut values = vec![];
+            for (seek_pk, (name, data_type, column_index)) in seek_pk_rows
+                        .into_iter()
+                        .zip_eq_fast(pks.into_iter()) {
+                if let Some(seek_pk) = seek_pk {
+                    pk_rows.push(
+                        InputRef {
+                            index: column_index,
+                            data_type: data_type.clone(),
                         }
-                    })
-                    .collect_vec();
-                let (scan, predicate) = Condition {
-                    conjunctions: seek_pk_row,
+                    );
+                    let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
+                    let value_data =
+                        ScalarImpl::from_text(&value_string, data_type).unwrap();
+                    values.push((Some(value_data),data_type.clone()));
                 }
-                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)
-                .unwrap();
+            }
+            if pk_rows.is_empty() {
+                (vec![], None)
+            } else if pk_rows.len() == 1 {
+                let left = pk_rows.pop().unwrap();
+                let (right_data,right_type) = values.pop().unwrap();
+                let (scan, predicate) = Condition {
+                    conjunctions: vec![FunctionCall::new(
+                        ExprType::GreaterThan,
+                        vec![left.into(), Literal::new(right_data, right_type).into()],
+                    )?.into()],
+                }.split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
+                (scan, Some(predicate))
+            }else{
+                let (right_datas,right_types):(Vec<_>,Vec<_>) = values.into_iter().unzip();
+                let right_data = ScalarImpl::Struct(StructValue::new(right_datas));
+                let right_type = DataType::Struct(StructType::unnamed(right_types));
+                let left = FunctionCall::new_unchecked(
+                    ExprType::Row,
+                    pk_rows.into_iter().map(|pk| pk.into()).collect(),
+                    right_type.clone(),
+                );
+                let right = Literal::new(Some(right_data), right_type);
+                let (scan, predicate) = Condition {
+                    conjunctions: vec![FunctionCall::new(
+                                ExprType::GreaterThan,
+                                vec![left.into(), right.into()],
+                            )?.into()],
+                }.split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
                 (scan, Some(predicate))
             }
-            None => (vec![], None),
+        } else{
+            (vec![], None)
         };
 
         let batch_log_seq_scan = BatchLogSeqScan::new(core, scan);

@@ -47,6 +47,14 @@ where
     })
 }
 
+#[function("cast(varchar) -> struct", type_infer = "unreachable")]
+pub fn str_parse_struct(elem: &str, ctx: &Context) -> Result<StructValue>{
+    match &ctx.return_type {
+        risingwave_common::types::DataType::Struct(s) => Ok(StructValue::from_str(elem, s).map_err(|e| ExprError::Parse(format!("error: {:?}",e.as_report()).into()))?),
+        _ => return Err(ExprError::Parse("unsupported type".into())),
+    }
+}
+
 // TODO: introduce `FromBinary` and support all types
 #[function("pgwire_recv(bytea) -> int8")]
 pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {

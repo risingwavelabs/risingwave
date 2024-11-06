@@ -290,7 +290,7 @@ pub fn gen_query_from_table_name_order_by(
             let right = Expr::Value(Value::SingleQuotedString(values.pop().unwrap()));
             Some(Expr::BinaryOp {
                 left: Box::new(left),
-                op: BinaryOperator::Eq,
+                op: BinaryOperator::Gt,
                 right: Box::new(right),
             })
         }else{

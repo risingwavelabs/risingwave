@@ -540,7 +540,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
+        | Statement::Update { .. } => Ok(query::handle_query(handler_args, stmt, formats).await.unwrap()),
         Statement::CreateView {
             materialized,
             if_not_exists,
