@@ -295,9 +295,9 @@ pub async fn run_slt_task(
                         expected: StatementExpect::Ok,
                     };
                     tester.run_async(set_random_vnode_count).await.unwrap();
-                }
 
-                println!("[BUGEN] running record: {record}");
+                    println!("[BUGEN] running record: {record}");
+                }
 
                 match tester
                     .run_async(record.clone())
