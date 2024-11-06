@@ -279,7 +279,7 @@ pub async fn run_slt_task(
                 {
                     let sql = format!(
                         "SET STREAMING_MAX_PARALLELISM = {};",
-                        ((1..=64)
+                        ((2..=64)
                             .chain(224..=288)
                             .chain(992..=1056)
                             .chain(std::iter::once(32768)))
