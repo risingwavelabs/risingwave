@@ -270,7 +270,7 @@ impl Query {
 }
 
 #[derive(Debug, Clone)]
-enum SourceFetchParameters {
+pub enum SourceFetchParameters {
     IcebergPredicate(IcebergPredicate),
     KafkaTimebound {
         lower: Option<i64>,
