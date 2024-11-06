@@ -14,6 +14,8 @@
 
 use std::rc::Rc;
 
+use educe::Educe;
+use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::IcebergScanNode;
@@ -29,14 +31,17 @@ use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Educe, Debug, Clone, PartialEq)]
+#[educe(Eq, Hash)]
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
+    #[educe(Hash(ignore))]
+    pub predicate: IcebergPredicate,
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source) -> Self {
+    pub fn new(core: generic::Source, predicate: IcebergPredicate) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -44,7 +49,11 @@ impl BatchIcebergScan {
             Order::any(),
         );
 
-        Self { base, core }
+        Self {
+            base,
+            core,
+            predicate,
+        }
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -62,6 +71,7 @@ impl BatchIcebergScan {
         Self {
             base,
             core: self.core.clone(),
+            predicate: self.predicate.clone(),
         }
     }
 
