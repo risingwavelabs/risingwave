@@ -88,6 +88,7 @@ impl Distill for BatchIcebergScan {
         let fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
+            ("predicate", Pretty::from(self.predicate.to_string())),
         ];
         childless_record("BatchIcebergScan", fields)
     }

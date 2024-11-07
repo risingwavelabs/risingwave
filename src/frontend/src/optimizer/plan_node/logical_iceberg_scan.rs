@@ -105,6 +105,7 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
+                ("predicate", Pretty::from(self.predicate.to_string())),
             ]
         } else {
             vec![]
