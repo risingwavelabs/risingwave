@@ -25,10 +25,10 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,

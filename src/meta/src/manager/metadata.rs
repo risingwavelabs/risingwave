@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model_v2::{ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};

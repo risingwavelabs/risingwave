@@ -31,7 +31,7 @@ pub use event_log::EventLogManagerRef;
 pub use idle::*;
 pub use metadata::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
-pub use risingwave_meta_model_v2::prelude;
+pub use risingwave_meta_model::prelude;
 use risingwave_pb::catalog::{PbSink, PbSource};
 use risingwave_pb::common::PbHostAddress;
 pub use streaming_job::*;

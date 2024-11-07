@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
     HummockContextId, HummockVersionId,
 };
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
     hummock_version_stats,
 };

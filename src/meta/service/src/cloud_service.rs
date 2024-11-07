@@ -24,7 +24,7 @@ use risingwave_connector::source::{
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model_v2::ConnectionId;
+use risingwave_meta_model::ConnectionId;
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
 use risingwave_pb::cloud_service::cloud_service_server::CloudService;
 use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
