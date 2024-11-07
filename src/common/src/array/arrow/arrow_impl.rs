@@ -980,7 +980,8 @@ trait FromIntoArrow {
     fn into_arrow(self) -> Self::ArrowType;
     /// Used for converting timestamp types and will not be used in conversions of other types.
     fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self;
-    /// Used for converting timestamp types and will not be used in conversions of other types.
+    /// Used for converting rw timestamp types to arrow timestamp type.
+    /// In actual calls, due to compatibility, it will only be converted to microsecond.
     fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType;
 }
 
