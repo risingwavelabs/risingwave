@@ -17,7 +17,6 @@ use risingwave_common::types::DataType;
 
 use super::RowEncoder;
 
-/// Encode with [`ToBytes`]. Only used to encode key.
 pub struct BytesEncoder {
     pub schema: Schema,
     // the column must contain only one element
