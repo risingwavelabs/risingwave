@@ -35,7 +35,7 @@ flush
 statement ok
 DELETE FROM s1 WHERE i1 < 3;
 
-sleep 16s
+sleep 20s
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -57,7 +57,7 @@ DELETE FROM s1 WHERE i1 > 4;
 statement ok
 flush
 
-sleep 16s
+sleep 20s
 
 query I
 select * from iceberg_t1_source order by i1 limit 5;
