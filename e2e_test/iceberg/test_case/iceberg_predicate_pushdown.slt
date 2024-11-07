@@ -60,10 +60,26 @@ select count(*) from iceberg_t1_source;
 query I
 explain select count(*) from iceberg_t1_source where i1 > 500;
 ----
+   BatchSimpleAgg { aggs: [sum0(count)] }
+   └─BatchExchange { order: [], dist: Single }
+     └─BatchSimpleAgg { aggs: [count] }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 }
 
 query I
 explain select count(*) from iceberg_t1_source where i1 > 500 and i1 < 600;
 ----
+   BatchSimpleAgg { aggs: [sum0(count)] }
+   └─BatchExchange { order: [], dist: Single }
+     └─BatchSimpleAgg { aggs: [count] }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 and i1 < 600 }
+
+query I
+explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
+----
+   BatchSimpleAgg { aggs: [sum0(count)] }
+   └─BatchExchange { order: [], dist: Single }
+     └─BatchSimpleAgg { aggs: [count] }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 and i1 < 600 }
 
 statement ok
 DROP SINK sink1;
