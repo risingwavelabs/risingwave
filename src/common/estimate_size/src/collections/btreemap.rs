@@ -224,7 +224,7 @@ pub struct OccupiedEntry<'a, K, V> {
     heap_size: &'a mut KvSize,
 }
 
-impl<'a, K, V> OccupiedEntry<'a, K, V>
+impl<K, V> OccupiedEntry<'_, K, V>
 where
     K: EstimateSize + Ord,
     V: EstimateSize,
@@ -248,7 +248,7 @@ where
     heap_size: &'a mut KvSize,
 }
 
-impl<'a, K, V, F> Iterator for ExtractIf<'a, K, V, F>
+impl<K, V, F> Iterator for ExtractIf<'_, K, V, F>
 where
     K: EstimateSize,
     V: EstimateSize,

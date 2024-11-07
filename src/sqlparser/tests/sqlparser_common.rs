@@ -1858,6 +1858,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: true,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1867,6 +1868,7 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
         },
     );
     run_explain_analyze(
@@ -1876,6 +1878,17 @@ fn parse_explain_analyze_with_simple_select() {
             trace: false,
             verbose: true,
             explain_type: ExplainType::DistSql,
+            explain_format: ExplainFormat::Text,
+        },
+    );
+    run_explain_analyze(
+        "EXPLAIN (LOGICAL, FORMAT JSON) SELECT sqrt(id) FROM foo",
+        false,
+        ExplainOptions {
+            trace: false,
+            verbose: false,
+            explain_type: ExplainType::Logical,
+            explain_format: ExplainFormat::Json,
         },
     );
 }
@@ -1893,9 +1906,15 @@ fn parse_explain_with_invalid_options() {
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
 
-    let err_msg =
-        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )";
-    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    let expected =
+        "expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL or FORMAT, found: )";
+    let actual = res.unwrap_err().to_string();
+    assert!(
+        actual.contains(expected),
+        "expected: {:?}\nactual: {:?}",
+        expected,
+        actual
+    );
 }
 
 #[test]
@@ -2831,70 +2850,6 @@ fn parse_ctes() {
     let select = verified_query(sql);
     if let CteInner::Query(query) = &only(&select.with.unwrap().cte_tables).cte_inner {
         assert_ctes_in_select(&cte_sqls, query);
-    } else {
-        panic!("expected CteInner::Query")
-    }
-}
-
-#[test]
-fn parse_changelog_ctes() {
-    let cte_sqls = vec!["foo", "bar"];
-    let with = &format!(
-        "WITH a AS changelog from {}, b AS changelog from {} SELECT foo + bar FROM a, b",
-        cte_sqls[0], cte_sqls[1]
-    );
-
-    fn assert_changelog_ctes(expected: &[&str], sel: &Query) {
-        for (i, exp) in expected.iter().enumerate() {
-            let Cte { alias, cte_inner } = &sel.with.as_ref().unwrap().cte_tables[i];
-            if let CteInner::ChangeLog(from) = cte_inner {
-                assert_eq!(*exp, from.to_string());
-                assert_eq!(
-                    if i == 0 {
-                        Ident::new_unchecked("a")
-                    } else {
-                        Ident::new_unchecked("b")
-                    },
-                    alias.name
-                );
-                assert!(alias.columns.is_empty());
-            } else {
-                panic!("expected CteInner::ChangeLog")
-            }
-        }
-    }
-
-    // Top-level CTE
-    assert_changelog_ctes(&cte_sqls, &verified_query(with));
-    // CTE in a subquery
-    let sql = &format!("SELECT ({})", with);
-    let select = verified_only_select(sql);
-    match expr_from_projection(only(&select.projection)) {
-        Expr::Subquery(ref subquery) => {
-            assert_changelog_ctes(&cte_sqls, subquery.as_ref());
-        }
-        _ => panic!("expected subquery"),
-    }
-    // CTE in a derived table
-    let sql = &format!("SELECT * FROM ({})", with);
-    let select = verified_only_select(sql);
-    match only(select.from).relation {
-        TableFactor::Derived { subquery, .. } => {
-            assert_changelog_ctes(&cte_sqls, subquery.as_ref())
-        }
-        _ => panic!("expected derived table"),
-    }
-    // CTE in a view
-    let sql = &format!("CREATE VIEW v AS {}", with);
-    match verified_stmt(sql) {
-        Statement::CreateView { query, .. } => assert_changelog_ctes(&cte_sqls, &query),
-        _ => panic!("expected CREATE VIEW"),
-    }
-    // CTE in a CTE...
-    let sql = &format!("WITH outer_cte AS ({}) SELECT * FROM outer_cte", with);
-    let select = verified_query(sql);
-    if let CteInner::Query(query) = &only(&select.with.unwrap().cte_tables).cte_inner {
-        assert_changelog_ctes(&cte_sqls, query);
     } else {
         panic!("expected CteInner::Query")
     }

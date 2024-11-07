@@ -21,9 +21,7 @@ use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::{
-    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
-};
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
@@ -152,13 +150,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
-                0,
-                0,      // l0_sub_level_id will be generated during apply_version_delta
-                vec![], // default
-                inserted_table_infos,
-                0, // default
-            ));
+            let group_delta = GroupDelta::NewL0SubLevel(inserted_table_infos);
 
             group_deltas.push(group_delta);
         }
@@ -207,7 +199,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 }
 
-impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
+impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas)) = self.pre_applied_version {
             *self.orig_version = version;
@@ -266,7 +258,7 @@ pub(super) struct SingleDeltaTransaction<'a, 'b> {
     delta: Option<HummockVersionDelta>,
 }
 
-impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
+impl SingleDeltaTransaction<'_, '_> {
     pub(super) fn latest_version(&self) -> &HummockVersion {
         self.version_txn.latest_version()
     }
@@ -286,7 +278,7 @@ impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {
+impl Deref for SingleDeltaTransaction<'_, '_> {
     type Target = HummockVersionDelta;
 
     fn deref(&self) -> &Self::Target {
@@ -294,13 +286,13 @@ impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {
     }
 }
 
-impl<'a, 'b> DerefMut for SingleDeltaTransaction<'a, 'b> {
+impl DerefMut for SingleDeltaTransaction<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.delta.as_mut().expect("should exist")
     }
 }
 
-impl<'a, 'b> Drop for SingleDeltaTransaction<'a, 'b> {
+impl Drop for SingleDeltaTransaction<'_, '_> {
     fn drop(&mut self) {
         if let Some(delta) = self.delta.take() {
             self.version_txn.pre_apply(delta);
@@ -325,7 +317,7 @@ impl<'a> HummockVersionStatsTransaction<'a> {
     }
 }
 
-impl<'a> InMemValTransaction for HummockVersionStatsTransaction<'a> {
+impl InMemValTransaction for HummockVersionStatsTransaction<'_> {
     fn commit(self) {
         if self.stats.has_new_value() {
             let stats = self.stats.clone();
@@ -345,7 +337,7 @@ where
     }
 }
 
-impl<'a> Deref for HummockVersionStatsTransaction<'a> {
+impl Deref for HummockVersionStatsTransaction<'_> {
     type Target = HummockVersionStats;
 
     fn deref(&self) -> &Self::Target {
@@ -353,7 +345,7 @@ impl<'a> Deref for HummockVersionStatsTransaction<'a> {
     }
 }
 
-impl<'a> DerefMut for HummockVersionStatsTransaction<'a> {
+impl DerefMut for HummockVersionStatsTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.stats.deref_mut()
     }

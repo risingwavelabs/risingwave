@@ -36,6 +36,7 @@ pub mod database;
 pub mod fragment;
 pub mod function;
 pub mod hummock_epoch_to_version;
+pub mod hummock_gc_history;
 pub mod hummock_pinned_snapshot;
 pub mod hummock_pinned_version;
 pub mod hummock_sequence;
@@ -92,7 +93,7 @@ pub type FragmentId = i32;
 pub type ActorId = i32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum JobStatus {
     #[sea_orm(string_value = "INITIAL")]
     Initial,
@@ -124,7 +125,7 @@ impl From<JobStatus> for PbStreamJobState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum CreateType {
     #[sea_orm(string_value = "BACKGROUND")]
     Background,

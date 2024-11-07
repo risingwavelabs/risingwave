@@ -92,7 +92,7 @@ message TableFragments {
     // Duplicated from the length of the vnode bitmap in any actor of the fragment.
     //
     // Can be unset if the fragment is created in older versions where variable vnode count is not
-    // supported, in which case a default value of 256 should be used.
+    // supported, in which case a default value of 256 (or 1 for singleton) should be used.
     // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
   }
@@ -156,7 +156,7 @@ message MigrationPlan {
 }
 
 message FlushRequest {
-  bool checkpoint = 1;
+  uint32 database_id = 1;
 }
 
 message FlushResponse {
@@ -769,6 +769,12 @@ message EventLog {
     string cdc_table_id = 3;
     string upstream_ddl = 4;
   }
+  message EventSinkFail {
+    uint32 sink_id = 1;
+    string sink_name = 2;
+    string connector = 3;
+    string error = 4;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -782,6 +788,7 @@ message EventLog {
     EventCollectBarrierFail collect_barrier_fail = 8;
     EventLog.EventWorkerNodePanic worker_node_panic = 9;
     EventLog.EventAutoSchemaChangeFail auto_schema_change_fail = 10;
+    EventLog.EventSinkFail sink_fail = 11;
   }
 }
 
@@ -795,6 +802,7 @@ message AddEventLogRequest {
   // A subset of EventLog.event that can be added by non meta node.
   oneof event {
     EventLog.EventWorkerNodePanic worker_node_panic = 1;
+    EventLog.EventSinkFail sink_fail = 2;
   }
 }
 

@@ -191,6 +191,8 @@ impl<const N: usize> LabelGuardedMetricsInfo<N> {
     }
 }
 
+/// An RAII metrics vec with labels.
+///
 /// `LabelGuardedMetricVec` enhances the [`MetricVec`] to ensure the set of labels to be
 /// correctly removed from the Prometheus client once being dropped. This is useful for metrics
 /// that are associated with an object that can be dropped, such as streaming jobs, fragments,

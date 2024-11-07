@@ -222,10 +222,7 @@ impl WorkerNodeManager {
                 // Do nothing for placeholder fragment.
             }
             None => {
-                panic!(
-                    "Streaming vnode mapping not found for fragment_id: {}",
-                    fragment_id
-                )
+                tracing::warn!(fragment_id, "Streaming vnode mapping not found");
             }
         };
     }

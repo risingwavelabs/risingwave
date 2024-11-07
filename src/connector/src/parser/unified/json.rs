@@ -28,7 +28,7 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
 use simd_json::prelude::{
-    TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
+    TypedValue, ValueAsArray, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
 use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;

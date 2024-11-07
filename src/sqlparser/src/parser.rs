@@ -2042,31 +2042,40 @@ impl Parser<'_> {
 
     pub fn parse_create_schema(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
-        let (schema_name, user_specified) = if self.parse_keyword(Keyword::AUTHORIZATION) {
-            let user_specified = self.parse_object_name()?;
-            (user_specified.clone(), Some(user_specified))
+        let (schema_name, owner) = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = self.parse_object_name()?;
+            (owner.clone(), Some(owner))
         } else {
             let schema_name = self.parse_object_name()?;
-            let user_specified = if self.parse_keyword(Keyword::AUTHORIZATION) {
+            let owner = if self.parse_keyword(Keyword::AUTHORIZATION) {
                 Some(self.parse_object_name()?)
             } else {
                 None
             };
-            (schema_name, user_specified)
+            (schema_name, owner)
         };
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            user_specified,
+            owner,
         })
     }
 
     pub fn parse_create_database(&mut self) -> PResult<Statement> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let db_name = self.parse_object_name()?;
+        let _ = self.parse_keyword(Keyword::WITH);
+        let owner = if self.parse_keyword(Keyword::OWNER) {
+            let _ = self.consume_token(&Token::Eq);
+            Some(self.parse_object_name()?)
+        } else {
+            None
+        };
+
         Ok(Statement::CreateDatabase {
             db_name,
             if_not_exists,
+            owner,
         })
     }
 
@@ -2134,7 +2143,7 @@ impl Parser<'_> {
 
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = self.parse_source_schema_with_connector(&connector, cdc_source_job)?;
+        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
 
         let stmt = CreateSourceStatement {
             temporary,
@@ -2144,7 +2153,7 @@ impl Parser<'_> {
             constraints,
             source_name,
             with_properties: WithProperties(with_options),
-            source_schema,
+            format_encode,
             source_watermarks,
             include_column_options: include_options,
         };
@@ -2576,8 +2585,8 @@ impl Parser<'_> {
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
 
-        let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector, false)?)
+        let format_encode = if let Some(connector) = connector {
+            Some(self.parse_format_encode_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2612,7 +2621,7 @@ impl Parser<'_> {
             with_options,
             or_replace,
             if_not_exists,
-            source_schema,
+            format_encode,
             source_watermarks,
             append_only,
             on_conflict,
@@ -3087,8 +3096,11 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::TO)?;
             let schema_name = self.parse_object_name()?;
             AlterSchemaOperation::RenameSchema { schema_name }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_schema = self.parse_object_name()?;
+            AlterSchemaOperation::SwapRenameSchema { target_schema }
         } else {
-            return self.expected("RENAME OR OWNER TO after ALTER SCHEMA");
+            return self.expected("RENAME, OWNER TO, OR SWAP WITH after ALTER SCHEMA");
         };
 
         Ok(Statement::AlterSchema {
@@ -3207,8 +3219,12 @@ impl Parser<'_> {
             AlterTableOperation::AlterColumn { column_name, op }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterTableOperation::RefreshSchema
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_table = self.parse_object_name()?;
+            AlterTableOperation::SwapRenameTable { target_table }
         } else {
-            return self.expected("ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE");
+            return self
+                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -3313,6 +3329,9 @@ impl Parser<'_> {
             AlterViewOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_view = self.parse_object_name()?;
+            AlterViewOperation::SwapRenameView { target_view }
         } else if self.parse_keyword(Keyword::SET) {
             if self.parse_keyword(Keyword::SCHEMA) {
                 let schema_name = self.parse_object_name()?;
@@ -3343,7 +3362,7 @@ impl Parser<'_> {
             }
         } else {
             return self.expected(&format!(
-                "RENAME or OWNER TO or SET after ALTER {}VIEW",
+                "RENAME or OWNER TO or SET or SWAP after ALTER {}VIEW",
                 if materialized { "MATERIALIZED " } else { "" }
             ));
         };
@@ -3392,6 +3411,9 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET");
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_sink = self.parse_object_name()?;
+            AlterSinkOperation::SwapRenameSink { target_sink }
         } else {
             return self.expected("RENAME or OWNER TO or SET after ALTER SINK");
         };
@@ -3425,8 +3447,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_subscription = self.parse_object_name()?;
+            AlterSubscriptionOperation::SwapRenameSubscription {
+                target_subscription,
+            }
         } else {
-            return self.expected("RENAME or OWNER TO or SET after ALTER SUBSCRIPTION");
+            return self.expected("RENAME or OWNER TO or SET or SWAP after ALTER SUBSCRIPTION");
         };
 
         Ok(Statement::AlterSubscription {
@@ -3466,13 +3493,16 @@ impl Parser<'_> {
                 return self.expected("SCHEMA after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
-            let connector_schema = self.parse_schema()?.unwrap();
-            if connector_schema.key_encode.is_some() {
+            let format_encode = self.parse_schema()?.unwrap();
+            if format_encode.key_encode.is_some() {
                 parser_err!("key encode clause is not supported in source schema");
             }
-            AlterSourceOperation::FormatEncode { connector_schema }
+            AlterSourceOperation::FormatEncode { format_encode }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_source = self.parse_object_name()?;
+            AlterSourceOperation::SwapRenameSource { target_source }
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
@@ -4006,6 +4036,7 @@ impl Parser<'_> {
             Keyword::LOGICAL,
             Keyword::PHYSICAL,
             Keyword::DISTSQL,
+            Keyword::FORMAT,
         ];
 
         let parse_explain_option = |parser: &mut Parser<'_>| -> PResult<()> {
@@ -4029,6 +4060,15 @@ impl Parser<'_> {
                 Keyword::LOGICAL => options.explain_type = ExplainType::Logical,
                 Keyword::PHYSICAL => options.explain_type = ExplainType::Physical,
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
+                Keyword::FORMAT => {
+                    options.explain_format = {
+                        match parser.expect_one_of_keywords(&[Keyword::TEXT, Keyword::JSON])? {
+                            Keyword::TEXT => ExplainFormat::Text,
+                            Keyword::JSON => ExplainFormat::Json,
+                            _ => unreachable!("{}", keyword),
+                        }
+                    }
+                }
                 _ => unreachable!("{}", keyword),
             };
             Ok(())
@@ -4141,7 +4181,7 @@ impl Parser<'_> {
                 parser_err!("Expected 'changelog' but found '{}'", changelog);
             }
             self.expect_keyword(Keyword::FROM)?;
-            Ok(CteInner::ChangeLog(self.parse_identifier()?))
+            Ok(CteInner::ChangeLog(self.parse_object_name()?))
         }
     }
 
@@ -4959,6 +4999,7 @@ impl Parser<'_> {
                 Keyword::SCHEMA,
                 Keyword::TABLE,
                 Keyword::SOURCE,
+                Keyword::SINK,
             ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
@@ -4966,6 +5007,7 @@ impl Parser<'_> {
                 Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
                 Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }

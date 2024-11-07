@@ -533,6 +533,29 @@ impl SinkMetaClient {
             }
         }
     }
+
+    pub async fn add_sink_fail_evet_log(
+        &self,
+        sink_id: u32,
+        sink_name: String,
+        connector: String,
+        error: String,
+    ) {
+        match self {
+            SinkMetaClient::MetaClient(meta_client) => {
+                match meta_client
+                    .add_sink_fail_evet(sink_id, sink_name, connector, error)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), sink_id = sink_id, "Fialed to add sink fail event to event log.");
+                    }
+                }
+            }
+            SinkMetaClient::MockMetaClient(_) => {}
+        }
+    }
 }
 
 impl SinkWriterParam {
@@ -669,12 +692,10 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
 
 impl SinkImpl {
     pub fn new(mut param: SinkParam) -> Result<Self> {
-        const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
 
         // remove privatelink related properties if any
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
-        param.properties.remove(CONNECTION_NAME_KEY);
 
         let sink_type = param
             .properties

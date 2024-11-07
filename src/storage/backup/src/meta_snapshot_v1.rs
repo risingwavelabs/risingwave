@@ -29,8 +29,7 @@ use risingwave_pb::user::UserInfo;
 use crate::error::{BackupError, BackupResult};
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 
-/// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
-
+// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
 
 impl Display for ClusterMetadata {

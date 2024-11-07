@@ -70,7 +70,7 @@ impl Rule for OverWindowToTopNRule {
             return None;
         }
         let window_func = &over_window.window_functions()[0];
-        if !window_func.kind.is_rank() {
+        if !window_func.kind.is_numbering() {
             // Only rank functions can be converted to TopN.
             return None;
         }

@@ -427,7 +427,7 @@ impl TestCase {
                     columns,
                     constraints,
                     if_not_exists,
-                    source_schema,
+                    format_encode,
                     source_watermarks,
                     append_only,
                     on_conflict,
@@ -437,7 +437,7 @@ impl TestCase {
                     wildcard_idx,
                     ..
                 } => {
-                    let source_schema = source_schema.map(|schema| schema.into_v2_with_warning());
+                    let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
 
                     create_table::handle_create_table(
                         handler_args,
@@ -446,7 +446,7 @@ impl TestCase {
                         wildcard_idx,
                         constraints,
                         if_not_exists,
-                        source_schema,
+                        format_encode,
                         source_watermarks,
                         append_only,
                         on_conflict,
@@ -568,13 +568,13 @@ impl TestCase {
                 Statement::CreateSchema {
                     schema_name,
                     if_not_exists,
-                    user_specified,
+                    owner,
                 } => {
                     create_schema::handle_create_schema(
                         handler_args,
                         schema_name,
                         if_not_exists,
-                        user_specified,
+                        owner,
                     )
                     .await?;
                 }

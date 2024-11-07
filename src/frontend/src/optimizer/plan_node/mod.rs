@@ -53,6 +53,7 @@ use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Or
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
+use crate::utils::PrettySerde;
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -643,6 +644,9 @@ pub trait Explain {
 
     /// Explain the plan node and return a string.
     fn explain_to_string(&self) -> String;
+
+    /// Explain the plan node and return a json string.
+    fn explain_to_json(&self) -> String;
 }
 
 impl Explain for PlanRef {
@@ -664,6 +668,14 @@ impl Explain for PlanRef {
         let mut config = pretty_config();
         config.unicode(&mut output, &plan.explain());
         output
+    }
+
+    /// Explain the plan node and return a json string.
+    fn explain_to_json(&self) -> String {
+        let plan = reorganize_elements_id(self.clone());
+        let explain_ir = plan.explain();
+        serde_json::to_string_pretty(&PrettySerde(explain_ir))
+            .expect("failed to serialize plan to json")
     }
 }
 
@@ -923,10 +935,14 @@ mod batch_file_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod batch_postgres_query;
+
+mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
+
+mod logical_mysql_query;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
@@ -949,6 +965,7 @@ pub use batch_limit::BatchLimit;
 pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
+pub use batch_mysql_query::BatchMySqlQuery;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
 pub use batch_postgres_query::BatchPostgresQuery;
@@ -985,6 +1002,7 @@ pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_mysql_query::LogicalMySqlQuery;
 pub use logical_now::LogicalNow;
 pub use logical_over_window::LogicalOverWindow;
 pub use logical_postgres_query::LogicalPostgresQuery;
@@ -1100,6 +1118,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, ChangeLog }
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
+            , { Logical, MySqlQuery }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1132,6 +1151,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, IcebergScan }
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
+            , { Batch, MySqlQuery }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -1214,6 +1234,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ChangeLog }
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
+            , { Logical, MySqlQuery }
         }
     };
 }
@@ -1255,6 +1276,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, IcebergScan }
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
+            , { Batch, MySqlQuery }
         }
     };
 }

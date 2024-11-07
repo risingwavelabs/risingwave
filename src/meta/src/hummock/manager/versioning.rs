@@ -36,7 +36,6 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
 use crate::hummock::model::CompactionGroup;
@@ -56,8 +55,6 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
-    /// Whether time travel is enabled during last commit epoch.
-    pub time_travel_toggle_check: bool,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -82,22 +79,6 @@ impl ContextInfo {
 }
 
 impl Versioning {
-    /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(
-        &self,
-        context_info: &ContextInfo,
-        delete_object_tracker: &DeleteObjectTracker,
-    ) {
-        let min_pinned_version_id = context_info.min_pinned_version_id();
-        delete_object_tracker.add(
-            self.checkpoint
-                .stale_objects
-                .iter()
-                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
-        );
-    }
-
     pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
         self.time_travel_snapshot_interval_counter = u64::MAX;
     }

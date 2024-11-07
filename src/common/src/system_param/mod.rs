@@ -419,6 +419,17 @@ impl ValidateOnSet for OverrideValidateOnSet {
         }
         Ok(())
     }
+
+    fn time_travel_retention_ms(v: &u64) -> Result<()> {
+        // This is intended to guarantee that non-time-travel batch query can still function even compute node's recent versions doesn't include the desired version.
+        let min_retention_ms = 600_000;
+        if *v < min_retention_ms {
+            return Err(format!(
+                "time_travel_retention_ms cannot be less than {min_retention_ms}"
+            ));
+        }
+        Ok(())
+    }
 }
 
 for_all_params!(impl_default_from_other_params);

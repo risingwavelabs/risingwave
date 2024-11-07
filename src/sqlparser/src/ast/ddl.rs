@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ConnectorSchema;
+use super::FormatEncodeOptions;
 use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
 };
@@ -38,6 +38,7 @@ pub enum AlterDatabaseOperation {
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
+    SwapRenameSchema { target_schema: ObjectName },
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -110,6 +111,10 @@ pub enum AlterTableOperation {
     SetBackfillRateLimit {
         rate_limit: i32,
     },
+    /// `SWAP WITH <table_name>`
+    SwapRenameTable {
+        target_table: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,6 +151,10 @@ pub enum AlterViewOperation {
     SetBackfillRateLimit {
         rate_limit: i32,
     },
+    /// `SWAP WITH <view_name>`
+    SwapRenameView {
+        target_view: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -165,6 +174,10 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SWAP WITH <sink_name>`
+    SwapRenameSink {
+        target_sink: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -173,6 +186,7 @@ pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
+    SwapRenameSubscription { target_subscription: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -182,9 +196,10 @@ pub enum AlterSourceOperation {
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
-    FormatEncode { connector_schema: ConnectorSchema },
+    FormatEncode { format_encode: FormatEncodeOptions },
     RefreshSchema,
     SetSourceRateLimit { rate_limit: i32 },
+    SwapRenameSource { target_source: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -220,6 +235,9 @@ impl fmt::Display for AlterSchemaOperation {
             }
             AlterSchemaOperation::RenameSchema { schema_name } => {
                 write!(f, "RENAME TO {}", schema_name)
+            }
+            AlterSchemaOperation::SwapRenameSchema { target_schema } => {
+                write!(f, "SWAP WITH {}", target_schema)
             }
         }
     }
@@ -300,6 +318,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterTableOperation::SwapRenameTable { target_table } => {
+                write!(f, "SWAP WITH {}", target_table)
+            }
         }
     }
 }
@@ -351,6 +372,9 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterViewOperation::SwapRenameView { target_view } => {
+                write!(f, "SWAP WITH {}", target_view)
+            }
         }
     }
 }
@@ -378,6 +402,9 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SwapRenameSink { target_sink } => {
+                write!(f, "SWAP WITH {}", target_sink)
+            }
         }
     }
 }
@@ -393,6 +420,11 @@ impl fmt::Display for AlterSubscriptionOperation {
             }
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SwapRenameSubscription {
+                target_subscription,
+            } => {
+                write!(f, "SWAP WITH {}", target_subscription)
             }
         }
     }
@@ -413,14 +445,17 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSourceOperation::FormatEncode { connector_schema } => {
-                write!(f, "{connector_schema}")
+            AlterSourceOperation::FormatEncode { format_encode } => {
+                write!(f, "{format_encode}")
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
             AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
                 write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSourceOperation::SwapRenameSource { target_source } => {
+                write!(f, "SWAP WITH {}", target_source)
             }
         }
     }
@@ -731,7 +766,7 @@ impl fmt::Display for ColumnOption {
 
 fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
     struct ConstraintName<'a>(&'a Option<Ident>);
-    impl<'a> fmt::Display for ConstraintName<'a> {
+    impl fmt::Display for ConstraintName<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some(name) = self.0 {
                 write!(f, "CONSTRAINT {} ", name)?;

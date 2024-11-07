@@ -28,6 +28,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
+use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -43,8 +44,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
-    PbTableJobType, ReplaceTablePlan, TableJobType,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, DdlProgress, PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -183,6 +184,7 @@ impl LocalFrontend {
         res
     }
 
+    /// Creates a new session
     pub fn session_ref(&self) -> Arc<SessionImpl> {
         self.session_user_ref(
             DEFAULT_DATABASE_NAME.to_string(),
@@ -280,6 +282,7 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
+        table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
         self.hummock_snapshot_manager
@@ -319,6 +322,7 @@ impl CatalogWriter for MockCatalogWriter {
         _job_type: TableJobType,
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
+        assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);
         self.catalog.write().update_table(&table);
         Ok(())
     }
@@ -352,6 +356,7 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         index_table.id = self.gen_id();
         index_table.stream_job_status = PbStreamJobStatus::Created as _;
+        index_table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&index_table);
         self.add_table_or_index_id(
             index_table.id,
@@ -640,6 +645,10 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {
@@ -917,7 +926,7 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
+    async fn flush(&self, _database_id: DatabaseId) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)
     }
 

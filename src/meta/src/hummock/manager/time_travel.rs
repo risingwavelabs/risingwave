@@ -17,14 +17,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
 };
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId,
 };
@@ -34,7 +33,6 @@ use risingwave_meta_model::{
     hummock_time_travel_version,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
-use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
@@ -46,14 +44,6 @@ use crate::hummock::HummockManager;
 
 /// Time travel.
 impl HummockManager {
-    pub(crate) async fn time_travel_enabled(&self) -> bool {
-        self.env
-            .system_params_reader()
-            .await
-            .time_travel_retention_ms()
-            > 0
-    }
-
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
         let mut guard = self.versioning.write().await;
@@ -383,12 +373,7 @@ impl HummockManager {
                     sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
                 };
                 hummock_sstable_info::Entity::insert(m)
-                    .on_conflict(
-                        OnConflict::column(hummock_sstable_info::Column::SstId)
-                            .do_nothing()
-                            .to_owned(),
-                    )
-                    .do_nothing()
+                    .on_conflict_do_nothing()
                     .exec(txn)
                     .await?;
                 count += 1;
@@ -437,18 +422,13 @@ impl HummockManager {
                     .into()),
             };
             hummock_time_travel_version::Entity::insert(m)
-                .on_conflict(
-                    OnConflict::column(hummock_time_travel_version::Column::VersionId)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .do_nothing()
+                .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
         }
         let written = write_sstable_infos(
             delta
-                .newly_added_sst_infos(&select_groups)
+                .newly_added_sst_infos(Some(&select_groups))
                 .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
             txn,
         )
@@ -468,12 +448,7 @@ impl HummockManager {
                     .into()),
             };
             hummock_time_travel_delta::Entity::insert(m)
-                .on_conflict(
-                    OnConflict::column(hummock_time_travel_delta::Column::VersionId)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .do_nothing()
+                .on_conflict_do_nothing()
                 .exec(txn)
                 .await?;
         }
@@ -489,6 +464,11 @@ fn replay_archive(
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);
+        debug_assert!(
+            !should_mark_next_time_travel_version_snapshot(&d),
+            "unexpected time travel delta {:?}",
+            d
+        );
         // Need to work around the assertion in `apply_version_delta`.
         // Because compaction deltas are not included in time travel archive.
         while last_version.id < d.prev_id {
@@ -521,4 +501,14 @@ fn should_ignore_group(root_group_id: CompactionGroupId) -> bool {
 
 pub fn require_sql_meta_store_err() -> Error {
     Error::TimeTravel(anyhow!("require SQL meta store"))
+}
+
+/// Time travel delta replay only expect `NewL0SubLevel`. In all other cases, a new version snapshot should be created.
+pub fn should_mark_next_time_travel_version_snapshot(delta: &HummockVersionDelta) -> bool {
+    delta.group_deltas.iter().any(|(_, deltas)| {
+        deltas
+            .group_deltas
+            .iter()
+            .any(|d| !matches!(d, GroupDeltaCommon::NewL0SubLevel(_)))
+    })
 }
