@@ -1135,13 +1135,6 @@ fn sanity_check_for_cdc_table(
     Ok(())
 }
 
-struct CdcSchemaChangeArgs {
-    /// original table catalog
-    original_catalog: Arc<TableCatalog>,
-    /// new version table columns, only provided in auto schema change
-    new_version_columns: Option<Vec<ColumnCatalog>>,
-}
-
 /// Derive schema for cdc table when create a new Table or alter an existing Table
 async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
@@ -1180,24 +1173,23 @@ async fn bind_cdc_table_schema_externally(
 fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    schema_change_args: Option<CdcSchemaChangeArgs>,
+    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
     let mut columns = bind_sql_columns(column_defs)?;
-    if let Some(args) = schema_change_args {
-        // If new_version_columns is provided, we are in the process of auto schema change.
-        // update the default value column since the default value column is not set in the
-        // column sql definition.
-        if let Some(new_version_columns) = args.new_version_columns {
-            for (col, new_version_col) in columns
-                .iter_mut()
-                .zip_eq_fast(new_version_columns.into_iter())
-            {
-                assert_eq!(col.name(), new_version_col.name());
-                col.column_desc.generated_or_default_column =
-                    new_version_col.column_desc.generated_or_default_column;
-            }
+    // If new_version_columns is provided, we are in the process of auto schema change.
+    // update the default value column since the default value column is not set in the
+    // column sql definition.
+    if let Some(new_version_columns) = new_version_columns {
+        for (col, new_version_col) in columns
+            .iter_mut()
+            .zip_eq_fast(new_version_columns.into_iter())
+        {
+            assert_eq!(col.name(), new_version_col.name());
+            col.column_desc.generated_or_default_column =
+                new_version_col.column_desc.generated_or_default_column;
         }
     }
+
     let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
 
     Ok((columns, pk_names))
@@ -1362,14 +1354,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) = bind_cdc_table_schema(
-                &column_defs,
-                &constraints,
-                Some(CdcSchemaChangeArgs {
-                    original_catalog: original_catalog.clone(),
-                    new_version_columns,
-                }),
-            )?;
+            let (columns, pk_names) =
+                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
