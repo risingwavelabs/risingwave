@@ -19,7 +19,7 @@ use educe::Educe;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::{Decimal, ScalarImpl};
 
 use super::generic::GenericPlanRef;
@@ -134,7 +134,7 @@ impl ExprVisitable for LogicalIcebergScan {}
 impl PredicatePushdown for LogicalIcebergScan {
     /// NOTE(kwannoel):
     /// 1. We expect it to be constant folded
-    /// 2. We don't convert `inputRefs` of type boolean directly to IcebergPredicates.
+    /// 2. We don't convert `inputRefs` of type boolean directly to `IcebergPredicates`.
     /// 3. The leaf nodes are always logical comparison operators:
     ///    `Equal`, `NotEqual`, `GreaterThan`,
     ///    `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`.
