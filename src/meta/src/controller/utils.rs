@@ -23,6 +23,7 @@ use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
@@ -733,6 +734,58 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
                 .to_owned(),
         )
         .to_owned()
+}
+
+pub async fn get_internal_tables_by_id<C>(job_id: ObjectId, db: &C) -> MetaResult<Vec<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let table_ids: Vec<TableId> = Table::find()
+        .select_only()
+        .column(table::Column::TableId)
+        .filter(
+            table::Column::TableType
+                .eq(TableType::Internal)
+                .and(table::Column::BelongsToJobId.eq(job_id)),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(table_ids)
+}
+
+pub async fn get_index_state_tables_by_table_id<C>(
+    table_id: TableId,
+    db: &C,
+) -> MetaResult<Vec<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let mut index_table_ids: Vec<TableId> = Index::find()
+        .select_only()
+        .column(index::Column::IndexTableId)
+        .filter(index::Column::PrimaryTableId.eq(table_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    if !index_table_ids.is_empty() {
+        let internal_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Internal)
+                    .and(table::Column::BelongsToJobId.is_in(index_table_ids.clone())),
+            )
+            .into_tuple()
+            .all(db)
+            .await?;
+
+        index_table_ids.extend(internal_table_ids.into_iter());
+    }
+
+    Ok(index_table_ids)
 }
 
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
