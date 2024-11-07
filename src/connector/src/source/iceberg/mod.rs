@@ -305,10 +305,13 @@ impl IcebergSplitEnumerator {
                 .files
                 .push(data_files[split_num * split_size + i].clone());
         }
-        Ok(splits
-            .into_iter()
-            .filter(|split| !split.files.is_empty())
-            .collect_vec())
+        let splits = splits.into_iter().map(|split| split).collect_vec();
+
+        if splits.is_empty() {
+            bail!("No splits found for the iceberg table");
+        }
+
+        Ok(splits)
     }
 
     /// The required field names are the intersection of the output shema and the equality delete columns.
