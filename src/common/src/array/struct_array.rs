@@ -361,11 +361,27 @@ impl StructValue {
         if !s.ends_with(')') {
             return Err("Missing right parenthesis".into());
         }
-        let mut fields = Vec::with_capacity(s.len());
-        for (s, ty) in s[1..s.len() - 1].split(',').zip_eq_debug(ty.types()) {
-            let datum = match s.trim() {
+        let s = &s[1..s.len() - 1];
+        let mut split_str = Vec::with_capacity(ty.len());
+        let mut left_parenthesis_num = 0;
+        let mut start = 0;
+        for (i, c) in s.char_indices() {
+            match c {
+                '(' => left_parenthesis_num += 1,
+                ')' => left_parenthesis_num -= 1,
+                ',' if left_parenthesis_num == 0 => {
+                    split_str.push(&s[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        split_str.push(&s[start..=(s.len() - 1)]);
+        let mut fields = Vec::with_capacity(ty.len());
+        for (str, ty) in split_str.iter().zip_eq_debug(ty.types()) {
+            let datum = match str.trim() {
                 "" => None,
-                s => Some(ScalarImpl::from_text(s, ty)?),
+                s => Some(ScalarImpl::from_text(s, ty).unwrap()),
             };
             fields.push(datum);
         }
@@ -831,5 +847,72 @@ mod tests {
         test("{1}", "{1}");
         test("{1,2}", r#""{1,2}""#);
         test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
+    }
+
+    #[test]
+    fn test_from_str_nested_struct() {
+        let struct_str = "(1,sad ,(3, 4.0),(1,( 2,(3,(4,(5, 6))) )) )";
+        let struct_type = StructType::unnamed(vec![
+            DataType::Int32,
+            DataType::Varchar,
+            DataType::new_unnamed_struct(vec![DataType::Int32, DataType::Float64]),
+            DataType::new_unnamed_struct(vec![
+                DataType::Int32,
+                DataType::new_unnamed_struct(vec![
+                    DataType::Int32,
+                    DataType::new_unnamed_struct(vec![
+                        DataType::Int32,
+                        DataType::new_unnamed_struct(vec![
+                            DataType::Int32,
+                            DataType::new_unnamed_struct(vec![DataType::Int32, DataType::Int32]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ]);
+        let struct_value = StructValue::from_str(struct_str, &struct_type).unwrap();
+        let expected = StructValue::new(vec![
+            Some(1.to_scalar_value()),
+            Some("sad".into()),
+            Some(
+                StructValue::new(vec![
+                    Some(3.to_scalar_value()),
+                    Some(ScalarImpl::Float64(4.0.into())),
+                ])
+                .to_scalar_value(),
+            ),
+            Some(
+                StructValue::new(vec![
+                    Some(1.to_scalar_value()),
+                    Some(
+                        StructValue::new(vec![
+                            Some(2.to_scalar_value()),
+                            Some(
+                                StructValue::new(vec![
+                                    Some(3.to_scalar_value()),
+                                    Some(
+                                        StructValue::new(vec![
+                                            Some(4.to_scalar_value()),
+                                            Some(
+                                                StructValue::new(vec![
+                                                    Some(5.to_scalar_value()),
+                                                    Some(6.to_scalar_value()),
+                                                ])
+                                                .to_scalar_value(),
+                                            ),
+                                        ])
+                                        .to_scalar_value(),
+                                    ),
+                                ])
+                                .to_scalar_value(),
+                            ),
+                        ])
+                        .to_scalar_value(),
+                    ),
+                ])
+                .to_scalar_value(),
+            ),
+        ]);
+        assert_eq!(struct_value, expected);
     }
 }

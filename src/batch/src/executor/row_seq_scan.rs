@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, Deref};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
@@ -23,11 +23,9 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::as_of::AsOfType;
 use risingwave_pb::plan_common::{as_of, PbAsOf, StorageTableDesc};

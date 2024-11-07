@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-
-use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SysRowSeqScanNode;
 use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, range_to_string, scan_ranges_as_strs, Distill};
+use super::utils::{childless_record, scan_ranges_as_strs, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};

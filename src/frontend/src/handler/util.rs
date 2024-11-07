@@ -274,12 +274,10 @@ pub fn gen_query_from_table_name_order_by(
         let mut values = vec![];
         for ((name, _), seek_pk) in pks.iter().zip_eq_fast(seek_pk_rows.iter()) {
             if let Some(seek_pk) = seek_pk {
-                pk_rows.push(
-                    Expr::Identifier(Ident::with_quote_unchecked(
-                        '"',
-                        name.clone(),
-                    ))
-                );
+                pk_rows.push(Expr::Identifier(Ident::with_quote_unchecked(
+                    '"',
+                    name.clone(),
+                )));
                 values.push(String::from_utf8(seek_pk.clone().into()).unwrap());
             }
         }
@@ -293,7 +291,7 @@ pub fn gen_query_from_table_name_order_by(
                 op: BinaryOperator::Gt,
                 right: Box::new(right),
             })
-        }else{
+        } else {
             let left = Expr::Row(pk_rows);
             let values = values.join(",");
             let right = Expr::Value(Value::SingleQuotedString(format!("({})", values)));
@@ -303,13 +301,13 @@ pub fn gen_query_from_table_name_order_by(
                 right: Box::new(right),
             })
         }
-    } else{
+    } else {
         None
     };
 
     let select = Select {
-        from,
         projection,
+        from,
         selection,
         ..Default::default()
     };

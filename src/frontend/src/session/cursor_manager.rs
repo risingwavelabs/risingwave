@@ -27,23 +27,20 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
 use pgwire::types::{Format, Row};
-use prost::Message;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::expr::expr_node::Type;
-use risingwave_sqlparser::ast::{BinaryOperator, Expr, Ident, ObjectName, Statement, Value};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
 use crate::handler::query::{
     gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
@@ -59,9 +56,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::utils::Condition;
-use crate::{
-    Binder, OptimizerContext, OptimizerContextRef, PgResponseStream, PlanRef, TableCatalog,
-};
+use crate::{Binder, OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
 pub enum CursorDataChunkStream {
     LocalDataChunk(Option<LocalQueryStream>),
@@ -392,26 +387,6 @@ impl SubscriptionCursor {
                                 &fields,
                                 handler_args.session.clone(),
                             );
-                            {
-                                let (mut chunk_stream, fields, init_query_timer, pk_column_names) =
-                                Self::initiate_query(
-                                    Some(rw_timestamp),
-                                    &self.dependent_table_id,
-                                    handler_args.clone(),
-                                    self.seek_pk_row.clone(),
-                                )
-                                .await?;
-                                Self::init_row_stream(
-                                    &mut chunk_stream,
-                                    formats,
-                                    &from_snapshot,
-                                    &fields,
-                                    handler_args.session.clone(),
-                                );
-                                while let Some(a) = chunk_stream.next().await? {
-                                    println!("testtest {:?}", a);
-                                }
-                            }
 
                             self.cursor_need_drop_time = Instant::now()
                                 + Duration::from_secs(self.subscription.retention_seconds);
@@ -875,43 +850,42 @@ impl SubscriptionCursor {
             .iter()
             .map(|f| {
                 let pk = table_catalog.columns.get(f.column_index).unwrap();
-                (pk.name().to_string(), pk.data_type(), f.column_index)
+                (pk.data_type(), f.column_index)
             })
             .collect_vec();
         let (scan, predicate) = if let Some(seek_pk_rows) = seek_pk_rows {
             let mut pk_rows = vec![];
             let mut values = vec![];
-            for (seek_pk, (name, data_type, column_index)) in seek_pk_rows
-                        .into_iter()
-                        .zip_eq_fast(pks.into_iter()) {
+            for (seek_pk, (data_type, column_index)) in
+                seek_pk_rows.into_iter().zip_eq_fast(pks.into_iter())
+            {
                 if let Some(seek_pk) = seek_pk {
-                    pk_rows.push(
-                        InputRef {
-                            index: column_index,
-                            data_type: data_type.clone(),
-                        }
-                    );
+                    pk_rows.push(InputRef {
+                        index: column_index,
+                        data_type: data_type.clone(),
+                    });
                     let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
-                    let value_data =
-                        ScalarImpl::from_text(&value_string, data_type).unwrap();
-                    values.push((Some(value_data),data_type.clone()));
+                    let value_data = ScalarImpl::from_text(&value_string, data_type).unwrap();
+                    values.push((Some(value_data), data_type.clone()));
                 }
             }
             if pk_rows.is_empty() {
                 (vec![], None)
             } else if pk_rows.len() == 1 {
                 let left = pk_rows.pop().unwrap();
-                let (right_data,right_type) = values.pop().unwrap();
+                let (right_data, right_type) = values.pop().unwrap();
                 let (scan, predicate) = Condition {
                     conjunctions: vec![FunctionCall::new(
                         ExprType::GreaterThan,
                         vec![left.into(), Literal::new(right_data, right_type).into()],
-                    )?.into()],
-                }.split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
+                    )?
+                    .into()],
+                }
+                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
                 (scan, Some(predicate))
-            }else{
-                let (right_datas,right_types):(Vec<_>,Vec<_>) = values.into_iter().unzip();
-                let right_data = ScalarImpl::Struct(StructValue::new(right_datas));
+            } else {
+                let (right_data, right_types): (Vec<_>, Vec<_>) = values.into_iter().unzip();
+                let right_data = ScalarImpl::Struct(StructValue::new(right_data));
                 let right_type = DataType::Struct(StructType::unnamed(right_types));
                 let left = FunctionCall::new_unchecked(
                     ExprType::Row,
@@ -921,13 +895,15 @@ impl SubscriptionCursor {
                 let right = Literal::new(Some(right_data), right_type);
                 let (scan, predicate) = Condition {
                     conjunctions: vec![FunctionCall::new(
-                                ExprType::GreaterThan,
-                                vec![left.into(), right.into()],
-                            )?.into()],
-                }.split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
+                        ExprType::GreaterThan,
+                        vec![left.into(), right.into()],
+                    )?
+                    .into()],
+                }
+                .split_to_scan_ranges(table_catalog.table_desc().into(), max_split_range_gap)?;
                 (scan, Some(predicate))
             }
-        } else{
+        } else {
             (vec![], None)
         };
 
