@@ -569,7 +569,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "TEST_NUM=4 RW_SIM_RANDOM_VNODE_COUNT=true ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=4 ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
