@@ -826,43 +826,52 @@ impl FunctionAttr {
             ReturnTypeKind::ResultOption => quote! { #next_state? },
         };
         if user_fn.accumulate().args_option.iter().all(|b| !b) {
+            let first_state = if self.init_state.is_some() {
+                // if `init_state` is specified, the state will never be None
+                quote! { unreachable!() }
+            } else if let Some(s) = &self.state
+                && s == "ref"
+            {
+                if self.args.is_empty() {
+                    return Err(Error::new(
+                        Span::call_site(),
+                        "`state` cannot be `ref` if there's no argument",
+                    ));
+                }
+
+                // for min/max/..., the first state is the first non-NULL value
+                quote! { Some(v0) }
+            } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
+                && impl_.create_state.is_some()
+            {
+                // use user-defined create_state function
+                quote! {{
+                    let state = self.function.create_state();
+                    #next_state
+                }}
+            } else {
+                quote! {{
+                    let state = #state_type::default();
+                    #next_state
+                }}
+            };
+
             match self.args.len() {
                 0 => {
+                    // the only argument is the state itself, now it's non-Option
                     next_state = quote! {
                         match state {
                             Some(state) => #next_state,
-                            None => state,
+                            None => #first_state, // create first state on first input
                         }
                     };
                 }
                 1 => {
-                    let first_state = if self.init_state.is_some() {
-                        // for count, the state will never be None
-                        quote! { unreachable!() }
-                    } else if let Some(s) = &self.state
-                        && s == "ref"
-                    {
-                        // for min/max/first/last, the state is the first value
-                        quote! { Some(v0) }
-                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
-                        && impl_.create_state.is_some()
-                    {
-                        // use user-defined create_state function
-                        quote! {{
-                            let state = self.function.create_state();
-                            #next_state
-                        }}
-                    } else {
-                        quote! {{
-                            let state = #state_type::default();
-                            #next_state
-                        }}
-                    };
                     next_state = quote! {
                         match (state, v0) {
                             (Some(state), Some(v0)) => #next_state,
-                            (None, Some(v0)) => #first_state,
-                            (state, None) => state,
+                            (None, Some(v0)) => #first_state, // for the first non-NULL input, create first state
+                            (state, None) => state, // ignoring NULL input
                         }
                     };
                 }
