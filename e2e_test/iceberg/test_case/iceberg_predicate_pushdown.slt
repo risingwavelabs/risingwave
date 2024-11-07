@@ -5,6 +5,9 @@ statement ok
 set streaming_parallelism=4;
 
 statement ok
+drop table if exists s1 cascade;
+
+statement ok
 CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
 
 statement ok
@@ -35,6 +38,9 @@ CREATE SINK sink1 AS select * from mv1 WITH (
 );
 
 statement ok
+drop source if exists iceberg_t1_source;
+
+statement ok
 CREATE SOURCE iceberg_t1_source
 WITH (
     connector = 'iceberg',
@@ -58,28 +64,34 @@ select count(*) from iceberg_t1_source;
 1000
 
 query I
-explain select count(*) from iceberg_t1_source where i1 > 500;
+select * from iceberg_t1_source where i1 > 990;
 ----
-   BatchSimpleAgg { aggs: [sum0(count)] }
-   └─BatchExchange { order: [], dist: Single }
-     └─BatchSimpleAgg { aggs: [count] }
-       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 }
 
 query I
-explain select count(*) from iceberg_t1_source where i1 > 500 and i1 < 600;
+explain select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
 ----
-   BatchSimpleAgg { aggs: [sum0(count)] }
-   └─BatchExchange { order: [], dist: Single }
-     └─BatchSimpleAgg { aggs: [count] }
-       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 and i1 < 600 }
+   BatchExchange { order: [], dist: Single }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: (((((i1 = 580) AND (i1 > 500)) AND (i1 < 600)) AND (i1 >= 550)) AND (i1 <= 590)) AND (i1 != 570) }
+
+query I
+select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
+----
+580
 
 query I
 explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
 ----
-   BatchSimpleAgg { aggs: [sum0(count)] }
-   └─BatchExchange { order: [], dist: Single }
-     └─BatchSimpleAgg { aggs: [count] }
-       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1], predicate: i1 > 500 and i1 < 600 }
+   BatchExchange { order: [], dist: Single }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: i1 IN (5, 4, 1, 3, 2) }
+
+query I
+explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
+----
+1
+2
+3
+4
+5
 
 statement ok
 DROP SINK sink1;
