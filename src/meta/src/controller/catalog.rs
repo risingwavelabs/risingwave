@@ -64,8 +64,8 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
 use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, rename_relation,
-    rename_relation_refer,
+    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
+    rename_relation, rename_relation_refer,
 };
 use crate::controller::utils::{
     build_relation_group_for_delete, check_connection_name_duplicate,
@@ -3493,13 +3493,7 @@ async fn update_internal_tables(
     new_value: Value,
     relations_to_notify: &mut Vec<PbRelationInfo>,
 ) -> MetaResult<()> {
-    let internal_tables: Vec<TableId> = Table::find()
-        .select_only()
-        .column(table::Column::TableId)
-        .filter(table::Column::BelongsToJobId.eq(object_id))
-        .into_tuple()
-        .all(txn)
-        .await?;
+    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
