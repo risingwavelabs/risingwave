@@ -65,7 +65,11 @@ pub enum HummockEvent {
     },
 
     /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>, HummockVersionId),
+    Clear(
+        oneshot::Sender<()>,
+        HummockVersionId,
+        Option<HashSet<TableId>>,
+    ),
 
     Shutdown,
 
@@ -122,7 +126,9 @@ impl HummockEvent {
                 table_ids,
             } => format!("AwaitSyncEpoch epoch {} {:?}", new_sync_epoch, table_ids),
 
-            HummockEvent::Clear(_, version_id) => format!("Clear {}", version_id),
+            HummockEvent::Clear(_, version_id, table_ids) => {
+                format!("Clear {} {:?}", version_id, table_ids)
+            }
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
