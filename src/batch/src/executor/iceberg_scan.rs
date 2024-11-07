@@ -46,7 +46,9 @@ static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
 static POSITION_DELETE_FILE_POS: usize = 1;
 
 pub enum IcebergFileScanTaskEnum {
+    // The scan task of the data file and the position delete file
     DataAndPositionDelete(Vec<FileScanTask>, Vec<FileScanTask>),
+    // The scan task of the equality delete file
     EqualityDelete(Vec<FileScanTask>),
 }
 

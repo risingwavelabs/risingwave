@@ -26,9 +26,9 @@ use crate::optimizer::PlanRef;
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
 #[derive(Debug, Clone, Default)]
-pub struct IcebergSourceRewriter {}
+pub struct IcebergMergeOnReadRewriter {}
 
-impl IcebergSourceRewriter {
+impl IcebergMergeOnReadRewriter {
     pub fn rewrite(plan: &PlanRef) -> Result<PlanRef> {
         Self::rewrite_logical_source(plan)
     }
@@ -53,71 +53,102 @@ impl IcebergSourceRewriter {
             } else {
                 return Ok(plan.clone());
             };
-            let delete_column_names = std::thread::spawn(move || {
+            let delete_column_names = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(s.get_all_delete_column_names())
-            })
-            .join()
-            .unwrap()?;
+            })?;
             // data file scan
             let data_iceberg_scan = LogicalIcebergScan::new(source, IcebergScanType::DataScan);
             // equality delete scan
-            let delete_iceberg_scan =
-                LogicalIcebergScan::new(source, IcebergScanType::EqualityDeleteScan);
+            let column_catalog = source
+                .core
+                .column_catalog
+                .iter()
+                .filter(|c| {
+                    delete_column_names.contains(&c.column_desc.name)
+                        || c.column_desc.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
+                })
+                .cloned()
+                .collect();
+            let equality_delete_source = source.clone_with_column_catalog(column_catalog)?;
+            let equality_delete_iceberg_scan = LogicalIcebergScan::new(
+                &equality_delete_source,
+                IcebergScanType::EqualityDeleteScan,
+            );
+
             let data_columns_len = data_iceberg_scan.core.schema().len();
             // The join condition is delete_column_names is equal and sequence number is less than, join type is left anti
-            let eq_join_expr = data_iceberg_scan
+            let join_left_inputs = data_iceberg_scan
                 .core
                 .schema()
                 .fields()
                 .iter()
-                .zip_eq_fast(delete_iceberg_scan.core.schema().fields().iter())
                 .enumerate()
-                .filter_map(|(index, (data_column, delete_column))| {
+                .filter_map(|(index, data_column)| {
                     if delete_column_names.contains(&data_column.name) {
-                        let data_input_ref = InputRef {
+                        Some(InputRef {
                             index,
                             data_type: data_column.data_type(),
-                        };
-                        let delete_input_ref = InputRef {
-                            index: index + data_columns_len,
-                            data_type: delete_column.data_type(),
-                        };
-                        Some(
-                            FunctionCall::new(
-                                ExprType::Equal,
-                                vec![data_input_ref.into(), delete_input_ref.into()],
-                            )
-                            .unwrap()
-                            .into(),
-                        )
-                    } else if data_column.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME) {
-                        let data_input_ref = InputRef {
-                            index,
-                            data_type: data_column.data_type(),
-                        };
-                        let delete_input_ref = InputRef {
-                            index: index + data_columns_len,
-                            data_type: delete_column.data_type(),
-                        };
-                        Some(
-                            FunctionCall::new(
-                                ExprType::LessThan,
-                                vec![data_input_ref.into(), delete_input_ref.into()],
-                            )
-                            .unwrap()
-                            .into(),
-                        )
+                        })
                     } else {
                         None
                     }
                 })
-                .collect::<Vec<ExprImpl>>();
+                .collect::<Vec<InputRef>>();
+            let join_right_inputs = equality_delete_iceberg_scan
+                .core
+                .schema()
+                .fields()
+                .iter()
+                .enumerate()
+                .map(|(index, data_column)| InputRef {
+                    index: index + data_columns_len,
+                    data_type: data_column.data_type(),
+                })
+                .collect::<Vec<InputRef>>();
+            let join_left_seq_input = InputRef {
+                index: data_iceberg_scan
+                    .core
+                    .schema()
+                    .fields()
+                    .iter()
+                    .position(|f| f.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME))
+                    .unwrap(),
+                data_type: risingwave_common::types::DataType::Int64,
+            };
+            let join_right_seq_input = InputRef {
+                index: data_iceberg_scan
+                    .core
+                    .schema()
+                    .fields()
+                    .iter()
+                    .position(|f| f.name.eq(ICEBERG_SEQUENCE_NUM_COLUMN_NAME))
+                    .unwrap(),
+                data_type: risingwave_common::types::DataType::Int64,
+            };
+            let mut eq_join_expr = join_left_inputs
+                .iter()
+                .zip_eq_fast(join_right_inputs.iter())
+                .map(|(left, right)| {
+                    Ok(FunctionCall::new(
+                        ExprType::Equal,
+                        vec![left.clone().into(), right.clone().into()],
+                    )?
+                    .into())
+                })
+                .collect::<Result<Vec<ExprImpl>>>()?;
+            eq_join_expr.push(
+                FunctionCall::new(
+                    ExprType::LessThan,
+                    vec![join_left_seq_input.into(), join_right_seq_input.into()],
+                )?
+                .into(),
+            );
             let on = Condition {
                 conjunctions: eq_join_expr,
             };
             let join = LogicalJoin::new(
                 data_iceberg_scan.into(),
-                delete_iceberg_scan.into(),
+                equality_delete_iceberg_scan.into(),
                 risingwave_pb::plan_common::JoinType::LeftAnti,
                 on,
             );

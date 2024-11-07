@@ -152,6 +152,7 @@ impl IcebergFileScanTaskJsonStrEnum {
                 data_files,
                 position_delete_files,
             ),
+            IcebergScanType::Unspecified => unreachable!("Unspecified iceberg scan type"),
         }
     }
 
