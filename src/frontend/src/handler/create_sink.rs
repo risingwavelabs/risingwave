@@ -26,7 +26,7 @@ use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, Ta
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkEncode, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
@@ -181,19 +181,6 @@ pub async fn gen_sink_plan(
             None => None,
         },
     };
-
-    // only allow Kafka connector work with `bytes` as key encode
-    if let Some(format_desc) = &format_desc
-        && let Some(encode) = &format_desc.key_encode
-        && connector != KAFKA_SINK
-        && matches!(encode, SinkEncode::Bytes)
-    {
-        return Err(ErrorCode::BindError(format!(
-            "key encode bytes only works with kafka connector, but found {}",
-            connector
-        ))
-        .into());
-    }
 
     let definition = context.normalized_sql().to_owned();
     let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
@@ -963,6 +950,19 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
         ))
         .into());
     }
+
+    // only allow Kafka connector work with `bytes` as key encode
+    if let Some(encode) = &format_desc.key_encode
+        && connector != KAFKA_SINK
+        && matches!(encode, Encode::Bytes)
+    {
+        return Err(ErrorCode::BindError(format!(
+            "key encode bytes only works with kafka connector, but found {}",
+            connector
+        ))
+        .into());
+    }
+
     Ok(())
 }
 

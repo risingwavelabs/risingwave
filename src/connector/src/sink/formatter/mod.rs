@@ -191,10 +191,9 @@ fn ensure_only_one_pk<'a>(
     };
     if pk_indices.len() != 1 {
         return Err(SinkError::Config(anyhow!(
-            "The key encode is {}, but the primary key has {} columns. The key encode {} requires the primary key to be a single column",
+            "KEY ENCODE {} expects only one primary key, but got {}",
             data_type_name,
             pk_indices.len(),
-            data_type_name
         )));
     }
 
