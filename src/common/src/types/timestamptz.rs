@@ -103,7 +103,7 @@ impl Timestamptz {
     }
 
     /// Creates a `Timestamptz` from microseconds.
-    pub fn from_nans(timestamp_nanos: i64) -> Option<Self> {
+    pub fn from_nanos(timestamp_nanos: i64) -> Option<Self> {
         timestamp_nanos.checked_div(1_000).map(Self)
     }
 
@@ -115,6 +115,11 @@ impl Timestamptz {
     /// Returns the number of non-leap-milliseconds since January 1, 1970 UTC.
     pub fn timestamp_millis(&self) -> i64 {
         self.0.div_euclid(1_000)
+    }
+
+    /// Returns the number of non-leap-nanosseconds since January 1, 1970 UTC.
+    pub fn timestamp_nanos(&self) -> Option<i64> {
+        self.0.checked_mul(1_000)
     }
 
     /// Returns the number of non-leap seconds since January 1, 1970 0:00:00 UTC (aka "UNIX
