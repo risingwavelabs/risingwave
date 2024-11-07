@@ -303,7 +303,7 @@ impl PredicatePushdown for LogicalIcebergScan {
                             }
                             _ => None,
                         },
-                        ExprType::IsNotNull => match &args[1] {
+                        ExprType::IsNotNull => match &args[0] {
                             ExprImpl::InputRef(lhs) => {
                                 let column_name = &fields[lhs.index].name;
                                 let reference = Reference::new(column_name);
@@ -311,7 +311,7 @@ impl PredicatePushdown for LogicalIcebergScan {
                             }
                             _ => None,
                         },
-                        ExprType::In => match &args[1] {
+                        ExprType::In => match &args[0] {
                             ExprImpl::InputRef(lhs) => {
                                 let column_name = &fields[lhs.index].name;
                                 let reference = Reference::new(column_name);
