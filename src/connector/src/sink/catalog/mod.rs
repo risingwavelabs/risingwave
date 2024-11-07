@@ -263,10 +263,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
