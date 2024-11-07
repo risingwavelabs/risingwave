@@ -133,6 +133,10 @@ pub struct Args {
     /// Use arrangement backfill
     #[clap(long, default_value = "false")]
     use_arrangement_backfill: bool,
+
+    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+    #[clap(long, env = "RW_SIM_RANDOM_VNODE_COUNT")]
+    random_vnode_count: bool,
 }
 
 #[tokio::main]
@@ -246,7 +250,12 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
+                let opts = Opts {
+                    kill_opts,
+                    background_ddl_rate: args.background_ddl_rate,
+                    random_vnode_count: args.random_vnode_count,
+                };
+                run_slt_task(cluster0, glob, opts).await;
             }
         })
         .await;
