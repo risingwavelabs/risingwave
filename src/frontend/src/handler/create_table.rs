@@ -371,7 +371,10 @@ pub fn bind_table_constraints(table_constraints: &[TableConstraint]) -> Result<V
                 columns,
                 is_primary: true,
             } => {
-                pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
+                if !pk_column_names.is_empty() {
+                    return Err(multiple_pk_definition_err());
+                }
+pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
             }
             _ => bail_not_implemented!("table constraint \"{}\"", constraint),
         }
