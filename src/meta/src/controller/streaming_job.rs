@@ -66,7 +66,7 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    rebuild_fragment_mapping_from_actors, PartialObject,
+    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
@@ -521,13 +521,7 @@ impl CatalogController {
             }
         }
 
-        let internal_table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .filter(table::Column::BelongsToJobId.eq(job_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
+        let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
         // Get the notification info if the job is a materialized view.
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
