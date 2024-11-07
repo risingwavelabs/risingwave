@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Encode,
-    FormatEncodeOptions, ObjectName, Statement, StructField,
+    FormatEncodeOptions, Ident, ObjectName, Statement, StructField, TableConstraint,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -43,6 +43,7 @@ use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
+use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -59,9 +60,11 @@ pub async fn get_new_table_definition_for_cdc_table(
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
+
     let Statement::CreateTable {
         columns: original_columns,
         format_encode,
+        constraints,
         ..
     } = &mut definition
     else {
@@ -72,6 +75,22 @@ pub async fn get_new_table_definition_for_cdc_table(
         format_encode.is_none(),
         "source schema should be None for CDC table"
     );
+
+    if bind_table_constraints(constraints).unwrap().is_empty() {
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        let pk_names: Vec<_> = original_catalog
+            .pk
+            .iter()
+            .map(|x| original_catalog.columns[x.column_index].name().to_string())
+            .collect();
+
+        constraints.push(TableConstraint::Unique {
+            name: None,
+            columns: pk_names.iter().map(Ident::new_unchecked).collect(),
+            is_primary: true,
+        });
+    }
 
     let orig_column_catalog: HashMap<String, ColumnCatalog> = HashMap::from_iter(
         original_catalog
