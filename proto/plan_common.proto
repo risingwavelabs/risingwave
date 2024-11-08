@@ -37,7 +37,7 @@ message ColumnDesc {
   // The user-defined type's name. Empty if the column type is a builtin type.
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
-  string type_name = 5;
+  // string type_name = 5;
 
   // deprecated, breaking change
   // GeneratedColumnDesc generated_column = 6 [deprecated = true];
