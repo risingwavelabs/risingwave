@@ -17,9 +17,9 @@
 
 import {
   Column,
-  primaryKeyColumn,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getTables } from "../lib/api/streaming"
 import { Table } from "../proto/gen/catalog"
@@ -34,6 +34,6 @@ export default function Tables() {
   return Relations("Tables", getTables, [
     associatedSourceColumn,
     ...streamingJobColumns,
-    primaryKeyColumn,
+    ...tableColumns,
   ])
 }

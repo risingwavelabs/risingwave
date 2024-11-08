@@ -30,7 +30,6 @@ use crate::error::ConnectorResult;
 use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
-pub const CONNECTION_NAME_KEY: &str = "connection.name";
 
 #[derive(Debug)]
 pub(super) enum PrivateLinkContextRole {

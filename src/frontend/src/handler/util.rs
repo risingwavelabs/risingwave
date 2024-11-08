@@ -35,8 +35,8 @@ use risingwave_common::types::{
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, CompatibleSourceSchema, ConnectorSchema, Expr, Ident, ObjectName, OrderByExpr,
-    Query, Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
+    BinaryOperator, CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
 };
 use thiserror_ext::AsReport;
 
@@ -194,16 +194,16 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]
-impl CompatibleSourceSchema {
-    /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
-    pub fn into_v2_with_warning(self) -> ConnectorSchema {
+impl CompatibleFormatEncode {
+    /// Convert `self` to [`FormatEncodeOptions`] and warn the user if the syntax is deprecated.
+    pub fn into_v2_with_warning(self) -> FormatEncodeOptions {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => {
+            CompatibleFormatEncode::RowFormat(inner) => {
                 // TODO: should be warning
                 current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
-                inner.into_source_schema_v2()
+                inner.into_format_encode_v2()
             }
-            CompatibleSourceSchema::V2(inner) => inner,
+            CompatibleFormatEncode::V2(inner) => inner,
         }
     }
 }

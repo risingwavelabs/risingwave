@@ -187,7 +187,7 @@ pub trait RowExt: Row {
 
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
-        impl<'a, T: Row> Display for D<'a, T> {
+        impl<T: Row> Display for D<'_, T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,

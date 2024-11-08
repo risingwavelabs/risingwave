@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::bitmap::Bitmap;
+use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
@@ -545,14 +545,11 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             let chunk = StreamChunk::from(chunk?);
             let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
             let mut memory_usage_diff = 0;
-            for (row_id, (key, visible)) in keys
+            for (row_id, key) in keys
                 .into_iter()
-                .zip_eq_fast(chunk.visibility().iter())
                 .enumerate()
+                .filter_by_bitmap(chunk.visibility())
             {
-                if !visible {
-                    continue;
-                }
                 let mut new_group = false;
                 let states = match groups.entry(key) {
                     Entry::Occupied(entry) => entry.into_mut(),

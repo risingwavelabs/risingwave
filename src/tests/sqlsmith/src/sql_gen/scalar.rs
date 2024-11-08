@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates integer scalar expression.
     /// Bound: [start, end).
     /// Type: `DataType`.

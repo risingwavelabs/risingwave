@@ -37,7 +37,7 @@ pub(super) struct AllRowIdIter<'a> {
     chunk_offsets: &'a [usize],
 }
 
-impl<'a> Iterator for AllRowIdIter<'a> {
+impl Iterator for AllRowIdIter<'_> {
     type Item = RowId;
 
     fn next(&mut self) -> Option<Self::Item> {

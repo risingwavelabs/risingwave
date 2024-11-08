@@ -30,7 +30,7 @@ use serde::{Serialize, Serializer};
 
 pub struct PrettySerde<'a>(pub Pretty<'a>);
 
-impl<'a> Serialize for PrettySerde<'a> {
+impl Serialize for PrettySerde<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

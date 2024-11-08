@@ -94,7 +94,7 @@ where
     default_format: Format,
 }
 
-impl<'a, 'b> FormatIterator<'a, 'b> {
+impl<'a> FormatIterator<'a, '_> {
     pub fn new(provided_formats: &'a [Format], actual_len: usize) -> Result<Self, String> {
         if !provided_formats.is_empty()
             && provided_formats.len() != 1

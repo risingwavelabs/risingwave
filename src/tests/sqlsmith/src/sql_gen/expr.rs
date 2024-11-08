@@ -28,7 +28,7 @@ static STRUCT_FIELD_NAMES: [&str; 26] = [
     "t", "u", "v", "w", "x", "y", "z",
 ];
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// In generating expression, there are two execution modes:
     /// 1) Can have Aggregate expressions (`can_agg` = true)
     ///    We can have aggregate of all bound columns (those present in GROUP BY and otherwise).

@@ -271,6 +271,7 @@ impl HummockUploader {
     }
 }
 
+#[expect(clippy::type_complexity)]
 pub(crate) fn prepare_uploader_order_test(
     config: &StorageOpts,
     skip_schedule: bool,

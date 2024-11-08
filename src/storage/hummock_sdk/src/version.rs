@@ -526,7 +526,7 @@ impl HummockVersionDelta {
     pub fn newly_added_sst_infos<'a>(
         &'a self,
         select_group: Option<&'a HashSet<CompactionGroupId>>,
-    ) -> impl Iterator<Item = &SstableInfo> + 'a {
+    ) -> impl Iterator<Item = &'a SstableInfo> + 'a {
         self.group_deltas
             .iter()
             .filter_map(move |(cg_id, group_deltas)| {

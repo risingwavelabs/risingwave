@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -65,7 +66,7 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    rebuild_fragment_mapping_from_actors, PartialObject,
+    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
@@ -481,23 +482,27 @@ impl CatalogController {
     }
 
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
-    /// It returns true if the job is not found or aborted.
+    /// It returns (true, _) if the job is not found or aborted.
+    /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
     pub async fn try_abort_creating_streaming_job(
         &self,
         job_id: ObjectId,
         is_cancelled: bool,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let cnt = Object::find_by_id(job_id).count(&txn).await?;
-        if cnt == 0 {
+        let obj = Object::find_by_id(job_id).one(&txn).await?;
+        let Some(obj) = obj else {
             tracing::warn!(
                 id = job_id,
                 "streaming job not found when aborting creating, might be cleaned by recovery"
             );
-            return Ok(true);
-        }
+            return Ok((true, None));
+        };
+        let database_id = obj
+            .database_id
+            .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
 
         if !is_cancelled {
             let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
@@ -511,18 +516,12 @@ impl CatalogController {
                         id = job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok(false);
+                    return Ok((false, Some(database_id)));
                 }
             }
         }
 
-        let internal_table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .filter(table::Column::BelongsToJobId.eq(job_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
+        let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
         // Get the notification info if the job is a materialized view.
         let table_obj = Table::find_by_id(job_id).one(&txn).await?;
@@ -597,7 +596,7 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_relation_group_for_delete(objs))
                 .await;
         }
-        Ok(true)
+        Ok((true, Some(database_id)))
     }
 
     pub async fn post_collect_table_fragments(
@@ -1494,7 +1493,6 @@ impl CatalogController {
                 removed_actors,
                 vnode_bitmap_updates,
                 actor_splits,
-                injectable: _,
                 newly_created_actors,
                 upstream_fragment_dispatcher_ids,
                 upstream_dispatcher_mapping,

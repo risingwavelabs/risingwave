@@ -30,7 +30,7 @@ use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
 /// Generators
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {

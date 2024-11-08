@@ -185,7 +185,8 @@ mod test {
         }
 
         assert!(deserializer.deserialize(&mut buf).is_err());
-        assert!(buf.is_empty());
+        // https://github.com/rust-lang/rust/pull/109174
+        assert!(buf.split().1.is_empty());
     }
 
     #[test]

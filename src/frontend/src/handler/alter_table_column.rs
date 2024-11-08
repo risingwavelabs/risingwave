@@ -29,13 +29,13 @@ use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Encode,
-    ObjectName, Statement, StructField,
+    AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Encode,
+    FormatEncodeOptions, ObjectName, Statement, StructField,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
-use super::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use super::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -51,14 +51,14 @@ pub async fn replace_table_with_definition(
     table_name: ObjectName,
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
-    source_schema: Option<ConnectorSchema>,
+    format_encode: Option<FormatEncodeOptions>,
 ) -> Result<()> {
     let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
         session,
         table_name,
         definition,
         original_catalog,
-        source_schema,
+        format_encode,
         None,
     )
     .await?;
@@ -86,7 +86,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         .unwrap();
     let Statement::CreateTable {
         columns: original_columns,
-        source_schema,
+        format_encode,
         ..
     } = &mut definition
     else {
@@ -94,7 +94,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     };
 
     assert!(
-        source_schema.is_none(),
+        format_encode.is_none(),
         "source schema should be None for CDC table"
     );
 
@@ -165,7 +165,7 @@ pub async fn get_replace_table_plan(
     table_name: ObjectName,
     definition: Statement,
     original_catalog: &Arc<TableCatalog>,
-    source_schema: Option<ConnectorSchema>,
+    format_encode: Option<FormatEncodeOptions>,
     new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
@@ -192,11 +192,11 @@ pub async fn get_replace_table_plan(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (mut graph, table, source, job_type) = generate_stream_graph_for_table(
+    let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         original_catalog,
-        source_schema,
+        format_encode,
         handler_args.clone(),
         col_id_gen,
         columns.clone(),
@@ -326,19 +326,19 @@ pub async fn handle_alter_table_column(
         .unwrap();
     let Statement::CreateTable {
         columns,
-        source_schema,
+        format_encode,
         ..
     } = &mut definition
     else {
         panic!("unexpected statement: {:?}", definition);
     };
-    let source_schema = source_schema
+    let format_encode = format_encode
         .clone()
-        .map(|source_schema| source_schema.into_v2_with_warning());
+        .map(|format_encode| format_encode.into_v2_with_warning());
 
     let fail_if_has_schema_registry = || {
-        if let Some(source_schema) = &source_schema
-            && schema_has_schema_registry(source_schema)
+        if let Some(format_encode) = &format_encode
+            && schema_has_schema_registry(format_encode)
         {
             Err(ErrorCode::NotSupported(
                 "alter table with schema registry".to_string(),
@@ -460,14 +460,14 @@ pub async fn handle_alter_table_column(
         table_name,
         definition,
         &original_catalog,
-        source_schema,
+        format_encode,
     )
     .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-pub fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
+pub fn schema_has_schema_registry(schema: &FormatEncodeOptions) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {

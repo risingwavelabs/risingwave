@@ -22,7 +22,6 @@ use std::ops::Bound::{Excluded, Unbounded};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -33,11 +32,12 @@ use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierCo
 use crate::barrier::creating_job::status::{
     CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
 };
-use crate::barrier::info::InflightGraphInfo;
+use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{BarrierInfo, Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
-use crate::rpc::metrics::MetaMetrics;
+use crate::barrier::{Command, CreateStreamingJobCommandInfo, SnapshotBackfillInfo};
+use crate::controller::fragment::InflightFragmentInfo;
+use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -46,7 +46,7 @@ pub(super) struct CreatingStreamingJobControl {
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     backfill_epoch: u64,
 
-    graph_info: InflightGraphInfo,
+    graph_info: InflightStreamingJobInfo,
 
     barrier_control: CreatingStreamingJobBarrierControl,
     status: CreatingStreamingJobStatus,
@@ -60,7 +60,6 @@ impl CreatingStreamingJobControl {
         snapshot_backfill_info: SnapshotBackfillInfo,
         backfill_epoch: u64,
         version_stat: &HummockVersionStats,
-        metrics: &MetaMetrics,
         initial_mutation: Mutation,
     ) -> Self {
         info!(
@@ -71,23 +70,24 @@ impl CreatingStreamingJobControl {
         let snapshot_backfill_actors = info.table_fragments.snapshot_backfill_actor_ids();
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
-        let fragment_info: HashMap<_, _> = info.new_fragment_info().collect();
+        let fragment_infos: HashMap<_, _> = info.new_fragment_info().collect();
 
         let table_id = info.table_fragments.table_id();
         let table_id_str = format!("{}", table_id.table_id);
 
         let actors_to_create = info.table_fragments.actors_to_create();
+        let graph_info = InflightStreamingJobInfo {
+            job_id: table_id,
+            database_id: info.streaming_job.database_id().into(),
+            fragment_infos,
+        };
 
         Self {
             info,
             snapshot_backfill_info,
-            barrier_control: CreatingStreamingJobBarrierControl::new(
-                table_id,
-                backfill_epoch,
-                metrics,
-            ),
+            barrier_control: CreatingStreamingJobBarrierControl::new(table_id, backfill_epoch),
             backfill_epoch,
-            graph_info: InflightGraphInfo::new(fragment_info),
+            graph_info,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time: 0,
                 pending_upstream_barriers: vec![],
@@ -98,7 +98,7 @@ impl CreatingStreamingJobControl {
                 pending_non_checkpoint_barriers: vec![],
                 initial_barrier_info: Some((actors_to_create, initial_mutation)),
             },
-            upstream_lag: metrics
+            upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&table_id_str]),
         }
@@ -106,11 +106,11 @@ impl CreatingStreamingJobControl {
 
     pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_wait_on_worker(worker_id)
-            || (self.status.is_finishing() && self.graph_info.contains_worker(worker_id))
-    }
-
-    pub(super) fn on_new_worker_node_map(&self, node_map: &HashMap<WorkerId, WorkerNode>) {
-        self.graph_info.on_new_worker_node_map(node_map)
+            || (self.status.is_finishing()
+                && InflightFragmentInfo::contains_worker(
+                    self.graph_info.fragment_infos(),
+                    worker_id,
+                ))
     }
 
     pub(super) fn gen_ddl_progress(&self) -> DdlProgress {
@@ -168,8 +168,8 @@ impl CreatingStreamingJobControl {
         table_id: TableId,
         control_stream_manager: &mut ControlStreamManager,
         barrier_control: &mut CreatingStreamingJobBarrierControl,
-        pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: Option<&InflightGraphInfo>,
+        pre_applied_graph_info: &InflightStreamingJobInfo,
+        applied_graph_info: Option<&InflightStreamingJobInfo>,
         CreatingJobInjectBarrierInfo {
             barrier_info,
             new_actors,
@@ -180,8 +180,11 @@ impl CreatingStreamingJobControl {
             Some(table_id),
             mutation,
             &barrier_info,
-            pre_applied_graph_info,
-            applied_graph_info,
+            pre_applied_graph_info.fragment_infos(),
+            applied_graph_info
+                .map(|graph_info| graph_info.fragment_infos())
+                .into_iter()
+                .flatten(),
             new_actors,
             vec![],
             vec![],
@@ -197,12 +200,12 @@ impl CreatingStreamingJobControl {
     pub(super) fn on_new_command(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        command: &Command,
+        command: Option<&Command>,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<()> {
         let table_id = self.info.table_fragments.table_id();
         let start_consume_upstream =
-            if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+            if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
                 jobs_to_merge.contains_key(&table_id)
             } else {
                 false
@@ -272,7 +275,7 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
-    pub(super) fn should_merge_to_upstream(&self) -> Option<InflightGraphInfo> {
+    pub(super) fn should_merge_to_upstream(&self) -> Option<InflightStreamingJobInfo> {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             ref log_store_progress_tracker,
         } = &self.status

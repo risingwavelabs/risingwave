@@ -176,17 +176,19 @@ async fn test_merger_sum_aggr() {
         let items = items.clone();
         async move {
             // use a merge operator to collect data from dispatchers before sending them to aggregator
+            let schema = Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]);
             let merger = Executor::new(
                 ExecutorInfo {
                     // output schema of local simple agg
-                    schema: Schema::new(vec![
-                        Field::unnamed(DataType::Int64),
-                        Field::unnamed(DataType::Int64),
-                    ]),
+                    schema: schema.clone(),
                     pk_indices: PkIndices::new(),
                     identity: "MergeExecutor".to_string(),
                 },
-                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone()).boxed(),
+                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone(), schema)
+                    .boxed(),
             );
 
             // for global aggregator, we need to sum data and sum row count
@@ -217,7 +219,6 @@ async fn test_merger_sum_aggr() {
                 ],
                 MultiMap::new(),
                 vec![],
-                0.0,
                 false,
             );
 

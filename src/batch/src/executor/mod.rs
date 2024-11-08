@@ -29,6 +29,7 @@ mod managed;
 mod max_one_row;
 mod merge_sort;
 mod merge_sort_exchange;
+mod mysql_query;
 mod order_by;
 mod postgres_query;
 mod project;
@@ -65,6 +66,7 @@ pub use managed::*;
 pub use max_one_row::*;
 pub use merge_sort::*;
 pub use merge_sort_exchange::*;
+pub use mysql_query::*;
 pub use order_by::*;
 pub use postgres_query::*;
 pub use project::*;
@@ -247,6 +249,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::FileScan => FileScanExecutorBuilder,
             NodeBody::IcebergScan => IcebergScanExecutorBuilder,
             NodeBody::PostgresQuery => PostgresQueryExecutorBuilder,
+            NodeBody::MysqlQuery => MySqlQueryExecutorBuilder,
             // Follow NodeBody only used for test
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
