@@ -112,6 +112,7 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
+                { Postgres, $crate::sink::postgres::PostgresSink }
                 // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
                 // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
