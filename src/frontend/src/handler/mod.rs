@@ -46,6 +46,7 @@ mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
+mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 mod alter_table_with_sr;
@@ -336,7 +337,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
-            source_schema,
+            format_encode,
             source_watermarks,
             append_only,
             on_conflict,
@@ -363,7 +364,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+            let format_encode = format_encode.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -371,7 +372,7 @@ pub async fn handle(
                 wildcard_idx,
                 constraints,
                 if_not_exists,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -384,19 +385,18 @@ pub async fn handle(
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
+            owner,
+        } => {
+            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
+                .await
+        }
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-            user_specified,
+            owner,
         } => {
-            create_schema::handle_create_schema(
-                handler_args,
-                schema_name,
-                if_not_exists,
-                user_specified,
-            )
-            .await
+            create_schema::handle_create_schema(handler_args, schema_name, if_not_exists, owner)
+                .await
         }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
@@ -638,6 +638,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::SwapRenameSchema { target_schema },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_schema,
+                StatementType::ALTER_SCHEMA,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:
@@ -718,6 +730,18 @@ pub async fn handle(
                 PbThrottleTarget::CdcTable,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SwapRenameTable { target_table },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_table,
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -838,6 +862,19 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SwapRenameView { target_view },
+        } => {
+            let statement_type = if materialized {
+                StatementType::ALTER_MATERIALIZED_VIEW
+            } else {
+                StatementType::ALTER_VIEW
+            };
+            alter_swap_rename::handle_swap_rename(handler_args, name, target_view, statement_type)
+                .await
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
@@ -885,6 +922,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SwapRenameSink { target_sink },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_sink,
+                StatementType::ALTER_SINK,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
@@ -911,6 +960,21 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SUBSCRIPTION,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation:
+                AlterSubscriptionOperation::SwapRenameSubscription {
+                    target_subscription,
+                },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_subscription,
+                StatementType::ALTER_SUBSCRIPTION,
             )
             .await
         }
@@ -949,9 +1013,9 @@ pub async fn handle(
         }
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::FormatEncode { connector_schema },
+            operation: AlterSourceOperation::FormatEncode { format_encode },
         } => {
-            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
                 .await
         }
         Statement::AlterSource {
@@ -967,6 +1031,18 @@ pub async fn handle(
                 PbThrottleTarget::Source,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SwapRenameSource { target_source },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_source,
+                StatementType::ALTER_SOURCE,
             )
             .await
         }

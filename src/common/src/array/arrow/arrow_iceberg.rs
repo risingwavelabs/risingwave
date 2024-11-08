@@ -83,8 +83,8 @@ impl IcebergArrowConvert {
 impl ToArrow for IcebergArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
-        let data_type =
-            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
+        let data_type = arrow_schema::DataType::Decimal128(28, 10);
         arrow_schema::Field::new(name, data_type, true)
     }
 
@@ -138,8 +138,9 @@ impl ToArrow for IcebergArrowConvert {
 impl FromArrow for IcebergArrowConvert {}
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
-/// iceberg data type to arrow data type. Specifically, it will add the field id to the
-/// arrow field metadata, because iceberg-rust and icelake need the field id to be set.
+/// iceberg data type to arrow data type.
+///
+/// Specifically, it will add the field id to the arrow field metadata, because iceberg-rust and icelake need the field id to be set.
 ///
 /// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
 /// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
@@ -178,7 +179,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         // We choose 28 here
         // The decimal type finally will be converted to an iceberg decimal type.
         // Iceberg decimal(P,S)
-        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
         let data_type = arrow_schema::DataType::Decimal128(28, 10);
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);

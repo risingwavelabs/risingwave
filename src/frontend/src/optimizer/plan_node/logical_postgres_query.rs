@@ -103,13 +103,13 @@ impl ToBatch for LogicalPostgresQuery {
 
 impl ToStream for LogicalPostgresQuery {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        bail!("file_scan function is not supported in streaming mode")
+        bail!("postgres_query function is not supported in streaming mode")
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        bail!("file_scan function is not supported in streaming mode")
+        bail!("postgres_query function is not supported in streaming mode")
     }
 }

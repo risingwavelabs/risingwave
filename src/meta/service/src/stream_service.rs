@@ -15,13 +15,14 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitMetaData;
+use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::manager::{LocalNotification, MetadataManager};
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model_v2::{SourceId, StreamingParallelism};
+use risingwave_meta_model::{ObjectId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -71,7 +72,7 @@ impl StreamManagerService for StreamServiceImpl {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
 
-        let version_id = self.barrier_scheduler.flush(req.checkpoint).await?;
+        let version_id = self.barrier_scheduler.flush(req.database_id.into()).await?;
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
@@ -80,17 +81,27 @@ impl StreamManagerService for StreamServiceImpl {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
-        self.barrier_scheduler
-            .run_command(Command::pause(PausedReason::Manual))
-            .await?;
+        for database_id in self.metadata_manager.list_active_database_ids().await? {
+            self.barrier_scheduler
+                .run_command(
+                    DatabaseId::new(database_id as _),
+                    Command::pause(PausedReason::Manual),
+                )
+                .await?;
+        }
         Ok(Response::new(PauseResponse {}))
     }
 
     #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
-        self.barrier_scheduler
-            .run_command(Command::resume(PausedReason::Manual))
-            .await?;
+        for database_id in self.metadata_manager.list_active_database_ids().await? {
+            self.barrier_scheduler
+                .run_command(
+                    DatabaseId::new(database_id as _),
+                    Command::resume(PausedReason::Manual),
+                )
+                .await?;
+        }
         Ok(Response::new(ResumeResponse {}))
     }
 
@@ -122,6 +133,12 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(request.id as ObjectId)
+            .await?;
+        let database_id = DatabaseId::new(database_id as _);
         // TODO: check whether shared source is correct
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -137,7 +154,7 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(Command::Throttle(mutation))
+            .run_command(database_id, Command::Throttle(mutation))
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
@@ -222,27 +239,35 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<ListTableFragmentStatesRequest>,
     ) -> Result<Response<ListTableFragmentStatesResponse>, Status> {
-        let job_states = self
+        let job_infos = self
             .metadata_manager
             .catalog_controller
-            .list_streaming_job_states()
+            .list_streaming_job_infos()
             .await?;
-        let states = job_states
+        let states = job_infos
             .into_iter()
-            .map(|(table_id, state, parallelism, max_parallelism)| {
-                let parallelism = match parallelism {
-                    StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
-                    StreamingParallelism::Custom => model::TableParallelism::Custom,
-                    StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
-                };
+            .map(
+                |StreamingJobInfo {
+                     job_id,
+                     job_status,
+                     parallelism,
+                     max_parallelism,
+                     ..
+                 }| {
+                    let parallelism = match parallelism {
+                        StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
+                        StreamingParallelism::Custom => model::TableParallelism::Custom,
+                        StreamingParallelism::Fixed(n) => model::TableParallelism::Fixed(n as _),
+                    };
 
-                list_table_fragment_states_response::TableFragmentState {
-                    table_id: table_id as _,
-                    state: PbState::from(state) as _,
-                    parallelism: Some(parallelism.into()),
-                    max_parallelism: max_parallelism as _,
-                }
-            })
+                    list_table_fragment_states_response::TableFragmentState {
+                        table_id: job_id as _,
+                        state: PbState::from(job_status) as _,
+                        parallelism: Some(parallelism.into()),
+                        max_parallelism: max_parallelism as _,
+                    }
+                },
+            )
             .collect_vec();
 
         Ok(Response::new(ListTableFragmentStatesResponse { states }))
@@ -312,7 +337,7 @@ impl StreamManagerService for StreamServiceImpl {
         let dependencies = self
             .metadata_manager
             .catalog_controller
-            .list_object_dependencies()
+            .list_created_object_dependencies()
             .await?;
 
         Ok(Response::new(ListObjectDependenciesResponse {

@@ -37,7 +37,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
-use crate::filter_key_extractor::FilterKeyExtractorManager;
+use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{await_tree_key, compact, CompactorContext};
 use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
 use crate::hummock::event_handler::uploader::{
@@ -207,14 +207,14 @@ pub struct HummockEventHandler {
 async fn flush_imms(
     payload: Vec<ImmutableMemtable>,
     compactor_context: CompactorContext,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
 ) -> HummockResult<UploadTaskOutput> {
     compact(
         compactor_context,
         sstable_object_id_manager,
         payload,
-        filter_key_extractor_manager,
+        compaction_catalog_manager_ref,
     )
     .verbose_instrument_await("shared_buffer_compact")
     .await
@@ -225,7 +225,7 @@ impl HummockEventHandler {
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
-        filter_key_extractor_manager: FilterKeyExtractorManager,
+        compaction_catalog_manager_ref: CompactionCatalogManagerRef,
         sstable_object_id_manager: Arc<SstableObjectIdManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
     ) -> Self {
@@ -251,7 +251,7 @@ impl HummockEventHandler {
                 let upload_task_latency = upload_task_latency.clone();
                 let wait_poll_latency = wait_poll_latency.clone();
                 let upload_compactor_context = upload_compactor_context.clone();
-                let filter_key_extractor_manager = filter_key_extractor_manager.clone();
+                let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
                 let sstable_object_id_manager = sstable_object_id_manager.clone();
                 spawn({
                     let future = async move {
@@ -262,7 +262,7 @@ impl HummockEventHandler {
                                 .flat_map(|imms| imms.into_iter())
                                 .collect(),
                             upload_compactor_context.clone(),
-                            filter_key_extractor_manager.clone(),
+                            compaction_catalog_manager_ref.clone(),
                             sstable_object_id_manager.clone(),
                         )
                         .await?;
@@ -795,6 +795,13 @@ impl HummockEventHandler {
             HummockEvent::DestroyReadVersion { instance_id } => {
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
+            }
+            HummockEvent::GetMinUncommittedSstId { result_tx } => {
+                let _ = result_tx
+                    .send(self.uploader.min_uncommitted_sst_id())
+                    .inspect_err(|e| {
+                        error!("unable to send get_min_uncommitted_sst_id result: {:?}", e);
+                    });
             }
         }
     }

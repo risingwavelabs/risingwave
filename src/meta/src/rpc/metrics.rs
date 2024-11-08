@@ -34,7 +34,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
@@ -83,9 +83,6 @@ pub struct MetaMetrics {
     pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
     pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
-    /// The latency that the upstream waits on the snapshot backfill progress after the upstream
-    /// has collected the barrier.
-    pub snapshot_backfill_upstream_wait_progress_latency: LabelGuardedHistogramVec<1>, /* (table_id, ) */
     /// The lags between the upstream epoch and the downstream epoch.
     pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
     /// The number of inflight barriers of `table_id`
@@ -207,6 +204,11 @@ pub struct MetaMetrics {
     pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
 
     pub time_travel_version_replay_latency: Histogram,
+
+    pub compaction_group_count: IntGauge,
+    pub compaction_group_size: IntGaugeVec,
+    pub compaction_group_file_count: IntGaugeVec,
+    pub compaction_group_throughput: IntGaugeVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -282,13 +284,7 @@ impl MetaMetrics {
         );
         let snapshot_backfill_wait_commit_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let opts = histogram_opts!(
-            "meta_snapshot_backfill_upstream_wait_progress_latency",
-            "snapshot backfill upstream_wait_progress_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
-        );
-        let snapshot_backfill_upstream_wait_progress_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
             "snapshot backfill upstream_lag",
@@ -749,6 +745,37 @@ impl MetaMetrics {
         let time_travel_version_replay_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let compaction_group_count = register_int_gauge_with_registry!(
+            "storage_compaction_group_count",
+            "The number of compaction groups",
+            registry,
+        )
+        .unwrap();
+
+        let compaction_group_size = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_size",
+            "The size of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_file_count = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_file_count",
+            "The file count of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_throughput = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_throughput",
+            "The throughput of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -759,7 +786,6 @@ impl MetaMetrics {
             last_committed_barrier_time,
             snapshot_backfill_barrier_latency,
             snapshot_backfill_wait_commit_latency,
-            snapshot_backfill_upstream_wait_progress_latency,
             snapshot_backfill_lag,
             snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
@@ -824,6 +850,10 @@ impl MetaMetrics {
             auto_schema_change_latency,
             merge_compaction_group_count,
             time_travel_version_replay_latency,
+            compaction_group_count,
+            compaction_group_size,
+            compaction_group_file_count,
+            compaction_group_throughput,
         }
     }
 
@@ -896,7 +926,7 @@ pub fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn refresh_fragment_info_metrics_v2(
+pub async fn refresh_fragment_info_metrics(
     catalog_controller: &CatalogControllerRef,
     cluster_controller: &ClusterControllerRef,
     hummock_manager: &HummockManagerRef,
@@ -1038,7 +1068,7 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
-            refresh_fragment_info_metrics_v2(
+            refresh_fragment_info_metrics(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
                 &hummock_manager,

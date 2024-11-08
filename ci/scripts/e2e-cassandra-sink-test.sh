@@ -37,7 +37,7 @@ risedev ci-start ci-sink-test
 sleep 40
 
 echo "--- install cassandra"
-wget $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
+wget --no-verbose $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
 tar xfvz cassandra_latest.tar.gz
 export LATEST_CASSANDRA_VERSION=$(get_latest_cassandra_version)
 export CASSANDRA_DIR="./apache-cassandra-${LATEST_CASSANDRA_VERSION}"

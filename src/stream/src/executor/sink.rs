@@ -295,7 +295,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    assert!(!is_paused, "Should not receive any data after pause");
+                    assert!(
+                        !is_paused,
+                        "Actor {actor_id} should not receive any data after pause"
+                    );
                     log_writer.write_chunk(chunk.clone()).await?;
                     yield Message::Chunk(chunk);
                 }
@@ -505,6 +508,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         log_reader.init().await?;
 
+        #[expect(irrefutable_let_patterns)] // false positive
         while let Err(e) = sink
             .new_log_sinker(sink_writer_param.clone())
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
@@ -516,6 +520,17 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 sink_param.sink_name.clone(),
                 actor_context.fragment_id.to_string(),
             ]);
+
+            if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
+                meta_client
+                    .add_sink_fail_evet_log(
+                        sink_writer_param.sink_id.sink_id,
+                        sink_writer_param.sink_name.clone(),
+                        sink_writer_param.connector.clone(),
+                        e.to_report_string(),
+                    )
+                    .await;
+            }
 
             match log_reader.rewind().await {
                 Ok((true, curr_vnode_bitmap)) => {

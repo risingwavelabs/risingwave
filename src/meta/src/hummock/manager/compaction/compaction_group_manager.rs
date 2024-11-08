@@ -19,13 +19,11 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, TableGroupInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::version::GroupDelta;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_meta_model_v2::compaction_config;
+use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -34,6 +32,7 @@ use risingwave_pb::hummock::{
 use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
 
+use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
     validate_compaction_config, CompactionConfigBuilder,
 };
@@ -418,13 +417,14 @@ impl HummockManager {
         results
     }
 
-    pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
         let mut infos = vec![];
         {
             let versioning_guard = self.versioning.read().await;
+            let manager = self.compaction_group_manager.read().await;
             let version = &versioning_guard.current_version;
             for group_id in version.levels.keys() {
-                let mut group_info = TableGroupInfo {
+                let mut group_info = CompactionGroupStatistic {
                     group_id: *group_id,
                     ..Default::default()
                 };
@@ -443,16 +443,12 @@ impl HummockManager {
                     group_info
                         .table_statistic
                         .insert(table_id.table_id, table_size);
+                    group_info.compaction_group_config =
+                        manager.try_get_compaction_group_config(*group_id).unwrap();
                 }
                 infos.push(group_info);
             }
         };
-        let manager = self.compaction_group_manager.read().await;
-        for info in &mut infos {
-            if let Some(group) = manager.compaction_groups.get(&info.group_id) {
-                info.split_by_table = group.compaction_config.split_by_state_table;
-            }
-        }
         infos
     }
 
@@ -493,6 +489,7 @@ impl CompactionGroupManager {
         CompactionGroupTransaction::new(&mut self.compaction_groups)
     }
 
+    #[expect(clippy::type_complexity)]
     pub fn start_owned_compaction_groups_txn<P: DerefMut<Target = Self>>(
         inner: P,
     ) -> BTreeMapTransactionInner<
@@ -595,7 +592,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
     }
 }
 
-impl<'a> CompactionGroupTransaction<'a> {
+impl CompactionGroupTransaction<'_> {
     /// Inserts compaction group configs if they do not exist.
     pub fn try_create_compaction_groups(
         &mut self,

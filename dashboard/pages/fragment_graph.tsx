@@ -24,7 +24,12 @@ import {
   HStack,
   Input,
   Select,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
   Text,
+  Tr,
   VStack,
 } from "@chakra-ui/react"
 import * as d3 from "d3"
@@ -184,7 +189,7 @@ function buildFragmentDependencyAsEdges(
   return nodes
 }
 
-const SIDEBAR_WIDTH = 200
+const SIDEBAR_WIDTH = 225
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
 const backPressureDataSources: BackPressureDataSource[] = [
@@ -202,23 +207,28 @@ interface EmbeddedBackPressureInfo {
 }
 
 export default function Streaming() {
-  const { response: relationList } = useFetch(getStreamingJobs)
+  const { response: streamingJobList } = useFetch(getStreamingJobs)
   const { response: relationIdInfos } = useFetch(getRelationIdInfos)
 
-  const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
+  const [jobId, setJobId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
   const [tableFragments, setTableFragments] = useState<TableFragments>()
+
+  const job = useMemo(
+    () => streamingJobList?.find((j) => j.id === jobId),
+    [streamingJobList, jobId]
+  )
 
   const toast = useErrorToast()
 
   useEffect(() => {
-    if (relationId) {
+    if (jobId) {
       setTableFragments(undefined)
-      getFragmentsByJobId(relationId).then((tf) => {
+      getFragmentsByJobId(jobId).then((tf) => {
         setTableFragments(tf)
       })
     }
-  }, [relationId])
+  }, [jobId])
 
   const fragmentDependencyCallback = useCallback(() => {
     if (tableFragments) {
@@ -232,14 +242,14 @@ export default function Streaming() {
   }, [tableFragments])
 
   useEffect(() => {
-    if (relationList) {
-      if (!relationId) {
-        if (relationList.length > 0) {
-          setRelationId(relationList[0].id)
+    if (streamingJobList) {
+      if (!jobId) {
+        if (streamingJobList.length > 0) {
+          setJobId(streamingJobList[0].id)
         }
       }
     }
-  }, [relationId, relationList, setRelationId])
+  }, [jobId, streamingJobList, setJobId])
 
   // The table fragments of the selected fragment id
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
@@ -276,7 +286,7 @@ export default function Streaming() {
         const fragmentIdToRelationId = map[relationId].map
         for (const fragmentId in fragmentIdToRelationId) {
           if (parseInt(fragmentId) == searchFragIdInt) {
-            setRelationId(parseInt(relationId))
+            setJobId(parseInt(relationId))
             setSelectedFragmentId(searchFragIdInt)
             return
           }
@@ -295,7 +305,7 @@ export default function Streaming() {
         for (const fragmentId in fragmentIdToRelationId) {
           let actorIds = fragmentIdToRelationId[fragmentId].ids
           if (actorIds.includes(searchActorIdInt)) {
-            setRelationId(parseInt(relationId))
+            setJobId(parseInt(relationId))
             setSelectedFragmentId(parseInt(fragmentId))
             return
           }
@@ -406,41 +416,70 @@ export default function Streaming() {
           height="full"
         >
           <FormControl>
-            <FormLabel>Relations</FormLabel>
+            <FormLabel>Streaming Jobs</FormLabel>
             <Input
               list="relationList"
               spellCheck={false}
               onChange={(event) => {
-                const id = relationList?.find(
+                const id = streamingJobList?.find(
                   (x) => x.name == event.target.value
                 )?.id
                 if (id) {
-                  setRelationId(id)
+                  setJobId(id)
                 }
               }}
               placeholder="Search..."
               mb={2}
             ></Input>
             <datalist id="relationList">
-              {relationList &&
-                relationList.map((r) => (
+              {streamingJobList &&
+                streamingJobList.map((r) => (
                   <option value={r.name} key={r.id}>
                     ({r.id}) {r.name}
                   </option>
                 ))}
             </datalist>
             <Select
-              value={relationId ?? undefined}
-              onChange={(event) => setRelationId(parseInt(event.target.value))}
+              value={jobId ?? undefined}
+              onChange={(event) => setJobId(parseInt(event.target.value))}
             >
-              {relationList &&
-                relationList.map((r) => (
+              {streamingJobList &&
+                streamingJobList.map((r) => (
                   <option value={r.id} key={r.name}>
                     ({r.id}) {r.name}
                   </option>
                 ))}
             </Select>
           </FormControl>
+          {job && (
+            <FormControl>
+              <FormLabel>Information</FormLabel>
+              <TableContainer>
+                <Table size="sm">
+                  <Tbody>
+                    <Tr>
+                      <Td fontWeight="medium">Type</Td>
+                      <Td isNumeric>{job.type}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Status</Td>
+                      <Td isNumeric>{job.jobStatus}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Parallelism</Td>
+                      <Td isNumeric>{job.parallelism}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium" paddingEnd={0}>
+                        Max Parallelism
+                      </Td>
+                      <Td isNumeric>{job.maxParallelism}</Td>
+                    </Tr>
+                  </Tbody>
+                </Table>
+              </TableContainer>
+            </FormControl>
+          )}
           <FormControl>
             <FormLabel>Goto</FormLabel>
             <VStack spacing={2}>

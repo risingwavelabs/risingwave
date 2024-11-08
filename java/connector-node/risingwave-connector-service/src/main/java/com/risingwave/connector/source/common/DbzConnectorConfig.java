@@ -58,6 +58,7 @@ public class DbzConnectorConfig {
 
     /* Sql Server configs */
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
+    public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
@@ -173,6 +174,13 @@ public class DbzConnectorConfig {
 
             dbzProps.putAll(mysqlProps);
 
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared MySQL source, since we
+                // allow user to ingest tables in different database
+                LOG.info("Disable table filtering for the shared MySQL source");
+                dbzProps.remove("table.include.list");
+            }
+
         } else if (source == SourceTypeE.POSTGRES) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -202,6 +210,23 @@ public class DbzConnectorConfig {
                     postgresProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
+            }
+
+            // adapt value of sslmode to the expected value
+            var sslMode = postgresProps.getProperty("database.sslmode");
+            if (sslMode != null) {
+                switch (sslMode) {
+                    case "disabled":
+                        sslMode = "disable";
+                        break;
+                    case "preferred":
+                        sslMode = "prefer";
+                        break;
+                    case "required":
+                        sslMode = "require";
+                        break;
+                }
+                postgresProps.setProperty("database.sslmode", sslMode);
             }
 
             dbzProps.putAll(postgresProps);

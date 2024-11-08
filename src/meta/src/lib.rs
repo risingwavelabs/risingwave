@@ -26,7 +26,6 @@
 #![cfg_attr(coverage, feature(coverage_attribute))]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-#![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(const_option)]
 #![feature(anonymous_lifetime_in_impl_trait)]
@@ -48,6 +47,7 @@ pub mod stream;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::MetaStoreConfig;
 pub use rpc::{ElectionClient, ElectionMember};
 
 use crate::manager::MetaOpts;
@@ -55,5 +55,8 @@ use crate::manager::MetaOpts;
 #[derive(Debug)]
 pub enum MetaStoreBackend {
     Mem,
-    Sql { endpoint: String },
+    Sql {
+        endpoint: String,
+        config: MetaStoreConfig,
+    },
 }

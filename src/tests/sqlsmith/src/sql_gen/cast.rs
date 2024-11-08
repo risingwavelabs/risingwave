@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::Expr;
 use crate::sql_gen::types::{data_type_to_ast_data_type, EXPLICIT_CAST_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub(crate) fn gen_explicit_cast(
         &mut self,
         ret: &DataType,

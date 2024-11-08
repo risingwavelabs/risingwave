@@ -18,8 +18,8 @@ use std::sync::Arc;
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
-use risingwave_meta_model_v2::{ObjectId, WorkerId};
+use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::{ObjectId, WorkerId};
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -238,6 +238,7 @@ impl GlobalStreamManager {
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
         let table_id = table_fragments.table_id();
+        let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
         self.creating_job_info.add_job(execution).await;
@@ -298,7 +299,10 @@ impl GlobalStreamManager {
                                 .await?;
 
                             self.barrier_scheduler
-                                .run_command(Command::CancelStreamingJob(table_fragments))
+                                .run_command(
+                                    database_id,
+                                    Command::CancelStreamingJob(table_fragments),
+                                )
                                 .await?;
                         } else {
                             // streaming job is already completed.
@@ -350,7 +354,7 @@ impl GlobalStreamManager {
         if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
             self.metadata_manager
                 .catalog_controller
-                .prepare_streaming_job(table_fragments.to_protobuf(), &streaming_job, true)
+                .prepare_streaming_job(&table_fragments, &streaming_job, true)
                 .await?;
 
             let dummy_table_id = table_fragments.table_id();
@@ -422,10 +426,15 @@ impl GlobalStreamManager {
             if need_pause {
                 // Special handling is required when creating sink into table, we need to pause the stream to avoid data loss.
                 self.barrier_scheduler
-                    .run_config_change_command_with_pause(command)
+                    .run_config_change_command_with_pause(
+                        streaming_job.database_id().into(),
+                        command,
+                    )
                     .await?;
             } else {
-                self.barrier_scheduler.run_command(command).await?;
+                self.barrier_scheduler
+                    .run_command(streaming_job.database_id().into(), command)
+                    .await?;
             }
 
             tracing::debug!(?streaming_job, "first barrier collected for stream job");
@@ -468,15 +477,18 @@ impl GlobalStreamManager {
         let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(Command::ReplaceTable(ReplaceTablePlan {
-                old_table_fragments,
-                new_table_fragments: table_fragments,
-                merge_updates,
-                dispatchers,
-                init_split_assignment,
-                dummy_id,
-                streaming_job,
-            }))
+            .run_config_change_command_with_pause(
+                streaming_job.database_id().into(),
+                Command::ReplaceTable(ReplaceTablePlan {
+                    old_table_fragments,
+                    new_table_fragments: table_fragments,
+                    merge_updates,
+                    dispatchers,
+                    init_split_assignment,
+                    dummy_id,
+                    streaming_job,
+                }),
+            )
             .await?;
 
         Ok(())
@@ -487,9 +499,10 @@ impl GlobalStreamManager {
     /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(
         &self,
+        database_id: DatabaseId,
         removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<ObjectId>,
-        state_table_ids: Vec<risingwave_meta_model_v2::TableId>,
+        state_table_ids: Vec<risingwave_meta_model::TableId>,
         fragment_ids: HashSet<FragmentId>,
     ) {
         if !removed_actors.is_empty()
@@ -498,14 +511,17 @@ impl GlobalStreamManager {
         {
             let _ = self
                 .barrier_scheduler
-                .run_command(Command::DropStreamingJobs {
-                    actors: removed_actors,
-                    unregistered_state_table_ids: state_table_ids
-                        .into_iter()
-                        .map(|table_id| TableId::new(table_id as _))
-                        .collect(),
-                    unregistered_fragment_ids: fragment_ids,
-                })
+                .run_command(
+                    database_id,
+                    Command::DropStreamingJobs {
+                        actors: removed_actors,
+                        unregistered_state_table_ids: state_table_ids
+                            .into_iter()
+                            .map(|table_id| TableId::new(table_id as _))
+                            .collect(),
+                        unregistered_fragment_ids: fragment_ids,
+                    },
+                )
                 .await
                 .inspect_err(|err| {
                     tracing::error!(error = ?err.as_report(), "failed to run drop command");
@@ -553,14 +569,16 @@ impl GlobalStreamManager {
                     )))?;
                 }
 
-                self.metadata_manager
+                let (_, database_id) = self.metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(id.table_id as _, true)
                     .await?;
 
-                self.barrier_scheduler
-                    .run_command(Command::CancelStreamingJob(fragment))
-                    .await?;
+                if let Some(database_id) = database_id {
+                    self.barrier_scheduler
+                        .run_command(DatabaseId::new(database_id as _), Command::CancelStreamingJob(fragment))
+                        .await?;
+                }
             };
             match result {
                 Ok(_) => {
@@ -587,6 +605,12 @@ impl GlobalStreamManager {
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
+        let database_id = DatabaseId::new(
+            self.metadata_manager
+                .catalog_controller
+                .get_object_database_id(table_id as ObjectId)
+                .await? as _,
+        );
         let table_id = TableId::new(table_id);
 
         let worker_nodes = self
@@ -665,6 +689,7 @@ impl GlobalStreamManager {
                     .await?;
             } else {
                 self.reschedule_actors(
+                    database_id,
                     reschedules,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: false,
@@ -691,12 +716,19 @@ impl GlobalStreamManager {
         };
 
         tracing::debug!("sending Command::CreateSubscription");
-        self.barrier_scheduler.run_command(command).await?;
+        self.barrier_scheduler
+            .run_command(subscription.database_id.into(), command)
+            .await?;
         Ok(())
     }
 
     // Don't need to add actor, just send a command
-    pub async fn drop_subscription(self: &Arc<Self>, subscription_id: u32, table_id: u32) {
+    pub async fn drop_subscription(
+        self: &Arc<Self>,
+        database_id: DatabaseId,
+        subscription_id: u32,
+        table_id: u32,
+    ) {
         let command = Command::DropSubscription {
             subscription_id,
             upstream_mv_table_id: TableId::new(table_id),
@@ -705,7 +737,7 @@ impl GlobalStreamManager {
         tracing::debug!("sending Command::DropSubscriptions");
         let _ = self
             .barrier_scheduler
-            .run_command(command)
+            .run_command(database_id, command)
             .await
             .inspect_err(|err| {
                 tracing::error!(error = ?err.as_report(), "failed to run drop command");

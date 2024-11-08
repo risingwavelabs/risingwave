@@ -196,7 +196,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
+impl<V: EstimateSize> Drop for MutGuard<'_, V> {
     fn drop(&mut self) {
         let new_value_size = self.inner.estimated_size();
         if new_value_size != self.old_value_size {
@@ -209,7 +209,7 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
+impl<V: EstimateSize> Deref for MutGuard<'_, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -217,7 +217,7 @@ impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
+impl<V: EstimateSize> DerefMut for MutGuard<'_, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
     }

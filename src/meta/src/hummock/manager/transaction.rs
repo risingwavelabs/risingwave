@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::version::{
-    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
-};
-use risingwave_hummock_sdk::{
-    CompactionGroupId, FrontendHummockVersionDelta, HummockEpoch, HummockVersionId,
-};
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
     HummockVersionStats, StateTableInfoDelta,
@@ -113,9 +110,8 @@ impl<'a> HummockVersionTransaction<'a> {
     /// Returns a duplicate delta, used by time travel.
     pub(super) fn pre_commit_epoch(
         &mut self,
-        committed_epoch: HummockEpoch,
-        tables_to_commit: &HashSet<TableId>,
-        new_compaction_group: Option<(CompactionGroupId, CompactionConfig)>,
+        tables_to_commit: &HashMap<TableId, u64>,
+        new_compaction_groups: HashMap<CompactionGroupId, Arc<CompactionConfig>>,
         commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
@@ -125,7 +121,7 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        if let Some((compaction_group_id, compaction_group_config)) = new_compaction_group {
+        for (compaction_group_id, compaction_group_config) in new_compaction_groups {
             {
                 let group_deltas = &mut new_version_delta
                     .group_deltas
@@ -135,7 +131,7 @@ impl<'a> HummockVersionTransaction<'a> {
 
                 #[expect(deprecated)]
                 group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some(compaction_group_config.clone()),
+                    group_config: Some((*compaction_group_config).clone()),
                     group_id: compaction_group_id,
                     parent_group_id: StaticCompactionGroupId::NewCompactionGroup
                         as CompactionGroupId,
@@ -154,13 +150,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let group_delta = GroupDelta::IntraLevel(IntraLevelDelta::new(
-                0,
-                0,      // l0_sub_level_id will be generated during apply_version_delta
-                vec![], // default
-                inserted_table_infos,
-                0, // default
-            ));
+            let group_delta = GroupDelta::NewL0SubLevel(inserted_table_infos);
 
             group_deltas.push(group_delta);
         }
@@ -173,6 +163,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     "newly added table exists previously: {:?}",
                     table_id
                 );
+                let committed_epoch = *tables_to_commit.get(table_id).expect("newly added table must exist in tables_to_commit");
                 delta.state_table_info_delta.insert(
                     *table_id,
                     StateTableInfoDelta {
@@ -182,7 +173,7 @@ impl<'a> HummockVersionTransaction<'a> {
                 );
             }
 
-            for table_id in tables_to_commit {
+            for (table_id, committed_epoch) in tables_to_commit {
                 if new_table_ids.contains_key(table_id) {
                     continue;
                 }
@@ -194,7 +185,7 @@ impl<'a> HummockVersionTransaction<'a> {
                     .insert(
                         *table_id,
                         StateTableInfoDelta {
-                            committed_epoch,
+                            committed_epoch: *committed_epoch,
                             compaction_group_id: info.compaction_group_id,
                         }
                     )
@@ -208,7 +199,7 @@ impl<'a> HummockVersionTransaction<'a> {
     }
 }
 
-impl<'a> InMemValTransaction for HummockVersionTransaction<'a> {
+impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas)) = self.pre_applied_version {
             *self.orig_version = version;
@@ -267,7 +258,7 @@ pub(super) struct SingleDeltaTransaction<'a, 'b> {
     delta: Option<HummockVersionDelta>,
 }
 
-impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
+impl SingleDeltaTransaction<'_, '_> {
     pub(super) fn latest_version(&self) -> &HummockVersion {
         self.version_txn.latest_version()
     }
@@ -287,7 +278,7 @@ impl<'a, 'b> SingleDeltaTransaction<'a, 'b> {
     }
 }
 
-impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {
+impl Deref for SingleDeltaTransaction<'_, '_> {
     type Target = HummockVersionDelta;
 
     fn deref(&self) -> &Self::Target {
@@ -295,13 +286,13 @@ impl<'a, 'b> Deref for SingleDeltaTransaction<'a, 'b> {
     }
 }
 
-impl<'a, 'b> DerefMut for SingleDeltaTransaction<'a, 'b> {
+impl DerefMut for SingleDeltaTransaction<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.delta.as_mut().expect("should exist")
     }
 }
 
-impl<'a, 'b> Drop for SingleDeltaTransaction<'a, 'b> {
+impl Drop for SingleDeltaTransaction<'_, '_> {
     fn drop(&mut self) {
         if let Some(delta) = self.delta.take() {
             self.version_txn.pre_apply(delta);
@@ -326,7 +317,7 @@ impl<'a> HummockVersionStatsTransaction<'a> {
     }
 }
 
-impl<'a> InMemValTransaction for HummockVersionStatsTransaction<'a> {
+impl InMemValTransaction for HummockVersionStatsTransaction<'_> {
     fn commit(self) {
         if self.stats.has_new_value() {
             let stats = self.stats.clone();
@@ -346,7 +337,7 @@ where
     }
 }
 
-impl<'a> Deref for HummockVersionStatsTransaction<'a> {
+impl Deref for HummockVersionStatsTransaction<'_> {
     type Target = HummockVersionStats;
 
     fn deref(&self) -> &Self::Target {
@@ -354,7 +345,7 @@ impl<'a> Deref for HummockVersionStatsTransaction<'a> {
     }
 }
 
-impl<'a> DerefMut for HummockVersionStatsTransaction<'a> {
+impl DerefMut for HummockVersionStatsTransaction<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.stats.deref_mut()
     }

@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableIn
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
@@ -336,6 +336,7 @@ pub async fn setup_compute_env_with_metric(
         compactor_streams_change_tx,
     )
     .await;
+
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,

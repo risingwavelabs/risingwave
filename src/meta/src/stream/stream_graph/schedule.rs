@@ -25,9 +25,9 @@ use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash::{ActorMapping, VirtualNode, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::{bail, hash};
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::{
     FragmentDistributionType, PbFragmentDistributionType,
@@ -152,11 +152,9 @@ impl Distribution {
     }
 
     /// Get the vnode count of the distribution.
-    ///
-    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used for singleton.
     pub fn vnode_count(&self) -> usize {
         match self {
-            Distribution::Singleton(_) => VirtualNode::COUNT_FOR_COMPAT,
+            Distribution::Singleton(_) => 1, // only `SINGLETON_VNODE`
             Distribution::Hash(mapping) => mapping.len(),
         }
     }

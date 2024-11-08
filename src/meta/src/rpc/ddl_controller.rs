@@ -20,7 +20,6 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
-use rand::Rng;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
@@ -28,37 +27,33 @@ use risingwave_common::secret::SecretEncryption;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_fragment, visit_stream_node, visit_stream_node_cont_mut,
+    visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, hash, must_match};
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::cdc::CdcSourceType;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
-    UPSTREAM_SOURCE_KEY,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::{
     ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
     SubscriptionId, TableId, UserId, ViewId,
 };
-use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
-use risingwave_pb::catalog::connection::PrivateLinkService;
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbSource, PbTable, Schema, Secret,
-    Sink, Source, Subscription, Table, View,
+    Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
+    Subscription, Table, View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, DdlProgress, TableJobType, WaitVersion,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request, DdlProgress,
+    TableJobType, WaitVersion,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
@@ -66,19 +61,19 @@ use risingwave_pb::stream_plan::{
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::controller::catalog::ReleaseContext;
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::error::{bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
     DdlType, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
+    IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::stream::{
-    create_source_worker_handle, ActorGraphBuildResult, ActorGraphBuilder,
+    create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef, StreamFragmentGraph,
 };
@@ -145,6 +140,7 @@ pub enum DdlCommand {
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceTableInfo>),
     AlterName(alter_name_request::Object, String),
+    AlterSwapRename(alter_swap_rename_request::Object),
     ReplaceTable(ReplaceTableInfo),
     AlterSourceColumn(Source),
     AlterObjectOwner(Object, UserId),
@@ -185,7 +181,6 @@ pub struct DdlController {
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
 
-    aws_client: Arc<Option<AwsEc2Client>>,
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
 }
@@ -255,7 +250,6 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
-        aws_client: Arc<Option<AwsEc2Client>>,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -264,7 +258,6 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
-            aws_client,
             creating_streaming_job_permits,
         }
     }
@@ -304,7 +297,7 @@ impl DdlController {
                     _create_type,
                     affected_table_replace_info,
                 ) => {
-                    ctrl.create_streaming_job_v2(
+                    ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         affected_table_replace_info,
@@ -320,7 +313,7 @@ impl DdlController {
                     fragment_graph,
                     col_index_mapping,
                 }) => {
-                    ctrl.replace_table_v2(streaming_job, fragment_graph, col_index_mapping)
+                    ctrl.replace_table(streaming_job, fragment_graph, col_index_mapping)
                         .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
@@ -346,18 +339,14 @@ impl DdlController {
                 DdlCommand::DropSubscription(subscription_id, drop_mode) => {
                     ctrl.drop_subscription(subscription_id, drop_mode).await
                 }
+                DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
             }
         }
         .in_current_span();
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self
-                .barrier_manager
-                .hummock_manager()
-                .get_version_id()
-                .await
-                .to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
         }))
     }
 
@@ -424,7 +413,7 @@ impl DdlController {
             .await
     }
 
-    /// Shared source is handled in [`Self::create_streaming_job_v2`]
+    /// Shared source is handled in [`Self::create_streaming_job`]
     async fn create_source_without_streaming_job(
         &self,
         source: Source,
@@ -548,21 +537,6 @@ impl DdlController {
             .await
     }
 
-    pub(crate) async fn delete_vpc_endpoint(&self, svc: &PrivateLinkService) -> MetaResult<()> {
-        // delete AWS vpc endpoint
-        if svc.get_provider()? == PbPrivateLinkProvider::Aws {
-            if let Some(aws_cli) = self.aws_client.as_ref() {
-                aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
-            } else {
-                warn!(
-                    "AWS client is not initialized, skip deleting vpc endpoint {}",
-                    svc.endpoint_id
-                );
-            }
-        }
-        Ok(())
-    }
-
     async fn create_subscription(
         &self,
         mut subscription: Subscription,
@@ -602,19 +576,20 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        let table_id = self
+        let subscription = self
             .metadata_manager
             .catalog_controller
             .get_subscription_by_id(subscription_id)
-            .await?
-            .dependent_table_id;
+            .await?;
+        let table_id = subscription.dependent_table_id;
+        let database_id = subscription.database_id.into();
         let (_, version) = self
             .metadata_manager
             .catalog_controller
             .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)
             .await?;
         self.stream_manager
-            .drop_subscription(subscription_id as _, table_id)
+            .drop_subscription(database_id, subscription_id as _, table_id)
             .await;
         tracing::debug!("finish drop subscription");
         Ok(version)
@@ -924,6 +899,554 @@ impl DdlController {
             .push(upstream_fragment_id);
     }
 
+    /// For [`CreateType::Foreground`], the function will only return after backfilling finishes
+    /// ([`crate::manager::MetadataManager::wait_streaming_job_finished`]).
+    pub async fn create_streaming_job(
+        &self,
+        mut streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
+    ) -> MetaResult<NotificationVersion> {
+        let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        self.metadata_manager
+            .catalog_controller
+            .create_job_catalog(
+                &mut streaming_job,
+                &ctx,
+                &fragment_graph.parallelism,
+                fragment_graph.max_parallelism as _,
+            )
+            .await?;
+        let job_id = streaming_job.id();
+
+        tracing::debug!(
+            id = job_id,
+            definition = streaming_job.definition(),
+            create_type = streaming_job.create_type().as_str_name(),
+            "starting streaming job",
+        );
+        let _permit = self
+            .creating_streaming_job_permits
+            .semaphore
+            .acquire()
+            .await
+            .unwrap();
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+
+        let id = streaming_job.id();
+        let name = streaming_job.name();
+        let definition = streaming_job.definition();
+        let source_id = match &streaming_job {
+            StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
+            _ => None,
+        };
+
+        // create streaming job.
+        match self
+            .create_streaming_job_inner(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                affected_table_replace_info,
+            )
+            .await
+        {
+            Ok(version) => Ok(version),
+            Err(err) => {
+                tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
+                let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
+                    id,
+                    name,
+                    definition,
+                    error: err.as_report().to_string(),
+                };
+                self.env.event_log_manager_ref().add_event_logs(vec![
+                    risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
+                ]);
+                let (aborted, _) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(job_id as _, false)
+                    .await?;
+                if aborted {
+                    tracing::warn!(id = job_id, "aborted streaming job");
+                    if let Some(source_id) = source_id {
+                        self.source_manager
+                            .unregister_sources(vec![source_id as SourceId])
+                            .await;
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    async fn create_streaming_job_inner(
+        &self,
+        ctx: StreamContext,
+        mut streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        affected_table_replace_info: Option<ReplaceTableInfo>,
+    ) -> MetaResult<NotificationVersion> {
+        let mut fragment_graph =
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
+        streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+
+        // create internal table catalogs and refill table id.
+        let incomplete_internal_tables = fragment_graph
+            .incomplete_internal_tables()
+            .into_values()
+            .collect_vec();
+        let table_id_map = self
+            .metadata_manager
+            .catalog_controller
+            .create_internal_table_catalog(&streaming_job, incomplete_internal_tables)
+            .await?;
+        fragment_graph.refill_internal_table_ids(table_id_map);
+
+        let affected_table_replace_info = match affected_table_replace_info {
+            Some(replace_table_info) => {
+                let ReplaceTableInfo {
+                    mut streaming_job,
+                    fragment_graph,
+                    ..
+                } = replace_table_info;
+
+                // Ensure the max parallelism unchanged before replacing table.
+                let original_max_parallelism = self
+                    .metadata_manager
+                    .get_job_max_parallelism(streaming_job.id().into())
+                    .await?;
+                let fragment_graph = PbStreamFragmentGraph {
+                    max_parallelism: original_max_parallelism as _,
+                    ..fragment_graph
+                };
+
+                let fragment_graph =
+                    StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
+                streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+                streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+                let streaming_job = streaming_job;
+
+                Some((streaming_job, fragment_graph))
+            }
+            None => None,
+        };
+
+        // create fragment and actor catalogs.
+        tracing::debug!(id = streaming_job.id(), "building streaming job");
+        let (ctx, table_fragments) = self
+            .build_stream_job(
+                ctx,
+                streaming_job,
+                fragment_graph,
+                affected_table_replace_info,
+            )
+            .await?;
+
+        let streaming_job = &ctx.streaming_job;
+
+        match streaming_job {
+            StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
+                Self::validate_cdc_table(table, &table_fragments).await?;
+            }
+            StreamingJob::Table(Some(source), ..) => {
+                // Register the source on the connector node.
+                self.source_manager.register_source(source).await?;
+            }
+            StreamingJob::Sink(sink, _) => {
+                // Validate the sink on the connector node.
+                validate_sink(sink).await?;
+            }
+            StreamingJob::Source(source) => {
+                // Register the source on the connector node.
+                self.source_manager.register_source(source).await?;
+            }
+            _ => {}
+        }
+
+        self.metadata_manager
+            .catalog_controller
+            .prepare_streaming_job(&table_fragments, streaming_job, false)
+            .await?;
+
+        // create streaming jobs.
+        let stream_job_id = streaming_job.id();
+        match (streaming_job.create_type(), &streaming_job) {
+            (CreateType::Unspecified, _)
+            | (CreateType::Foreground, _)
+            // FIXME(kwannoel): Unify background stream's creation path with MV below.
+            | (CreateType::Background, StreamingJob::Sink(_, _)) => {
+                let version = self.stream_manager
+                    .create_streaming_job(table_fragments, ctx)
+                    .await?;
+                Ok(version)
+            }
+            (CreateType::Background, _) => {
+                let ctrl = self.clone();
+                let fut = async move {
+                    let _ = ctrl
+                        .stream_manager
+                        .create_streaming_job(table_fragments, ctx)
+                        .await.inspect_err(|err| {
+                        tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
+                    });
+                };
+                tokio::spawn(fut);
+                Ok(IGNORED_NOTIFICATION_VERSION)
+            }
+        }
+    }
+
+    pub async fn drop_object(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        drop_mode: DropMode,
+        target_replace_info: Option<ReplaceTableInfo>,
+    ) -> MetaResult<NotificationVersion> {
+        let (release_ctx, mut version) = match object_type {
+            ObjectType::Database => {
+                self.metadata_manager
+                    .catalog_controller
+                    .drop_database(object_id)
+                    .await?
+            }
+            ObjectType::Schema => {
+                return self
+                    .metadata_manager
+                    .catalog_controller
+                    .drop_schema(object_id, drop_mode)
+                    .await;
+            }
+            ObjectType::Function => {
+                return self
+                    .metadata_manager
+                    .catalog_controller
+                    .drop_function(object_id)
+                    .await;
+            }
+            ObjectType::Connection => {
+                let (version, _conn) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .drop_connection(object_id)
+                    .await?;
+                return Ok(version);
+            }
+            _ => {
+                self.metadata_manager
+                    .catalog_controller
+                    .drop_relation(object_type, object_id, drop_mode)
+                    .await?
+            }
+        };
+
+        if let Some(replace_table_info) = target_replace_info {
+            let stream_ctx =
+                StreamContext::from_protobuf(replace_table_info.fragment_graph.get_ctx().unwrap());
+
+            let ReplaceTableInfo {
+                mut streaming_job,
+                fragment_graph,
+                ..
+            } = replace_table_info;
+
+            let sink_id = if let ObjectType::Sink = object_type {
+                object_id as _
+            } else {
+                panic!("additional replace table event only occurs when dropping sink into table")
+            };
+
+            // Ensure the max parallelism unchanged before replacing table.
+            let original_max_parallelism = self
+                .metadata_manager
+                .get_job_max_parallelism(streaming_job.id().into())
+                .await?;
+            let fragment_graph = PbStreamFragmentGraph {
+                max_parallelism: original_max_parallelism as _,
+                ..fragment_graph
+            };
+
+            let fragment_graph =
+                StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
+            streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+            streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+            let streaming_job = streaming_job;
+
+            let table = streaming_job.table().unwrap();
+
+            tracing::debug!(id = streaming_job.id(), "replacing table for dropped sink");
+            let dummy_id = self
+                .metadata_manager
+                .catalog_controller
+                .create_job_catalog_for_replace(
+                    &streaming_job,
+                    &stream_ctx,
+                    table.get_version()?,
+                    &fragment_graph.specified_parallelism(),
+                    fragment_graph.max_parallelism(),
+                )
+                .await? as u32;
+
+            let (ctx, table_fragments) = self
+                .inject_replace_table_job_for_table_sink(
+                    dummy_id,
+                    &self.metadata_manager,
+                    stream_ctx,
+                    None,
+                    None,
+                    Some(sink_id),
+                    &streaming_job,
+                    fragment_graph,
+                )
+                .await?;
+
+            let result: MetaResult<Vec<PbMergeUpdate>> = try {
+                let merge_updates = ctx.merge_updates.clone();
+
+                self.metadata_manager
+                    .catalog_controller
+                    .prepare_streaming_job(&table_fragments, &streaming_job, true)
+                    .await?;
+
+                self.stream_manager
+                    .replace_table(table_fragments, ctx)
+                    .await?;
+
+                merge_updates
+            };
+
+            version = match result {
+                Ok(merge_updates) => {
+                    let version = self
+                        .metadata_manager
+                        .catalog_controller
+                        .finish_replace_streaming_job(
+                            dummy_id as _,
+                            streaming_job,
+                            merge_updates,
+                            None,
+                            None,
+                            Some(sink_id),
+                            vec![],
+                        )
+                        .await?;
+                    Ok(version)
+                }
+                Err(err) => {
+                    tracing::error!(id = object_id, error = ?err.as_report(), "failed to replace table");
+                    let _ = self.metadata_manager
+                        .catalog_controller
+                        .try_abort_replacing_streaming_job(dummy_id as _)
+                        .await
+                        .inspect_err(|err| {
+                            tracing::error!(id = object_id, error = ?err.as_report(), "failed to abort replacing table");
+                        });
+                    Err(err)
+                }
+            }?;
+        }
+
+        let ReleaseContext {
+            database_id,
+            streaming_job_ids,
+            state_table_ids,
+            source_ids,
+            source_fragments,
+            removed_actors,
+            removed_fragments,
+            ..
+        } = release_ctx;
+
+        // unregister sources.
+        self.source_manager
+            .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
+            .await;
+
+        // unregister fragments and actors from source manager.
+        self.source_manager
+            .drop_source_fragments(
+                source_fragments
+                    .into_iter()
+                    .map(|(source_id, fragments)| {
+                        (
+                            source_id,
+                            fragments.into_iter().map(|id| id as u32).collect(),
+                        )
+                    })
+                    .collect(),
+                removed_actors.iter().map(|id| *id as _).collect(),
+            )
+            .await;
+
+        // drop streaming jobs.
+        self.stream_manager
+            .drop_streaming_jobs(
+                risingwave_common::catalog::DatabaseId::new(database_id as _),
+                removed_actors.into_iter().map(|id| id as _).collect(),
+                streaming_job_ids,
+                state_table_ids,
+                removed_fragments.iter().map(|id| *id as _).collect(),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    pub async fn replace_table(
+        &self,
+        mut streaming_job: StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+        table_col_index_mapping: Option<ColIndexMapping>,
+    ) -> MetaResult<NotificationVersion> {
+        let job_id = streaming_job.id();
+
+        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+
+        // Ensure the max parallelism unchanged before replacing table.
+        let original_max_parallelism = self
+            .metadata_manager
+            .get_job_max_parallelism(streaming_job.id().into())
+            .await?;
+        let fragment_graph = PbStreamFragmentGraph {
+            max_parallelism: original_max_parallelism as _,
+            ..fragment_graph
+        };
+
+        // 1. build fragment graph.
+        let fragment_graph = StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
+        streaming_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        streaming_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
+        let streaming_job = streaming_job;
+
+        let StreamingJob::Table(_, table, ..) = &streaming_job else {
+            unreachable!("unexpected job: {streaming_job:?}")
+        };
+        let dummy_id = self
+            .metadata_manager
+            .catalog_controller
+            .create_job_catalog_for_replace(
+                &streaming_job,
+                &ctx,
+                table.get_version()?,
+                &fragment_graph.specified_parallelism(),
+                fragment_graph.max_parallelism(),
+            )
+            .await?;
+
+        tracing::debug!(id = streaming_job.id(), "building replace streaming job");
+        let mut updated_sink_catalogs = vec![];
+
+        let result: MetaResult<Vec<PbMergeUpdate>> = try {
+            let (mut ctx, mut table_fragments) = self
+                .build_replace_table(
+                    ctx,
+                    &streaming_job,
+                    fragment_graph,
+                    table_col_index_mapping.clone(),
+                    dummy_id as _,
+                )
+                .await?;
+
+            let mut union_fragment_id = None;
+
+            for (fragment_id, fragment) in &mut table_fragments.fragments {
+                for actor in &mut fragment.actors {
+                    if let Some(node) = &mut actor.nodes {
+                        visit_stream_node(node, |body| {
+                            if let NodeBody::Union(_) = body {
+                                if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                    // The union fragment should be unique.
+                                    assert_eq!(*union_fragment_id, *fragment_id);
+                                } else {
+                                    union_fragment_id = Some(*fragment_id);
+                                }
+                            }
+                        })
+                    };
+                }
+            }
+
+            let target_fragment_id =
+                union_fragment_id.expect("fragment of placeholder merger not found");
+
+            let catalogs = self
+                .metadata_manager
+                .get_sink_catalog_by_ids(&table.incoming_sinks)
+                .await?;
+
+            for sink in catalogs {
+                let sink_id = &sink.id;
+
+                let sink_table_fragments = self
+                    .metadata_manager
+                    .get_job_fragments_by_id(&risingwave_common::catalog::TableId::new(*sink_id))
+                    .await?;
+
+                let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
+
+                Self::inject_replace_table_plan_for_sink(
+                    Some(*sink_id),
+                    &sink_fragment,
+                    table,
+                    &mut ctx,
+                    &mut table_fragments,
+                    target_fragment_id,
+                    Some(&sink.unique_identity()),
+                );
+
+                if sink.original_target_columns.is_empty() {
+                    updated_sink_catalogs.push(sink.id as _);
+                }
+            }
+
+            let merge_updates = ctx.merge_updates.clone();
+
+            self.metadata_manager
+                .catalog_controller
+                .prepare_streaming_job(&table_fragments, &streaming_job, true)
+                .await?;
+
+            self.stream_manager
+                .replace_table(table_fragments, ctx)
+                .await?;
+            merge_updates
+        };
+
+        match result {
+            Ok(merge_updates) => {
+                let version = self
+                    .metadata_manager
+                    .catalog_controller
+                    .finish_replace_streaming_job(
+                        dummy_id,
+                        streaming_job,
+                        merge_updates,
+                        table_col_index_mapping,
+                        None,
+                        None,
+                        updated_sink_catalogs,
+                    )
+                    .await?;
+                Ok(version)
+            }
+            Err(err) => {
+                tracing::error!(id = job_id, error = ?err.as_report(), "failed to replace table");
+                let _ = self.metadata_manager
+                    .catalog_controller
+                    .try_abort_replacing_streaming_job(dummy_id)
+                    .await.inspect_err(|err| {
+                    tracing::error!(id = job_id, error = ?err.as_report(), "failed to abort replacing table");
+                });
+                Err(err)
+            }
+        }
+    }
+
     async fn drop_streaming_job(
         &self,
         job_id: StreamingJobId,
@@ -1013,7 +1536,6 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
-        let internal_tables = fragment_graph.internal_tables();
         let expr_context = stream_ctx.to_expr_context();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
@@ -1096,6 +1618,7 @@ impl DdlController {
             table_parallelism,
             max_parallelism.get(),
         );
+        let internal_tables = table_fragments.internal_tables();
 
         if let Some(mview_fragment) = table_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
@@ -1338,6 +1861,55 @@ impl DdlController {
             .await
     }
 
+    async fn alter_swap_rename(
+        &self,
+        object: alter_swap_rename_request::Object,
+    ) -> MetaResult<NotificationVersion> {
+        let (obj_type, src_id, dst_id) = match object {
+            alter_swap_rename_request::Object::Schema(_) => unimplemented!("schema swap"),
+            alter_swap_rename_request::Object::Table(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Table, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::View(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::View, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Source(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Source, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Sink(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Sink, src_id, dst_id)
+            }
+            alter_swap_rename_request::Object::Subscription(objs) => {
+                let (src_id, dst_id) = (
+                    objs.src_object_id as ObjectId,
+                    objs.dst_object_id as ObjectId,
+                );
+                (ObjectType::Subscription, src_id, dst_id)
+            }
+        };
+
+        self.metadata_manager
+            .catalog_controller
+            .alter_swap_rename(obj_type, src_id, dst_id)
+            .await
+    }
+
     async fn alter_owner(
         &self,
         object: Object,
@@ -1409,72 +1981,5 @@ impl DdlController {
             .catalog_controller
             .comment_on(comment)
             .await
-    }
-}
-
-/// Fill in necessary information for `Table` stream graph.
-/// e.g., fill source id for table with connector, fill external table id for CDC table.
-pub fn fill_table_stream_graph_info(
-    source: &mut Option<PbSource>,
-    table: &mut PbTable,
-    table_job_type: TableJobType,
-    fragment_graph: &mut PbStreamFragmentGraph,
-) {
-    let mut source_count = 0;
-    for fragment in fragment_graph.fragments.values_mut() {
-        visit_fragment(fragment, |node_body| {
-            if let NodeBody::Source(source_node) = node_body {
-                if source_node.source_inner.is_none() {
-                    // skip empty source for dml node
-                    return;
-                }
-
-                // If we're creating a table with connector, we should additionally fill its ID first.
-                if let Some(source) = source {
-                    source_node.source_inner.as_mut().unwrap().source_id = source.id;
-                    source_count += 1;
-
-                    // Generate a random server id for mysql cdc source if needed
-                    // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-                    // group (that is, different from any other server id being used by any master or slave)
-                    if let Some(connector) = source.with_properties.get(UPSTREAM_SOURCE_KEY)
-                        && matches!(
-                            CdcSourceType::from(connector.as_str()),
-                            CdcSourceType::Mysql
-                        )
-                    {
-                        let props = &mut source_node.source_inner.as_mut().unwrap().with_properties;
-                        let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
-                        props
-                            .entry("server.id".to_string())
-                            .or_insert(rand_server_id.to_string());
-
-                        // make these two `Source` consistent
-                        props.clone_into(&mut source.with_properties);
-                    }
-
-                    assert_eq!(
-                        source_count, 1,
-                        "require exactly 1 external stream source when creating table with a connector"
-                    );
-
-                    // Fill in the correct table id for source.
-                    source.optional_associated_table_id =
-                        Some(OptionalAssociatedTableId::AssociatedTableId(table.id));
-                    // Fill in the correct source id for mview.
-                    table.optional_associated_source_id =
-                        Some(OptionalAssociatedSourceId::AssociatedSourceId(source.id));
-                }
-            }
-
-            // fill table id for cdc backfill
-            if let NodeBody::StreamCdcScan(node) = node_body
-                && table_job_type == TableJobType::SharedCdcSource
-            {
-                if let Some(table_desc) = node.cdc_table_desc.as_mut() {
-                    table_desc.table_id = table.id;
-                }
-            }
-        });
     }
 }

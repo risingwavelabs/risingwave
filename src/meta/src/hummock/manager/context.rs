@@ -15,14 +15,17 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
+use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     INVALID_VERSION_ID,
 };
+use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
+use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::controller::SqlMetaStore;
 use crate::hummock::error::{Error, Result};
@@ -189,8 +192,7 @@ impl HummockManager {
 
     pub async fn commit_epoch_sanity_check(
         &self,
-        committed_epoch: HummockEpoch,
-        tables_to_commit: &HashSet<TableId>,
+        tables_to_commit: &HashMap<TableId, u64>,
         sstables: &[LocalSstableInfo],
         sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
@@ -216,9 +218,9 @@ impl HummockManager {
         }
 
         // sanity check on monotonically increasing table committed epoch
-        for table_id in tables_to_commit {
+        for (table_id, committed_epoch) in tables_to_commit {
             if let Some(info) = current_version.state_table_info.info().get(table_id) {
-                if committed_epoch <= info.committed_epoch {
+                if *committed_epoch <= info.committed_epoch {
                     return Err(anyhow::anyhow!(
                         "table {} Epoch {} <= committed_epoch {}",
                         table_id,
@@ -232,7 +234,8 @@ impl HummockManager {
 
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
         if !sstables.is_empty() {
-            // sanity check to ensure SSTs to commit have not been full GCed yet.
+            // Sanity check to ensure SSTs to commit have not been full GCed yet.
+            // TODO: since HummockManager::complete_full_gc have already filtered out SSTs by min uncommitted SST id, this sanity check can be removed.
             let now = self.now().await?;
             check_sst_retention(
                 now,
@@ -241,6 +244,10 @@ impl HummockManager {
                     .iter()
                     .map(|s| (s.sst_info.object_id, s.created_at)),
             )?;
+            if self.env.opts.gc_history_retention_time_sec != 0 {
+                let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+                check_gc_history(&self.meta_store_ref().conn, ids).await?;
+            }
         }
 
         async {
@@ -265,7 +272,6 @@ impl HummockManager {
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
                     sst_id_to_worker_id: sst_to_context.clone(),
-                    epoch: committed_epoch,
                 }))
                 .is_err()
             {
@@ -293,7 +299,12 @@ impl HummockManager {
             now,
             self.env.opts.min_sst_retention_time_sec,
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
-        )
+        )?;
+        if self.env.opts.gc_history_retention_time_sec != 0 {
+            let ids = object_timestamps.iter().map(|(id, _)| *id).collect_vec();
+            check_gc_history(&self.meta_store_ref().conn, ids).await?;
+        }
+        Ok(())
     }
 }
 
@@ -309,6 +320,34 @@ fn check_sst_retention(
         }
     }
     Ok(())
+}
+
+async fn check_gc_history(
+    db: &DatabaseConnection,
+    // need IntoIterator to work around stream's "implementation of `std::iter::Iterator` is not general enough" error.
+    object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
+) -> Result<()> {
+    let futures = object_ids.into_iter().map(|id| async move {
+        let id: risingwave_meta_model::HummockSstableObjectId = id.try_into().unwrap();
+        hummock_gc_history::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .map_err(Error::from)
+    });
+    let res: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
+    let res: Result<Vec<_>> = res.into_iter().collect();
+    let mut expired_object_ids = res?.into_iter().flatten().peekable();
+    if expired_object_ids.peek().is_none() {
+        return Ok(());
+    }
+    let expired_object_ids: Vec<_> = expired_object_ids.collect();
+    tracing::error!(
+        ?expired_object_ids,
+        "new SSTs are rejected because they have already been GCed"
+    );
+    Err(Error::InvalidSst(
+        expired_object_ids[0].object_id as HummockSstableObjectId,
+    ))
 }
 
 // pin and unpin method

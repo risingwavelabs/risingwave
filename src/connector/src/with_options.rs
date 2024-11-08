@@ -18,6 +18,7 @@ use risingwave_pb::secret::PbSecretRef;
 
 use crate::sink::catalog::SinkFormatDesc;
 use crate::source::cdc::external::CdcTableType;
+use crate::source::cdc::MYSQL_CDC_CONNECTOR;
 use crate::source::iceberg::ICEBERG_CONNECTOR;
 use crate::source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,
@@ -67,6 +68,7 @@ impl WithOptions for i64 {}
 impl WithOptions for f64 {}
 impl WithOptions for std::time::Duration {}
 impl WithOptions for crate::connector_common::MqttQualityOfService {}
+impl WithOptions for crate::sink::file_sink::opendal_sink::PathPartitionPrefix {}
 impl WithOptions for crate::sink::kafka::CompressionCodec {}
 impl WithOptions for crate::source::filesystem::file_common::CompressionFormat {}
 impl WithOptions for nexmark::config::RateShape {}
@@ -101,6 +103,14 @@ pub trait WithPropertiesExt: Get + Sized {
             return false;
         };
         connector == KAFKA_CONNECTOR
+    }
+
+    #[inline(always)]
+    fn is_mysql_cdc_connector(&self) -> bool {
+        let Some(connector) = self.get_connector() else {
+            return false;
+        };
+        connector == MYSQL_CDC_CONNECTOR
     }
 
     #[inline(always)]

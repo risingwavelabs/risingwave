@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Debug;
 use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model_v2::{ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -58,13 +59,16 @@ pub(crate) enum ActiveStreamingWorkerChange {
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
+    #[cfg_attr(not(debug_assertions), expect(dead_code))]
+    meta_manager: MetadataManager,
 }
 
 impl ActiveStreamingWorkerNodes {
-    pub(crate) fn uninitialized() -> Self {
+    pub(crate) fn uninitialized(meta_manager: MetadataManager) -> Self {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
+            meta_manager,
         }
     }
 
@@ -76,6 +80,7 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes.into_iter().map(|node| (node.id as _, node)).collect(),
             rx,
+            meta_manager,
         })
     }
 
@@ -191,6 +196,51 @@ impl ActiveStreamingWorkerNodes {
 
         ret
     }
+
+    #[cfg(debug_assertions)]
+    pub(crate) async fn validate_change(&self) {
+        use risingwave_pb::common::WorkerNode;
+        use thiserror_ext::AsReport;
+        match self
+            .meta_manager
+            .list_active_streaming_compute_nodes()
+            .await
+        {
+            Ok(worker_nodes) => {
+                let ignore_irrelevant_info = |node: &WorkerNode| {
+                    (
+                        node.id,
+                        WorkerNode {
+                            id: node.id,
+                            r#type: node.r#type,
+                            host: node.host.clone(),
+                            parallelism: node.parallelism,
+                            property: node.property.clone(),
+                            resource: node.resource.clone(),
+                            ..Default::default()
+                        },
+                    )
+                };
+                let worker_nodes: HashMap<_, _> =
+                    worker_nodes.iter().map(ignore_irrelevant_info).collect();
+                let curr_worker_nodes: HashMap<_, _> = self
+                    .current()
+                    .values()
+                    .map(ignore_irrelevant_info)
+                    .collect();
+                if worker_nodes != curr_worker_nodes {
+                    warn!(
+                        ?worker_nodes,
+                        ?curr_worker_nodes,
+                        "different to global snapshot"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(e = ?e.as_report(), "fail to list_active_streaming_compute_nodes to compare with local snapshot");
+            }
+        }
+    }
 }
 
 impl MetadataManager {
@@ -261,6 +311,47 @@ impl MetadataManager {
 
     pub async fn list_active_serving_compute_nodes(&self) -> MetaResult<Vec<PbWorkerNode>> {
         self.cluster_controller.list_active_serving_workers().await
+    }
+
+    pub async fn list_active_database_ids(&self) -> MetaResult<HashSet<DatabaseId>> {
+        Ok(self
+            .catalog_controller
+            .list_fragment_database_ids(None)
+            .await?
+            .into_iter()
+            .map(|(_, database_id)| database_id)
+            .collect())
+    }
+
+    pub async fn split_fragment_map_by_database<T: Debug>(
+        &self,
+        fragment_map: HashMap<FragmentId, T>,
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<FragmentId, T>>> {
+        let fragment_to_database_map: HashMap<_, _> = self
+            .catalog_controller
+            .list_fragment_database_ids(Some(
+                fragment_map
+                    .keys()
+                    .map(|fragment_id| *fragment_id as _)
+                    .collect(),
+            ))
+            .await?
+            .into_iter()
+            .map(|(fragment_id, database_id)| {
+                (fragment_id as FragmentId, database_id as DatabaseId)
+            })
+            .collect();
+        let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
+        for (fragment_id, value) in fragment_map {
+            let database_id = *fragment_to_database_map
+                .get(&fragment_id)
+                .ok_or_else(|| anyhow!("cannot get database_id of fragment {fragment_id}"))?;
+            ret.entry(database_id)
+                .or_default()
+                .try_insert(fragment_id, value)
+                .expect("non duplicate");
+        }
+        Ok(ret)
     }
 
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
@@ -532,7 +623,7 @@ impl MetadataManager {
 
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
         self.catalog_controller
-            .list_streaming_job_states()
+            .list_streaming_job_infos()
             .await
             .map(|x| x.len())
     }

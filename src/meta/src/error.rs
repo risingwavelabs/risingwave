@@ -16,7 +16,7 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
@@ -116,9 +116,6 @@ pub enum MetaErrorInner {
         SinkError,
     ),
 
-    #[error("AWS SDK error: {0}")]
-    Aws(#[source] BoxedError),
-
     #[error(transparent)]
     Internal(
         #[from]
@@ -132,6 +129,9 @@ pub enum MetaErrorInner {
 
     #[error("Integrity check failed")]
     IntegrityCheckFailed,
+
+    #[error("{0} has been deprecated, please use {1} instead.")]
+    Deprecated(String, String),
 }
 
 impl MetaError {
@@ -153,15 +153,6 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
-    }
-}
-
-impl<E> From<aws_sdk_ec2::error::SdkError<E>> for MetaError
-where
-    E: std::error::Error + Sync + Send + 'static,
-{
-    fn from(e: aws_sdk_ec2::error::SdkError<E>) -> Self {
-        MetaErrorInner::Aws(e.into()).into()
     }
 }
 

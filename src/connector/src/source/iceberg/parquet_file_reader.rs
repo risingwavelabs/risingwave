@@ -19,7 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use futures::TryFutureExt;
+use futures::{FutureExt, TryFutureExt};
 use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
@@ -27,9 +27,9 @@ use iceberg::{Error, ErrorKind};
 use opendal::layers::RetryLayer;
 use opendal::services::S3;
 use opendal::Operator;
-use parquet::arrow::async_reader::{AsyncFileReader, MetadataLoader};
+use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
-use parquet::file::metadata::ParquetMetaData;
+use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
 use url::Url;
 
 pub struct ParquetFileReader<R: FileRead> {
@@ -53,12 +53,14 @@ impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
     }
 
     fn get_metadata(&mut self) -> BoxFuture<'_, parquet::errors::Result<Arc<ParquetMetaData>>> {
-        Box::pin(async move {
-            let file_size = self.meta.size;
-            let mut loader = MetadataLoader::load(self, file_size as usize, None).await?;
-            loader.load_page_index(false, false).await?;
-            Ok(Arc::new(loader.finish()))
-        })
+        async move {
+            let reader = ParquetMetaDataReader::new();
+            let size = self.meta.size as usize;
+            let meta = reader.load_and_finish(self, size).await?;
+
+            Ok(Arc::new(meta))
+        }
+        .boxed()
     }
 }
 

@@ -35,7 +35,7 @@ import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
-  StreamingJob,
+  StreamingRelation,
   getDatabases,
   getSchemas,
   getUsers,
@@ -73,7 +73,7 @@ export const dependentsColumn: Column<Relation> = {
   ),
 }
 
-export const fragmentsColumn: Column<StreamingJob> = {
+export const fragmentsColumn: Column<StreamingRelation> = {
   name: "Fragments",
   width: 1,
   content: (r) => (
@@ -100,6 +100,17 @@ export const primaryKeyColumn: Column<RwTable> = {
       .map((col) => extractColumnInfo(col))
       .join(", "),
 }
+
+export const vnodeCountColumn: Column<RwTable> = {
+  name: "Vnode Count",
+  width: 1,
+  // The table catalogs retrieved here are constructed from SQL models,
+  // where the `vnode_count` column has already been populated during migration.
+  // Therefore, it should always be present and no need to specify a fallback.
+  content: (r) => r.maybeVnodeCount ?? "?",
+}
+
+export const tableColumns = [primaryKeyColumn, vnodeCountColumn]
 
 export const connectorColumnSource: Column<RwSource> = {
   name: "Connector",

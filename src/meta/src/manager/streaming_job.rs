@@ -328,8 +328,4 @@ impl StreamingJob {
             StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
     }
-
-    pub fn is_source_job(&self) -> bool {
-        matches!(self, StreamingJob::Source(_))
-    }
 }

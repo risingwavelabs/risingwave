@@ -108,6 +108,8 @@ impl OptimizationStage {
 
 use std::sync::LazyLock;
 
+use risingwave_sqlparser::ast::ExplainFormat;
+
 pub struct LogicalOptimizer {}
 
 static DAG_TO_TREE: LazyLock<OptimizationStage> = LazyLock::new(|| {
@@ -134,6 +136,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToFileScanRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
+            // Apply mysql query rule next
+            TableFunctionToMySqlQueryRule::create(),
             // Apply project set rule last
             TableFunctionToProjectSetRule::create(),
         ],
@@ -153,6 +157,14 @@ static TABLE_FUNCTION_TO_POSTGRES_QUERY: LazyLock<OptimizationStage> = LazyLock:
     OptimizationStage::new(
         "Table Function To PostgresQuery",
         vec![TableFunctionToPostgresQueryRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static TABLE_FUNCTION_TO_MYSQL_QUERY: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Table Function To MySQL",
+        vec![TableFunctionToMySqlQueryRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -197,12 +209,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE: LazyLock<OptimizationStage> =
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(true),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
-            ],
+            vec![TranslateApplyRule::create(true)],
             ApplyOrder::TopDown,
         )
     });
@@ -211,12 +218,7 @@ static GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE: LazyLock<OptimizationStage> 
     LazyLock::new(|| {
         OptimizationStage::new(
             "General Unnesting(Translate Apply)",
-            vec![
-                TranslateApplyRule::create(false),
-                // Separate the project from a join if necessary because `ApplyJoinTransposeRule`
-                // can't handle a join with `output_indices`.
-                ProjectJoinSeparateRule::create(),
-            ],
+            vec![TranslateApplyRule::create(false)],
             ApplyOrder::TopDown,
         )
     });
@@ -684,7 +686,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)
@@ -714,6 +723,7 @@ impl LogicalOptimizer {
         // Table function should be converted into `file_scan` before `project_set`.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN);
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY);
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT);
 
@@ -789,7 +799,14 @@ impl LogicalOptimizer {
         InputRefValidator.validate(plan.clone());
 
         if ctx.is_explain_logical() {
-            ctx.store_logical(plan.explain_to_string());
+            match ctx.explain_format() {
+                ExplainFormat::Text => {
+                    ctx.store_logical(plan.explain_to_string());
+                }
+                ExplainFormat::Json => {
+                    ctx.store_logical(plan.explain_to_json());
+                }
+            }
         }
 
         Ok(plan)

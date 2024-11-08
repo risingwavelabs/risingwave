@@ -24,10 +24,11 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{
     generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -55,7 +56,7 @@ pub(super) struct BuildingFragment {
     inner: StreamFragment,
 
     /// The ID of the job if it contains the streaming job node.
-    table_id: Option<u32>,
+    job_id: Option<u32>,
 
     /// The required column IDs of each upstream table.
     /// Will be converted to indices when building the edge connected to the upstream.
@@ -81,12 +82,12 @@ impl BuildingFragment {
         // Fill the information of the internal tables in the fragment.
         Self::fill_internal_tables(&mut fragment, job, table_id_gen);
 
-        let table_id = Self::fill_job(&mut fragment, job).then(|| job.id());
+        let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
         let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
 
         Self {
             inner: fragment,
-            table_id,
+            job_id,
             upstream_table_columns,
         }
     }
@@ -125,17 +126,17 @@ impl BuildingFragment {
 
     /// Fill the information with the job in the fragment.
     fn fill_job(fragment: &mut StreamFragment, job: &StreamingJob) -> bool {
-        let table_id = job.id();
+        let job_id = job.id();
         let fragment_id = fragment.fragment_id;
-        let mut has_table = false;
+        let mut has_job = false;
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
-                materialize_node.table_id = table_id;
+                materialize_node.table_id = job_id;
 
                 // Fill the ID of the `Table`.
                 let table = materialize_node.table.as_mut().unwrap();
-                table.id = table_id;
+                table.id = job_id;
                 table.database_id = job.database_id();
                 table.schema_id = job.schema_id();
                 table.fragment_id = fragment_id;
@@ -144,27 +145,49 @@ impl BuildingFragment {
                     table.definition = job.name();
                 }
 
-                has_table = true;
+                has_job = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.sink_desc.as_mut().unwrap().id = table_id;
+                sink_node.sink_desc.as_mut().unwrap().id = job_id;
 
-                has_table = true;
+                has_job = true;
             }
             NodeBody::Dml(dml_node) => {
-                dml_node.table_id = table_id;
+                dml_node.table_id = job_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
-            NodeBody::Source(_) => {
-                // Notice: Table job has a dumb Source node, we should be careful that `has_table` should not be overwrite to `false`
-                if !has_table {
-                    has_table = job.is_source_job();
+            NodeBody::Source(source_node) => {
+                match job {
+                    // Note: For table without connector, it has a dummy Source node.
+                    // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
+                    StreamingJob::Table(source, _table, _table_job_type) => {
+                        if let Some(source_inner) = source_node.source_inner.as_mut() {
+                            if let Some(source) = source {
+                                debug_assert_ne!(source.id, job_id);
+                                source_inner.source_id = source.id;
+                            }
+                        }
+                    }
+                    StreamingJob::Source(source) => {
+                        has_job = true;
+                        if let Some(source_inner) = source_node.source_inner.as_mut() {
+                            debug_assert_eq!(source.id, job_id);
+                            source_inner.source_id = source.id;
+                        }
+                    }
+                    // For other job types, no need to fill the source id, since it refers to an existing source.
+                    _ => {}
+                }
+            }
+            NodeBody::StreamCdcScan(node) => {
+                if let Some(table_desc) = node.cdc_table_desc.as_mut() {
+                    table_desc.table_id = job_id;
                 }
             }
             _ => {}
         });
 
-        has_table
+        has_job
     }
 
     /// Extract the required columns (in IDs) of each upstream table.
@@ -349,6 +372,9 @@ impl StreamFragmentGraph {
     ) -> MetaResult<Self> {
         let fragment_id_gen =
             GlobalFragmentIdGen::new(env.id_gen_manager(), proto.fragments.len() as u64);
+        // Note: in SQL backend, the ids generated here are fake and will be overwritten again
+        // with `refill_internal_table_ids` later.
+        // TODO: refactor the code to remove this step.
         let table_id_gen = GlobalTableIdGen::new(env.id_gen_manager(), proto.table_ids_cnt as u64);
 
         // Create nodes.
@@ -417,8 +443,14 @@ impl StreamFragmentGraph {
         })
     }
 
-    /// Retrieve the internal tables map of the whole graph.
-    pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+    /// Retrieve the **incomplete** internal tables map of the whole graph.
+    ///
+    /// Note that some fields in the table catalogs are not filled during the current phase, e.g.,
+    /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
+    /// Be careful when using the returned values.
+    ///
+    /// See also [`crate::model::TableFragments::internal_tables`].
+    pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
             for table in fragment.extract_internal_tables() {
@@ -431,6 +463,8 @@ impl StreamFragmentGraph {
         tables
     }
 
+    /// Refill the internal tables' `table_id`s according to the given map, typically obtained from
+    /// `create_internal_table_catalog`.
     pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<u32, u32>) {
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
@@ -487,7 +521,7 @@ impl StreamFragmentGraph {
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
             .values()
-            .filter(|b| b.table_id.is_some())
+            .filter(|b| b.job_id.is_some())
             .map(|b| b.fragment_id)
             .exactly_one()
             .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
@@ -1083,7 +1117,7 @@ impl CompleteStreamFragmentGraph {
         let internal_tables = building_fragment.extract_internal_tables();
         let BuildingFragment {
             inner,
-            table_id,
+            job_id,
             upstream_table_columns: _,
         } = building_fragment;
 
@@ -1092,7 +1126,7 @@ impl CompleteStreamFragmentGraph {
 
         let materialized_fragment_id =
             if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
-                table_id
+                job_id
             } else {
                 None
             };
@@ -1115,7 +1149,7 @@ impl CompleteStreamFragmentGraph {
             actors,
             state_table_ids,
             upstream_fragment_ids,
-            maybe_vnode_count: Some(vnode_count as _),
+            maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
         }
     }
 

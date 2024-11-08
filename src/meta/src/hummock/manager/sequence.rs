@@ -17,11 +17,11 @@ use std::fmt::Display;
 use std::sync::LazyLock;
 
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_meta_model_v2::hummock_sequence;
-use risingwave_meta_model_v2::hummock_sequence::{
+use risingwave_meta_model::hummock_sequence;
+use risingwave_meta_model::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
 };
-use risingwave_meta_model_v2::prelude::HummockSequence;
+use risingwave_meta_model::prelude::HummockSequence;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 

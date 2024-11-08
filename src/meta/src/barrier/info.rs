@@ -14,18 +14,30 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_common::catalog::TableId;
-use risingwave_meta_model_v2::WorkerId;
-use risingwave_pb::common::WorkerNode;
+use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_meta_model::WorkerId;
 use tracing::warn;
 
-use crate::barrier::Command;
+use crate::barrier::{BarrierKind, Command, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{ActorId, FragmentId};
 
 #[derive(Debug, Clone)]
+pub(super) struct BarrierInfo {
+    pub prev_epoch: TracedEpoch,
+    pub curr_epoch: TracedEpoch,
+    pub kind: BarrierKind,
+}
+
+impl BarrierInfo {
+    pub(super) fn prev_epoch(&self) -> u64 {
+        self.prev_epoch.value().0
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum CommandFragmentChanges {
-    NewFragment(InflightFragmentInfo),
+    NewFragment(DatabaseId, TableId, InflightFragmentInfo),
     Reschedule {
         new_actors: HashMap<ActorId, WorkerId>,
         to_remove: HashSet<ActorId>,
@@ -39,69 +51,97 @@ pub struct InflightSubscriptionInfo {
     pub mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
 }
 
+#[derive(Clone, Debug)]
+pub struct InflightStreamingJobInfo {
+    pub job_id: TableId,
+    pub database_id: DatabaseId,
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+}
+
+impl InflightStreamingJobInfo {
+    pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
+        self.fragment_infos.values()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct InflightDatabaseInfo {
+    #[expect(dead_code)]
+    database_id: DatabaseId,
+    jobs: HashMap<TableId, InflightStreamingJobInfo>,
+}
+
+impl InflightDatabaseInfo {
+    pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
+        self.jobs.values().flat_map(|job| job.fragment_infos())
+    }
+}
+
 /// [`InflightGraphInfo`] resolves the actor info read from meta store for
-/// [`crate::barrier::GlobalBarrierManager`].
+/// [`crate::barrier::GlobalBarrierWorker`].
 #[derive(Default, Clone, Debug)]
 pub struct InflightGraphInfo {
-    /// `node_id` => actors
-    pub actor_map: HashMap<WorkerId, HashSet<ActorId>>,
-
-    /// `actor_id` => `WorkerId`
-    pub actor_location_map: HashMap<ActorId, WorkerId>,
-
-    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    pub databases: HashMap<DatabaseId, InflightDatabaseInfo>,
+    pub fragment_location: HashMap<FragmentId, (DatabaseId, TableId)>,
 }
 
 impl InflightGraphInfo {
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn new(fragment_infos: HashMap<FragmentId, InflightFragmentInfo>) -> Self {
-        let actor_map = {
-            let mut map: HashMap<_, HashSet<_>> = HashMap::new();
-            for info in fragment_infos.values() {
-                for (actor_id, worker_id) in &info.actors {
-                    map.entry(*worker_id as WorkerId)
-                        .or_default()
-                        .insert(*actor_id as ActorId);
+    pub fn new(
+        fragment_infos: HashMap<
+            DatabaseId,
+            HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+        >,
+    ) -> Self {
+        let mut fragment_location = HashMap::new();
+        let mut databases = HashMap::new();
+        for (database_id, database_fragment_info) in fragment_infos {
+            let mut database = InflightDatabaseInfo {
+                database_id,
+                jobs: Default::default(),
+            };
+            for (job_id, job_fragment_info) in database_fragment_info {
+                for fragment_id in job_fragment_info.keys() {
+                    fragment_location
+                        .try_insert(*fragment_id, (database_id, job_id))
+                        .expect("no duplicate");
+                }
+                if !job_fragment_info.is_empty() {
+                    database.jobs.insert(
+                        job_id,
+                        InflightStreamingJobInfo {
+                            job_id,
+                            database_id,
+                            fragment_infos: job_fragment_info,
+                        },
+                    );
                 }
             }
-            map
-        };
-
-        let actor_location_map = fragment_infos
-            .values()
-            .flat_map(|fragment| {
-                fragment
-                    .actors
-                    .iter()
-                    .map(|(actor_id, worker_id)| (*actor_id as ActorId, *worker_id as WorkerId))
-            })
-            .collect();
-
+            if !database.jobs.is_empty() {
+                databases
+                    .try_insert(database_id, database)
+                    .expect("no duplicate");
+            }
+        }
         Self {
-            actor_map,
-            actor_location_map,
-            fragment_infos,
+            databases,
+            fragment_location,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.fragment_infos.is_empty()
+        self.databases.is_empty()
     }
 
-    /// Update worker nodes snapshot. We need to support incremental updates for it in the future.
-    pub fn on_new_worker_node_map(&self, node_map: &HashMap<WorkerId, WorkerNode>) {
-        for (node_id, actors) in &self.actor_map {
-            if !node_map.contains_key(node_id) {
-                warn!(node_id, ?actors, "node with running actors is deleted");
-            }
-        }
-    }
-
-    pub(crate) fn extend(&mut self, other: Self) {
+    pub(crate) fn extend(&mut self, job: InflightStreamingJobInfo) {
         self.apply_add(
-            other.fragment_infos.into_iter().map(|(fragment_id, info)| {
-                (fragment_id, CommandFragmentChanges::NewFragment(info))
+            job.fragment_infos.into_iter().map(|(fragment_id, info)| {
+                (
+                    fragment_id,
+                    CommandFragmentChanges::NewFragment(job.database_id, job.job_id, info),
+                )
             }),
+            job.database_id,
         )
     }
 
@@ -110,56 +150,68 @@ impl InflightGraphInfo {
     pub(crate) fn pre_apply(
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
+        database_id: DatabaseId,
     ) {
         self.apply_add(
             fragment_changes
                 .iter()
                 .map(|(fragment_id, change)| (*fragment_id, change.clone())),
+            database_id,
         )
     }
 
     fn apply_add(
         &mut self,
         fragment_changes: impl Iterator<Item = (FragmentId, CommandFragmentChanges)>,
+        passed_database_id: DatabaseId,
     ) {
         {
-            let mut to_add = HashMap::new();
             for (fragment_id, change) in fragment_changes {
                 match change {
-                    CommandFragmentChanges::NewFragment(info) => {
-                        for (actor_id, node_id) in &info.actors {
-                            assert!(to_add.insert(*actor_id, *node_id).is_none());
-                        }
-                        assert!(self.fragment_infos.insert(fragment_id, info).is_none());
+                    CommandFragmentChanges::NewFragment(database_id, job_id, info) => {
+                        assert_eq!(passed_database_id, database_id);
+                        let fragment_infos = self
+                            .databases
+                            .entry(database_id)
+                            .or_insert_with(|| InflightDatabaseInfo {
+                                database_id,
+                                jobs: Default::default(),
+                            })
+                            .jobs
+                            .entry(job_id)
+                            .or_insert_with(|| InflightStreamingJobInfo {
+                                job_id,
+                                database_id,
+                                fragment_infos: Default::default(),
+                            });
+                        fragment_infos
+                            .fragment_infos
+                            .try_insert(fragment_id, info)
+                            .expect("non duplicate");
+                        self.fragment_location
+                            .try_insert(fragment_id, (database_id, job_id))
+                            .expect("non duplicate");
                     }
                     CommandFragmentChanges::Reschedule { new_actors, .. } => {
+                        let (database_id, table_id) = self.fragment_location[&fragment_id];
+                        assert_eq!(passed_database_id, database_id);
                         let info = self
+                            .databases
+                            .get_mut(&database_id)
+                            .expect("should exist")
+                            .jobs
+                            .get_mut(&table_id)
+                            .expect("should exist")
                             .fragment_infos
                             .get_mut(&fragment_id)
                             .expect("should exist");
                         let actors = &mut info.actors;
                         for (actor_id, node_id) in &new_actors {
-                            assert!(to_add.insert(*actor_id as _, *node_id as _).is_none());
                             assert!(actors.insert(*actor_id as _, *node_id as _).is_none());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {}
                 }
-            }
-            for (actor_id, node_id) in to_add {
-                assert!(
-                    self.actor_map
-                        .entry(node_id as _)
-                        .or_default()
-                        .insert(actor_id as _),
-                    "duplicate actor in command changes"
-                );
-                assert!(
-                    self.actor_location_map
-                        .insert(actor_id as _, node_id as _)
-                        .is_none(),
-                    "duplicate actor in command changes"
-                );
             }
         }
     }
@@ -191,42 +243,46 @@ impl InflightGraphInfo {
     pub(crate) fn post_apply(
         &mut self,
         fragment_changes: &HashMap<FragmentId, CommandFragmentChanges>,
+        passed_database_id: DatabaseId,
     ) {
         {
-            let mut all_to_remove = HashSet::new();
             for (fragment_id, changes) in fragment_changes {
                 match changes {
-                    CommandFragmentChanges::NewFragment(_) => {}
+                    CommandFragmentChanges::NewFragment(_, _, _) => {}
                     CommandFragmentChanges::Reschedule { to_remove, .. } => {
+                        let (database_id, job_id) = self.fragment_location[fragment_id];
+                        assert_eq!(passed_database_id, database_id);
                         let info = self
+                            .databases
+                            .get_mut(&database_id)
+                            .expect("should exist")
+                            .jobs
+                            .get_mut(&job_id)
+                            .expect("should exist")
                             .fragment_infos
                             .get_mut(fragment_id)
                             .expect("should exist");
                         for actor_id in to_remove {
-                            assert!(all_to_remove.insert(*actor_id));
                             assert!(info.actors.remove(&(*actor_id as _)).is_some());
                         }
                     }
                     CommandFragmentChanges::RemoveFragment => {
-                        let info = self
-                            .fragment_infos
+                        let (database_id, job_id) = self.fragment_location[fragment_id];
+                        assert_eq!(passed_database_id, database_id);
+                        let database = self.databases.get_mut(&database_id).expect("should exist");
+                        let job = database.jobs.get_mut(&job_id).expect("should exist");
+                        job.fragment_infos
                             .remove(fragment_id)
                             .expect("should exist");
-                        for (actor_id, _) in info.actors {
-                            assert!(all_to_remove.insert(actor_id as _));
+                        if job.fragment_infos.is_empty() {
+                            database.jobs.remove(&job_id).expect("should exist");
+                            if database.jobs.is_empty() {
+                                self.databases.remove(&database_id).expect("should exist");
+                            }
                         }
                     }
                 }
             }
-            for actor_id in all_to_remove {
-                let node_id = self
-                    .actor_location_map
-                    .remove(&actor_id)
-                    .expect("actor not found");
-                let actor_ids = self.actor_map.get_mut(&node_id).expect("node not found");
-                assert!(actor_ids.remove(&actor_id), "actor not found");
-            }
-            self.actor_map.retain(|_, actor_ids| !actor_ids.is_empty());
         }
     }
 }
@@ -255,24 +311,25 @@ impl InflightSubscriptionInfo {
     }
 }
 
-impl InflightGraphInfo {
+impl InflightFragmentInfo {
     /// Returns actor list to collect in the target worker node.
-    pub fn actor_ids_to_collect(&self, node_id: WorkerId) -> impl Iterator<Item = ActorId> + '_ {
-        self.fragment_infos.values().flat_map(move |info| {
-            info.actors
-                .iter()
-                .filter_map(move |(actor_id, actor_node_id)| {
-                    if (*actor_node_id as WorkerId) == node_id {
-                        Some(*actor_id as _)
-                    } else {
-                        None
-                    }
-                })
-        })
+    pub(crate) fn actor_ids_to_collect(
+        infos: impl IntoIterator<Item = &Self>,
+    ) -> HashMap<WorkerId, HashSet<ActorId>> {
+        let mut ret: HashMap<_, HashSet<_>> = HashMap::new();
+        for (actor_id, worker_id) in infos.into_iter().flat_map(|info| info.actors.iter()) {
+            assert!(ret
+                .entry(*worker_id as WorkerId)
+                .or_default()
+                .insert(*actor_id as _))
+        }
+        ret
     }
 
-    pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.fragment_infos.values().flat_map(|info| {
+    pub fn existing_table_ids<'a>(
+        infos: impl IntoIterator<Item = &'a Self> + 'a,
+    ) -> impl Iterator<Item = TableId> + 'a {
+        infos.into_iter().flat_map(|info| {
             info.state_table_ids
                 .iter()
                 .cloned()
@@ -280,11 +337,32 @@ impl InflightGraphInfo {
         })
     }
 
-    pub fn worker_ids(&self) -> impl Iterator<Item = WorkerId> + '_ {
-        self.actor_map.keys().cloned()
+    pub fn contains_worker(infos: impl IntoIterator<Item = &Self>, worker_id: WorkerId) -> bool {
+        infos.into_iter().any(|fragment| {
+            fragment
+                .actors
+                .values()
+                .any(|location| (*location as WorkerId) == worker_id)
+        })
+    }
+}
+
+impl InflightGraphInfo {
+    pub fn contains_worker(&self, worker_id: WorkerId) -> bool {
+        InflightFragmentInfo::contains_worker(self.fragment_infos(), worker_id)
     }
 
-    pub fn contains_worker(&self, worker_id: WorkerId) -> bool {
-        self.actor_map.contains_key(&worker_id)
+    pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
+        self.databases
+            .values()
+            .flat_map(|database_info| database_info.fragment_infos())
+    }
+
+    pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
+        InflightFragmentInfo::existing_table_ids(
+            self.databases
+                .values()
+                .flat_map(|database| database.fragment_infos()),
+        )
     }
 }

@@ -25,16 +25,16 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
-use risingwave_meta_model_v2::object::ObjectType;
-use risingwave_meta_model_v2::prelude::*;
-use risingwave_meta_model_v2::table::TableType;
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
+use risingwave_meta_model::{
     actor, connection, database, fragment, function, index, object, object_dependency, schema,
     secret, sink, source, streaming_job, subscription, table, user_privilege, view, ActorId,
     ActorUpstreamActors, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId,
-    FunctionId, I32Array, IndexId, JobStatus, ObjectId, PrivateLinkService, Property, SchemaId,
-    SecretId, SinkId, SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId,
-    TableId, UserId, ViewId,
+    FunctionId, I32Array, IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkId,
+    SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
+    ViewId,
 };
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
@@ -57,24 +57,30 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
     IntoActiveModel, JoinType, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-    TransactionTrait, Value,
+    SelectColumns, TransactionTrait, Value,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
-use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs};
-use crate::controller::rename::{alter_relation_rename, alter_relation_rename_refs};
+use super::utils::{
+    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
+    rename_relation, rename_relation_refer,
+};
 use crate::controller::utils::{
-    build_relation_group, check_connection_name_duplicate, check_database_name_duplicate,
-    check_function_signature_duplicate, check_relation_name_duplicate, check_schema_name_duplicate,
-    check_secret_name_duplicate, ensure_object_id, ensure_object_not_refer, ensure_schema_empty,
-    ensure_user_id, extract_external_table_name_from_definition, get_referring_objects,
+    build_relation_group_for_delete, check_connection_name_duplicate,
+    check_database_name_duplicate, check_function_signature_duplicate,
+    check_relation_name_duplicate, check_schema_name_duplicate, check_secret_name_duplicate,
+    ensure_object_id, ensure_object_not_refer, ensure_schema_empty, ensure_user_id,
+    extract_external_table_name_from_definition, get_referring_objects,
     get_referring_objects_cascade, get_user_privilege, list_user_info_by_ids,
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{
+    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
+    IGNORED_NOTIFICATION_VERSION,
+};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -103,13 +109,15 @@ pub struct CatalogController {
 
 #[derive(Clone, Default)]
 pub struct ReleaseContext {
+    pub(crate) database_id: DatabaseId,
     pub(crate) streaming_job_ids: Vec<ObjectId>,
     /// Dropped state table list, need to unregister from hummock.
     pub(crate) state_table_ids: Vec<TableId>,
     /// Dropped source list, need to unregister from source manager.
     pub(crate) source_ids: Vec<SourceId>,
     /// Dropped connection list, need to delete from vpc endpoints.
-    pub(crate) connections: Vec<PrivateLinkService>,
+    #[allow(dead_code)]
+    pub(crate) connections: Vec<ConnectionId>,
 
     /// Dropped fragments that are fetching data from the target source.
     pub(crate) source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
@@ -367,7 +375,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|conn| conn.info)
+            .map(|conn| conn.connection_id)
             .collect_vec();
 
         // Find affect users with privileges on the database and the objects in the database.
@@ -418,6 +426,7 @@ impl CatalogController {
             .await;
         Ok((
             ReleaseContext {
+                database_id,
                 streaming_job_ids: streaming_jobs,
                 state_table_ids,
                 source_ids,
@@ -428,6 +437,18 @@ impl CatalogController {
             },
             version,
         ))
+    }
+
+    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+        let inner = self.inner.read().await;
+        let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
+            .select_only()
+            .select_column(object::Column::DatabaseId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+        Ok(database_id.ok_or_else(|| anyhow!("object has no database id: {object_id}"))?)
     }
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
@@ -671,25 +692,42 @@ impl CatalogController {
         Ok(tables)
     }
 
-    pub async fn list_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+    pub async fn list_all_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(true).await
+    }
+
+    pub async fn list_created_object_dependencies(&self) -> MetaResult<Vec<PbObjectDependencies>> {
+        self.list_object_dependencies(false).await
+    }
+
+    async fn list_object_dependencies(
+        &self,
+        include_creating: bool,
+    ) -> MetaResult<Vec<PbObjectDependencies>> {
         let inner = self.inner.read().await;
 
-        let dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
-            .select_only()
-            .columns([
-                object_dependency::Column::Oid,
-                object_dependency::Column::UsedBy,
-            ])
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(streaming_job::Column::JobStatus.eq(JobStatus::Created))
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+        let dependencies: Vec<(ObjectId, ObjectId)> = {
+            let filter = if include_creating {
+                Expr::value(true)
+            } else {
+                streaming_job::Column::JobStatus.eq(JobStatus::Created)
+            };
+            ObjectDependency::find()
+                .select_only()
+                .columns([
+                    object_dependency::Column::Oid,
+                    object_dependency::Column::UsedBy,
+                ])
+                .join(
+                    JoinType::InnerJoin,
+                    object_dependency::Relation::Object1.def(),
+                )
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
@@ -720,20 +758,24 @@ impl CatalogController {
             }
         }));
 
-        let sink_dependencies: Vec<(SinkId, TableId)> = Sink::find()
-            .select_only()
-            .columns([sink::Column::SinkId, sink::Column::TargetTable])
-            .join(JoinType::InnerJoin, sink::Relation::Object.def())
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(
+        let sink_dependencies: Vec<(SinkId, TableId)> = {
+            let filter = if include_creating {
+                sink::Column::TargetTable.is_not_null()
+            } else {
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Created)
-                    .and(sink::Column::TargetTable.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(sink::Column::TargetTable.is_not_null())
+            };
+            Sink::find()
+                .select_only()
+                .columns([sink::Column::SinkId, sink::Column::TargetTable])
+                .join(JoinType::InnerJoin, sink::Relation::Object.def())
+                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
                 object_id: table_id as _,
@@ -741,22 +783,26 @@ impl CatalogController {
             }
         }));
 
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = Subscription::find()
-            .select_only()
-            .columns([
-                subscription::Column::SubscriptionId,
-                subscription::Column::DependentTableId,
-            ])
-            .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-            .filter(
+        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = {
+            let filter = if include_creating {
+                subscription::Column::DependentTableId.is_not_null()
+            } else {
                 subscription::Column::SubscriptionState
                     .eq(Into::<i32>::into(SubscriptionState::Created))
-                    .and(subscription::Column::DependentTableId.is_not_null()),
-            )
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
+                    .and(subscription::Column::DependentTableId.is_not_null())
+            };
+            Subscription::find()
+                .select_only()
+                .columns([
+                    subscription::Column::SubscriptionId,
+                    subscription::Column::DependentTableId,
+                ])
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .filter(filter)
+                .into_tuple()
+                .all(&inner.db)
+                .await?
+        };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
                 object_id: subscription_id as _,
@@ -891,7 +937,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_group = build_relation_group(
+        let relation_group = build_relation_group_for_delete(
             dirty_mview_objs
                 .into_iter()
                 .chain(dirty_mview_internal_table_objs.into_iter())
@@ -1189,6 +1235,9 @@ impl CatalogController {
         )
         .await?;
 
+        // handle secret ref
+        let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+
         let source_obj = Self::create_object(
             &txn,
             ObjectType::Source,
@@ -1201,6 +1250,19 @@ impl CatalogController {
         pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
+
+        // add secret dependency
+        if !secret_ids.is_empty() {
+            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+                object_dependency::ActiveModel {
+                    oid: Set(*id as _),
+                    used_by: Set(source_id as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
@@ -2109,6 +2171,9 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
         assert_eq!(obj.obj_type, object_type);
+        let database_id = obj
+            .database_id
+            .ok_or_else(|| anyhow!("dropped object should have database_id"))?;
 
         let mut to_drop_objects = match drop_mode {
             DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
@@ -2273,6 +2338,18 @@ impl CatalogController {
             to_drop_objects.extend(to_drop_internal_table_objs);
         }
 
+        let to_drop_objects = to_drop_objects;
+
+        to_drop_objects.iter().for_each(|obj| {
+            if let Some(obj_database_id) = obj.database_id {
+                assert_eq!(
+                    database_id, obj_database_id,
+                    "dropped objects not in the same database: {:?}",
+                    obj
+                );
+            }
+        });
+
         let (source_fragments, removed_actors, removed_fragments) =
             resolve_source_register_info_for_jobs(&txn, to_drop_streaming_jobs.clone()).await?;
 
@@ -2305,7 +2382,7 @@ impl CatalogController {
 
         // notify about them.
         self.notify_users_update(user_infos).await;
-        let relation_group = build_relation_group(to_drop_objects);
+        let relation_group = build_relation_group_for_delete(to_drop_objects);
 
         let version = self
             .notify_frontend(NotificationOperation::Delete, relation_group)
@@ -2324,6 +2401,7 @@ impl CatalogController {
 
         Ok((
             ReleaseContext {
+                database_id,
                 streaming_job_ids: to_drop_streaming_jobs,
                 state_table_ids: to_drop_state_table_ids,
                 source_ids: to_drop_source_ids,
@@ -2426,139 +2504,104 @@ impl CatalogController {
         )
         .await?;
 
-        let mut to_update_relations = vec![];
         // rename relation.
-        macro_rules! rename_relation {
-            ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
-                let (mut relation, obj) = $entity::find_by_id($object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                let obj = obj.unwrap();
-                let old_name = relation.name.clone();
-                relation.name = object_name.into();
-                if obj.obj_type != ObjectType::View {
-                    relation.definition = alter_relation_rename(&relation.definition, object_name);
-                }
-                let active_model = $table::ActiveModel {
-                    $identity: Set(relation.$identity),
-                    name: Set(object_name.into()),
-                    definition: Set(relation.definition.clone()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::$entity(ObjectModel(relation, obj).into())),
-                });
-                old_name
-            }};
-        }
-
-        // TODO: check is there any thing to change for shared source?
-        let old_name = match object_type {
-            ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
-            ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
-            ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
-            ObjectType::Subscription => {
-                rename_relation!(Subscription, subscription, subscription_id, object_id)
-            }
-            ObjectType::View => rename_relation!(View, view, view_id, object_id),
-            ObjectType::Index => {
-                let (mut index, obj) = Index::find_by_id(object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                index.name = object_name.into();
-                let index_table_id = index.index_table_id;
-                let old_name = rename_relation!(Table, table, table_id, index_table_id);
-
-                // the name of index and its associated table is the same.
-                let active_model = index::ActiveModel {
-                    index_id: Set(index.index_id),
-                    name: Set(object_name.into()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::Index(
-                        ObjectModel(index, obj.unwrap()).into(),
-                    )),
-                });
-                old_name
-            }
-            _ => unreachable!("only relation name can be altered."),
-        };
-
+        let (mut to_update_relations, old_name) =
+            rename_relation(&txn, object_type, object_id, object_name).await?;
         // rename referring relation name.
-        macro_rules! rename_relation_ref {
-            ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
-                let (mut relation, obj) = $entity::find_by_id($object_id)
-                    .find_also_related(Object)
-                    .one(&txn)
-                    .await?
-                    .unwrap();
-                relation.definition =
-                    alter_relation_rename_refs(&relation.definition, &old_name, object_name);
-                let active_model = $table::ActiveModel {
-                    $identity: Set(relation.$identity),
-                    definition: Set(relation.definition.clone()),
-                    ..Default::default()
-                };
-                active_model.update(&txn).await?;
-                to_update_relations.push(PbRelation {
-                    relation_info: Some(PbRelationInfo::$entity(
-                        ObjectModel(relation, obj.unwrap()).into(),
-                    )),
-                });
-            }};
-        }
-        let mut objs = get_referring_objects(object_id, &txn).await?;
-        if object_type == ObjectType::Table {
-            let incoming_sinks: I32Array = Table::find_by_id(object_id)
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, object_id, object_name, &old_name).await?,
+        );
+
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::RelationGroup(PbRelationGroup {
+                    relations: to_update_relations,
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_swap_rename(
+        &self,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        dst_object_id: ObjectId,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let dst_name: String = match object_type {
+            ObjectType::Table => Table::find_by_id(dst_object_id)
                 .select_only()
-                .column(table::Column::IncomingSinks)
+                .column(table::Column::Name)
                 .into_tuple()
                 .one(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-
-            objs.extend(
-                incoming_sinks
-                    .into_inner()
-                    .into_iter()
-                    .map(|id| PartialObject {
-                        oid: id,
-                        obj_type: ObjectType::Sink,
-                        schema_id: None,
-                        database_id: None,
-                    }),
-            );
-        }
-
-        for obj in objs {
-            match obj.obj_type {
-                ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
-                ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
-                ObjectType::Subscription => {
-                    rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
-                }
-                ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
-                ObjectType::Index => {
-                    let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
-                        .select_only()
-                        .column(index::Column::IndexTableId)
-                        .into_tuple()
-                        .one(&txn)
-                        .await?;
-                    rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
-                }
-                _ => {
-                    bail!("only table, sink, subscription, view and index depend on other objects.")
-                }
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Source => Source::find_by_id(dst_object_id)
+                .select_only()
+                .column(source::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Sink => Sink::find_by_id(dst_object_id)
+                .select_only()
+                .column(sink::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::View => View::find_by_id(dst_object_id)
+                .select_only()
+                .column(view::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            ObjectType::Subscription => Subscription::find_by_id(dst_object_id)
+                .select_only()
+                .column(subscription::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                })?,
+            _ => {
+                return Err(MetaError::permission_denied(format!(
+                    "swap rename not supported for object type: {:?}",
+                    object_type
+                )));
             }
-        }
+        };
+
+        // rename relations.
+        let (mut to_update_relations, src_name) =
+            rename_relation(&txn, object_type, object_id, &dst_name).await?;
+        let (to_update_relations2, _) =
+            rename_relation(&txn, object_type, dst_object_id, &src_name).await?;
+        to_update_relations.extend(to_update_relations2);
+        // rename referring relation name.
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, object_id, &dst_name, &src_name).await?,
+        );
+        to_update_relations.extend(
+            rename_relation_refer(&txn, object_type, dst_object_id, &src_name, &dst_name).await?,
+        );
+
         txn.commit().await?;
 
         let version = self
@@ -3450,13 +3493,7 @@ async fn update_internal_tables(
     new_value: Value,
     relations_to_notify: &mut Vec<PbRelationInfo>,
 ) -> MetaResult<()> {
-    let internal_tables: Vec<TableId> = Table::find()
-        .select_only()
-        .column(table::Column::TableId)
-        .filter(table::Column::BelongsToJobId.eq(object_id))
-        .into_tuple()
-        .all(txn)
-        .await?;
+    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -3481,6 +3518,8 @@ async fn update_internal_tables(
 
 #[cfg(test)]
 mod tests {
+
+    use risingwave_pb::catalog::StreamSourceInfo;
 
     use super::*;
 
@@ -3641,6 +3680,9 @@ mod tests {
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
                 .to_string(),
+            info: Some(StreamSourceInfo {
+                ..Default::default()
+            }),
             ..Default::default()
         };
         mgr.create_source(pb_source).await?;

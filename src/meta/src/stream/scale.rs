@@ -27,10 +27,10 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::{actor, fragment, ObjectId, StreamingParallelism, WorkerId};
+use risingwave_meta_model::{actor, fragment, ObjectId, StreamingParallelism, WorkerId};
 use risingwave_pb::common::{PbActorLocation, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -52,7 +52,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use crate::barrier::{Command, Reschedule};
 use crate::controller::scale::RescheduleWorkingSet;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableParallelism};
 use crate::serving::{
     to_deleted_fragment_worker_slot_mapping, to_fragment_worker_slot_mapping, ServingVnodeMapping,
 };
@@ -498,7 +498,7 @@ impl ScaleController {
             fragment_state: &mut HashMap<FragmentId, State>,
             fragment_to_table: &mut HashMap<FragmentId, TableId>,
             mgr: &MetadataManager,
-            fragment_ids: Vec<risingwave_meta_model_v2::FragmentId>,
+            fragment_ids: Vec<risingwave_meta_model::FragmentId>,
         ) -> Result<(), MetaError> {
             let RescheduleWorkingSet {
                 fragments,
@@ -513,7 +513,7 @@ impl ScaleController {
                 .await?;
 
             let mut fragment_actors: HashMap<
-                risingwave_meta_model_v2::FragmentId,
+                risingwave_meta_model::FragmentId,
                 Vec<CustomActorInfo>,
             > = HashMap::new();
 
@@ -850,7 +850,7 @@ impl ScaleController {
     /// - `reschedule_fragment`: the generated reschedule plan
     /// - `applied_reschedules`: the changes that need to be updated to the meta store (`pre_apply_reschedules`, only for V1).
     ///
-    /// In [normal process of scaling](`GlobalStreamManager::reschedule_actors_impl`), we use the returned values to
+    /// In [normal process of scaling](`GlobalStreamManager::reschedule_actors`), we use the returned values to
     /// build a [`Command::RescheduleFragment`], which will then flows through the barrier mechanism to perform scaling.
     /// Meta store is updated after the barrier is collected.
     ///
@@ -1291,12 +1291,6 @@ impl ScaleController {
 
         for (fragment_id, _) in reschedules {
             let mut actors_to_create: HashMap<_, Vec<_>> = HashMap::new();
-            let fragment_type_mask = ctx
-                .fragment_map
-                .get(&fragment_id)
-                .unwrap()
-                .fragment_type_mask;
-            let injectable = TableFragments::is_injectable(fragment_type_mask);
 
             if let Some(actor_worker_maps) = fragment_actors_to_create.get(&fragment_id).cloned() {
                 for (actor_id, worker_id) in actor_worker_maps {
@@ -1431,7 +1425,6 @@ impl ScaleController {
                     upstream_dispatcher_mapping,
                     downstream_fragment_ids,
                     actor_splits,
-                    injectable,
                     newly_created_actors: vec![],
                 },
             );
@@ -1843,7 +1836,7 @@ impl ScaleController {
         // index for fragment_id -> [actor_id]
         let mut fragment_actor_id_map = HashMap::new();
 
-        async fn build_index_v2(
+        async fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
             fragment_distribution_map: &mut HashMap<
@@ -1870,7 +1863,7 @@ impl ScaleController {
 
             for (fragment_id, downstreams) in fragment_downstreams {
                 for (downstream_fragment_id, dispatcher_type) in downstreams {
-                    if let risingwave_meta_model_v2::actor_dispatcher::DispatcherType::NoShuffle =
+                    if let risingwave_meta_model::actor_dispatcher::DispatcherType::NoShuffle =
                         dispatcher_type
                     {
                         no_shuffle_source_fragment_ids.insert(fragment_id as FragmentId);
@@ -1910,7 +1903,7 @@ impl ScaleController {
             .map(|id| *id as ObjectId)
             .collect();
 
-        build_index_v2(
+        build_index(
             &mut no_shuffle_source_fragment_ids,
             &mut no_shuffle_target_fragment_ids,
             &mut fragment_distribution_map,
@@ -2312,16 +2305,7 @@ impl GlobalStreamManager {
     ///     * automatic parallelism control for [`TableParallelism::Adaptive`] when worker nodes changed
     pub async fn reschedule_actors(
         &self,
-        reschedules: HashMap<FragmentId, WorkerReschedule>,
-        options: RescheduleOptions,
-        table_parallelism: Option<HashMap<TableId, TableParallelism>>,
-    ) -> MetaResult<()> {
-        self.reschedule_actors_impl(reschedules, options, table_parallelism)
-            .await
-    }
-
-    async fn reschedule_actors_impl(
-        &self,
+        database_id: DatabaseId,
         reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
         table_parallelism: Option<HashMap<TableId, TableParallelism>>,
@@ -2368,7 +2352,7 @@ impl GlobalStreamManager {
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
         self.barrier_scheduler
-            .run_config_change_command_with_pause(command)
+            .run_config_change_command_with_pause(database_id, command)
             .await?;
 
         tracing::info!("reschedule done");
@@ -2497,15 +2481,22 @@ impl GlobalStreamManager {
             return Ok(false);
         };
 
-        self.reschedule_actors(
-            reschedules,
-            RescheduleOptions {
-                resolve_no_shuffle_upstream: false,
-                skip_create_new_actors: false,
-            },
-            None,
-        )
-        .await?;
+        for (database_id, reschedules) in self
+            .metadata_manager
+            .split_fragment_map_by_database(reschedules)
+            .await?
+        {
+            self.reschedule_actors(
+                DatabaseId::new(database_id as _),
+                reschedules,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: false,
+                    skip_create_new_actors: false,
+                },
+                None,
+            )
+            .await?;
+        }
 
         Ok(true)
     }
