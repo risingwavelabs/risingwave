@@ -170,7 +170,7 @@ macro_rules! reset_mysql_sequence {
             sea_orm::DbBackend::Postgres => {
                 $db.execute(sea_orm::Statement::from_string(
                     sea_orm::DatabaseBackend::Postgres,
-                    format!("SELECT setval('{}_{}_seq', (SELECT MAX({}) FROM worker));", $table, stringify!($id_field), stringify!($id_field)),
+                    format!("SELECT setval('{}_{}_seq', (SELECT MAX({}) FROM {}));", $table, stringify!($id_field), stringify!($id_field), $table),
                 ))
                 .await
                 .map_err(map_db_err)?;
