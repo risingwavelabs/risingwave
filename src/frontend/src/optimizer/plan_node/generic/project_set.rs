@@ -75,18 +75,18 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
         fields.extend(self.select_list.iter().enumerate().map(|(idx, expr)| {
             let idx = idx + 1;
             // Get field info from o2i.
-            let (name, sub_fields) = match o2i.try_map(idx) {
+            let (name,) = match o2i.try_map(idx) {
                 Some(input_idx) => {
                     let field = input_schema.fields()[input_idx].clone();
-                    (field.name, field.sub_fields)
+                    (field.name,)
                 }
                 None => (
                     format!("{:?}", ExprDisplay { expr, input_schema }),
-                    vec![],
+                    // vec![],
                     // String::new(),
                 ),
             };
-            Field::with_struct(expr.return_type(), name, sub_fields, String::new())
+            Field::with_struct(expr.return_type(), name, vec![], String::new())
         }));
 
         Schema { fields }

@@ -187,7 +187,7 @@ impl LogicalSource {
                         &Field {
                             name: "filename".to_string(),
                             data_type: DataType::Varchar,
-                            sub_fields: vec![],
+                            // sub_fields: vec![],
                             // type_name: "".to_string(),
                         },
                         0,
@@ -199,7 +199,7 @@ impl LogicalSource {
                         &Field {
                             name: "last_edit_time".to_string(),
                             data_type: DataType::Timestamptz,
-                            sub_fields: vec![],
+                            // sub_fields: vec![],
                             // type_name: "".to_string(),
                         },
                         1,
@@ -211,7 +211,7 @@ impl LogicalSource {
                         &Field {
                             name: "file_size".to_string(),
                             data_type: DataType::Int64,
-                            sub_fields: vec![],
+                            // sub_fields: vec![],
                             // type_name: "".to_string(),
                         },
                         0,

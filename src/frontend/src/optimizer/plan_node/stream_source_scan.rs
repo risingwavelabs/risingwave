@@ -104,13 +104,13 @@ impl StreamSourceScan {
         let key = Field {
             data_type: DataType::Varchar,
             name: "partition_id".to_string(),
-            sub_fields: vec![],
+            // sub_fields: vec![],
             // type_name: "".to_string(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
             name: "backfill_progress".to_string(),
-            sub_fields: vec![],
+            // sub_fields: vec![],
             // type_name: "".to_string(),
         };
 

@@ -118,13 +118,13 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
     let key = Field {
         data_type: DataType::Int16,
         name: "vnode".to_string(),
-        sub_fields: vec![],
+        // sub_fields: vec![],
         // type_name: "".to_string(),
     };
     let value = Field {
         data_type: watermark_type,
         name: "offset".to_string(),
-        sub_fields: vec![],
+        // sub_fields: vec![],
         // type_name: "".to_string(),
     };
 
