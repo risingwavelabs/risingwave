@@ -129,14 +129,15 @@ impl Binder {
         for Assignment { id, value } in assignments {
             // FIXME: Parsing of `id` is not strict. It will even treat `a.b` as `(a, b)`.
             let assignments = match (id.as_slice(), value) {
+                // _ = (subquery)
+                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
+                    return Err(ErrorCode::BindError(
+                        "subquery on the right side of assignment is unsupported".to_owned(),
+                    ).into())
+                }
                 // col = expr
                 ([id], value) => {
                     vec![(id.clone(), value)]
-                }
-
-                // (col1, col2) = (subquery)
-                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
-                    bail_not_implemented!("subquery on the right side of multi-assignment");
                 }
                 // (col1, col2) = (expr1, expr2)
                 // TODO: support `DEFAULT` in multiple assignments
