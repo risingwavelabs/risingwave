@@ -198,7 +198,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
 
         check_valid_column_name(&name.real_value())?;
 
-        let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
+        let field_descs = if let AstDataType::Struct(fields) = &data_type {
             fields
                 .iter()
                 .map(bind_struct_field)

@@ -747,8 +747,8 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
-                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
+                                // ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                // ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
                             // type_name: ".test.Country".to_string(),
                             description: None,

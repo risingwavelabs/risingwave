@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
+// use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
     ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
@@ -959,30 +959,29 @@ impl Binder {
 }
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
-pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
-        defs.iter()
-            .map(|f| {
-                Ok(ColumnDesc::named(
-                    f.name.real_value(),
-                    ColumnId::new(0), // Literals don't have `column_id`.
-                    bind_data_type(&f.data_type)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
-    Ok(ColumnDesc {
+pub fn bind_struct_field(column_def: &StructField) -> Result<risingwave_common::catalog::Field> {
+    // let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
+    //     defs.iter()
+    //         .map(|f| {
+    //             Ok(risingwave_common::catalog::Field::with_name(
+    //                 bind_data_type(&f.data_type)?,
+    //                 f.name.real_value(),
+    //             ))
+    //         })
+    //         .collect::<Result<Vec<_>>>()?
+    // } else {
+    //     vec![]
+    // };
+    Ok(risingwave_common::catalog::Field {
         data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new(0),
+        // column_id: ColumnId::new(0),
         name: column_def.name.real_value(),
-        field_descs,
+        // field_descs,
         // type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-        additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::Pr13707,
+        // generated_or_default_column: None,
+        // description: None,
+        // additional_column: AdditionalColumn { column_type: None },
+        // version: ColumnDescVersion::Pr13707,
     })
 }
 
