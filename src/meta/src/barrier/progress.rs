@@ -18,7 +18,7 @@ use std::mem::take;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model_v2::ObjectId;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;

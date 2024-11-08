@@ -19,7 +19,7 @@ use risingwave_common::util::cluster_limit::{
 };
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta::MetaResult;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;

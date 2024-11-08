@@ -22,8 +22,8 @@ use risingwave_common::system_param::{
     check_missing_params, default, derive_missing_fields, set_system_param,
 };
 use risingwave_common::{for_all_params, key_of};
-use risingwave_meta_model_v2::prelude::SystemParameter;
-use risingwave_meta_model_v2::system_parameter;
+use risingwave_meta_model::prelude::SystemParameter;
+use risingwave_meta_model::system_parameter;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PbSystemParams;
 use sea_orm::ActiveValue::Set;

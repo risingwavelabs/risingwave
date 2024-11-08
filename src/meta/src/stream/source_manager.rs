@@ -29,7 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta_model_v2::SourceId;
+use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -752,7 +752,7 @@ impl SourceManager {
         })
     }
 
-    pub async fn drop_source_fragments_v2(
+    pub async fn drop_source_fragments(
         &self,
         source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
         removed_actors: HashSet<ActorId>,
@@ -762,7 +762,7 @@ impl SourceManager {
     }
 
     /// For dropping MV.
-    pub async fn drop_source_fragments(&self, table_fragments: &[TableFragments]) {
+    pub async fn drop_source_fragments_vec(&self, table_fragments: &[TableFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.

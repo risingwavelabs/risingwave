@@ -34,7 +34,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
 };
@@ -886,7 +886,7 @@ pub fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn refresh_fragment_info_metrics_v2(
+pub async fn refresh_fragment_info_metrics(
     catalog_controller: &CatalogControllerRef,
     cluster_controller: &ClusterControllerRef,
     hummock_manager: &HummockManagerRef,
@@ -1028,7 +1028,7 @@ pub fn start_fragment_info_monitor(
                 }
             }
 
-            refresh_fragment_info_metrics_v2(
+            refresh_fragment_info_metrics(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
                 &hummock_manager,

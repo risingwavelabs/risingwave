@@ -121,7 +121,7 @@ fn get_compaction_group_object_ids(
 }
 
 async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPinnedVersion> {
-    use risingwave_meta_model_v2::hummock_pinned_version;
+    use risingwave_meta_model::hummock_pinned_version;
     use sea_orm::EntityTrait;
     hummock_pinned_version::Entity::find()
         .all(&env.meta_store_ref().conn)
