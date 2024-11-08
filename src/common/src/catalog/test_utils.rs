@@ -41,7 +41,7 @@ impl ColumnDescTestExt for ColumnDesc {
         }
     }
 
-    fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self {
+    fn new_struct(name: &str, column_id: i32, _type_name: &str, fields: Vec<ColumnDesc>) -> Self {
         let field_type = fields
             .iter()
             .map(|f| f.column_type.as_ref().unwrap().clone())

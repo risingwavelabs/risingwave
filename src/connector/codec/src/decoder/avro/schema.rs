@@ -110,7 +110,7 @@ fn avro_field_to_column_desc(
     let data_type = avro_type_mapping(schema, map_handling)?;
     match schema {
         Schema::Record(RecordSchema {
-            name: schema_name,
+            name: _schema_name,
             fields,
             ..
         }) => {
@@ -124,7 +124,7 @@ fn avro_field_to_column_desc(
                 column_id: *index,
                 name: name.to_owned(),
                 field_descs: vec_column,
-                type_name: schema_name.to_string(),
+                // type_name: schema_name.to_string(),
                 generated_or_default_column: None,
                 description: None,
                 additional_column_type: 0, // deprecated

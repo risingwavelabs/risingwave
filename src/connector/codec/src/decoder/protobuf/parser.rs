@@ -60,7 +60,7 @@ fn pb_field_to_col_desc(
             name: field_descriptor.name().to_string(),
             column_type: Some(field_type.to_protobuf()),
             field_descs,
-            type_name: m.full_name().to_string(),
+            // type_name: m.full_name().to_string(),
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
