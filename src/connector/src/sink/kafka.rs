@@ -752,13 +752,13 @@ mod test {
                 data_type: DataType::Int32,
                 name: "id".into(),
                 sub_fields: vec![],
-                type_name: "".into(),
+                // type_name: "".into(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "v2".into(),
                 sub_fields: vec![],
-                type_name: "".into(),
+                // type_name: "".into(),
             },
         ]);
 

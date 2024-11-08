@@ -446,7 +446,7 @@ mod tests {
             data_type: DataType::Boolean,
             name: Default::default(),
             sub_fields: Default::default(),
-            type_name: Default::default(),
+            // type_name: Default::default(),
         };
 
         let config = JsonEncoderConfig {
@@ -725,7 +725,7 @@ mod tests {
             data_type: DataType::Boolean,
             name: Default::default(),
             sub_fields: Default::default(),
-            type_name: Default::default(),
+            // type_name: Default::default(),
         };
         let fields = vec![
             Field {
