@@ -44,6 +44,10 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
     }
 }
 
+/// The split will follow the following rules:
+/// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
+/// 2. Currently only `vnode` 0 and `vnode` max is supported.
+/// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 pub mod group_split {
     use std::cmp::Ordering;
     use std::collections::BTreeSet;
@@ -60,11 +64,6 @@ pub mod group_split {
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
     use crate::{can_concat, HummockEpoch, KeyComparator};
-
-    /// The split will follow the following rules:
-    /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
-    /// 2. Currently only `vnode` 0 and `vnode` max is supported.
-    /// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 
     // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {

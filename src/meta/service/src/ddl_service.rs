@@ -23,14 +23,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
-use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_pb::catalog::connection::private_link_service::{
-    PbPrivateLinkProvider, PrivateLinkProvider,
-};
-use risingwave_pb::catalog::connection::PbPrivateLinkService;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -44,12 +38,11 @@ use tonic::{Request, Response, Status};
 use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{
     DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
-use crate::{MetaError, MetaResult};
+use crate::MetaError;
 
 #[derive(Clone)]
 pub struct DdlServiceImpl {
@@ -58,7 +51,6 @@ pub struct DdlServiceImpl {
     metadata_manager: MetadataManager,
     sink_manager: SinkCoordinatorManager,
     ddl_controller: DdlController,
-    aws_client: Arc<Option<AwsEc2Client>>,
     meta_metrics: Arc<MetaMetrics>,
 }
 
@@ -66,7 +58,6 @@ impl DdlServiceImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         env: MetaSrvEnv,
-        aws_client: Option<AwsEc2Client>,
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
@@ -74,47 +65,45 @@ impl DdlServiceImpl {
         sink_manager: SinkCoordinatorManager,
         meta_metrics: Arc<MetaMetrics>,
     ) -> Self {
-        let aws_cli_ref = Arc::new(aws_client);
         let ddl_controller = DdlController::new(
             env.clone(),
             metadata_manager.clone(),
             stream_manager,
             source_manager,
             barrier_manager,
-            aws_cli_ref.clone(),
         )
         .await;
         Self {
             env,
             metadata_manager,
-            ddl_controller,
-            aws_client: aws_cli_ref,
             sink_manager,
+            ddl_controller,
             meta_metrics,
         }
     }
 
-    fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
-        let job_type = change.get_job_type().unwrap_or_default();
-        let mut source = change.source;
-        let mut fragment_graph = change.fragment_graph.unwrap();
-        let mut table = change.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            source.as_mut().unwrap().id = source_id;
-            fill_table_stream_graph_info(&mut source, &mut table, job_type, &mut fragment_graph);
-        }
-        let table_col_index_mapping = change
-            .table_col_index_mapping
+    fn extract_replace_table_info(
+        ReplaceTablePlan {
+            table,
+            fragment_graph,
+            table_col_index_mapping,
+            source,
+            job_type,
+        }: ReplaceTablePlan,
+    ) -> ReplaceTableInfo {
+        let table = table.unwrap();
+        let col_index_mapping = table_col_index_mapping
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
-        let stream_job = StreamingJob::Table(source, table, job_type);
         ReplaceTableInfo {
-            streaming_job: stream_job,
-            fragment_graph,
-            col_index_mapping: table_col_index_mapping,
+            streaming_job: StreamingJob::Table(
+                source,
+                table,
+                TableJobType::try_from(job_type).unwrap(),
+            ),
+            fragment_graph: fragment_graph.unwrap(),
+            col_index_mapping,
         }
     }
 }
@@ -231,11 +220,6 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let source = req.get_source()?.clone();
 
-        // validate connection before starting the DDL procedure
-        if let Some(connection_id) = source.connection_id {
-            self.validate_connection(connection_id).await?;
-        }
-
         match req.fragment_graph {
             None => {
                 let version = self
@@ -296,11 +280,6 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let affected_table_change = req.get_affected_table_change().cloned().ok();
-
-        // validate connection before starting the DDL procedure
-        if let Some(connection_id) = sink.connection_id {
-            self.validate_connection(connection_id).await?;
-        }
 
         let stream_job = match &affected_table_change {
             None => StreamingJob::Sink(sink, None),
@@ -748,63 +727,10 @@ impl DdlService for DdlServiceImpl {
         }
 
         match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(link) => {
-                // currently we only support AWS
-                let private_link_svc = match link.get_provider()? {
-                    PbPrivateLinkProvider::Mock => PbPrivateLinkService {
-                        provider: link.provider,
-                        service_name: String::new(),
-                        endpoint_id: String::new(),
-                        endpoint_dns_name: String::new(),
-                        dns_entries: HashMap::new(),
-                    },
-                    PbPrivateLinkProvider::Aws => {
-                        if let Some(aws_cli) = self.aws_client.as_ref() {
-                            let tags_env = self
-                                .env
-                                .opts
-                                .privatelink_endpoint_default_tags
-                                .as_ref()
-                                .map(|tags| {
-                                    tags.iter()
-                                        .map(|(key, val)| (key.as_str(), val.as_str()))
-                                        .collect()
-                                });
-                            aws_cli
-                                .create_aws_private_link(
-                                    &link.service_name,
-                                    link.tags.as_deref(),
-                                    tags_env,
-                                )
-                                .await?
-                        } else {
-                            return Err(Status::from(MetaError::unavailable(
-                                "AWS client is not configured",
-                            )));
-                        }
-                    }
-                    PbPrivateLinkProvider::Unspecified => {
-                        return Err(Status::invalid_argument("Privatelink provider unspecified"));
-                    }
-                };
-                let connection = Connection {
-                    id: 0,
-                    schema_id: req.schema_id,
-                    database_id: req.database_id,
-                    name: req.name,
-                    owner: req.owner_id,
-                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
-                };
-
-                // save private link info to catalog
-                let version = self
-                    .ddl_controller
-                    .run_command(DdlCommand::CreateConnection(connection))
-                    .await?;
-
-                Ok(Response::new(CreateConnectionResponse { version }))
+            create_connection_request::Payload::PrivateLink(_) => {
+                panic!("Private Link Connection has been deprecated")
             }
-        }
+        };
     }
 
     async fn list_connections(
@@ -1086,32 +1012,22 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }
-}
 
-impl DdlServiceImpl {
-    async fn validate_connection(&self, connection_id: u32) -> MetaResult<()> {
-        let connection = self
-            .metadata_manager
-            .catalog_controller
-            .get_connection_by_id(connection_id as _)
+    async fn alter_swap_rename(
+        &self,
+        request: Request<AlterSwapRenameRequest>,
+    ) -> Result<Response<AlterSwapRenameResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSwapRename(req.object.unwrap()))
             .await?;
-        if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
-            // skip all checks for mock connection
-            if svc.get_provider()? == PrivateLinkProvider::Mock {
-                return Ok(());
-            }
 
-            // check whether private link is ready
-            if let Some(aws_cli) = self.aws_client.as_ref() {
-                if !aws_cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
-                    return Err(MetaError::from(anyhow!(
-                        "Private link endpoint {} is not ready",
-                        svc.endpoint_id
-                    )));
-                }
-            }
-        }
-        Ok(())
+        Ok(Response::new(AlterSwapRenameResponse {
+            status: None,
+            version,
+        }))
     }
 }
 

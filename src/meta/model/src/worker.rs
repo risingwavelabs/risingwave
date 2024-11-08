@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::{TransactionId, WorkerId};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum WorkerType {
     #[sea_orm(string_value = "FRONTEND")]
     Frontend,
@@ -61,7 +61,7 @@ impl From<WorkerType> for PbWorkerType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum WorkerStatus {
     #[sea_orm(string_value = "STARTING")]
     Starting,

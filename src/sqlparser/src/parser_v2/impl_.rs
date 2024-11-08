@@ -26,7 +26,7 @@ impl<'a> Offset<CheckpointWrapper<'a>> for CheckpointWrapper<'a> {
 }
 
 // Used for diagnostics with `--features winnow/debug`.
-impl<'a> std::fmt::Debug for Parser<'a> {
+impl std::fmt::Debug for Parser<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(token) = self.0.first() {
             write!(f, "{}", token.token)?;
@@ -52,7 +52,7 @@ impl<'a> Offset<CheckpointWrapper<'a>> for Parser<'a> {
     }
 }
 
-impl<'a> SliceLen for Parser<'a> {
+impl SliceLen for Parser<'_> {
     #[inline(always)]
     fn slice_len(&self) -> usize {
         self.0.len()
@@ -135,7 +135,7 @@ impl<'a> Stream for Parser<'a> {
     }
 }
 
-impl<'a> UpdateSlice for Parser<'a> {
+impl UpdateSlice for Parser<'_> {
     #[inline(always)]
     fn update_slice(self, inner: Self::Slice) -> Self {
         Parser(self.0.update_slice(inner.0))

@@ -31,6 +31,7 @@ impl MergeExecutorBuilder {
         actor_context: ActorContextRef,
         info: ExecutorInfo,
         node: &MergeNode,
+        chunk_size: usize,
     ) -> StreamResult<MergeExecutorInput> {
         let upstreams = node.get_upstream_actor_id();
         let upstream_fragment_id = node.get_upstream_fragment_id();
@@ -76,6 +77,7 @@ impl MergeExecutorBuilder {
             shared_context,
             executor_stats,
             info,
+            chunk_size,
         ))
     }
 }
@@ -98,6 +100,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             params.actor_context,
             params.info,
             node,
+            params.env.config().developer.chunk_size,
         )?
         .into_executor(barrier_rx))
     }

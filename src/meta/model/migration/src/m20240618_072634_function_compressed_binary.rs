@@ -1,6 +1,7 @@
 use sea_orm_migration::prelude::*;
 
 use crate::sea_orm::{DatabaseBackend, DbBackend, Statement};
+use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -19,7 +20,7 @@ impl MigrationTrait for Migration {
                         Table::alter()
                             .table(Function::Table)
                             .modify_column(
-                                ColumnDef::new(Function::CompressedBinary).blob(BlobSize::Medium),
+                                ColumnDef::new(Function::CompressedBinary).rw_binary(manager),
                             )
                             .to_owned(),
                     )

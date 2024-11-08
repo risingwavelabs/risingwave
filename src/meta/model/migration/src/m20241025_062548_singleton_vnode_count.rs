@@ -6,14 +6,21 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        // Hack for unifying the test for different backends.
+        let json_is_empty_array = |col| {
+            Expr::col(col)
+                .cast_as(Alias::new("char(2)"))
+                .eq(Expr::value("[]"))
+        };
+
         // Fill vnode count with 1 for singleton tables.
         manager
             .exec_stmt(
                 UpdateStatement::new()
                     .table(Table::Table)
                     .values([(Table::VnodeCount, Expr::value(1))])
-                    .and_where(Expr::col(Table::DistributionKey).eq(Expr::value("[]")))
-                    .and_where(Expr::col(Table::DistKeyInPk).eq(Expr::value("[]")))
+                    .and_where(json_is_empty_array(Table::DistributionKey))
+                    .and_where(json_is_empty_array(Table::DistKeyInPk))
                     .and_where(Expr::col(Table::VnodeColIndex).is_null())
                     .to_owned(),
             )

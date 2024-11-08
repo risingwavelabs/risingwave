@@ -172,7 +172,7 @@ impl<'a, T: Ord> PeekMutGuard<'a, T> {
     }
 }
 
-impl<'a, T: Ord> Deref for PeekMutGuard<'a, T> {
+impl<T: Ord> Deref for PeekMutGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -180,13 +180,13 @@ impl<'a, T: Ord> Deref for PeekMutGuard<'a, T> {
     }
 }
 
-impl<'a, T: Ord> DerefMut for PeekMutGuard<'a, T> {
+impl<T: Ord> DerefMut for PeekMutGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.peek.as_mut().expect("should not be None")
     }
 }
 
-impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
+impl<T: Ord> Drop for PeekMutGuard<'_, T> {
     /// When the guard is dropped, if `pop` or `used` is not called before it is dropped, we will
     /// call `PeekMut::pop` on the `PeekMut` and recycle the node to the unused list.
     fn drop(&mut self) {

@@ -118,7 +118,7 @@ pub struct SliceGuard<'env, 'array> {
     slice: &'array [u8],
 }
 
-impl<'env, 'array> Deref for SliceGuard<'env, 'array> {
+impl Deref for SliceGuard<'_, '_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -132,7 +132,7 @@ pub struct Pointer<'a, T> {
     _phantom: PhantomData<&'a T>,
 }
 
-impl<'a, T> Default for Pointer<'a, T> {
+impl<T> Default for Pointer<'_, T> {
     fn default() -> Self {
         Self {
             pointer: 0,
@@ -187,7 +187,7 @@ impl<'a> Deref for EnvParam<'a> {
     }
 }
 
-impl<'a> DerefMut for EnvParam<'a> {
+impl DerefMut for EnvParam<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.env
     }
@@ -306,7 +306,7 @@ impl JavaBindingIterator<'static> {
     }
 }
 
-impl<'a> Deref for JavaBindingIterator<'a> {
+impl Deref for JavaBindingIterator<'_> {
     type Target = OwnedRow;
 
     fn deref(&self) -> &Self::Target {

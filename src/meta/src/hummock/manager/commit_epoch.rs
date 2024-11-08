@@ -16,9 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, to_prost_table_stats_map, PbTableStatsMap,
@@ -43,19 +43,13 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
+use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
 use crate::hummock::{
-    commit_multi_var, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
-    HummockManager,
+    commit_multi_var_with_provided_txn, start_measure_real_process_timer, HummockManager,
 };
 
-pub enum NewTableFragmentInfo {
-    Normal {
-        mv_table_id: Option<TableId>,
-        internal_table_ids: Vec<TableId>,
-    },
-    NewCompactionGroup {
-        table_ids: HashSet<TableId>,
-    },
+pub struct NewTableFragmentInfo {
+    pub table_ids: HashSet<TableId>,
 }
 
 #[derive(Default)]
@@ -108,13 +102,6 @@ impl HummockManager {
             );
         }
 
-        let previous_time_travel_toggle_check = versioning.time_travel_toggle_check;
-        versioning.time_travel_toggle_check = self.time_travel_enabled().await;
-        if !previous_time_travel_toggle_check && versioning.time_travel_toggle_check {
-            // Take a snapshot for the first commit epoch after enabling time travel.
-            versioning.mark_next_time_travel_version_snapshot();
-        }
-
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
@@ -130,73 +117,48 @@ impl HummockManager {
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
         // Add new table
-        for new_table_fragment_info in new_table_fragment_infos {
-            match new_table_fragment_info {
-                NewTableFragmentInfo::Normal {
-                    mv_table_id,
-                    internal_table_ids,
-                } => {
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &internal_table_ids,
-                        StaticCompactionGroupId::StateDefault as u64,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
+        for NewTableFragmentInfo { table_ids } in new_table_fragment_infos {
+            let (compaction_group_manager, compaction_group_config) =
+                if let Some(compaction_group_manager) = &mut compaction_group_manager_txn {
+                    (
+                        compaction_group_manager,
+                        (*compaction_group_config
+                            .as_ref()
+                            .expect("must be set with compaction_group_manager_txn"))
+                        .clone(),
+                    )
+                } else {
+                    let compaction_group_manager_guard =
+                        self.compaction_group_manager.write().await;
+                    let new_compaction_group_config =
+                        compaction_group_manager_guard.default_compaction_config();
+                    compaction_group_config = Some(new_compaction_group_config.clone());
+                    (
+                        compaction_group_manager_txn.insert(
+                            CompactionGroupManager::start_owned_compaction_groups_txn(
+                                compaction_group_manager_guard,
+                            ),
+                        ),
+                        new_compaction_group_config,
+                    )
+                };
+            let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
+            new_compaction_groups.insert(new_compaction_group_id, compaction_group_config.clone());
+            compaction_group_manager.insert(
+                new_compaction_group_id,
+                CompactionGroup {
+                    group_id: new_compaction_group_id,
+                    compaction_config: compaction_group_config,
+                },
+            );
 
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &mv_table_id,
-                        StaticCompactionGroupId::MaterializedView as u64,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
-                }
-                NewTableFragmentInfo::NewCompactionGroup { table_ids } => {
-                    let (compaction_group_manager, compaction_group_config) =
-                        if let Some(compaction_group_manager) = &mut compaction_group_manager_txn {
-                            (
-                                compaction_group_manager,
-                                (*compaction_group_config
-                                    .as_ref()
-                                    .expect("must be set with compaction_group_manager_txn"))
-                                .clone(),
-                            )
-                        } else {
-                            let compaction_group_manager_guard =
-                                self.compaction_group_manager.write().await;
-                            let new_compaction_group_config =
-                                compaction_group_manager_guard.default_compaction_config();
-                            compaction_group_config = Some(new_compaction_group_config.clone());
-                            (
-                                compaction_group_manager_txn.insert(
-                                    CompactionGroupManager::start_owned_compaction_groups_txn(
-                                        compaction_group_manager_guard,
-                                    ),
-                                ),
-                                new_compaction_group_config,
-                            )
-                        };
-                    let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-                    new_compaction_groups
-                        .insert(new_compaction_group_id, compaction_group_config.clone());
-                    compaction_group_manager.insert(
-                        new_compaction_group_id,
-                        CompactionGroup {
-                            group_id: new_compaction_group_id,
-                            compaction_config: compaction_group_config,
-                        },
-                    );
-
-                    on_handle_add_new_table(
-                        state_table_info,
-                        &table_ids,
-                        new_compaction_group_id,
-                        &mut table_compaction_group_mapping,
-                        &mut new_table_ids,
-                    )?;
-                }
-            }
+            on_handle_add_new_table(
+                state_table_info,
+                &table_ids,
+                new_compaction_group_id,
+                &mut table_compaction_group_mapping,
+                &mut new_table_ids,
+            )?;
         }
 
         let commit_sstables = self
@@ -213,6 +175,10 @@ impl HummockManager {
             new_table_watermarks,
             change_log_delta,
         );
+        if should_mark_next_time_travel_version_snapshot(&time_travel_delta) {
+            // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.
+            versioning.time_travel_snapshot_interval_counter = u64::MAX;
+        }
 
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
@@ -246,59 +212,50 @@ impl HummockManager {
             );
             table_metrics.inc_write_throughput(stats_value as u64);
         }
-        if versioning.time_travel_toggle_check {
-            let mut time_travel_version = None;
-            if versioning.time_travel_snapshot_interval_counter
-                >= self.env.opts.hummock_time_travel_snapshot_interval
-            {
-                versioning.time_travel_snapshot_interval_counter = 0;
-                time_travel_version = Some(version.latest_version());
-            } else {
-                versioning.time_travel_snapshot_interval_counter = versioning
-                    .time_travel_snapshot_interval_counter
-                    .saturating_add(1);
-            }
-            let group_parents = version
-                .latest_version()
-                .levels
-                .values()
-                .map(|g| (g.group_id, g.parent_group_id))
-                .collect();
-            let time_travel_tables_to_commit =
-                table_compaction_group_mapping
-                    .iter()
-                    .filter_map(|(table_id, cg_id)| {
-                        tables_to_commit
-                            .get(table_id)
-                            .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
-                    });
-            let mut txn = self.env.meta_store_ref().conn.begin().await?;
-            let version_snapshot_sst_ids = self
-                .write_time_travel_metadata(
-                    &txn,
-                    time_travel_version,
-                    time_travel_delta,
-                    &group_parents,
-                    &versioning.last_time_travel_snapshot_sst_ids,
-                    time_travel_tables_to_commit,
-                )
-                .await?;
-            commit_multi_var_with_provided_txn!(
-                txn,
-                version,
-                version_stats,
-                compaction_group_manager_txn
-            )?;
-            if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
-                versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
-            }
+        let mut time_travel_version = None;
+        if versioning.time_travel_snapshot_interval_counter
+            >= self.env.opts.hummock_time_travel_snapshot_interval
+        {
+            versioning.time_travel_snapshot_interval_counter = 0;
+            time_travel_version = Some(version.latest_version());
         } else {
-            commit_multi_var!(
-                self.meta_store_ref(),
-                version,
-                version_stats,
-                compaction_group_manager_txn
-            )?;
+            versioning.time_travel_snapshot_interval_counter = versioning
+                .time_travel_snapshot_interval_counter
+                .saturating_add(1);
+        }
+        let group_parents = version
+            .latest_version()
+            .levels
+            .values()
+            .map(|g| (g.group_id, g.parent_group_id))
+            .collect();
+        let time_travel_tables_to_commit =
+            table_compaction_group_mapping
+                .iter()
+                .filter_map(|(table_id, cg_id)| {
+                    tables_to_commit
+                        .get(table_id)
+                        .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
+                });
+        let mut txn = self.env.meta_store_ref().conn.begin().await?;
+        let version_snapshot_sst_ids = self
+            .write_time_travel_metadata(
+                &txn,
+                time_travel_version,
+                time_travel_delta,
+                &group_parents,
+                &versioning.last_time_travel_snapshot_sst_ids,
+                time_travel_tables_to_commit,
+            )
+            .await?;
+        commit_multi_var_with_provided_txn!(
+            txn,
+            version,
+            version_stats,
+            compaction_group_manager_txn
+        )?;
+        if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
+            versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
         }
 
         for compaction_group_id in &modified_compaction_groups {
@@ -319,7 +276,8 @@ impl HummockManager {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
             }
             if !table_stats_change.is_empty() {
-                self.collect_table_write_throughput(table_stats_change);
+                self.collect_table_write_throughput(table_stats_change)
+                    .await;
             }
         }
         if !modified_compaction_groups.is_empty() {
@@ -333,13 +291,30 @@ impl HummockManager {
         Ok(())
     }
 
-    fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+    async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+        let params = self.env.system_params_reader().await;
+        let barrier_interval_ms = params.barrier_interval_ms() as u64;
+        let checkpoint_secs = {
+            std::cmp::max(
+                1,
+                params.checkpoint_frequency() * barrier_interval_ms / 1000,
+            )
+        };
+
         let mut table_infos = self.history_table_throughput.write();
+        let max_table_stat_throuput_window_seconds = std::cmp::max(
+            self.env.opts.table_stat_throuput_window_seconds_for_split,
+            self.env.opts.table_stat_throuput_window_seconds_for_merge,
+        );
+
+        let max_sample_size = (max_table_stat_throuput_window_seconds as f64
+            / checkpoint_secs as f64)
+            .ceil() as usize;
         for (table_id, stat) in table_stats {
             let throughput = (stat.total_value_size + stat.total_key_size) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(throughput);
-            if entry.len() > self.env.opts.table_info_statistic_history_times {
+            if entry.len() > max_sample_size {
                 entry.pop_front();
             }
         }

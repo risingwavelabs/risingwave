@@ -49,6 +49,7 @@ pub trait SinkFormatter {
     ///   For example append-only without `primary_key` (aka `downstream_pk`) set.
     /// * Value may be None so that messages with same key are removed during log compaction.
     ///   For example debezium tombstone event.
+    #[expect(clippy::type_complexity)]
     fn format_chunk(
         &self,
         chunk: &StreamChunk,

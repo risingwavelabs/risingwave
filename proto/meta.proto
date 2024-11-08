@@ -156,7 +156,7 @@ message MigrationPlan {
 }
 
 message FlushRequest {
-  bool checkpoint = 1;
+  uint32 database_id = 1;
 }
 
 message FlushResponse {
