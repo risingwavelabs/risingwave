@@ -122,18 +122,25 @@ async fn test_vnode_watermark_reclaim_impl(
         .parse::<u64>()
         .unwrap();
 
-    // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
-    cluster.split_compaction_group(2, table_id).await.unwrap();
     tokio::time::sleep(Duration::from_secs(5)).await;
-    let compaction_group_id = session
-        .run(format!(
-            "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
-            table_id
-        ))
+    async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -> u64 {
+        session
+            .run(format!(
+                "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
+                table_id
+            ))
+            .await
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+    }
+    let original_compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
+    // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
+    cluster
+        .split_compaction_group(original_compaction_group_id, table_id)
         .await
-        .unwrap()
-        .parse::<u64>()
         .unwrap();
+    let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
 
     session
         .run("INSERT INTO t2 VALUES (now(), 1);")

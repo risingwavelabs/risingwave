@@ -95,6 +95,8 @@ message StreamSourceInfo {
 }
 
 message Source {
+  // For shared source, this is the same as the job id.
+  // For non-shared source and table with connector, this is a different oid.
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
