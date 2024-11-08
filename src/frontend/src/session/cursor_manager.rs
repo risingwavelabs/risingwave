@@ -682,7 +682,7 @@ impl SubscriptionCursor {
                 subscription_from_table_name,
                 pks,
                 seek_pk_row,
-            )));
+            )?));
             gen_batch_plan_by_statement(&session, context.into(), query_stmt)
         }
     }

@@ -239,7 +239,7 @@ pub fn gen_query_from_table_name_order_by(
     from_name: ObjectName,
     pks: Vec<(String, bool)>,
     seek_pk_rows: Option<Vec<Option<Bytes>>>,
-) -> Query {
+) -> RwResult<Query> {
     let select_pks = pks
         .iter()
         .filter_map(
@@ -278,7 +278,12 @@ pub fn gen_query_from_table_name_order_by(
                     '"',
                     name.clone(),
                 )));
-                values.push(String::from_utf8(seek_pk.clone().into()).unwrap());
+                values.push(String::from_utf8(seek_pk.clone().into()).map_err(|e| {
+                    ErrorCode::InternalError(format!(
+                        "Convert cursor seek_pk to string error: {:?}",
+                        e.as_report()
+                    ))
+                })?);
             }
         }
         if pk_rows.is_empty() {
@@ -323,14 +328,14 @@ pub fn gen_query_from_table_name_order_by(
             }
         })
         .collect();
-    Query {
+    Ok(Query {
         with: None,
         body,
         order_by,
         limit: None,
         offset: None,
         fetch: None,
-    }
+    })
 }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {

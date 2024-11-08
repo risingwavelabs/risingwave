@@ -381,7 +381,7 @@ impl StructValue {
         for (str, ty) in split_str.iter().zip_eq_debug(ty.types()) {
             let datum = match str.trim() {
                 "" => None,
-                s => Some(ScalarImpl::from_text(s, ty).unwrap()),
+                s => Some(ScalarImpl::from_text(s, ty)?),
             };
             fields.push(datum);
         }
