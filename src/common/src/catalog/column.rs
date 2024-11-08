@@ -195,7 +195,7 @@ impl ColumnDesc {
                 .into_iter()
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
-            type_name: self.type_name.clone(),
+            // type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
             additional_column_type: 0, // deprecated
@@ -308,7 +308,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             data_type: DataType::from(prost.column_type.as_ref().unwrap()),
             column_id: ColumnId::new(prost.column_id),
             name: prost.name,
-            type_name: prost.type_name,
+            type_name: String::new(), // prost.type_name,
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
@@ -331,7 +331,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             column_id: c.column_id.into(),
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
-            type_name: c.type_name.clone(),
+            // type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
             additional_column_type: 0, // deprecated

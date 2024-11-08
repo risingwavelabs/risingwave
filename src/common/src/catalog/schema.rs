@@ -81,7 +81,7 @@ impl From<&PbColumnDesc> for Field {
             data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
             name: pb_column_desc.name.clone(),
             sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
-            type_name: pb_column_desc.type_name.clone(),
+            type_name: String::new(), // pb_column_desc.type_name.clone(),
         }
     }
 }
