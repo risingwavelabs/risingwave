@@ -132,14 +132,11 @@ impl ExprRewritable for LogicalIcebergScan {}
 impl ExprVisitable for LogicalIcebergScan {}
 
 impl PredicatePushdown for LogicalIcebergScan {
-    /// NOTE(kwannoel):
-    /// 1. We expect it to be constant folded
-    /// 2. We don't convert `inputRefs` of type boolean directly to `IcebergPredicates`.
-    /// 3. The leaf nodes are always logical comparison operators:
-    ///    `Equal`, `NotEqual`, `GreaterThan`,
-    ///    `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`.
-    /// 4. For leaf nodes, their LHS is always an `inputRef`
-    ///    and their RHS is always a `Literal` to be compatible with Iceberg.
+    /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
+    /// Currently we depend on third-party tools to compact iceberg tables and provide zone-map.
+    /// zone-map is used to evaluate predicates on iceberg tables.
+    /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
+    /// See: https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235.
     fn predicate_pushdown(
         &self,
         predicate: Condition,
