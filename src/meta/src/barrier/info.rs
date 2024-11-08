@@ -21,7 +21,7 @@ use tracing::warn;
 
 use crate::barrier::{BarrierKind, Command, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::model::{ActorId, FragmentId};
+use crate::model::{ActorId, FragmentId, SubscriptionId};
 
 #[derive(Debug, Clone)]
 pub(super) struct BarrierInfo {
@@ -49,7 +49,7 @@ pub(crate) enum CommandFragmentChanges {
 #[derive(Default, Clone, Debug)]
 pub struct InflightSubscriptionInfo {
     /// `mv_table_id` => `subscription_id` => retention seconds
-    pub mv_depended_subscriptions: HashMap<TableId, HashMap<u32, u64>>,
+    pub mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
 }
 
 #[derive(Clone, Debug)]

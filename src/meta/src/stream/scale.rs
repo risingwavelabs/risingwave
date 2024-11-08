@@ -2487,7 +2487,7 @@ impl GlobalStreamManager {
             .await?
         {
             self.reschedule_actors(
-                DatabaseId::new(database_id as _),
+                database_id,
                 reschedules,
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: false,

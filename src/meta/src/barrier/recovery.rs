@@ -34,9 +34,10 @@ use tracing::{debug, info, warn, Instrument};
 
 use super::{
     BarrierWorkerRuntimeInfoSnapshot, CheckpointControl, DatabaseCheckpointControl,
-    GlobalBarrierWorker, GlobalBarrierWorkerContext, RecoveryReason, TracedEpoch,
+    GlobalBarrierWorker, GlobalBarrierWorkerContext, InflightSubscriptionInfo, RecoveryReason,
+    TracedEpoch,
 };
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -242,7 +243,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .into_iter()
                         .map(|(database_id, mv_depended_subscriptions)| {
                             (
-                                DatabaseId::new(database_id as _),
+                                database_id,
                                 InflightSubscriptionInfo {
                                     mv_depended_subscriptions,
                                 },

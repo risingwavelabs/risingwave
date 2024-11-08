@@ -2905,9 +2905,7 @@ impl CatalogController {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<
-        HashMap<DatabaseId, HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>>,
-    > {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
         let inner = self.inner.read().await;
         let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
             Subscription::find()
@@ -2927,11 +2925,9 @@ impl CatalogController {
         {
             map.entry(database_id)
                 .or_default()
-                .entry(risingwave_common::catalog::TableId::new(
-                    dependent_table_id as _,
-                ))
+                .entry(dependent_table_id)
                 .or_default()
-                .insert(subscription_id as u32, retention_seconds as _);
+                .insert(subscription_id, retention_seconds as _);
         }
         Ok(map)
     }

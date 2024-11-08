@@ -903,6 +903,7 @@ enum CompletingTask {
     None,
     Completing {
         #[expect(clippy::type_complexity)]
+        /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
         epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
 
         // The join handle of a spawned task that completes the barrier.
@@ -1599,6 +1600,7 @@ impl CompleteBarrierTask {
 
 struct BarrierCompleteOutput {
     #[expect(clippy::type_complexity)]
+    /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
     epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
     hummock_version_stats: HummockVersionStats,
 }

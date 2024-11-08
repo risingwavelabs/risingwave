@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
-use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, WorkerId};
+use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -37,7 +37,9 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{ActorId, ClusterId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{
+    ActorId, ClusterId, FragmentId, SubscriptionId, TableFragments, TableParallelism,
+};
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -327,7 +329,7 @@ impl MetadataManager {
             .list_fragment_database_ids(None)
             .await?
             .into_iter()
-            .map(|(_, database_id)| database_id)
+            .map(|(_, database_id)| DatabaseId::new(database_id as _))
             .collect())
     }
 
@@ -346,7 +348,7 @@ impl MetadataManager {
             .await?
             .into_iter()
             .map(|(fragment_id, database_id)| {
-                (fragment_id as FragmentId, database_id as DatabaseId)
+                (fragment_id as FragmentId, DatabaseId::new(database_id as _))
             })
             .collect();
         let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
@@ -681,10 +683,32 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<u32, u64>>>> {
-        self.catalog_controller
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        Ok(self
+            .catalog_controller
             .get_mv_depended_subscriptions()
-            .await
+            .await?
+            .into_iter()
+            .map(|(database_id, mv_depended_subscriptions)| {
+                (
+                    DatabaseId::new(database_id as _),
+                    mv_depended_subscriptions
+                        .into_iter()
+                        .map(|(table_id, subscriptions)| {
+                            (
+                                TableId::new(table_id as _),
+                                subscriptions
+                                    .into_iter()
+                                    .map(|(subscription_id, retention_time)| {
+                                        (subscription_id as SubscriptionId, retention_time)
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect())
     }
 
     pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
