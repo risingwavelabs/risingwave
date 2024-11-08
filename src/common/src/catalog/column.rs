@@ -260,11 +260,11 @@ impl ColumnDesc {
             data_type: field.data_type.clone(),
             column_id: ColumnId::new(id),
             name: field.name.clone(),
-            field_descs: field
-                .sub_fields
-                .iter()
-                .map(Self::from_field_without_column_id)
-                .collect_vec(),
+            field_descs: vec![],
+            //     .sub_fields
+            //     .iter()
+            //     .map(Self::from_field_without_column_id)
+            //     .collect_vec(),
             // type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
