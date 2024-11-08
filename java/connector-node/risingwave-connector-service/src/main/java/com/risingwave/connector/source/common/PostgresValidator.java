@@ -553,8 +553,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 return val == Data.DataType.TypeName.INT64_VALUE;
             case "float":
             case "real":
-                return val == Data.DataType.TypeName.FLOAT_VALUE
-                        || val == Data.DataType.TypeName.DOUBLE_VALUE;
+                return val == Data.DataType.TypeName.FLOAT_VALUE;
             case "boolean":
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
             case "double":
