@@ -5,7 +5,15 @@ system ok
 mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
 system ok
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS kdb; CREATE DATABASE kdb;"
+
+system ok
 mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
+
+system ok
+mysql --protocol=tcp -u root kdb -e " CREATE TABLE kt1 (id int primary key, v1 varchar(32));
+                                      INSERT INTO kt1 VALUES (1,'aaa'),(2,'bbb');
+"
 
 # generate data to mysql
 system ok
@@ -27,6 +35,7 @@ create source mysql_mytest with (
  database.name = 'mytest',
  server.id = '5601'
 );
+
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mysql_mytest;
@@ -70,6 +79,19 @@ SINGLE {STREAM_SCAN}
 SINGLE {CDC_FILTER}
 HASH {SOURCE,DML}
 
+
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'rwcdc',
+ password = secret mysql_pwd,
+ database.name = 'mytest,kdb',
+ server.id = '5602'
+);
+
+
 statement ok
 CREATE TABLE IF NOT EXISTS mysql_all_types(
     c_boolean boolean,
@@ -112,6 +134,10 @@ create table orders_test (
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
+
+statement ok
+create table kt1 (*) from mysql_source table 'kdb.kt1';
+
 statement ok
 create materialized view products_test_cnt as select count(*) as cnt from rw.products_test;
 
@@ -120,6 +146,9 @@ create materialized view orders_test_cnt as select count(*) as cnt from orders_t
 
 system ok
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Juice', '100ml Juice');"
+
+system ok
+mysql --protocol=tcp -u root kdb -e "INSERT INTO kt1 VALUES (3, 'ccc'),(4, 'ddd');"
 
 system ok
 mysql --protocol=tcp -u root mytest -e "FLUSH LOGS"
@@ -145,6 +174,16 @@ query I
 select count(*) from orders_no_backfill
 ----
 0
+
+
+query IT
+select * from kt1 order by id;
+----
+1 aaa
+2 bbb
+3 ccc
+4 ddd
+
 
 # check ingestion results
 query I
