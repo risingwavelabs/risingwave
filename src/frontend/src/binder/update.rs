@@ -133,7 +133,8 @@ impl Binder {
                 (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
                     return Err(ErrorCode::BindError(
                         "subquery on the right side of assignment is unsupported".to_owned(),
-                    ).into())
+                    )
+                    .into())
                 }
                 // col = expr
                 ([id], value) => {
