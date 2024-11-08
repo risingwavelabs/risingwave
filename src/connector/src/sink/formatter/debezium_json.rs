@@ -363,13 +363,13 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "v1".into(),
-                sub_fields: vec![],
+                // sub_fields: vec![],
                 // type_name: "".into(),
             },
             Field {
                 data_type: DataType::Float32,
                 name: "v2".into(),
-                sub_fields: vec![],
+                // sub_fields: vec![],
                 // type_name: "".into(),
             },
             Field {
@@ -378,20 +378,20 @@ mod tests {
                     vec!["v4".to_string(), "v5".to_string()],
                 ),
                 name: "v3".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int32,
-                        name: "v4".into(),
-                        sub_fields: vec![],
-                        // type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float32,
-                        name: "v5".into(),
-                        sub_fields: vec![],
-                        // type_name: "".into(),
-                    },
-                ],
+                // sub_fields: vec![
+                //     Field {
+                //         data_type: DataType::Int32,
+                //         name: "v4".into(),
+                //         sub_fields: vec![],
+                //         // type_name: "".into(),
+                //     },
+                //     Field {
+                //         data_type: DataType::Float32,
+                //         name: "v5".into(),
+                //         sub_fields: vec![],
+                //         // type_name: "".into(),
+                //     },
+                // ],
                 // type_name: "".into(),
             },
         ]);

@@ -372,11 +372,11 @@ impl BigQuerySink {
                 )))
             }
             DataType::Struct(_) => {
-                let mut sub_fields = Vec::with_capacity(rw_field.sub_fields.len());
-                for rw_field in &rw_field.sub_fields {
-                    let field = Self::map_field(rw_field)?;
-                    sub_fields.push(field)
-                }
+                let sub_fields = Vec::with_capacity(0); // TODO
+                // for rw_field in &rw_field.sub_fields {
+                //     let field = Self::map_field(rw_field)?;
+                //     sub_fields.push(field)
+                // }
                 TableFieldSchema::record(&rw_field.name, sub_fields)
             }
             DataType::List(dt) => {
