@@ -46,6 +46,7 @@ mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
+mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 mod alter_table_with_sr;
@@ -638,6 +639,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::SwapRenameSchema { target_schema },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_schema,
+                StatementType::ALTER_SCHEMA,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:
@@ -718,6 +731,18 @@ pub async fn handle(
                 PbThrottleTarget::CdcTable,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SwapRenameTable { target_table },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_table,
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -838,6 +863,19 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SwapRenameView { target_view },
+        } => {
+            let statement_type = if materialized {
+                StatementType::ALTER_MATERIALIZED_VIEW
+            } else {
+                StatementType::ALTER_VIEW
+            };
+            alter_swap_rename::handle_swap_rename(handler_args, name, target_view, statement_type)
+                .await
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
@@ -885,6 +923,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SwapRenameSink { target_sink },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_sink,
+                StatementType::ALTER_SINK,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
@@ -911,6 +961,21 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SUBSCRIPTION,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation:
+                AlterSubscriptionOperation::SwapRenameSubscription {
+                    target_subscription,
+                },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_subscription,
+                StatementType::ALTER_SUBSCRIPTION,
             )
             .await
         }
@@ -967,6 +1032,18 @@ pub async fn handle(
                 PbThrottleTarget::Source,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SwapRenameSource { target_source },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_source,
+                StatementType::ALTER_SOURCE,
             )
             .await
         }

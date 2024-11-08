@@ -1086,6 +1086,23 @@ impl DdlService for DdlServiceImpl {
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }
+
+    async fn alter_swap_rename(
+        &self,
+        request: Request<AlterSwapRenameRequest>,
+    ) -> Result<Response<AlterSwapRenameResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSwapRename(req.object.unwrap()))
+            .await?;
+
+        Ok(Response::new(AlterSwapRenameResponse {
+            status: None,
+            version,
+        }))
+    }
 }
 
 impl DdlServiceImpl {

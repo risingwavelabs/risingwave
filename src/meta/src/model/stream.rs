@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model_v2::{SourceId, WorkerId};
+use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};

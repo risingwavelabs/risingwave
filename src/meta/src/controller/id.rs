@@ -15,8 +15,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_meta_model_v2::prelude::{Actor, Fragment};
-use risingwave_meta_model_v2::{actor, fragment};
+use risingwave_meta_model::prelude::{Actor, Fragment};
+use risingwave_meta_model::{actor, fragment};
 use sea_orm::sea_query::{Expr, Func};
 use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect};
 
