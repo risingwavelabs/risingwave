@@ -29,9 +29,9 @@ pub struct Field {
     pub name: String,
     /// For STRUCT type.
     pub sub_fields: Vec<Field>,
-    /// The user-defined type's name, when the type is created from a protobuf schema file,
-    /// this field will store the message name.
-    pub type_name: String,
+    // The user-defined type's name, when the type is created from a protobuf schema file,
+    // this field will store the message name.
+    // pub type_name: String,
 }
 
 impl std::fmt::Debug for Field {
@@ -55,7 +55,7 @@ impl From<&ColumnDesc> for Field {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
             sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: String::new(), // desc.type_name.clone(),
+            // type_name: String::new(), // desc.type_name.clone(),
         }
     }
 }
@@ -70,7 +70,7 @@ impl From<ColumnDesc> for Field {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            type_name: String::new(), // column_desc.type_name,
+            // type_name: String::new(), // column_desc.type_name,
         }
     }
 }
@@ -81,7 +81,7 @@ impl From<&PbColumnDesc> for Field {
             data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
             name: pb_column_desc.name.clone(),
             sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
-            type_name: String::new(), // pb_column_desc.type_name.clone(),
+            // type_name: String::new(), // pb_column_desc.type_name.clone(),
         }
     }
 }
@@ -216,7 +216,7 @@ impl Field {
             data_type,
             name: name.into(),
             sub_fields: vec![],
-            type_name: String::new(),
+            // type_name: String::new(),
         }
     }
 
@@ -224,7 +224,7 @@ impl Field {
         data_type: DataType,
         name: S,
         sub_fields: Vec<Field>,
-        type_name: S,
+        _type_name: S,
     ) -> Self
     where
         S: Into<String>,
@@ -233,7 +233,7 @@ impl Field {
             data_type,
             name: name.into(),
             sub_fields,
-            type_name: type_name.into(),
+            // type_name: type_name.into(),
         }
     }
 
@@ -242,7 +242,7 @@ impl Field {
             data_type,
             name: String::new(),
             sub_fields: vec![],
-            type_name: String::new(),
+            // type_name: String::new(),
         }
     }
 
@@ -255,7 +255,7 @@ impl Field {
             data_type: desc.data_type.clone(),
             name: format!("{}.{}", table_name, desc.name),
             sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: String::new(), // desc.type_name.clone(),
+            // type_name: String::new(), // desc.type_name.clone(),
         }
     }
 }
@@ -266,7 +266,7 @@ impl From<&PbField> for Field {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
             sub_fields: vec![],
-            type_name: String::new(),
+            // type_name: String::new(),
         }
     }
 }
