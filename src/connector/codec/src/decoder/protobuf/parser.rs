@@ -46,13 +46,13 @@ fn pb_field_to_col_desc(
 ) -> anyhow::Result<ColumnDesc> {
     let field_type = protobuf_type_mapping(field_descriptor, parse_trace)
         .context("failed to map protobuf type")?;
-    if let Kind::Message(m) = field_descriptor.kind() {
+    if let Kind::Message(_m) = field_descriptor.kind() {
         let field_descs = if let DataType::List { .. } = field_type {
             vec![]
         } else {
-            m.fields()
-                .map(|f| pb_field_to_col_desc(&f, index, parse_trace))
-                .try_collect()?
+            vec![] // m.fields()
+            //     .map(|f| pb_field_to_col_desc(&f, index, parse_trace))
+            //     .try_collect()?
         };
         *index += 1;
         Ok(ColumnDesc {

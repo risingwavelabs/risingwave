@@ -30,7 +30,7 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub fields: Vec<Field>,
+    pub fields: Vec<risingwave_common::catalog::Field>,
     /// `additional_column` and `column_type` are orthogonal
     /// `additional_column` is used to indicate the column is from which part of the message
     /// `column_type` is used to indicate the type of the column, only used in cdc scenario

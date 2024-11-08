@@ -111,13 +111,13 @@ fn avro_field_to_column_desc(
     match schema {
         Schema::Record(RecordSchema {
             name: _schema_name,
-            fields,
+            fields: _,
             ..
         }) => {
-            let vec_column = fields
-                .iter()
-                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index, map_handling))
-                .collect::<anyhow::Result<_>>()?;
+            let vec_column = vec![]; // fields
+            //     .iter()
+            //     .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index, map_handling))
+            //     .collect::<anyhow::Result<_>>()?;
             *index += 1;
             Ok(ColumnDesc {
                 column_type: Some(data_type.to_protobuf()),
