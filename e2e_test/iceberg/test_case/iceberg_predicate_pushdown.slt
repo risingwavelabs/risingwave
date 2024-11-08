@@ -11,7 +11,10 @@ statement ok
 CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
 
 statement ok
-insert into s1 select * from generate_series(1, 1000);
+insert into s1 select x, 'some str', 'another str' from generate_series(1, 500) t(x);
+
+statement ok
+insert into s1 select x, null as y, null as z from generate_series(501, 1000) t(x);
 
 statement ok
 flush;
@@ -40,23 +43,6 @@ CREATE SINK sink1 AS select * from mv1 WITH (
 statement ok
 drop source if exists iceberg_t1_source;
 
-query I
-explain CREATE SOURCE iceberg_t1_source
-WITH (
-    connector = 'iceberg',
-    s3.endpoint = 'http://127.0.0.1:9301',
-    s3.region = 'us-east-1',
-    s3.access.key = 'hummockadmin',
-    s3.secret.key = 'hummockadmin',
-    s3.path.style.access = 'true',
-    catalog.type = 'storage',
-    warehouse.path = 's3a://icebergdata/demo',
-    database.name = 'demo_db',
-    table.name = 't1',
-);
-----
-
-
 statement ok
 CREATE SOURCE iceberg_t1_source
 WITH (
@@ -76,13 +62,28 @@ statement ok
 flush;
 
 query I
+select * from iceberg_t1_source order by i1 limit 1;
+----
+1 some str another str
+
+query I
 select count(*) from iceberg_t1_source;
 ----
 1000
 
 query I
-select * from iceberg_t1_source where i1 > 990;
+select * from iceberg_t1_source where i1 > 990 order by i1;
 ----
+991 NULL NULL
+992 NULL NULL
+993 NULL NULL
+994 NULL NULL
+995 NULL NULL
+996 NULL NULL
+997 NULL NULL
+998 NULL NULL
+999 NULL NULL
+1000 NULL NULL
 
 query I
 explain select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
@@ -91,7 +92,7 @@ explain select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 55
    └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: (((((i1 = 580) AND (i1 > 500)) AND (i1 < 600)) AND (i1 >= 550)) AND (i1 <= 590)) AND (i1 != 570) }
 
 query I
-select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
+select i1 from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
 ----
 580
 
@@ -102,13 +103,18 @@ explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
    └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: i1 IN (5, 4, 1, 3, 2) }
 
 query I
-explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
+select i1 from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
 ----
 1
 2
 3
 4
 5
+
+query I
+select count(*), i2, i3 from iceberg_t1_source where i2 = 'some str' and i3 = 'another str' group by i2, i3;
+----
+500 some str another str
 
 statement ok
 DROP SINK sink1;

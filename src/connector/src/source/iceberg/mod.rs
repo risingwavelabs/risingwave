@@ -248,6 +248,9 @@ impl IcebergSplitEnumerator {
 
         let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
 
+        let table_schema = table.metadata().current_schema();
+        tracing::debug!("iceberg_table_schema: {:?}", table_schema);
+
         let mut position_delete_files = vec![];
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
