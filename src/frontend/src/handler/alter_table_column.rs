@@ -76,7 +76,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         "source schema should be None for CDC table"
     );
 
-    if bind_table_constraints(constraints).unwrap().is_empty() {
+    if bind_table_constraints(constraints)?.is_empty() {
         // For table created by `create table t (*)` the constraint is empty, we need to
         // retrieve primary key names from original table catalog if available
         let pk_names: Vec<_> = original_catalog
