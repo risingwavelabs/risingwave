@@ -255,7 +255,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 17
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink v2 test"
@@ -270,7 +270,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 17
     retry: *auto-retry
 
   - label: "end-to-end iceberg cdc test"
