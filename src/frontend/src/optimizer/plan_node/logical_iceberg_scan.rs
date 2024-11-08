@@ -136,7 +136,7 @@ impl PredicatePushdown for LogicalIcebergScan {
     /// Currently we depend on third-party tools to compact iceberg tables and provide zone-map.
     /// zone-map is used to evaluate predicates on iceberg tables.
     /// Without zone-map, iceberg-sdk will still apply the predicate on its own.
-    /// See: https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235.
+    /// See: <https://github.com/apache/iceberg-rust/blob/5c1a9e68da346819072a15327080a498ad91c488/crates/iceberg/src/arrow/reader.rs#L229-L235>.
     fn predicate_pushdown(
         &self,
         predicate: Condition,

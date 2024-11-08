@@ -308,7 +308,10 @@ impl IcebergSplitEnumerator {
                 .files
                 .push(data_files[split_num * split_size + i].clone());
         }
-        let splits = splits.into_iter().map(|split| split).collect_vec();
+        let splits = splits
+            .into_iter()
+            .filter(|split| !split.files.is_empty())
+            .collect_vec();
 
         if splits.is_empty() {
             bail!("No splits found for the iceberg table");
