@@ -22,6 +22,7 @@ use crate::sink::Result;
 
 mod avro;
 mod bson;
+pub mod bytes;
 mod json;
 mod proto;
 pub mod template;
