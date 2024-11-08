@@ -164,13 +164,13 @@ impl Source {
             data_type: DataType::Varchar,
             name: "partition_id".to_string(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            // type_name: "".to_string(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
             name: "offset_info".to_string(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            // type_name: "".to_string(),
         };
 
         let ordered_col_idx = builder.add_column(&key);
