@@ -106,7 +106,7 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String,
-    pub field_descs: Vec<ColumnDesc>,
+    pub field_descs: Vec<Field>,
     // pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,

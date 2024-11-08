@@ -33,7 +33,7 @@ message ColumnDesc {
   // we should store it in ColumnCatalog but not here
   string name = 3;
   // For STRUCT type.
-  repeated ColumnDesc field_descs = 4;
+  repeated Field field_descs = 4;
   // The user-defined type's name. Empty if the column type is a builtin type.
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
