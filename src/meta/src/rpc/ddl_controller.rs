@@ -175,7 +175,8 @@ impl DdlCommand {
             | DdlCommand::CreateView(_)
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
-            | DdlCommand::CreateSecret(_) => true,
+            | DdlCommand::CreateSecret(_)
+            | DdlCommand::AlterSwapRename(_) => true,
             DdlCommand::CreateStreamingJob(_, _, _, _)
             | DdlCommand::CreateSourceWithoutStreamingJob(_)
             | DdlCommand::ReplaceTable(_)
