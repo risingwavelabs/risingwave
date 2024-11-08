@@ -16,20 +16,20 @@ use std::collections::{btree_map, BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
-use delta_btree_map::{Change, PositionType};
+use delta_btree_map::Change;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::Op;
 use risingwave_common::row::RowExt;
 use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
-    create_window_state, StateKey, WindowFuncCall, WindowStates,
+    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall,
 };
 
+use super::frame_finder::merge_rows_frames;
 use super::over_partition::{
     new_empty_partition_cache, shrink_partition_cache, CacheKey, OverPartition, PartitionCache,
     PartitionDelta,
@@ -38,7 +38,6 @@ use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::consistency::consistency_panic;
 use crate::executor::monitor::OverWindowMetrics;
-use crate::executor::over_window::over_partition::AffectedRange;
 use crate::executor::prelude::*;
 
 /// [`OverWindowExecutor`] consumes retractable input stream and produces window function outputs.
@@ -55,13 +54,12 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     schema: Schema,
-    calls: Vec<WindowFuncCall>,
+    calls: Calls,
     deduped_part_key_indices: Vec<usize>,
     order_key_indices: Vec<usize>,
     order_key_data_types: Vec<DataType>,
     order_key_order_types: Vec<OrderType>,
     input_pk_indices: Vec<usize>,
-    input_schema_len: usize,
     state_key_to_table_sub_pk_proj: Vec<usize>,
 
     state_table: StateTable<S>,
@@ -140,15 +138,85 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
     pub cache_policy: CachePolicy,
 }
 
+/// Information about the window function calls.
+/// Contains the original calls and many other information that can be derived from the calls to avoid
+/// repeated calculation.
+pub(super) struct Calls {
+    calls: Vec<WindowFuncCall>,
+
+    /// The `ROWS` frame that is the union of all `ROWS` frames.
+    pub(super) super_rows_frame_bounds: RowsFrameBounds,
+    /// All `RANGE` frames.
+    pub(super) range_frames: Vec<RangeFrameBounds>,
+    pub(super) start_is_unbounded: bool,
+    pub(super) end_is_unbounded: bool,
+    /// Deduplicated indices of all arguments of all calls.
+    pub(super) all_arg_indices: Vec<usize>,
+
+    // TODO(rc): The following flags are used to optimize for `row_number`, `rank` and `dense_rank`.
+    // We should try our best to remove these flags while maintaining the performance in the future.
+    pub(super) numbering_only: bool,
+    pub(super) has_rank: bool,
+}
+
+impl Calls {
+    fn new(calls: Vec<WindowFuncCall>) -> Self {
+        let rows_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_rows())
+            .collect::<Vec<_>>();
+        let super_rows_frame_bounds = merge_rows_frames(&rows_frames);
+        let range_frames = calls
+            .iter()
+            .filter_map(|call| call.frame.bounds.as_range())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let start_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.start_is_unbounded());
+        let end_is_unbounded = calls
+            .iter()
+            .any(|call| call.frame.bounds.end_is_unbounded());
+
+        let all_arg_indices = calls
+            .iter()
+            .flat_map(|call| call.args.val_indices().iter().copied())
+            .dedup()
+            .collect();
+
+        let numbering_only = calls.iter().all(|call| call.kind.is_numbering());
+        let has_rank = calls.iter().any(|call| call.kind.is_rank());
+
+        Self {
+            calls,
+            super_rows_frame_bounds,
+            range_frames,
+            start_is_unbounded,
+            end_is_unbounded,
+            all_arg_indices,
+            numbering_only,
+            has_rank,
+        }
+    }
+
+    pub(super) fn iter(&self) -> impl ExactSizeIterator<Item = &WindowFuncCall> {
+        self.calls.iter()
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.calls.len()
+    }
+}
+
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
+        let calls = Calls::new(args.calls);
+
         let input_info = args.input.info().clone();
         let input_schema = &input_info.schema;
 
-        let has_unbounded_frame = args
-            .calls
-            .iter()
-            .any(|call| call.frame.bounds.is_unbounded());
+        let has_unbounded_frame = calls.start_is_unbounded || calls.end_is_unbounded;
         let cache_policy = if has_unbounded_frame {
             // For unbounded frames, we finally need all entries of the partition in the cache,
             // so for simplicity we just use full cache policy for these cases.
@@ -183,13 +251,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
                 schema: args.schema,
-                calls: args.calls,
+                calls,
                 deduped_part_key_indices,
                 order_key_indices: args.order_key_indices,
                 order_key_data_types,
                 order_key_order_types: args.order_key_order_types,
                 input_pk_indices: input_info.pk_indices,
-                input_schema_len: input_schema.len(),
                 state_key_to_table_sub_pk_proj,
                 state_table: args.state_table,
                 watermark_sequence: args.watermark_epoch,
@@ -279,8 +346,12 @@ impl<S: StateStore> OverWindowExecutor<S> {
         chunk: StreamChunk,
         metrics: &'a OverWindowMetrics,
     ) {
-        // (deduped) partition key => changes happened in the partition.
-        let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, PartitionDelta> = BTreeMap::new();
+        // (deduped) partition key => (
+        //   significant changes happened in the partition,
+        //   no-effect changes happened in the partition,
+        // )
+        let mut deltas: BTreeMap<DefaultOrdered<OwnedRow>, (PartitionDelta, PartitionDelta)> =
+            BTreeMap::new();
         // input pk of update records of which the order key is changed.
         let mut key_change_updated_pks = HashSet::new();
 
@@ -289,16 +360,16 @@ impl<S: StateStore> OverWindowExecutor<S> {
             match record {
                 Record::Insert { new_row } => {
                     let part_key = this.get_partition_key(new_row).into();
-                    let part_delta = deltas.entry(part_key).or_default();
-                    part_delta.insert(
+                    let (delta, _) = deltas.entry(part_key).or_default();
+                    delta.insert(
                         this.row_to_cache_key(new_row)?,
                         Change::Insert(new_row.into_owned_row()),
                     );
                 }
                 Record::Delete { old_row } => {
                     let part_key = this.get_partition_key(old_row).into();
-                    let part_delta = deltas.entry(part_key).or_default();
-                    part_delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
+                    let (delta, _) = deltas.entry(part_key).or_default();
+                    delta.insert(this.row_to_cache_key(old_row)?, Change::Delete);
                 }
                 Record::Update { old_row, new_row } => {
                     let old_part_key = this.get_partition_key(old_row).into();
@@ -307,23 +378,31 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     let new_state_key = this.row_to_cache_key(new_row)?;
                     if old_part_key == new_part_key && old_state_key == new_state_key {
                         // not a key-change update
-                        let part_delta = deltas.entry(old_part_key).or_default();
-                        part_delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
+                        let (delta, no_effect_delta) = deltas.entry(old_part_key).or_default();
+                        if old_row.project(&this.calls.all_arg_indices)
+                            == new_row.project(&this.calls.all_arg_indices)
+                        {
+                            // partition key, order key and arguments are all the same
+                            no_effect_delta
+                                .insert(old_state_key, Change::Insert(new_row.into_owned_row()));
+                        } else {
+                            delta.insert(old_state_key, Change::Insert(new_row.into_owned_row()));
+                        }
                     } else if old_part_key == new_part_key {
                         // order-change update, split into delete + insert, will be merged after
                         // building changes
                         key_change_updated_pks.insert(this.get_input_pk(old_row));
-                        let part_delta = deltas.entry(old_part_key).or_default();
-                        part_delta.insert(old_state_key, Change::Delete);
-                        part_delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
+                        let (delta, _) = deltas.entry(old_part_key).or_default();
+                        delta.insert(old_state_key, Change::Delete);
+                        delta.insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     } else {
                         // partition-change update, split into delete + insert
                         // NOTE(rc): Since we append partition key to logical pk, we can't merge the
                         // delete + insert back to update later.
                         // TODO: IMO this behavior is problematic. Deep discussion is needed.
-                        let old_part_delta = deltas.entry(old_part_key).or_default();
+                        let (old_part_delta, _) = deltas.entry(old_part_key).or_default();
                         old_part_delta.insert(old_state_key, Change::Delete);
-                        let new_part_delta = deltas.entry(new_part_key).or_default();
+                        let (new_part_delta, _) = deltas.entry(new_part_key).or_default();
                         new_part_delta
                             .insert(new_state_key, Change::Insert(new_row.into_owned_row()));
                     }
@@ -337,7 +416,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         let mut chunk_builder = StreamChunkBuilder::new(this.chunk_size, this.schema.data_types());
 
         // Build final changes partition by partition.
-        for (part_key, delta) in deltas {
+        for (part_key, (delta, no_effect_delta)) in deltas {
             vars.stats.cache_lookup += 1;
             if !vars.cached_partitions.contains(&part_key.0) {
                 vars.stats.cache_miss += 1;
@@ -345,6 +424,54 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     .put(part_key.0.clone(), new_empty_partition_cache());
             }
             let mut cache = vars.cached_partitions.get_mut(&part_key).unwrap();
+
+            // First, handle `Update`s that don't affect window function outputs.
+            // Be careful that changes in `delta` may (though we believe unlikely) affect the
+            // window function outputs of rows in `no_effect_delta`, so before handling `delta`
+            // we need to write all changes to state table, range cache and chunk builder.
+            for (key, change) in no_effect_delta {
+                let new_row = change.into_insert().unwrap(); // new row of an `Update`
+
+                let (old_row, from_cache) = if let Some(old_row) = cache.inner().get(&key).cloned()
+                {
+                    // Got old row from range cache.
+                    (old_row, true)
+                } else {
+                    // Retrieve old row from state table.
+                    let table_pk = (&new_row).project(this.state_table.pk_indices());
+                    // The accesses to the state table is ordered by table PK, so ideally we
+                    // can leverage the block cache under the hood.
+                    if let Some(old_row) = this.state_table.get_row(table_pk).await? {
+                        (old_row, false)
+                    } else {
+                        consistency_panic!(?part_key, ?key, ?new_row, "updating non-existing row");
+                        continue;
+                    }
+                };
+
+                // concatenate old outputs
+                let input_len = new_row.len();
+                let new_row = OwnedRow::new(
+                    new_row
+                        .into_iter()
+                        .chain(old_row.as_inner().iter().skip(input_len).cloned()) // chain old outputs
+                        .collect(),
+                );
+
+                // apply & emit the change
+                let record = Record::Update {
+                    old_row: &old_row,
+                    new_row: &new_row,
+                };
+                if let Some(chunk) = chunk_builder.append_record(record.as_ref()) {
+                    yield chunk;
+                }
+                this.state_table.write_record(record);
+                if from_cache {
+                    cache.insert(key, new_row);
+                }
+            }
+
             let mut partition = OverPartition::new(
                 &part_key,
                 &mut cache,
@@ -359,9 +486,13 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 },
             );
 
+            if delta.is_empty() {
+                continue;
+            }
+
             // Build changes for current partition.
             let (part_changes, accessed_range) =
-                Self::build_changes_for_partition(this, &mut partition, delta).await?;
+                partition.build_changes(&this.state_table, delta).await?;
 
             for (key, record) in part_changes {
                 // Build chunk and yield if needed.
@@ -431,6 +562,15 @@ impl<S: StateStore> OverWindowExecutor<S> {
             metrics
                 .over_window_range_cache_right_miss_count
                 .inc_by(stats.right_miss_count);
+            metrics
+                .over_window_accessed_entry_count
+                .inc_by(stats.accessed_entry_count);
+            metrics
+                .over_window_compute_count
+                .inc_by(stats.compute_count);
+            metrics
+                .over_window_same_output_count
+                .inc_by(stats.same_output_count);
 
             // Update recently accessed range for later shrinking cache.
             if !this.cache_policy.is_full()
@@ -460,155 +600,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
         if let Some(chunk) = chunk_builder.take() {
             yield chunk;
         }
-    }
-
-    async fn build_changes_for_partition(
-        this: &ExecutorInner<S>,
-        partition: &mut OverPartition<'_, S>,
-        mut delta: PartitionDelta,
-    ) -> StreamExecutorResult<(
-        BTreeMap<StateKey, Record<OwnedRow>>,
-        Option<RangeInclusive<StateKey>>,
-    )> {
-        let mut part_changes = BTreeMap::new();
-
-        // Find affected ranges, this also ensures that all rows in the affected ranges are loaded
-        // into the cache.
-        let (part_with_delta, affected_ranges) = partition
-            .find_affected_ranges(&this.state_table, &mut delta)
-            .await?;
-
-        let snapshot = part_with_delta.snapshot();
-        let delta = part_with_delta.delta();
-
-        // Generate delete changes first, because deletes are skipped during iteration over
-        // `part_with_delta` in the next step.
-        for (key, change) in delta {
-            if change.is_delete() {
-                part_changes.insert(
-                    key.as_normal_expect().clone(),
-                    Record::Delete {
-                        old_row: snapshot.get(key).unwrap().clone(),
-                    },
-                );
-            }
-        }
-
-        let mut accessed_range: Option<RangeInclusive<StateKey>> = None;
-
-        for AffectedRange {
-            first_frame_start,
-            first_curr_key,
-            last_curr_key,
-            last_frame_end,
-        } in affected_ranges
-        {
-            assert!(first_frame_start <= first_curr_key);
-            assert!(first_curr_key <= last_curr_key);
-            assert!(last_curr_key <= last_frame_end);
-            assert!(first_frame_start.is_normal());
-            assert!(first_curr_key.is_normal());
-            assert!(last_curr_key.is_normal());
-            assert!(last_frame_end.is_normal());
-
-            if let Some(accessed_range) = accessed_range.as_mut() {
-                let min_start = first_frame_start
-                    .as_normal_expect()
-                    .min(accessed_range.start())
-                    .clone();
-                let max_end = last_frame_end
-                    .as_normal_expect()
-                    .max(accessed_range.end())
-                    .clone();
-                *accessed_range = min_start..=max_end;
-            } else {
-                accessed_range = Some(
-                    first_frame_start.as_normal_expect().clone()
-                        ..=last_frame_end.as_normal_expect().clone(),
-                );
-            }
-
-            let mut states =
-                WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?);
-
-            // Populate window states with the affected range of rows.
-            {
-                let mut cursor = part_with_delta
-                    .find(first_frame_start)
-                    .expect("first frame start key must exist");
-                while {
-                    let (key, row) = cursor
-                        .key_value()
-                        .expect("cursor must be valid until `last_frame_end`");
-
-                    for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
-                        // TODO(rc): batch appending
-                        state.append(
-                            key.as_normal_expect().clone(),
-                            row.project(call.args.val_indices())
-                                .into_owned_row()
-                                .as_inner()
-                                .into(),
-                        );
-                    }
-                    cursor.move_next();
-
-                    key != last_frame_end
-                } {}
-            }
-
-            // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
-            // because it must exist in the states, by the definition of affected range.
-            while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
-                states.just_slide()?;
-            }
-            let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
-            assert_eq!(
-                states.curr_key(),
-                curr_key_cursor.key().map(CacheKey::as_normal_expect)
-            );
-
-            // Slide and generate changes.
-            while {
-                let (key, row) = curr_key_cursor
-                    .key_value()
-                    .expect("cursor must be valid until `last_curr_key`");
-                let output = states.slide_no_evict_hint()?;
-                let new_row = OwnedRow::new(
-                    row.as_inner()
-                        .iter()
-                        .take(this.input_schema_len)
-                        .cloned()
-                        .chain(output)
-                        .collect(),
-                );
-
-                match curr_key_cursor.position() {
-                    PositionType::Ghost => unreachable!(),
-                    PositionType::Snapshot | PositionType::DeltaUpdate => {
-                        // update
-                        let old_row = snapshot.get(key).unwrap().clone();
-                        if old_row != new_row {
-                            part_changes.insert(
-                                key.as_normal_expect().clone(),
-                                Record::Update { old_row, new_row },
-                            );
-                        }
-                    }
-                    PositionType::DeltaInsert => {
-                        // insert
-                        part_changes
-                            .insert(key.as_normal_expect().clone(), Record::Insert { new_row });
-                    }
-                }
-
-                curr_key_cursor.move_next();
-
-                key != last_curr_key
-            } {}
-        }
-
-        Ok((part_changes, accessed_range))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
