@@ -133,7 +133,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             additional_column,
             // ignored fields below
             generated_or_default_column,
-            type_name: _,
+            // type_name: _,
             description: _,
             version: _,
         }: &ColumnDesc,
@@ -181,7 +181,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_string(),
+            // type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
             version: ColumnDescVersion::Pr13707,
