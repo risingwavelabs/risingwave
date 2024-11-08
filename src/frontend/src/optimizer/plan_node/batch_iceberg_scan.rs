@@ -41,7 +41,7 @@ pub struct BatchIcebergScan {
 }
 
 impl BatchIcebergScan {
-    pub fn new(core: generic::Source, predicate: IcebergPredicate) -> Self {
+    pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
@@ -52,7 +52,7 @@ impl BatchIcebergScan {
         Self {
             base,
             core,
-            predicate,
+            predicate: IcebergPredicate::AlwaysTrue,
         }
     }
 
@@ -72,6 +72,14 @@ impl BatchIcebergScan {
             base,
             core: self.core.clone(),
             predicate: self.predicate.clone(),
+        }
+    }
+
+    pub fn clone_with_predicate(&self, predicate: IcebergPredicate) -> Self {
+        Self {
+            base: self.base.clone(),
+            core: self.core.clone(),
+            predicate,
         }
     }
 
