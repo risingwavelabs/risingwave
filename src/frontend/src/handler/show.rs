@@ -151,7 +151,7 @@ impl ShowColumnRow {
             .into_iter()
             .map(|c| {
                 let type_name = if let DataType::Struct { .. } = c.data_type {
-                    c.type_name.clone()
+                    "TODO".to_string() // c.type_name.clone()
                 } else {
                     c.data_type.to_string()
                 };

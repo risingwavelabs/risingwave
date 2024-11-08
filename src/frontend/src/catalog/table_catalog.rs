@@ -750,7 +750,7 @@ mod tests {
                                 ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string(),
+                            // type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },

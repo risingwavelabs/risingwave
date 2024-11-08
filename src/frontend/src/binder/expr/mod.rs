@@ -978,7 +978,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         column_id: ColumnId::new(0),
         name: column_def.name.real_value(),
         field_descs,
-        type_name: "".to_string(),
+        // type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
         additional_column: AdditionalColumn { column_type: None },
