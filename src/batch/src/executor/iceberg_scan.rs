@@ -194,7 +194,11 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         );
         let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
 
-        assert_eq!(source_node.split.len(), 1, "Iceberg source should have one split!");
+        assert_eq!(
+            source_node.split.len(),
+            1,
+            "Iceberg source should have one split!"
+        );
         let split_list = source_node
             .split
             .iter()
