@@ -116,6 +116,18 @@ select count(*), i2, i3 from iceberg_t1_source where i2 = 'some str' and i3 = 'a
 ----
 500 some str another str
 
+query I
+explain select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
+----
+   BatchExchange { order: [], dist: Single }
+   └─BatchProject { exprs: [i1] }
+     └─BatchFilter { predicate: (i2 = i3) }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: i1 > 500 }
+
+query I
+select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
+----
+
 statement ok
 DROP SINK sink1;
 
