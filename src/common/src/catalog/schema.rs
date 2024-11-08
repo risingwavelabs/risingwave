@@ -55,7 +55,7 @@ impl From<&ColumnDesc> for Field {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
             sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: desc.type_name.clone(),
+            type_name: String::new(), // desc.type_name.clone(),
         }
     }
 }
@@ -70,7 +70,7 @@ impl From<ColumnDesc> for Field {
                 .into_iter()
                 .map(Into::into)
                 .collect(),
-            type_name: column_desc.type_name,
+            type_name: String::new(), // column_desc.type_name,
         }
     }
 }
@@ -255,7 +255,7 @@ impl Field {
             data_type: desc.data_type.clone(),
             name: format!("{}.{}", table_name, desc.name),
             sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: desc.type_name.clone(),
+            type_name: String::new(), // desc.type_name.clone(),
         }
     }
 }
