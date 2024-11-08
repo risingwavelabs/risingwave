@@ -193,7 +193,7 @@ impl ColumnDesc {
                 .field_descs
                 .clone()
                 .into_iter()
-                .map(|f| f.to_protobuf())
+                .map(|f| f.to_prost())
                 .collect_vec(),
             // type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
@@ -209,12 +209,12 @@ impl ColumnDesc {
     /// If the type has multiple nesting levels, it traverses for the tree-like schema,
     /// and returns every tree node.
     pub fn flatten(&self) -> Vec<ColumnDesc> {
-        let mut descs = vec![self.clone()];
-        descs.extend(self.field_descs.iter().flat_map(|d| {
-            let mut desc = d.clone();
-            desc.name = self.name.clone() + "." + &desc.name;
-            desc.flatten()
-        }));
+        let descs = vec![self.clone()];
+        // descs.extend(self.field_descs.iter().flat_map(|d| {
+        //     let mut desc = d.clone();
+        //     desc.name = self.name.clone() + "." + &desc.name;
+        //     desc.flatten() TODO
+        // }));
         descs
     }
 
@@ -246,7 +246,7 @@ impl ColumnDesc {
             data_type,
             column_id: ColumnId::new(column_id),
             name: name.to_string(),
-            field_descs: fields,
+            field_descs: vec![], // fields,
             // type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
@@ -299,10 +299,10 @@ impl From<PbColumnDesc> for ColumnDesc {
             .unwrap_or(&AdditionalColumn { column_type: None })
             .clone();
         let version = prost.version();
-        let field_descs: Vec<ColumnDesc> = prost
+        let field_descs = prost
             .field_descs
-            .into_iter()
-            .map(ColumnDesc::from)
+            .iter()
+            .map(From::from)
             .collect();
         Self {
             data_type: DataType::from(prost.column_type.as_ref().unwrap()),
@@ -330,7 +330,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             column_type: c.data_type.to_protobuf().into(),
             column_id: c.column_id.into(),
             name: c.name.clone(),
-            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
+            field_descs: c.field_descs.iter().map(Field::to_prost).collect(),
             // type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
