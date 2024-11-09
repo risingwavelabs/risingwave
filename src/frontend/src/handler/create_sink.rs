@@ -30,6 +30,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
@@ -840,13 +841,15 @@ fn bind_sink_format_desc(session: &SessionImpl, value: ConnectorSchema) -> Resul
 
     let mut key_encode = None;
     if let Some(encode) = value.key_encode {
-        if encode == E::Text {
-            key_encode = Some(SinkEncode::Text);
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "sink key encode unsupported: {encode}, only TEXT supported"
-            ))
-            .into());
+        match encode {
+            E::Text => key_encode = Some(SinkEncode::Text),
+            E::Bytes => key_encode = Some(SinkEncode::Bytes),
+            _ => {
+                return Err(ErrorCode::BindError(format!(
+                    "sink key encode unsupported: {encode}, only TEXT and BYTES supported"
+                ))
+                .into())
+            }
         }
     }
 
@@ -951,6 +954,19 @@ pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) ->
         ))
         .into());
     }
+
+    // only allow Kafka connector work with `bytes` as key encode
+    if let Some(encode) = &format_desc.key_encode
+        && connector != KAFKA_SINK
+        && matches!(encode, Encode::Bytes)
+    {
+        return Err(ErrorCode::BindError(format!(
+            "key encode bytes only works with kafka connector, but found {}",
+            connector
+        ))
+        .into());
+    }
+
     Ok(())
 }
 

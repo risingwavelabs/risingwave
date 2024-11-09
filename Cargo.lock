@@ -11629,8 +11629,7 @@ dependencies = [
 ]
 
 [[package]]
-
-name = "risingwave_meta_model_migration"
+name = "risingwave_meta_model"
 version = "2.1.0-rc.2"
 dependencies = [
  "prost 0.13.1",
@@ -11643,7 +11642,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_meta_model_v2"
+name = "risingwave_meta_model_migration"
 version = "2.1.0-rc.2"
 dependencies = [
  "async-std",
