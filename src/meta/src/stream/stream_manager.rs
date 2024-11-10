@@ -602,6 +602,7 @@ impl GlobalStreamManager {
         table_id: u32,
         parallelism: TableParallelism,
         deferred: bool,
+        label: Option<String>,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 

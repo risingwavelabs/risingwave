@@ -831,7 +831,7 @@ impl DdlService for DdlServiceImpl {
         let deferred = req.get_deferred();
 
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism, deferred)
+            .alter_parallelism(table_id, parallelism, deferred, None)
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))

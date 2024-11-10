@@ -2635,6 +2635,14 @@ impl GlobalStreamManager {
 
         (join_handle, shutdown_tx)
     }
+
+    pub async fn update_label(&self, id: u32, label: String) -> MetaResult<()> {
+
+        self.scale_controller.generate_table_resize_plan(TableResizePolicy {
+            worker_ids: BTreeSet::new(),
+            table_parallelisms: HashMap::new(),
+        }).await?;
+    }
 }
 
 pub fn schedule_units_for_slots(

@@ -176,9 +176,13 @@ impl ScaleService for ScaleServiceImpl {
 
     async fn update_streaming_job_node_labels(
         &self,
-        _request: Request<UpdateStreamingJobNodeLabelsRequest>,
+        request: Request<UpdateStreamingJobNodeLabelsRequest>,
     ) -> Result<Response<UpdateStreamingJobNodeLabelsResponse>, Status> {
-        todo!()
+        let UpdateStreamingJobNodeLabelsRequest { id, node_label } = request.into_inner();
+
+        self.stream_manager.update_label(id, node_label).await?;
+
+        Ok(Response::new(UpdateStreamingJobNodeLabelsResponse {}))
     }
 
     async fn get_serverless_streaming_jobs_status(

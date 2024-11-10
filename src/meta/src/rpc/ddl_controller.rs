@@ -368,6 +368,7 @@ impl DdlController {
         table_id: u32,
         parallelism: PbTableParallelism,
         mut deferred: bool,
+        label: Option<String>,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
         if self.barrier_manager.check_status_running().is_err() {
@@ -388,7 +389,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into(), deferred)
+            .alter_table_parallelism(table_id, parallelism.into(), deferred, None)
             .await
     }
 
