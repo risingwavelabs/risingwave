@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
 use risingwave_expr::aggregate;
 
 /// Note that different from `min` and `max`, `first_value` doesn't ignore `NULL` values.
@@ -32,9 +31,9 @@ use risingwave_expr::aggregate;
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("first_value(*) -> auto", state = "ref")]
-fn first_value<T>(state: Option<T>, _: Option<T>) -> Option<T> {
-    state
+#[aggregate("first_value(*) -> auto", state = "ref", shortcurcuit_if = "true" /* always shortcurcuit */)]
+fn first_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
+    input // always shortcurcuit immediately, so the output is always the first value
 }
 
 /// Note that different from `min` and `max`, `last_value` doesn't ignore `NULL` values.
