@@ -15,11 +15,11 @@
 use std::collections::HashSet;
 use std::mem::take;
 
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 
@@ -29,13 +29,13 @@ pub(super) struct BarrierWorkerState {
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
-    in_flight_prev_epoch: Option<TracedEpoch>,
+    in_flight_prev_epoch: TracedEpoch,
 
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
 
     /// Inflight running actors info.
-    pub(crate) inflight_graph_info: InflightGraphInfo,
+    pub(crate) inflight_graph_info: InflightDatabaseInfo,
 
     pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
 
@@ -44,9 +44,19 @@ pub(super) struct BarrierWorkerState {
 }
 
 impl BarrierWorkerState {
-    pub fn new(
-        in_flight_prev_epoch: Option<TracedEpoch>,
-        inflight_graph_info: InflightGraphInfo,
+    pub fn new() -> Self {
+        Self {
+            in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
+            pending_non_checkpoint_barriers: vec![],
+            inflight_graph_info: InflightDatabaseInfo::empty(),
+            inflight_subscription_info: InflightSubscriptionInfo::default(),
+            paused_reason: None,
+        }
+    }
+
+    pub fn recovery(
+        in_flight_prev_epoch: TracedEpoch,
+        inflight_graph_info: InflightDatabaseInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
     ) -> Self {
@@ -70,8 +80,8 @@ impl BarrierWorkerState {
         }
     }
 
-    pub fn in_flight_prev_epoch(&self) -> Option<&TracedEpoch> {
-        self.in_flight_prev_epoch.as_ref()
+    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
+        &self.in_flight_prev_epoch
     }
 
     /// Returns the `BarrierInfo` for the next barrier, and updates the state.
@@ -79,18 +89,21 @@ impl BarrierWorkerState {
         &mut self,
         command: Option<&Command>,
         is_checkpoint: bool,
+        curr_epoch: TracedEpoch,
     ) -> Option<BarrierInfo> {
         if self.inflight_graph_info.is_empty()
             && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
         };
-        let in_flight_prev_epoch = self
-            .in_flight_prev_epoch
-            .get_or_insert_with(|| TracedEpoch::new(Epoch::now()));
-        let prev_epoch = in_flight_prev_epoch.clone();
-        let curr_epoch = prev_epoch.next();
-        *in_flight_prev_epoch = curr_epoch.clone();
+        assert!(
+            self.in_flight_prev_epoch.value() < curr_epoch.value(),
+            "curr epoch regress. {} > {}",
+            self.in_flight_prev_epoch.value(),
+            curr_epoch.value()
+        );
+        let prev_epoch = self.in_flight_prev_epoch.clone();
+        self.in_flight_prev_epoch = curr_epoch.clone();
         self.pending_non_checkpoint_barriers
             .push(prev_epoch.value().0);
         let kind = if is_checkpoint {
@@ -113,9 +126,8 @@ impl BarrierWorkerState {
     pub fn apply_command(
         &mut self,
         command: Option<&Command>,
-        database_id: Option<DatabaseId>,
     ) -> (
-        InflightGraphInfo,
+        InflightDatabaseInfo,
         InflightSubscriptionInfo,
         HashSet<TableId>,
         HashSet<TableId>,
@@ -129,10 +141,7 @@ impl BarrierWorkerState {
         {
             None
         } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
-            self.inflight_graph_info.pre_apply(
-                &fragment_changes,
-                database_id.expect("should exist when having fragment changes"),
-            );
+            self.inflight_graph_info.pre_apply(&fragment_changes);
             Some(fragment_changes)
         } else {
             None
@@ -145,10 +154,7 @@ impl BarrierWorkerState {
         let subscription_info = self.inflight_subscription_info.clone();
 
         if let Some(fragment_changes) = fragment_changes {
-            self.inflight_graph_info.post_apply(
-                &fragment_changes,
-                database_id.expect("should exist when having fragment changes"),
-            );
+            self.inflight_graph_info.post_apply(&fragment_changes);
         }
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();

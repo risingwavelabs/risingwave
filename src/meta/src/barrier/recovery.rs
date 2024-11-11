@@ -18,13 +18,11 @@ use std::time::Duration;
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{StreamingParallelism, WorkerId};
-use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
@@ -35,9 +33,11 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, info, warn, Instrument};
 
 use super::{
-    CheckpointControl, GlobalBarrierWorker, GlobalBarrierWorkerContext, RecoveryReason, TracedEpoch,
+    BarrierWorkerRuntimeInfoSnapshot, CheckpointControl, DatabaseCheckpointControl,
+    GlobalBarrierWorker, GlobalBarrierWorkerContext, InflightSubscriptionInfo, RecoveryReason,
+    TracedEpoch,
 };
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::schedule::ScheduledBarriers;
@@ -154,16 +154,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn reload_runtime_info_impl(
         &self,
-    ) -> MetaResult<(
-        ActiveStreamingWorkerNodes,
-        InflightGraphInfo,
-        InflightSubscriptionInfo,
-        Option<TracedEpoch>,
-        HashMap<WorkerId, Vec<StreamActor>>,
-        HashMap<ActorId, Vec<SplitImpl>>,
-        HashMap<TableId, (String, TableFragments)>,
-        HummockVersionStats,
-    )> {
+    ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
         {
             {
                 {
@@ -173,7 +164,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // Mview progress needs to be recovered.
                     tracing::info!("recovering mview progress");
-                    let background_mview_progress = self
+                    let background_jobs = self
                         .recover_background_mv_progress()
                         .await
                         .context("recover mview progress should not fail")?;
@@ -224,71 +215,59 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let info = info;
 
-                    self.purge_state_table_from_hummock(&info.existing_table_ids().collect())
-                        .await
-                        .context("purge state table from hummock")?;
+                    self.purge_state_table_from_hummock(
+                        &InflightFragmentInfo::existing_table_ids(
+                            info.values().flat_map(|database| database.fragment_infos()),
+                        )
+                        .collect(),
+                    )
+                    .await
+                    .context("purge state table from hummock")?;
 
-                    let prev_epoch = self
+                    let state_table_committed_epochs: HashMap<_, _> = self
                         .hummock_manager
                         .on_current_version(|version| {
-                            let state_table_info = version.state_table_info.info();
-                            let committed_epoch = state_table_info
-                                .values()
-                                .map(|info| info.committed_epoch)
-                                .next();
-                            let existing_table_ids = info.existing_table_ids();
-                            for table_id in existing_table_ids {
-                                assert!(
-                                    state_table_info.contains_key(&table_id),
-                                    "table id {table_id} not registered to hummock but in recovered job {:?}. hummock table info{:?}",
-                                    info.existing_table_ids().collect_vec(),
-                                    state_table_info
-                                );
-                            }
-                            if let Some(committed_epoch) = committed_epoch {
-                                for (table_id, info) in version.state_table_info.info() {
-                                    assert_eq!(
-                                        info.committed_epoch, committed_epoch,
-                                        "table {} with invisible epoch is not purged",
-                                        table_id
-                                    );
-                                }
-                            }
-                            committed_epoch.map(|committed_epoch| {
-                                TracedEpoch::new(Epoch::from(committed_epoch))
-                            })
+                            version
+                                .state_table_info
+                                .info()
+                                .iter()
+                                .map(|(table_id, info)| (*table_id, info.committed_epoch))
+                                .collect()
                         })
                         .await;
 
-                    let subscription_info = InflightSubscriptionInfo {
-                        mv_depended_subscriptions: self
-                            .metadata_manager
-                            .get_mv_depended_subscriptions()
-                            .await?,
-                    };
-
-                    self.sink_manager.reset().await;
+                    let subscription_infos = self
+                        .metadata_manager
+                        .get_mv_depended_subscriptions()
+                        .await?
+                        .into_iter()
+                        .map(|(database_id, mv_depended_subscriptions)| {
+                            (
+                                database_id,
+                                InflightSubscriptionInfo {
+                                    mv_depended_subscriptions,
+                                },
+                            )
+                        })
+                        .collect();
 
                     // update and build all actors.
-                    let node_actors = self
-                        .load_all_actors(&info, &active_streaming_nodes)
-                        .await
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "update actors failed");
-                        })?;
+                    let stream_actors = self.load_all_actors().await.inspect_err(|err| {
+                        warn!(error = %err.as_report(), "update actors failed");
+                    })?;
 
                     // get split assignments for all actors
-                    let source_split_assignments = self.source_manager.list_assignments().await;
-                    Ok((
+                    let source_splits = self.source_manager.list_assignments().await;
+                    Ok(BarrierWorkerRuntimeInfoSnapshot {
                         active_streaming_nodes,
-                        info,
-                        subscription_info,
-                        prev_epoch,
-                        node_actors,
-                        source_split_assignments,
-                        background_mview_progress,
-                        self.hummock_manager.get_version_stats().await,
-                    ))
+                        database_fragment_infos: info,
+                        state_table_committed_epochs,
+                        subscription_infos,
+                        stream_actors,
+                        source_splits,
+                        background_jobs,
+                        hummock_version_stats: self.hummock_manager.get_version_stats().await,
+                    })
                 }
             }
         }
@@ -312,22 +291,31 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             if let Some(err) = &err {
                 self.context.notify_creating_job_failed(err).await;
             };
-            let (
+            let runtime_info_snapshot = self
+                .context
+                .reload_runtime_info()
+                .await?;
+            runtime_info_snapshot.validate().inspect_err(|e| {
+                warn!(err = ?e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
+            })?;
+            let BarrierWorkerRuntimeInfoSnapshot {
                 active_streaming_nodes,
-                info,
-                subscription_info,
-                prev_epoch,
-                node_actors,
-                source_split_assignments,
-                background_mview_progress,
-                version_stats,
-            ) = self.context.reload_runtime_info().await?;
+                database_fragment_infos,
+                mut state_table_committed_epochs,
+                mut subscription_infos,
+                mut stream_actors,
+                mut source_splits,
+                mut background_jobs,
+                hummock_version_stats,
+            } = runtime_info_snapshot;
+
+            self.sink_manager.reset().await;
 
             let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
             let reset_start_time = Instant::now();
             control_stream_manager
                 .reset(
-                    &subscription_info,
+                    subscription_infos.values(),
                     active_streaming_nodes.current(),
                     &*self.context,
                 )
@@ -337,8 +325,20 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 })?;
             info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
 
+            let mut databases = HashMap::new();
+
             let recovery_result: MetaResult<_> = try {
-                {
+                for (database_id, info) in database_fragment_infos {
+                    let source_split_assignments = info
+                        .fragment_infos()
+                        .flat_map(|info| info.actors.keys())
+                        .filter_map(|actor_id| {
+                            let actor_id = *actor_id as ActorId;
+                            source_splits
+                                .remove(&actor_id)
+                                .map(|splits| (actor_id, splits))
+                        })
+                        .collect();
                     let mutation = Mutation::Add(AddMutation {
                         // Actors built during recovery is not treated as newly added actors.
                         actor_dispatchers: Default::default(),
@@ -348,7 +348,24 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         subscriptions_to_add: Default::default(),
                     });
 
-                    let new_epoch = if let Some(prev_epoch) = prev_epoch {
+                    let new_epoch = {
+                        let mut epochs = info.existing_table_ids().map(|table_id| {
+                            (
+                                table_id,
+                                state_table_committed_epochs
+                                    .remove(&table_id)
+                                    .expect("should exist"),
+                            )
+                        });
+                        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
+                        for (table_id, epoch) in epochs {
+                            assert_eq!(
+                                prev_epoch, epoch,
+                                "{} has different committed epoch to {}",
+                                first_table_id, table_id
+                            );
+                        }
+                        let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
                         // Use a different `curr_epoch` for each recovery attempt.
                         let curr_epoch = prev_epoch.next();
                         let barrier_info = BarrierInfo {
@@ -357,7 +374,19 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             kind: BarrierKind::Initial,
                         };
 
+                        let mut node_actors: HashMap<_, Vec<_>> = HashMap::new();
+                        for (actor_id, worker_id) in
+                            info.fragment_infos().flat_map(|info| info.actors.iter())
+                        {
+                            let worker_id = *worker_id as WorkerId;
+                            let actor_id = *actor_id as ActorId;
+                            let stream_actor =
+                                stream_actors.remove(&actor_id).expect("should exist");
+                            node_actors.entry(worker_id).or_default().push(stream_actor);
+                        }
+
                         let mut node_to_collect = control_stream_manager.inject_barrier(
+                            database_id,
                             None,
                             Some(mutation),
                             &barrier_info,
@@ -376,23 +405,53 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             assert!(node_to_collect.remove(&worker_id));
                         }
                         debug!("collected initial barrier");
-                        Some(barrier_info.curr_epoch)
-                    } else {
-                        assert!(info.is_empty());
-                        None
+                        barrier_info.curr_epoch
                     };
 
-                    (
-                        BarrierWorkerState::new(new_epoch, info, subscription_info, paused_reason),
-                        active_streaming_nodes,
-                        control_stream_manager,
-                        CreateMviewProgressTracker::recover(
-                            background_mview_progress,
-                            &version_stats,
-                        ),
-                        version_stats,
-                    )
+                    let background_mviews = info
+                        .job_ids()
+                        .filter_map(|job_id| {
+                            background_jobs.remove(&job_id).map(|mview| (job_id, mview))
+                        })
+                        .collect();
+                    let tracker = CreateMviewProgressTracker::recover(
+                        background_mviews,
+                        &hummock_version_stats,
+                    );
+                    let state = BarrierWorkerState::recovery(
+                        new_epoch,
+                        info,
+                        subscription_infos.remove(&database_id).unwrap_or_default(),
+                        paused_reason,
+                    );
+                    databases.insert(
+                        database_id,
+                        DatabaseCheckpointControl::recovery(database_id, tracker, state),
+                    );
                 }
+                if !stream_actors.is_empty() {
+                    warn!(actor_ids = ?stream_actors.keys().collect_vec(), "unused stream actors in recovery");
+                }
+                if !source_splits.is_empty() {
+                    warn!(actor_ids = ?source_splits.keys().collect_vec(), "unused actor source splits in recovery");
+                }
+                if !background_jobs.is_empty() {
+                    warn!(job_ids = ?background_jobs.keys().collect_vec(), "unused recovered background mview in recovery");
+                }
+                if !subscription_infos.is_empty() {
+                    warn!(?subscription_infos, "unused subscription infos in recovery");
+                }
+                if !state_table_committed_epochs.is_empty() {
+                    warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
+                }
+                (
+                    active_streaming_nodes,
+                    control_stream_manager,
+                    CheckpointControl {
+                        databases,
+                        hummock_version_stats,
+                    },
+                )
             };
             if recovery_result.is_err() {
                 GLOBAL_META_METRICS.recovery_failure_cnt.inc();
@@ -405,25 +464,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         recovery_timer.observe_duration();
 
-        let create_mview_tracker: CreateMviewProgressTracker;
-        let state: BarrierWorkerState;
-        let version_stats: HummockVersionStats;
         (
-            state,
             self.active_streaming_nodes,
             self.control_stream_manager,
-            create_mview_tracker,
-            version_stats,
+            self.checkpoint_control,
         ) = new_state;
 
-        tracing::info!(
-            epoch = state.in_flight_prev_epoch().map(|epoch| epoch.value().0),
-            paused = ?state.paused_reason(),
-            "recovery success"
-        );
-
-        self.checkpoint_control =
-            CheckpointControl::new(create_mview_tracker, state, version_stats);
+        tracing::info!("recovery success");
 
         self.env
             .notification_manager()
@@ -439,7 +486,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn migrate_actors(
         &self,
         active_nodes: &mut ActiveStreamingWorkerNodes,
-    ) -> MetaResult<InflightGraphInfo> {
+    ) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
         let mgr = &self.metadata_manager;
 
         // all worker slots used by actors
@@ -751,39 +798,8 @@ impl GlobalBarrierWorkerContextImpl {
     }
 
     /// Update all actors in compute nodes.
-    async fn load_all_actors(
-        &self,
-        info: &InflightGraphInfo,
-        active_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
-        let actor_map = InflightFragmentInfo::actor_ids_to_collect(info.fragment_infos());
-        if actor_map.is_empty() {
-            tracing::debug!("no actor to update, skipping.");
-            return Ok(HashMap::new());
-        }
-
-        let all_node_actors = self.metadata_manager.all_node_actors(false).await?;
-
-        // Check if any actors were dropped after info resolved.
-        if all_node_actors.iter().any(|(node_id, node_actors)| {
-            !active_nodes.current().contains_key(node_id)
-                || actor_map
-                    .get(node_id)
-                    .map(|actors| actors.len() != node_actors.len())
-                    .unwrap_or(true)
-        }) {
-            return Err(anyhow!("actors dropped during update").into());
-        }
-
-        {
-            for (node_id, actors) in &actor_map {
-                if !actors.is_empty() && !all_node_actors.contains_key(node_id) {
-                    return Err(anyhow!("streaming job dropped during update").into());
-                }
-            }
-        }
-
-        Ok(all_node_actors)
+    async fn load_all_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
+        self.metadata_manager.all_active_actors().await
     }
 }
 

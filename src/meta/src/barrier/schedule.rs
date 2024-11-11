@@ -99,7 +99,9 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs { .. } | Command::CancelStreamingJob(_)
+                Command::DropStreamingJobs { .. }
+                    | Command::CancelStreamingJob(_)
+                    | Command::DropSubscription { .. }
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -426,6 +428,7 @@ impl ScheduledBarriers {
                     let table_id = table_fragments.table_id();
                     cancel_table_ids.insert(table_id);
                 }
+                Command::DropSubscription { .. } => {}
                 _ => {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
