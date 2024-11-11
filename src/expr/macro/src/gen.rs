@@ -856,7 +856,7 @@ impl FunctionAttr {
                     }}
                 }
             } else {
-                // for the remaining case, clone the first input as the initial state
+                // for the remaining cases, clone the first input as the initial state
                 quote! { Some(v0.clone().into()) }
             };
 
