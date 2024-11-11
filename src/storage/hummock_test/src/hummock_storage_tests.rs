@@ -26,7 +26,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::range::RangeBoundsExt;
 use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
@@ -36,6 +35,7 @@ use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
+use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
 use risingwave_meta::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
@@ -2675,20 +2675,20 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst1_epoch1.clone(),
-        vec![NewTableFragmentInfo::Normal {
-            mv_table_id: None,
-            internal_table_ids: vec![existing_table_id],
+        vec![NewTableFragmentInfo {
+            table_ids: HashSet::from_iter([existing_table_id]),
         }],
         &[existing_table_id],
     )
     .await;
 
-    let old_cg_id_set: HashSet<_> = {
+    let cg_id =
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
+            .await;
+
+    {
         let version = test_env.manager.get_current_version().await;
-        let cg = version
-            .levels
-            .get(&(StaticCompactionGroupId::StateDefault as _))
-            .unwrap();
+        let cg = version.levels.get(&(cg_id)).unwrap();
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 1);
         let sub_level = &sub_levels[0];
@@ -2701,13 +2701,8 @@ async fn test_commit_multi_epoch() {
             .get(&existing_table_id)
             .unwrap();
         assert_eq!(epoch1, info.committed_epoch);
-        assert_eq!(
-            StaticCompactionGroupId::StateDefault as u64,
-            info.compaction_group_id
-        );
-
-        version.levels.keys().cloned().collect()
-    };
+        assert_eq!(cg_id, info.compaction_group_id);
+    }
 
     let sst1_epoch2 = SstableInfo {
         sst_id: 22,
@@ -2724,10 +2719,7 @@ async fn test_commit_multi_epoch() {
 
     {
         let version = test_env.manager.get_current_version().await;
-        let cg = version
-            .levels
-            .get(&(StaticCompactionGroupId::StateDefault as _))
-            .unwrap();
+        let cg = version.levels.get(&(cg_id)).unwrap();
         let sub_levels = &cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 2);
         let sub_level = &sub_levels[0];
@@ -2743,10 +2735,7 @@ async fn test_commit_multi_epoch() {
             .get(&existing_table_id)
             .unwrap();
         assert_eq!(epoch2, info.committed_epoch);
-        assert_eq!(
-            StaticCompactionGroupId::StateDefault as u64,
-            info.compaction_group_id
-        );
+        assert_eq!(cg_id, info.compaction_group_id);
     };
 
     let new_table_id = TableId::new(2);
@@ -2763,7 +2752,7 @@ async fn test_commit_multi_epoch() {
     commit_epoch(
         epoch1,
         sst2_epoch1.clone(),
-        vec![NewTableFragmentInfo::NewCompactionGroup {
+        vec![NewTableFragmentInfo {
             table_ids: HashSet::from_iter([new_table_id]),
         }],
         &[new_table_id],
@@ -2772,10 +2761,9 @@ async fn test_commit_multi_epoch() {
 
     let new_cg_id = {
         let version = test_env.manager.get_current_version().await;
-        let new_cg_id_set: HashSet<_> = version.levels.keys().cloned().collect();
-        let added_cg_id_set = &new_cg_id_set - &old_cg_id_set;
-        assert_eq!(added_cg_id_set.len(), 1);
-        let new_cg_id = added_cg_id_set.into_iter().next().unwrap();
+        let new_cg_id =
+            get_compaction_group_id_by_table_id(test_env.manager.clone(), new_table_id.table_id())
+                .await;
 
         let new_cg = version.levels.get(&new_cg_id).unwrap();
         let sub_levels = &new_cg.l0.sub_levels;
@@ -2841,10 +2829,7 @@ async fn test_commit_multi_epoch() {
 
     {
         let version = test_env.manager.get_current_version().await;
-        let old_cg = version
-            .levels
-            .get(&(StaticCompactionGroupId::StateDefault as _))
-            .unwrap();
+        let old_cg = version.levels.get(&cg_id).unwrap();
         let sub_levels = &old_cg.l0.sub_levels;
         assert_eq!(sub_levels.len(), 3);
         let sub_level1 = &sub_levels[0];

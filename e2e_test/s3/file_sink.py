@@ -141,7 +141,6 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_parquet_sink/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
@@ -185,6 +184,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     stmt = f'select count(*), sum(id) from test_parquet_sink_table'
     print(f'Execute reading sink files: {stmt}')
 
+    print(f'Create snowflake s3 sink ')
     # Execute a SELECT statement
     cur.execute(f'''CREATE sink test_file_sink_json as select
         id,
@@ -201,15 +201,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamp,
         test_timestamptz
         from {_table()} WITH (
-        connector = 's3',
+        connector = 'snowflake',
         match_pattern = '*.parquet',
-        s3.region_name = 'custom',
-        s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        snowflake.aws_region = 'custom',
+        snowflake.s3_bucket = 'hummock001',
+        snowflake.aws_access_key_id = 'hummockadmin',
+        snowflake.aws_secret_access_key = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
-        s3.file_type = 'json',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
@@ -297,7 +296,6 @@ def test_file_sink_batching():
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_file_sink_batching/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         rollover_seconds = 5,
         max_row_count = 5,

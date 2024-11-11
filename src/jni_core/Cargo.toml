@@ -15,7 +15,7 @@ bytes = "1"
 cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false }
 foyer ={ workspace = true }
-fs-err = "2"
+fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }

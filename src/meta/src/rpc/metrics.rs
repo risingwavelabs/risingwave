@@ -72,9 +72,9 @@ pub struct MetaMetrics {
     pub barrier_send_latency: Histogram,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: IntGauge,
+    pub all_barrier_nums: IntGaugeVec,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: IntGauge,
+    pub in_flight_barrier_nums: IntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
     pub last_committed_barrier_time: IntGauge,
 
@@ -246,15 +246,17 @@ impl MetaMetrics {
         );
         let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let all_barrier_nums = register_int_gauge_with_registry!(
+        let all_barrier_nums = register_int_gauge_vec_with_registry!(
             "all_barrier_nums",
             "num of of all_barrier",
+            &["database_id"],
             registry
         )
         .unwrap();
-        let in_flight_barrier_nums = register_int_gauge_with_registry!(
+        let in_flight_barrier_nums = register_int_gauge_vec_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
+            &["database_id"],
             registry
         )
         .unwrap();

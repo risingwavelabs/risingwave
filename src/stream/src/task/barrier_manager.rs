@@ -951,7 +951,7 @@ pub(crate) mod barrier_test_utils {
                             barrier: Some(barrier.to_protobuf()),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
-                            partial_graph_id: u32::MAX,
+                            partial_graph_id: u64::MAX,
                             broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],

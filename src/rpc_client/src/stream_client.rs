@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
@@ -88,22 +86,12 @@ pub type StreamingControlHandle =
 impl StreamClient {
     pub async fn start_streaming_control(
         &self,
-        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> Result<StreamingControlHandle> {
         let first_request = StreamingControlStreamRequest {
             request: Some(streaming_control_stream_request::Request::Init(
                 InitRequest {
-                    subscriptions: mv_depended_subscriptions
-                        .iter()
-                        .flat_map(|(table_id, subscriptions)| {
-                            subscriptions
-                                .keys()
-                                .map(|subscriber_id| SubscriptionUpstreamInfo {
-                                    subscriber_id: *subscriber_id,
-                                    upstream_mv_table_id: table_id.table_id,
-                                })
-                        })
-                        .collect(),
+                    subscriptions: subscriptions.collect(),
                 },
             )),
         };
