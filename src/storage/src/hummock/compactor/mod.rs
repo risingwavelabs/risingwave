@@ -553,11 +553,11 @@ pub fn start_compactor(
                                     }
                                 });
                             }
-                            ResponseEvent::VacuumTask(vacuum_task) => {
-                                tracing::error!(?vacuum_task, "unexpected vacuum task");
+                            ResponseEvent::VacuumTask(_) => {
+                                unreachable!("unexpected vacuum task");
                             }
-                            ResponseEvent::FullScanTask(full_scan_task) => {
-                                tracing::error!(?full_scan_task, "unexpected scan task");
+                            ResponseEvent::FullScanTask(_) => {
+                                unreachable!("unexpected scan task");
                             }
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
@@ -725,11 +725,11 @@ pub fn start_shared_compactor(
                                     }
 
                                 }
-                                dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
-                                    tracing::error!(?vacuum_task, "unexpected vacuum task");
+                                dispatch_compaction_task_request::Task::VacuumTask(_) => {
+                                    unreachable!("unexpected vacuum task");
                                 }
-                                dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
-                                    tracing::error!(?full_scan_task, "unexpected scan task");
+                                dispatch_compaction_task_request::Task::FullScanTask(_) => {
+                                    unreachable!("unexpected scan task");
                                 }
                                 dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
                                     let validation_task = ValidationTask::from(validation_task);

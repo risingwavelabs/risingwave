@@ -58,7 +58,7 @@ pub fn start_hummock_workers(
 
 /// Starts a task to periodically vacuum stale metadata.
 pub fn start_vacuum_metadata_loop(
-    vacuum: HummockManagerRef,
+    hummock_manager: HummockManagerRef,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -75,7 +75,7 @@ pub fn start_vacuum_metadata_loop(
                     return;
                 }
             }
-            if let Err(err) = vacuum.delete_metadata().await {
+            if let Err(err) = hummock_manager.delete_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
             }
         }

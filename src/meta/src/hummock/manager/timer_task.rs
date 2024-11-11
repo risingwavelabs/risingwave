@@ -449,7 +449,7 @@ impl HummockManager {
                                             )
                                             .await
                                             .inspect_err(|e| {
-                                                warn!(error = e.as_report(), "Failed to start GC.")
+                                                warn!(error = %e.as_report(), "Failed to start GC.")
                                             });
                                     });
                                 }

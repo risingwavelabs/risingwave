@@ -250,7 +250,7 @@ impl HummockManagerService for HummockServiceImpl {
                     Some(backup_manager_2),
                 )
                 .await
-                .inspect_err(|e| tracing::warn!(error = e.as_report(), "Failed to start GC."));
+                .inspect_err(|e| tracing::warn!(error = %e.as_report(), "Failed to start GC."));
         });
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
