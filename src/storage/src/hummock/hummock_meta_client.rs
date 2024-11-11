@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
+use risingwave_hummock_sdk::{SstObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
@@ -80,25 +80,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     ) -> Result<()> {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
-            .await
-    }
-
-    async fn report_full_scan_task(
-        &self,
-        filtered_object_ids: Vec<HummockSstableObjectId>,
-        total_object_count: u64,
-        total_object_size: u64,
-        start_after: Option<String>,
-        next_start_after: Option<String>,
-    ) -> Result<()> {
-        self.meta_client
-            .report_full_scan_task(
-                filtered_object_ids,
-                total_object_count,
-                total_object_size,
-                start_after,
-                next_start_after,
-            )
             .await
     }
 

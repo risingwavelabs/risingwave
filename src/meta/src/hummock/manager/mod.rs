@@ -42,7 +42,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, GcManager, PagedMetrics};
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, GcManager};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
@@ -108,10 +108,7 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
-    full_gc_state: FullGcState,
-    /// Gather metrics that require accumulation across multiple operations.
-    /// For example, to get the total number of objects in object store, multiple LISTs are required because a single LIST can visit at most `full_gc_object_limit` objects.
-    paged_metrics: parking_lot::Mutex<PagedMetrics>,
+    full_gc_state: Arc<FullGcState>,
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
@@ -245,7 +242,6 @@ impl HummockManager {
         let version_checkpoint_path = version_checkpoint_path(state_store_dir);
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let full_gc_object_limit = env.opts.full_gc_object_limit;
         let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
         let gc_manager = GcManager::new(
             object_store.clone(),
@@ -287,8 +283,7 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
-            full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
-            paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
+            full_gc_state: FullGcState::new().into(),
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,

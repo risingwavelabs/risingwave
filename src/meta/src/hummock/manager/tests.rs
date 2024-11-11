@@ -1191,7 +1191,7 @@ async fn test_extend_objects_to_delete() {
     assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .extend_objects_to_delete(&all_object_ids)
             .await
             .unwrap(),
         orphan_sst_num as usize
@@ -1213,7 +1213,7 @@ async fn test_extend_objects_to_delete() {
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .extend_objects_to_delete(&all_object_ids)
             .await
             .unwrap(),
         orphan_sst_num as usize
@@ -1243,7 +1243,7 @@ async fn test_extend_objects_to_delete() {
     // stale objects are combined in the checkpoint of version2, so no sst to reclaim
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .extend_objects_to_delete(&all_object_ids)
             .await
             .unwrap(),
         orphan_sst_num as usize
@@ -1272,7 +1272,7 @@ async fn test_extend_objects_to_delete() {
     // in the stale objects of version2 checkpoint
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .extend_objects_to_delete(&all_object_ids)
             .await
             .unwrap(),
         orphan_sst_num as usize + 3
@@ -2583,7 +2583,7 @@ async fn test_vacuum() {
         context_id,
     ));
     assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
-    assert_eq!(hummock_manager.delete_object().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 0);
     hummock_manager.pin_version(context_id).await.unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let sst_infos = add_test_tables(
@@ -2605,13 +2605,12 @@ async fn test_vacuum() {
     hummock_manager.create_version_checkpoint(0).await.unwrap();
     assert!(hummock_manager.get_objects_to_delete().is_empty());
     hummock_manager
-        .complete_full_gc(
+        .complete_gc_batch(
             sst_infos
                 .iter()
                 .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
                 .collect(),
             None,
-            HashSet::default(),
         )
         .await
         .unwrap();
@@ -2629,7 +2628,7 @@ async fn test_vacuum() {
             .collect::<Vec<_>>()
     );
     // No SST deletion is scheduled because no available worker.
-    assert_eq!(hummock_manager.delete_object().await.unwrap(), 3);
+    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 3);
     // No objects_to_delete.
-    assert_eq!(hummock_manager.delete_object().await.unwrap(), 0);
+    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 0);
 }

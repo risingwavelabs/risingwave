@@ -20,7 +20,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
     GetNewSstIdsRequest, GetNewSstIdsResponse, ReportCompactionTaskRequest,
-    ReportCompactionTaskResponse, ReportFullScanTaskRequest, ReportFullScanTaskResponse,
+    ReportCompactionTaskResponse,
 };
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
@@ -134,18 +134,6 @@ impl GrpcCompactorProxyClient {
             report_compaction_task,
             request,
             ReportCompactionTaskResponse
-        )
-    }
-
-    pub async fn report_full_scan_task(
-        &self,
-        request: ReportFullScanTaskRequest,
-    ) -> std::result::Result<tonic::Response<ReportFullScanTaskResponse>, tonic::Status> {
-        retry_rpc!(
-            self,
-            report_full_scan_task,
-            request,
-            ReportFullScanTaskResponse
         )
     }
 

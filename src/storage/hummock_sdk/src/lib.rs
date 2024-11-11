@@ -421,7 +421,7 @@ pub fn get_sst_data_path(
     );
     path.push_str(path_prefix);
     path.push('/');
-    path.push_str(&obj_prefix);
+    path.push_str(obj_prefix);
     path.push_str(&object_id.to_string());
     path.push('.');
     path.push_str(OBJECT_SUFFIX);

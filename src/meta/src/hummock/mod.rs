@@ -106,7 +106,7 @@ pub fn start_vacuum_object_loop(
                     return;
                 }
             }
-            if let Err(err) = vacuum.delete_object().await {
+            if let Err(err) = vacuum.delete_objects().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum object error");
             }
         }

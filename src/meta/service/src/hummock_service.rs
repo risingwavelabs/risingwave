@@ -28,7 +28,6 @@ use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::*;
-use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::selector::ManualCompactionOption;
@@ -235,48 +234,17 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn report_full_scan_task(
-        &self,
-        request: Request<ReportFullScanTaskRequest>,
-    ) -> Result<Response<ReportFullScanTaskResponse>, Status> {
-        let req = request.into_inner();
-        let hummock_manager = self.hummock_manager.clone();
-        hummock_manager.update_paged_metrics(
-            req.start_after,
-            req.next_start_after.clone(),
-            req.total_object_count,
-            req.total_object_size,
-        );
-        let pinned_by_metadata_backup = self.backup_manager.list_pinned_ssts();
-        // The following operation takes some time, so we do it in dedicated task and responds the
-        // RPC immediately.
-        tokio::spawn(async move {
-            match hummock_manager
-                .complete_full_gc(
-                    req.object_ids,
-                    req.next_start_after,
-                    pinned_by_metadata_backup,
-                )
-                .await
-            {
-                Ok(number) => {
-                    tracing::info!("Full GC results {} SSTs to delete", number);
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(),  "Full GC SST failed");
-                }
-            }
-        });
-        Ok(Response::new(ReportFullScanTaskResponse { status: None }))
-    }
-
     async fn trigger_full_gc(
         &self,
         request: Request<TriggerFullGcRequest>,
     ) -> Result<Response<TriggerFullGcResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .start_full_gc(Duration::from_secs(req.sst_retention_time_sec), req.prefix)
+            .start_full_gc(
+                Duration::from_secs(req.sst_retention_time_sec),
+                req.prefix,
+                Some(self.backup_manager.clone()),
+            )
             .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }

@@ -499,7 +499,7 @@ message SubscribeCompactionEventResponse {
   oneof event {
     CompactTask compact_task = 1;
     VacuumTask vacuum_task = 2 [deprecated = true];
-    FullScanTask full_scan_task = 3;
+    FullScanTask full_scan_task = 3 [deprecated = true];
     ValidationTask validation_task = 4 [deprecated = true];
     CancelCompactTask cancel_compact_task = 5;
 
@@ -563,23 +563,6 @@ message TriggerManualCompactionRequest {
 }
 
 message TriggerManualCompactionResponse {
-  common.Status status = 1;
-}
-
-message ReportFullScanTaskRequest {
-  // Object ids that satisfying conditions specified by FullScanTask.
-  repeated uint64 object_ids = 1;
-  // Total count of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_count = 2;
-  // Total size of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_size = 3;
-  // Start key of the next page.
-  optional string next_start_after = 4;
-  // Start key of this page.
-  optional string start_after = 5;
-}
-
-message ReportFullScanTaskResponse {
   common.Status status = 1;
 }
 
@@ -812,7 +795,6 @@ service HummockManagerService {
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
-  rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);

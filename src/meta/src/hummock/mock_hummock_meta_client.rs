@@ -30,8 +30,8 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange, SyncResult,
+    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -235,17 +235,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         _sst_ids: Vec<u64>,
     ) -> Result<()> {
         todo!()
-    }
-
-    async fn report_full_scan_task(
-        &self,
-        _filtered_object_ids: Vec<HummockSstableObjectId>,
-        _total_object_count: u64,
-        _total_object_size: u64,
-        _start_after: Option<String>,
-        _next_start_after: Option<String>,
-    ) -> Result<()> {
-        unimplemented!()
     }
 
     async fn trigger_full_gc(
