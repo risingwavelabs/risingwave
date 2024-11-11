@@ -711,7 +711,6 @@ impl LogicalOptimizer {
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
-        println!("DAG_TO_TREE");
         plan = IcebergMergeOnReadRewriter::rewrite(plan)?;
 
         plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
