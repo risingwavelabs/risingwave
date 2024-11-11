@@ -11,7 +11,18 @@ CREATE TABLE diamonds (
     connector = 'posix_fs',
     match_pattern = 'data*.csv',
     posix_fs.root = 'e2e_test/source_inline/fs/data',
+    source_rate_limit = 0
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
+
+sleep 1s
+
+# no output due to rate limit
+query TTTT rowsort
+select * from diamonds;
+----
+
+statement ok
+ALTER TABLE diamonds SET source_rate_limit TO DEFAULT;
 
 sleep 10s
 
