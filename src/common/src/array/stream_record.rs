@@ -28,7 +28,7 @@ pub enum RecordType {
 }
 
 /// Generic type to represent a row change.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Record<R: Row> {
     Insert { new_row: R },
     Delete { old_row: R },

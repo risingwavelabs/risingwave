@@ -60,7 +60,6 @@ pub fn xxhash64_checksum(data: &[u8]) -> u64 {
 }
 
 /// Verifies the checksum of the data equals the given checksum with xxhash64.
-
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     let data_checksum = xxhash64_checksum(data);
     if data_checksum != checksum {

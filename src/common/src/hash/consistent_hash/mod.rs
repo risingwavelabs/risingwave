@@ -13,6 +13,6 @@
 // limitations under the License.
 
 pub mod bitmap;
-pub mod compat;
 pub mod mapping;
 pub mod vnode;
+pub mod vnode_count;

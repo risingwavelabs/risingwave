@@ -23,6 +23,13 @@ FROM
             ai.ad_id
     ) AS ad_clicks ON ad_impressions.ad_id = ad_clicks.ad_id;
 
+CREATE MATERIALIZED VIEW kinesis_timestamp AS
+SELECT
+    ad_impression._rw_kinesis_timestamp AS timestamp
+FROM
+    ad_impression
+WHERE ad_impression._rw_kinesis_timestamp IS NOT NULL AND ad_impression._rw_kinesis_timestamp >= '2024-01-01 00:00:00+00'::TIMESTAMPTZ;
+
 CREATE MATERIALIZED VIEW ad_ctr_5min AS
 SELECT
     ac.ad_id AS ad_id,

@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.0.1}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.1.0-rc.1}
 services:
   risingwave-standalone:
     <<: *image
@@ -59,7 +59,7 @@ services:
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
       ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
       RW_TELEMETRY_TYPE: ${RW_TELEMETRY_TYPE:-"docker-compose"}
-      RW_SECRET_STORE_PRIVATE_KEY_HEX: ${RW_SECRET_STORE_PRIVATE_KEY_HEX:-0123456789abcdef}
+      RW_SECRET_STORE_PRIVATE_KEY_HEX: ${RW_SECRET_STORE_PRIVATE_KEY_HEX:-0123456789abcdef0123456789abcdef}
       RW_LICENSE_KEY: ${RW_LICENSE_KEY:-}
     container_name: risingwave-standalone
     healthcheck:

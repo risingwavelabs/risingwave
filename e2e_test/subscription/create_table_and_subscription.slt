@@ -21,3 +21,18 @@ create subscription sub2 from t3 with(retention = '1D');
 
 statement ok
 create sink s1 into t3 from t2;
+
+statement ok
+create table t4 (v1 int, v2 int, v3 int, v4 int);
+
+statement ok
+create materialized view mv4 as select v4,v2 from t4;
+
+statement ok
+create subscription sub4 from mv4 with(retention = '1D');
+
+statement ok
+create table t5 (v1 int, v2 int, v3 int, v4 int, primary key (v1, v2));
+
+statement ok
+create subscription sub5 from t5 with(retention = '1D');

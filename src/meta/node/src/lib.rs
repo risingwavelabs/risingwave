@@ -231,6 +231,7 @@ pub fn start(
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
+        let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
             MetaBackend::Mem => MetaStoreBackend::Mem,
             MetaBackend::Sql => MetaStoreBackend::Sql {
@@ -239,6 +240,7 @@ pub fn start(
                     .expect("sql endpoint is required")
                     .expose_secret()
                     .to_string(),
+                config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -247,6 +249,7 @@ pub fn start(
                         .expect("sql endpoint is required")
                         .expose_secret()
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -258,6 +261,7 @@ pub fn start(
                         .expose_secret(),
                     opts.sql_database
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -269,6 +273,7 @@ pub fn start(
                         .expose_secret(),
                     opts.sql_database
                 ),
+                config: meta_store_config,
             },
         };
         validate_config(&config);
@@ -387,13 +392,18 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
-                periodic_scheduling_compaction_group_interval_sec: config
+                periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
-                    .periodic_scheduling_compaction_group_interval_sec,
-                split_group_size_limit: config.meta.split_group_size_limit,
-                min_table_split_size: config.meta.move_table_size_limit,
-                table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
-                min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
+                    .periodic_scheduling_compaction_group_split_interval_sec,
+                periodic_scheduling_compaction_group_merge_interval_sec: config
+                    .meta
+                    .periodic_scheduling_compaction_group_merge_interval_sec,
+                table_high_write_throughput_threshold: config
+                    .meta
+                    .table_high_write_throughput_threshold,
+                table_low_write_throughput_threshold: config
+                    .meta
+                    .table_low_write_throughput_threshold,
                 partition_vnode_count: config.meta.partition_vnode_count,
                 compact_task_table_size_partition_threshold_low: config
                     .meta
@@ -424,6 +434,19 @@ pub fn start(
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                split_group_size_ratio: config.meta.split_group_size_ratio,
+                table_stat_high_write_throughput_ratio_for_split: config
+                    .meta
+                    .table_stat_high_write_throughput_ratio_for_split,
+                table_stat_low_write_throughput_ratio_for_merge: config
+                    .meta
+                    .table_stat_low_write_throughput_ratio_for_merge,
+                table_stat_throuput_window_seconds_for_split: config
+                    .meta
+                    .table_stat_throuput_window_seconds_for_split,
+                table_stat_throuput_window_seconds_for_merge: config
+                    .meta
+                    .table_stat_throuput_window_seconds_for_merge,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
@@ -432,9 +455,6 @@ pub fn start(
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
                 secret_store_private_key,
                 temp_secret_file_dir: opts.temp_secret_file_dir,
-                table_info_statistic_history_times: config
-                    .storage
-                    .table_info_statistic_history_times,
                 actor_cnt_per_worker_parallelism_hard_limit: config
                     .meta
                     .developer

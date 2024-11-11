@@ -110,6 +110,7 @@ pub enum EngineType {
     Fs,
     Azblob,
     Webhdfs,
+    Snowflake,
 }
 
 impl<S: OpendalSinkBackend> Sink for FileSink<S> {
@@ -169,16 +170,23 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
         let op = S::new_operator(config.clone())?;
         let batching_strategy = S::get_batching_strategy(config.clone());
         let engine_type = S::get_engine_type();
-
+        let format_desc = match param.format_desc {
+            Some(desc) => desc,
+            None => {
+                if let EngineType::Snowflake = engine_type {
+                    SinkFormatDesc::plain_json_for_snowflake_only()
+                } else {
+                    return Err(SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")));
+                }
+            }
+        };
         Ok(Self {
             op,
             path,
             schema,
             is_append_only: param.sink_type.is_append_only(),
             batching_strategy,
-            format_desc: param
-                .format_desc
-                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+            format_desc,
             engine_type,
             _marker: PhantomData,
         })
@@ -390,28 +398,24 @@ impl OpenDalSinkWriter {
         // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
         // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
-        let object_name = match self.engine_type {
-            // For the local fs sink, the data will be automatically written to the defined path.
-            // Therefore, there is no need to specify the path in the file name.
-            EngineType::Fs => {
-                format!(
-                    "{}{}_{}.{}",
-                    self.path_partition_prefix(&create_time),
-                    self.executor_id,
-                    create_time.as_secs(),
-                    suffix
-                )
-            }
-            _ => format!(
-                "{}/{}{}_{}.{}",
-                self.write_path,
+        // 3. For the Snowflake Sink, the `write_path` parameter can be empty.
+        // When the `write_path` is not specified, the data will be written to the root of the specified bucket.
+        let object_name = {
+            let base_path = match self.engine_type {
+                EngineType::Fs => "".to_string(),
+                EngineType::Snowflake if self.write_path.is_empty() => "".to_string(),
+                _ => format!("{}/", self.write_path),
+            };
+
+            format!(
+                "{}{}{}_{}.{}",
+                base_path,
                 self.path_partition_prefix(&create_time),
                 self.executor_id,
                 create_time.as_secs(),
                 suffix,
-            ),
+            )
         };
-
         Ok(self
             .operator
             .writer_with(&object_name)

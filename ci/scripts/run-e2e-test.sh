@@ -35,8 +35,11 @@ cluster_start() {
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
     risedev pre-start-dev
+    risedev dev standalone-minio-sqlite &
+    PID=$!
+    sleep 1
     start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-sqlite
+    wait $PID
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
@@ -45,6 +48,13 @@ cluster_start() {
     # Give it a while to make sure the single-node is ready.
     sleep 10
   else
+    # Initialize backends.
+    if [[ $mode == *"mysql-backend" ]]; then
+      mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
+    elif [[ $mode == *"pg-backend" ]]; then
+      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
+    fi
+
     risedev ci-start "$mode"
   fi
 }
@@ -255,8 +265,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite-compactor &
+  PID=$!
+  sleep 1
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-sqlite-compactor
+  wait $PID
   wait_standalone
   if compactor_is_online
   then
@@ -272,8 +285,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite &
+  PID=$!
+  sleep 1
   start_standalone "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-sqlite
+  wait $PID
   wait_standalone
   if ! compactor_is_online
   then

@@ -32,9 +32,7 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
@@ -341,17 +339,6 @@ impl TableFragments {
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
     }
 
-    /// Check if the fragment type mask is injectable.
-    pub fn is_injectable(fragment_type_mask: u32) -> bool {
-        (fragment_type_mask
-            & (PbFragmentTypeFlag::Source as u32
-                | PbFragmentTypeFlag::Now as u32
-                | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32
-                | PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-            != 0
-    }
-
     /// Returns mview actor ids.
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
@@ -576,10 +563,21 @@ impl TableFragments {
     /// Compared to [`crate::stream::StreamFragmentGraph::incomplete_internal_tables`],
     /// the table catalogs returned here are complete, with all fields filled.
     pub fn internal_tables(&self) -> BTreeMap<u32, Table> {
+        self.collect_tables_inner(true)
+    }
+
+    /// `internal_tables()` with additional table in `Materialize` node.
+    pub fn all_tables(&self) -> BTreeMap<u32, Table> {
+        self.collect_tables_inner(false)
+    }
+
+    fn collect_tables_inner(&self, internal_tables_only: bool) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {
-            stream_graph_visitor::visit_stream_node_internal_tables(
+            stream_graph_visitor::visit_stream_node_tables_inner(
                 &mut fragment.actors[0].nodes.clone().unwrap(),
+                internal_tables_only,
+                true,
                 |table, _| {
                     let table_id = table.id;
                     tables

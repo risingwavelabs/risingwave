@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
 use risingwave_meta::controller::IN_MEMORY_STORE;
@@ -80,13 +81,12 @@ use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
 use crate::backup_restore::BackupManager;
-use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::barrier::BarrierScheduler;
 use crate::controller::system_param::SystemParamsController;
 use crate::controller::SqlMetaStore;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
@@ -147,14 +147,15 @@ pub async fn rpc_serve(
             )
             .await
         }
-        MetaStoreBackend::Sql { endpoint } => {
+        MetaStoreBackend::Sql { endpoint, config } => {
             let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
             let mut options = sea_orm::ConnectOptions::new(endpoint);
             options
-                .max_connections(10)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30))
-                .acquire_timeout(Duration::from_secs(30));
+                .max_connections(config.max_connections)
+                .min_connections(config.min_connections)
+                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
+                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
+                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
 
             if is_sqlite {
                 // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
@@ -438,11 +439,8 @@ pub async fn start_service_as_election_leader(
         None
     };
 
-    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.checkpoint_frequency() as usize,
-    );
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -489,17 +487,17 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
-    let barrier_manager = GlobalBarrierManager::new(
+    let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        meta_metrics.clone(),
         scale_controller.clone(),
     )
     .await;
+    sub_tasks.push((join_handle, shutdown_rx));
 
     {
         let source_manager = source_manager.clone();
@@ -531,21 +529,12 @@ pub async fn start_service_as_election_leader(
         compactor_manager.clone(),
     ));
 
-    let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id
-        && let Some(security_group_id) = &env.opts.security_group_id
-    {
-        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
-        aws_cli = Some(cli);
-    }
-
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
-        aws_cli.clone(),
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager.context().clone(),
+        barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
     )
@@ -557,12 +546,11 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         source_manager,
         stream_manager.clone(),
-        barrier_manager.context().clone(),
+        barrier_manager.clone(),
         scale_controller.clone(),
     );
 
-    let cluster_srv =
-        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.context().clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
@@ -586,7 +574,7 @@ pub async fn start_service_as_election_leader(
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
-    let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
+    let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
 
@@ -629,12 +617,11 @@ pub async fn start_service_as_election_leader(
         .await,
     );
 
-    if cfg!(not(test)) {
+    {
         sub_tasks.push(ClusterController::start_heartbeat_checker(
             metadata_manager.cluster_controller.clone(),
             Duration::from_secs(1),
         ));
-        sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
         if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
@@ -705,6 +692,7 @@ pub async fn start_service_as_election_leader(
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
+        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
@@ -712,7 +700,6 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));

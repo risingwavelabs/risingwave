@@ -115,10 +115,14 @@ impl SchemaCatalog {
         let table_ref = Arc::new(table);
 
         let old_table = self.table_by_id.get(&id).unwrap();
-        // check if table name get updated.
-        if old_table.name() != name {
+        // check if the table name gets updated.
+        if old_table.name() != name
+            && let Some(t) = self.table_by_name.get(old_table.name())
+            && t.id == id
+        {
             self.table_by_name.remove(old_table.name());
         }
+
         self.table_by_name.insert(name, table_ref.clone());
         self.table_by_id.insert(id, table_ref.clone());
         table_ref
@@ -137,8 +141,11 @@ impl SchemaCatalog {
         let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
         let index_ref = Arc::new(index);
 
-        // check if index name get updated.
-        if old_index.name != name {
+        // check if the index name gets updated.
+        if old_index.name != name
+            && let Some(idx) = self.index_by_name.get(&old_index.name)
+            && idx.id == id
+        {
             self.index_by_name.remove(&old_index.name);
         }
         self.index_by_name.insert(name, index_ref.clone());
@@ -245,8 +252,11 @@ impl SchemaCatalog {
         let source_ref = Arc::new(source);
 
         let old_source = self.source_by_id.get(&id).unwrap();
-        // check if source name get updated.
-        if old_source.name != name {
+        // check if the source name gets updated.
+        if old_source.name != name
+            && let Some(src) = self.source_by_name.get(&old_source.name)
+            && src.id == id
+        {
             self.source_by_name.remove(&old_source.name);
         }
 
@@ -294,8 +304,11 @@ impl SchemaCatalog {
         let sink_ref = Arc::new(sink);
 
         let old_sink = self.sink_by_id.get(&id).unwrap();
-        // check if sink name get updated.
-        if old_sink.name != name {
+        // check if the sink name gets updated.
+        if old_sink.name != name
+            && let Some(s) = self.sink_by_name.get(&old_sink.name)
+            && s.id.sink_id == id
+        {
             self.sink_by_name.remove(&old_sink.name);
         }
 
@@ -331,8 +344,11 @@ impl SchemaCatalog {
         let subscription_ref = Arc::new(subscription);
 
         let old_subscription = self.subscription_by_id.get(&id).unwrap();
-        // check if subscription name get updated.
-        if old_subscription.name != name {
+        // check if the subscription name gets updated.
+        if old_subscription.name != name
+            && let Some(s) = self.subscription_by_name.get(&old_subscription.name)
+            && s.id.subscription_id == id
+        {
             self.subscription_by_name.remove(&old_subscription.name);
         }
 
@@ -365,8 +381,11 @@ impl SchemaCatalog {
         let view_ref = Arc::new(view);
 
         let old_view = self.view_by_id.get(&id).unwrap();
-        // check if view name get updated.
-        if old_view.name != name {
+        // check if the view name gets updated.
+        if old_view.name != name
+            && let Some(v) = self.view_by_name.get(old_view.name())
+            && v.id == id
+        {
             self.view_by_name.remove(&old_view.name);
         }
 
@@ -438,8 +457,11 @@ impl SchemaCatalog {
             .function_by_name
             .get_mut(&old_function_by_id.name)
             .unwrap();
-        // check if function name get updated.
-        if old_function_by_id.name != name {
+        // check if the function name gets updated.
+        if old_function_by_id.name != name
+            && let Some(f) = old_function_by_name.get(&old_function_by_id.arg_types)
+            && f.id == id
+        {
             old_function_by_name.remove(&old_function_by_id.arg_types);
             if old_function_by_name.is_empty() {
                 self.function_by_name.remove(&old_function_by_id.name);
@@ -473,8 +495,11 @@ impl SchemaCatalog {
         let connection_ref = Arc::new(connection);
 
         let old_connection = self.connection_by_id.get(&id).unwrap();
-        // check if connection name get updated.
-        if old_connection.name != name {
+        // check if the connection name gets updated.
+        if old_connection.name != name
+            && let Some(conn) = self.connection_by_name.get(&old_connection.name)
+            && conn.id == id
+        {
             self.connection_by_name.remove(&old_connection.name);
         }
 
@@ -513,8 +538,11 @@ impl SchemaCatalog {
         let secret_ref = Arc::new(secret);
 
         let old_secret = self.secret_by_id.get(&id).unwrap();
-        // check if secret name get updated.
-        if old_secret.name != name {
+        // check if the secret name gets updated.
+        if old_secret.name != name
+            && let Some(s) = self.secret_by_name.get(&old_secret.name)
+            && s.id == id
+        {
             self.secret_by_name.remove(&old_secret.name);
         }
 
@@ -557,6 +585,14 @@ impl SchemaCatalog {
     }
 
     /// Iterate all materialized views, excluding the indices.
+    pub fn iter_all_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate created materialized views, excluding the indices.
     pub fn iter_created_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()

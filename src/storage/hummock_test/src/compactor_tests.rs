@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
     use std::ops::Bound;
     use std::sync::Arc;
 
@@ -53,11 +53,13 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_pb::hummock::TableOption;
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FixedLengthFilterKeyExtractor,
-        FullKeyFilterKeyExtractor,
+    use risingwave_storage::compaction_catalog_manager::{
+        CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
+        FixedLengthFilterKeyExtractor, MultiFilterKeyExtractor,
     };
-    use risingwave_storage::hummock::compactor::compactor_runner::{compact, CompactorRunner};
+    use risingwave_storage::hummock::compactor::compactor_runner::{
+        compact_with_agent, CompactorRunner,
+    };
     use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
     use risingwave_storage::hummock::compactor::{
         CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
@@ -82,7 +84,10 @@ pub(crate) mod tests {
 
     use crate::get_notification_client_for_test;
     use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-    use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
+    use crate::test_utils::{
+        register_tables_with_id_for_test, update_filter_key_extractor_for_table_ids,
+        TestIngestBatch,
+    };
 
     pub(crate) async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -111,7 +116,7 @@ pub(crate) mod tests {
         .unwrap();
 
         register_tables_with_id_for_test(
-            hummock.filter_key_extractor_manager(),
+            hummock.compaction_catalog_manager_ref(),
             hummock_manager_ref,
             table_ids,
         )
@@ -197,7 +202,7 @@ pub(crate) mod tests {
         }
     }
 
-    fn get_compactor_context(storage: &HummockStorage) -> CompactorContext {
+    pub fn get_compactor_context(storage: &HummockStorage) -> CompactorContext {
         get_compactor_context_impl(storage.storage_opts().clone(), storage.sstable_store())
     }
 
@@ -240,16 +245,6 @@ pub(crate) mod tests {
         )
         .await;
 
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
         let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -276,8 +271,13 @@ pub(crate) mod tests {
         )
         .await;
 
-        // 2. get compact task
+        let compaction_catalog_agent_ref = storage
+            .compaction_catalog_manager_ref()
+            .acquire(vec![table_id])
+            .await
+            .unwrap();
 
+        // 2. get compact task
         let compaction_group_id =
             get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), table_id).await;
         while let Some(compact_task) = hummock_manager_ref
@@ -287,12 +287,12 @@ pub(crate) mod tests {
         {
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats, object_timestamps), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                 compact_ctx.clone(),
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
+                compaction_catalog_agent_ref.clone(),
             )
             .await;
 
@@ -404,29 +404,6 @@ pub(crate) mod tests {
         }
     }
 
-    pub fn prepare_compactor_and_filter(
-        storage: &HummockStorage,
-        existing_table_id: u32,
-    ) -> (CompactorContext, FilterKeyExtractorManager) {
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-        rpc_filter_key_extractor_manager.update(
-            existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
-        );
-
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
-
-        (get_compactor_context(storage), filter_key_extractor_manager)
-    }
-
     #[tokio::test]
     async fn test_compaction_drop_all_key() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
@@ -435,16 +412,18 @@ pub(crate) mod tests {
             worker_id as _,
         ));
 
+        let notification_client = get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id,
+        )
+        .await;
+
         let existing_table_id: u32 = 1;
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_notification_client_for_test(
-                env,
-                hummock_manager_ref.clone(),
-                cluster_ctl_ref,
-                worker_id,
-            )
-            .await,
+            notification_client,
             &hummock_manager_ref,
             &[existing_table_id],
         )
@@ -483,8 +462,6 @@ pub(crate) mod tests {
             .get_sst_ids_by_group_id(compaction_group_id)
             .collect_vec()
             .is_empty());
-
-        // assert_eq!(0, current_version.num_levels(compaction_group_id));
     }
 
     #[tokio::test]
@@ -519,26 +496,17 @@ pub(crate) mod tests {
         let table_id_2 = storage_2.table_id();
         let table_id_set = HashSet::from_iter([table_id_1, table_id_2]);
 
-        let rpc_filter_key_extractor_manager =
-            match global_storage.filter_key_extractor_manager().clone() {
-                FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                    rpc_filter_key_extractor_manager,
-                ) => rpc_filter_key_extractor_manager,
-                FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-            };
-
-        rpc_filter_key_extractor_manager.update(
-            table_id_1.table_id(),
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        update_filter_key_extractor_for_table_ids(
+            global_storage.compaction_catalog_manager_ref(),
+            &[table_id_1.table_id(), table_id_2.table_id()],
         );
 
-        rpc_filter_key_extractor_manager.update(
-            table_id_2.table_id(),
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
-        );
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
+        let compaction_catalog_agent_ref = global_storage
+            .compaction_catalog_manager_ref()
+            .acquire(vec![table_id_1.table_id(), table_id_2.table_id()])
+            .await
+            .unwrap();
+
         let compact_ctx = get_compactor_context_impl(
             global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
@@ -639,12 +607,12 @@ pub(crate) mod tests {
 
         // 4. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
-            filter_key_extractor_manager,
+            compaction_catalog_agent_ref.clone(),
         )
         .await;
         hummock_manager_ref
@@ -738,14 +706,6 @@ pub(crate) mod tests {
         )
         .await;
 
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-
         let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -754,13 +714,12 @@ pub(crate) mod tests {
                 .clone()
                 .sstable_id_remote_fetch_number,
         ));
-        rpc_filter_key_extractor_manager.update(
-            existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
-        );
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
+
+        let compaction_catalog_agent_ref = storage
+            .compaction_catalog_manager_ref()
+            .acquire(vec![existing_table_id])
+            .await
+            .unwrap();
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
@@ -844,12 +803,12 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
-            filter_key_extractor_manager,
+            compaction_catalog_agent_ref.clone(),
         )
         .await;
 
@@ -950,23 +909,21 @@ pub(crate) mod tests {
         )
         .await;
 
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-
-        rpc_filter_key_extractor_manager.update(
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        multi_filter_key_extractor.register(
             existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FixedLength(
-                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
+            FilterKeyExtractorImpl::FixedLength(FixedLengthFilterKeyExtractor::new(
+                TABLE_PREFIX_LEN + key_prefix.len(),
             )),
         );
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
+
+        let table_id_to_vnode =
+            HashMap::from_iter([(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
+            table_id_to_vnode,
+        ));
+
         let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -1043,12 +1000,12 @@ pub(crate) mod tests {
 
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
-            filter_key_extractor_manager,
+            compaction_catalog_agent_ref.clone(),
         )
         .await;
 
@@ -1156,8 +1113,7 @@ pub(crate) mod tests {
             &[existing_table_id],
         )
         .await;
-        let (compact_ctx, filter_key_extractor_manager) =
-            prepare_compactor_and_filter(&storage, existing_table_id);
+        let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             storage
@@ -1221,14 +1177,20 @@ pub(crate) mod tests {
             129
         );
 
+        let compaction_catalog_agent_ref = storage
+            .compaction_catalog_manager_ref()
+            .acquire(vec![existing_table_id])
+            .await
+            .unwrap();
+
         // 3. compact
         let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact(
+        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
             compact_ctx,
             compact_task.clone(),
             rx,
             Box::new(sstable_object_id_manager.clone()),
-            filter_key_extractor_manager,
+            compaction_catalog_agent_ref.clone(),
         )
         .await;
 
@@ -1328,9 +1290,8 @@ pub(crate) mod tests {
     async fn run_fast_and_normal_runner(
         compact_ctx: CompactorContext,
         task: CompactTask,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
-        let multi_filter_key_extractor =
-            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
         let slow_compact_runner = CompactorRunner::new(
             0,
@@ -1340,10 +1301,11 @@ pub(crate) mod tests {
                 VecDeque::from_iter([5, 6, 7, 8, 9, 10, 11, 12, 13]),
             )),
         );
+
         let fast_compact_runner = FastCompactorRunner::new(
             compact_ctx.clone(),
             task.clone(),
-            multi_filter_key_extractor.clone(),
+            compaction_catalog_agent_ref.clone(),
             Box::new(SharedComapctorObjectIdManager::for_test(
                 VecDeque::from_iter([22, 23, 24, 25, 26, 27, 28, 29]),
             )),
@@ -1352,7 +1314,7 @@ pub(crate) mod tests {
         let (_, ret1, _) = slow_compact_runner
             .run(
                 compaction_filter,
-                multi_filter_key_extractor,
+                compaction_catalog_agent_ref,
                 Arc::new(TaskProgress::default()),
             )
             .await
@@ -1384,7 +1346,9 @@ pub(crate) mod tests {
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
-        let (compact_ctx, _) = prepare_compactor_and_filter(&storage, existing_table_id);
+        let compact_ctx = get_compactor_context(&storage);
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1433,7 +1397,9 @@ pub(crate) mod tests {
             gc_delete_keys: true,
             ..Default::default()
         };
-        let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
+        let (ret, fast_ret) =
+            run_fast_and_normal_runner(compact_ctx.clone(), task, compaction_catalog_agent_ref)
+                .await;
         check_compaction_result(compact_ctx.sstable_store, ret, fast_ret, capacity).await;
     }
 
@@ -1563,7 +1529,9 @@ pub(crate) mod tests {
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
-        let (compact_ctx, _) = prepare_compactor_and_filter(&storage, existing_table_id);
+        let compact_ctx = get_compactor_context(&storage);
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1585,7 +1553,6 @@ pub(crate) mod tests {
         );
         let mut sst_infos = vec![];
         let mut max_sst_file_size = 0;
-
         for object_id in 1..3 {
             let mut builder = SstableBuilder::<_, BlockedXor16FilterBuilder>::new(
                 object_id,
@@ -1594,7 +1561,7 @@ pub(crate) mod tests {
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
                 BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
                 opts.clone(),
-                Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+                compaction_catalog_agent_ref.clone(),
                 None,
             );
             let mut last_k: u64 = 1;
@@ -1659,7 +1626,12 @@ pub(crate) mod tests {
             gc_delete_keys: true,
             ..Default::default()
         };
-        let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
+        let (ret, fast_ret) = run_fast_and_normal_runner(
+            compact_ctx.clone(),
+            task,
+            compaction_catalog_agent_ref.clone(),
+        )
+        .await;
         check_compaction_result(compact_ctx.sstable_store, ret, fast_ret, target_file_size).await;
     }
 
@@ -1685,7 +1657,9 @@ pub(crate) mod tests {
         )
         .await;
         hummock_manager_ref.get_new_sst_ids(10).await.unwrap();
-        let (compact_ctx, _) = prepare_compactor_and_filter(&storage, existing_table_id);
+        let compact_ctx = get_compactor_context(&storage);
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let capacity = 256 * 1024;
@@ -1707,7 +1681,6 @@ pub(crate) mod tests {
         );
         let mut sst_infos = vec![];
         let mut max_sst_file_size = 0;
-
         for object_id in 1..3 {
             let mut builder = SstableBuilder::<_, BlockedXor16FilterBuilder>::new(
                 object_id,
@@ -1716,7 +1689,7 @@ pub(crate) mod tests {
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
                 BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
                 opts.clone(),
-                Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+                compaction_catalog_agent_ref.clone(),
                 None,
             );
             let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;
@@ -1799,7 +1772,7 @@ pub(crate) mod tests {
                     table_infos: sst_infos,
                 },
             ],
-            existing_table_ids: vec![1],
+            existing_table_ids: vec![existing_table_id],
             task_id: 1,
             splits: vec![KeyRange::inf()],
             target_level: 6,
@@ -1810,7 +1783,12 @@ pub(crate) mod tests {
             table_watermarks,
             ..Default::default()
         };
-        let (ret, fast_ret) = run_fast_and_normal_runner(compact_ctx.clone(), task).await;
+        let (ret, fast_ret) = run_fast_and_normal_runner(
+            compact_ctx.clone(),
+            task,
+            compaction_catalog_agent_ref.clone(),
+        )
+        .await;
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
@@ -1889,35 +1867,14 @@ pub(crate) mod tests {
         .await;
 
         // basic cg2 -> [1, 2]
-        let rpc_filter_key_extractor_manager = match storage.filter_key_extractor_manager().clone()
-        {
-            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-                rpc_filter_key_extractor_manager,
-            ) => rpc_filter_key_extractor_manager,
-            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(_) => unreachable!(),
-        };
-
         let mut key = BytesMut::default();
         key.put_u16(1);
         key.put_slice(b"key_prefix");
         let key_prefix = key.freeze();
 
-        rpc_filter_key_extractor_manager.update(
-            table_id_1.table_id(),
-            Arc::new(FilterKeyExtractorImpl::FixedLength(
-                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
-            )),
-        );
-        rpc_filter_key_extractor_manager.update(
-            table_id_2.table_id(),
-            Arc::new(FilterKeyExtractorImpl::FixedLength(
-                FixedLengthFilterKeyExtractor::new(TABLE_PREFIX_LEN + key_prefix.len()),
-            )),
-        );
+        let compaction_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![table_id_1.table_id(), table_id_2.table_id()]);
 
-        let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
-            rpc_filter_key_extractor_manager,
-        );
         let compact_ctx = get_compactor_context(&storage);
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
@@ -2027,7 +1984,7 @@ pub(crate) mod tests {
             level: usize,
             hummock_manager_ref: HummockManagerRef,
             compact_ctx: CompactorContext,
-            filter_key_extractor_manager: FilterKeyExtractorManager,
+            compaction_catalog_agent_ref: CompactionCatalogAgentRef,
             sstable_object_id_manager: Arc<SstableObjectIdManager>,
         ) {
             // compact left group
@@ -2054,12 +2011,12 @@ pub(crate) mod tests {
 
             // 3. compact
             let (_tx, rx) = tokio::sync::oneshot::channel();
-            let ((result_task, task_stats, object_timestamps), _) = compact(
+            let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                 compact_ctx,
                 compact_task.clone(),
                 rx,
                 Box::new(sstable_object_id_manager.clone()),
-                filter_key_extractor_manager.clone(),
+                compaction_catalog_agent_ref.clone(),
             )
             .await;
 
@@ -2076,7 +2033,11 @@ pub(crate) mod tests {
         }
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2101,7 +2062,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2111,19 +2072,25 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
 
+        let created_tables = HashSet::from_iter(vec![table_id_1.table_id(), table_id_2.table_id()]);
+
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2133,7 +2100,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2143,7 +2110,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2167,7 +2134,7 @@ pub(crate) mod tests {
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2177,14 +2144,18 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2207,7 +2178,7 @@ pub(crate) mod tests {
         epoch += millisec_interval_epoch;
 
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
 
@@ -2234,7 +2205,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2244,7 +2215,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2254,7 +2225,7 @@ pub(crate) mod tests {
             level: usize,
             hummock_manager_ref: HummockManagerRef,
             compact_ctx: CompactorContext,
-            filter_key_extractor_manager: FilterKeyExtractorManager,
+            compaction_catalog_agent_ref: CompactionCatalogAgentRef,
             sstable_object_id_manager: Arc<SstableObjectIdManager>,
         ) {
             loop {
@@ -2279,12 +2250,12 @@ pub(crate) mod tests {
 
                 // 3. compact
                 let (_tx, rx) = tokio::sync::oneshot::channel();
-                let ((result_task, task_stats, object_timestamps), _) = compact(
+                let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
                     compact_ctx.clone(),
                     compact_task.clone(),
                     rx,
                     Box::new(sstable_object_id_manager.clone()),
-                    filter_key_extractor_manager.clone(),
+                    compaction_catalog_agent_ref.clone(),
                 )
                 .await;
 
@@ -2303,7 +2274,11 @@ pub(crate) mod tests {
 
         // try split
         let new_cg_id = hummock_manager_ref
-            .move_state_tables_to_dedicated_compaction_group(parent_group_id, &split_table_ids, 0)
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &split_table_ids,
+                None,
+            )
             .await
             .unwrap()
             .0;
@@ -2328,7 +2303,7 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
@@ -2338,14 +2313,14 @@ pub(crate) mod tests {
             0,
             hummock_manager_ref.clone(),
             compact_ctx.clone(),
-            filter_key_extractor_manager.clone(),
+            compaction_catalog_agent_ref.clone(),
             sstable_object_id_manager.clone(),
         )
         .await;
 
         // try merge
         hummock_manager_ref
-            .merge_compaction_group(parent_group_id, new_cg_id)
+            .merge_compaction_group_for_test(parent_group_id, new_cg_id, created_tables.clone())
             .await
             .unwrap();
     }

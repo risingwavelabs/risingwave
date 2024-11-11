@@ -11,6 +11,7 @@ rpk topic create test-rw-sink-upsert-schema
 rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
 rpk topic create test-rw-sink-text-key-id
+rpk topic create test-rw-sink-bytes-key-id
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -150,7 +151,7 @@ echo "preparing confluent schema registry"
 python3 -m pip install --break-system-packages requests confluent-kafka
 
 echo "testing protobuf"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
+risedev slt 'e2e_test/sink/kafka/protobuf.slt'
 
 echo "testing avro"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/avro.slt'
+risedev slt 'e2e_test/sink/kafka/avro.slt'

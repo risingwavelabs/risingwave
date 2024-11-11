@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
+use crate::utils::ColumnDefExt;
 use crate::{assert_not_has_tables, drop_tables};
 
 #[derive(DeriveMigrationName)]
@@ -19,8 +20,16 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Subscription::Name).string().not_null())
-                    .col(ColumnDef::new(Subscription::Columns).binary().not_null())
-                    .col(ColumnDef::new(Subscription::PlanPk).binary().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::Columns)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::PlanPk)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Subscription::DistributionKey)
                             .json_binary()
@@ -31,7 +40,11 @@ impl MigrationTrait for Migration {
                             .json_binary()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Subscription::SubscriptionFromName)
                             .string()

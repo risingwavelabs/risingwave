@@ -5,7 +5,7 @@ rpk topic create 'test-pb-struct'
 
 
 system ok
-jq -sR '{"schema":.,"schemaType":"PROTOBUF"}' << EOF | curl -X POST -H 'content-type: application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value/versions"
+sr_register test-pb-struct-value PROTOBUF << EOF
 syntax = "proto3";
 package test;
 message User {
@@ -31,7 +31,7 @@ format plain encode protobuf (
 
 # register a v2 schema
 system ok
-jq -sR '{"schema":.,"schemaType":"PROTOBUF"}' << EOF | curl -X POST -H 'content-type: application/json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/test-pb-struct-value/versions"
+sr_register test-pb-struct-value PROTOBUF << EOF
 syntax = "proto3";
 package test;
 message User {

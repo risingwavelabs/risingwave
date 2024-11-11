@@ -17,7 +17,7 @@
 
 use std::ops::Bound;
 
-use delta_btree_map::DeltaBTreeMap;
+use delta_btree_map::{CursorWithDelta, DeltaBTreeMap};
 use itertools::Itertools;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Datum, Sentinelled, ToDatumRef};
@@ -150,7 +150,7 @@ pub(super) fn find_frame_end_for_rows_frame<'cache>(
 /// Given the first and last key in delta, calculate the order values of the first
 /// and the last frames logically affected by some `RANGE` frames.
 pub(super) fn calc_logical_curr_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     delta_first_key: &StateKey,
     delta_last_key: &StateKey,
 ) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
@@ -167,7 +167,7 @@ pub(super) fn calc_logical_curr_for_range_frames(
 /// values of the logical start row of the first frame and the logical end row of the
 /// last frame.
 pub(super) fn calc_logical_boundary_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     first_curr_key: &StateKey,
     last_curr_key: &StateKey,
 ) -> Option<(Sentinelled<Datum>, Sentinelled<Datum>)> {
@@ -184,7 +184,7 @@ pub(super) fn calc_logical_boundary_for_range_frames(
 /// find the most closed cache key in `part_with_delta`. Ideally this function returns
 /// the smallest key that is larger than or equal to the given logical order (using `lower_bound`).
 pub(super) fn find_left_for_range_frames<'cache>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
@@ -201,7 +201,7 @@ pub(super) fn find_left_for_range_frames<'cache>(
 /// find the most closed cache key in `part_with_delta`. Ideally this function returns
 /// the largest key that is smaller than or equal to the given logical order (using `lower_bound`).
 pub(super) fn find_right_for_range_frames<'cache>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize, // this is dirty but we have no better choice
@@ -284,6 +284,14 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     } else {
         part_with_delta.upper_bound(Bound::Included(delta_key))
     };
+    let pointed_key = |cursor: CursorWithDelta<'cache, CacheKey, OwnedRow>| {
+        if LEFT {
+            cursor.peek_next().map(|(k, _)| k)
+        } else {
+            cursor.peek_prev().map(|(k, _)| k)
+        }
+    };
+
     let n_rows_to_move = if LEFT {
         frame_bounds.n_following_rows().unwrap()
     } else {
@@ -291,8 +299,7 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     };
 
     if n_rows_to_move == 0 {
-        return cursor
-            .key()
+        return pointed_key(cursor)
             .or_else(|| {
                 if LEFT {
                     part_with_delta.last_key()
@@ -304,28 +311,16 @@ fn find_curr_for_rows_frame<'cache, const LEFT: bool>(
     }
 
     for _ in 0..n_rows_to_move {
-        // Note that we have to move before check, to handle situation where the
-        // cursor is at ghost position at first.
-        if LEFT {
-            cursor.move_prev();
-        } else {
-            cursor.move_next();
-        }
-        if cursor.position().is_ghost() {
+        let res = if LEFT { cursor.prev() } else { cursor.next() };
+        if res.is_none() {
+            // we reach the end
             break;
         }
     }
-    cursor
-        .key()
-        .or_else(|| {
-            // Note the difference between this with the `n_rows_to_move == 0` case.
-            if LEFT {
-                part_with_delta.first_key()
-            } else {
-                part_with_delta.last_key()
-            }
-        })
-        .unwrap()
+
+    // We always have a valid key here, because `part_with_delta` must not be empty,
+    // and `n_rows_to_move` is always larger than 0 when we reach here.
+    pointed_key(cursor).unwrap()
 }
 
 fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
@@ -350,8 +345,18 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     // have `curr_key` which definitely exists in the `part_with_delta`. We just find
     // the cursor pointing to it and move the cursor to frame boundary.
 
-    let mut cursor = part_with_delta.find(curr_key).unwrap();
-    assert!(!cursor.position().is_ghost());
+    let mut cursor = if LEFT {
+        part_with_delta.before(curr_key).unwrap()
+    } else {
+        part_with_delta.after(curr_key).unwrap()
+    };
+    let pointed_key = |cursor: CursorWithDelta<'cache, CacheKey, OwnedRow>| {
+        if LEFT {
+            cursor.peek_next().map(|(k, _)| k)
+        } else {
+            cursor.peek_prev().map(|(k, _)| k)
+        }
+    };
 
     let n_rows_to_move = if LEFT {
         frame_bounds.n_preceding_rows().unwrap()
@@ -360,25 +365,16 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
     };
 
     for _ in 0..n_rows_to_move {
-        if LEFT {
-            cursor.move_prev();
-        } else {
-            cursor.move_next();
-        }
-        if cursor.position().is_ghost() {
+        let res = if LEFT { cursor.prev() } else { cursor.next() };
+        if res.is_none() {
+            // we reach the end
             break;
         }
     }
-    cursor
-        .key()
-        .or_else(|| {
-            if LEFT {
-                part_with_delta.first_key()
-            } else {
-                part_with_delta.last_key()
-            }
-        })
-        .unwrap()
+
+    // We always have a valid key here, because `cursor` must point to a valid key
+    // at the beginning.
+    pointed_key(cursor).unwrap()
 }
 
 /// Given a pair of left and right state keys, calculate the leftmost (smallest) and rightmost
@@ -391,7 +387,7 @@ fn find_boundary_for_rows_frame<'cache, const LEFT: bool>(
 /// repeating. Check [`calc_logical_curr_for_range_frames`] and [`calc_logical_boundary_for_range_frames`]
 /// if you cannot understand the purpose of this function.
 fn calc_logical_ord_for_range_frames(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     left_key: &StateKey,
     right_key: &StateKey,
     left_offset_fn: impl Fn(&RangeFrameBounds, &Datum) -> Sentinelled<Datum>,
@@ -459,7 +455,7 @@ fn calc_logical_ord_for_range_frames(
 }
 
 fn find_for_range_frames<'cache, const LEFT: bool>(
-    range_frames: &[&RangeFrameBounds],
+    range_frames: &[RangeFrameBounds],
     part_with_delta: DeltaBTreeMap<'cache, CacheKey, OwnedRow>,
     logical_order_value: impl ToDatumRef,
     cache_key_pk_len: usize,
@@ -497,11 +493,15 @@ fn find_for_range_frames<'cache, const LEFT: bool>(
             // the curr key.
             prev_key
         } else {
-            // If cursor is in ghost position, it simply means that the search key is larger
+            // If there's nothing on the left, it simply means that the search key is larger
             // than any existing key. Returning the last key in this case does no harm. Especially,
             // if the last key is largest sentinel, the caller should extend the cache rightward
             // to get possible entries with the same order value into the cache.
-            cursor.key().or_else(|| part_with_delta.last_key()).unwrap()
+            cursor
+                .peek_next()
+                .map(|(k, _)| k)
+                .or_else(|| part_with_delta.last_key())
+                .unwrap()
         }
     } else {
         let cursor = part_with_delta.upper_bound(Bound::Included(&search_key));
@@ -511,7 +511,8 @@ fn find_for_range_frames<'cache, const LEFT: bool>(
             next_key
         } else {
             cursor
-                .key()
+                .peek_prev()
+                .map(|(k, _)| k)
                 .or_else(|| part_with_delta.first_key())
                 .unwrap()
         }
@@ -1204,13 +1205,13 @@ mod tests {
             let order_type = OrderType::ascending();
 
             let range_frames = [
-                &create_range_frame(
+                create_range_frame(
                     order_data_type.clone(),
                     order_type,
                     Preceding(3i64),
                     Preceding(2i64),
                 ),
-                &create_range_frame(
+                create_range_frame(
                     order_data_type.clone(),
                     order_type,
                     Preceding(1i64),
@@ -1252,7 +1253,7 @@ mod tests {
             let order_data_type = DataType::Timestamp;
             let order_type = OrderType::descending_nulls_first();
 
-            let range_frames = [&create_range_frame(
+            let range_frames = [create_range_frame(
                 order_data_type.clone(),
                 order_type,
                 Preceding(Interval::from_month_day_usec(1, 2, 3 * 1000 * 1000)),
@@ -1320,7 +1321,7 @@ mod tests {
             expected_left: Sentinelled<ScalarImpl>,
             expected_right: Sentinelled<ScalarImpl>,
         ) {
-            let frames = if matches!(order_data_type, DataType::Int32) {
+            let range_frames = if matches!(order_data_type, DataType::Int32) {
                 [create_range_frame(
                     order_data_type.clone(),
                     order_type,
@@ -1330,7 +1331,6 @@ mod tests {
             } else {
                 panic!()
             };
-            let range_frames = frames.iter().collect::<Vec<_>>();
             let logical_order_value = Some(logical_order_value);
             let cache_key_pk_len = 1;
 

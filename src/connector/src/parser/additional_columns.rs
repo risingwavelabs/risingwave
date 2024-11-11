@@ -29,8 +29,8 @@ use risingwave_pb::plan_common::{
 use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
-    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
+    NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -87,6 +87,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "collection_name",
                 ]),
             ),
+            (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
         ])
     });
 

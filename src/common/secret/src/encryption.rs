@@ -71,7 +71,8 @@ mod test {
     use super::*;
     #[test]
     fn test_secret_encryption_decyption() {
-        let key = b"0123456789abcdef";
+        let key = &hex::decode("0123456789abcdef0123456789abcdef").unwrap();
+        assert!(key.len() == 16);
         let plaintext = "Hello, world!".as_bytes();
         let secret = SecretEncryption::encrypt(key, plaintext).unwrap();
         let decrypted = secret.decrypt(key).unwrap();

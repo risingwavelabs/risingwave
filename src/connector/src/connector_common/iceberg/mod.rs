@@ -15,7 +15,6 @@
 mod jni_catalog;
 mod mock_catalog;
 mod storage_catalog;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -30,6 +29,7 @@ use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
 
+use crate::deserialize_optional_bool_from_string;
 use crate::error::ConnectorResult;
 
 #[serde_as]
@@ -62,6 +62,13 @@ pub struct IcebergCommon {
     /// Full name of table, must include schema name.
     #[serde(rename = "table.name")]
     pub table_name: String,
+
+    #[serde(
+        rename = "s3.path.style.access",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub path_style_access: Option<bool>,
 }
 
 impl IcebergCommon {
@@ -79,7 +86,6 @@ impl IcebergCommon {
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
-        path_style_access: &Option<bool>,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(BaseCatalogConfig, HashMap<String, String>)> {
         let mut iceberg_configs = HashMap::new();
@@ -193,7 +199,7 @@ impl IcebergCommon {
                 self.secret_key.clone().to_string(),
             );
 
-            if let Some(path_style_access) = path_style_access {
+            if let Some(path_style_access) = self.path_style_access {
                 java_catalog_configs.insert(
                     "s3.path-style-access".to_string(),
                     path_style_access.to_string(),
@@ -247,10 +253,7 @@ mod v1 {
             Ok(ret.context("Failed to create table identifier")?)
         }
 
-        fn build_iceberg_configs(
-            &self,
-            path_style_access: &Option<bool>,
-        ) -> ConnectorResult<HashMap<String, String>> {
+        fn build_iceberg_configs(&self) -> ConnectorResult<HashMap<String, String>> {
             let mut iceberg_configs = HashMap::new();
 
             let catalog_type = self.catalog_type().to_string();
@@ -303,7 +306,7 @@ mod v1 {
                 "iceberg.table.io.secret_access_key".to_string(),
                 self.secret_key.clone().to_string(),
             );
-            if let Some(path_style_access) = path_style_access {
+            if let Some(path_style_access) = self.path_style_access {
                 iceberg_configs.insert(
                     "iceberg.table.io.enable_virtual_host_style".to_string(),
                     (!path_style_access).to_string(),
@@ -345,12 +348,11 @@ mod v1 {
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
         pub async fn create_catalog(
             &self,
-            path_style_access: &Option<bool>,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<CatalogRef> {
             match self.catalog_type() {
                 "storage" | "rest" => {
-                    let iceberg_configs = self.build_iceberg_configs(path_style_access)?;
+                    let iceberg_configs = self.build_iceberg_configs()?;
                     let catalog = load_catalog(&iceberg_configs).await?;
                     Ok(catalog)
                 }
@@ -361,7 +363,7 @@ mod v1 {
                 {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
-                        self.build_jni_catalog_configs(path_style_access, java_catalog_props)?;
+                        self.build_jni_catalog_configs(java_catalog_props)?;
                     let catalog_impl = match catalog_type {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
@@ -389,11 +391,10 @@ mod v1 {
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
         pub async fn load_table(
             &self,
-            path_style_access: &Option<bool>,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<Table> {
             let catalog = self
-                .create_catalog(path_style_access, java_catalog_props)
+                .create_catalog(java_catalog_props)
                 .await
                 .context("Unable to load iceberg catalog")?;
 
@@ -429,7 +430,6 @@ mod v2 {
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
         pub async fn create_catalog_v2(
             &self,
-            path_style_access: &Option<bool>,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<Arc<dyn CatalogV2>> {
             match self.catalog_type() {
@@ -515,7 +515,7 @@ mod v2 {
                 catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
-                        self.build_jni_catalog_configs(path_style_access, java_catalog_props)?;
+                        self.build_jni_catalog_configs(java_catalog_props)?;
                     let catalog_impl = match catalog_type {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
@@ -541,11 +541,10 @@ mod v2 {
         /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
         pub async fn load_table_v2(
             &self,
-            path_style_access: &Option<bool>,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<TableV2> {
             let catalog = self
-                .create_catalog_v2(path_style_access, java_catalog_props)
+                .create_catalog_v2(java_catalog_props)
                 .await
                 .context("Unable to load iceberg catalog")?;
 
@@ -559,7 +558,6 @@ mod v2 {
         pub async fn load_table_v2_with_metadata(
             &self,
             metadata: TableMetadata,
-            path_style_access: &Option<bool>,
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<TableV2> {
             match self.catalog_type() {
@@ -585,10 +583,7 @@ mod v2 {
                         .readonly(true)
                         .build()?)
                 }
-                _ => {
-                    self.load_table_v2(path_style_access, java_catalog_props)
-                        .await
-                }
+                _ => self.load_table_v2(java_catalog_props).await,
             }
         }
     }

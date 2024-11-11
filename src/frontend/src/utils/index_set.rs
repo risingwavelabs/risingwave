@@ -106,7 +106,7 @@ impl BitAnd for IndexSet {
     }
 }
 
-impl<'a> BitAnd for &'a IndexSet {
+impl BitAnd for &IndexSet {
     type Output = IndexSet;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -126,7 +126,7 @@ impl BitOr for IndexSet {
     }
 }
 
-impl<'a> BitOr for &'a IndexSet {
+impl BitOr for &IndexSet {
     type Output = IndexSet;
 
     fn bitor(self, rhs: Self) -> Self::Output {
