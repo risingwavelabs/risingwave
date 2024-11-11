@@ -16,81 +16,141 @@ use std::cmp;
 use std::collections::HashSet;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use chrono::DateTime;
 use futures::future::try_join_all;
+use futures::{future, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use parking_lot::Mutex;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::{
+    get_object_id_from_path, get_sst_data_path, HummockSstableObjectId, OBJECT_SUFFIX,
+};
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
 use risingwave_meta_model_migration::OnConflict;
-use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
-use risingwave_pb::hummock::FullScanTask;
+use risingwave_object_store::object::{ObjectMetadataIter, ObjectStoreRef};
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
 use risingwave_rpc_client::StreamClientPool;
 use sea_orm::{ActiveValue, ColumnTrait, EntityTrait, QueryFilter, Set};
 
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
+use crate::MetaResult;
 
-#[derive(Default)]
-pub(super) struct DeleteObjectTracker {
-    /// Objects that waits to be deleted from object store. It comes from either compaction, or
-    /// full GC (listing object store).
-    objects_to_delete: Mutex<HashSet<HummockSstableObjectId>>,
+pub(crate) struct GcManager {
+    store: ObjectStoreRef,
+    path_prefix: String,
+    use_new_object_prefix_strategy: bool,
 }
 
-impl DeleteObjectTracker {
-    pub(super) fn add(&self, objects: impl Iterator<Item = HummockSstableObjectId>) {
-        self.objects_to_delete.lock().extend(objects)
-    }
-
-    pub(super) fn current(&self) -> HashSet<HummockSstableObjectId> {
-        self.objects_to_delete.lock().clone()
-    }
-
-    pub(super) fn clear(&self) {
-        self.objects_to_delete.lock().clear();
-    }
-
-    pub(super) fn ack<'a>(&self, objects: impl Iterator<Item = &'a HummockSstableObjectId>) {
-        let mut lock = self.objects_to_delete.lock();
-        for object in objects {
-            lock.remove(object);
+impl GcManager {
+    pub fn new(
+        store: ObjectStoreRef,
+        path_prefix: &str,
+        use_new_object_prefix_strategy: bool,
+    ) -> Self {
+        Self {
+            store,
+            path_prefix: path_prefix.to_owned(),
+            use_new_object_prefix_strategy,
         }
+    }
+
+    /// Deletes all SSTs specified in the given list of IDs from storage.
+    pub async fn delete_objects(
+        &self,
+        object_id_list: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> Result<()> {
+        let mut paths = Vec::with_capacity(1000);
+        for object_id in object_id_list {
+            let obj_prefix = self
+                .store
+                .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
+            paths.push(get_sst_data_path(&obj_prefix, &self.path_prefix, object_id));
+        }
+        self.store.delete_objects(&paths).await?;
+        Ok(())
+    }
+
+    async fn list_object_metadata_from_object_store(
+        &self,
+        prefix: Option<String>,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> Result<ObjectMetadataIter> {
+        let list_path = format!("{}/{}", self.path_prefix, prefix.unwrap_or("".into()));
+        let raw_iter = self.store.list(&list_path, start_after, limit).await?;
+        let iter = raw_iter.filter(|r| match r {
+            Ok(i) => future::ready(i.key.ends_with(&format!(".{}", OBJECT_SUFFIX))),
+            Err(_) => future::ready(true),
+        });
+        Ok(Box::pin(iter))
+    }
+
+    /// Returns **filtered** object ids, and **unfiltered** total object count and size.
+    pub async fn list_objects(
+        &self,
+        sst_retention_watermark: u64,
+        prefix: Option<String>,
+        start_after: Option<String>,
+        limit: Option<u64>,
+    ) -> Result<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
+        tracing::debug!(
+            sst_retention_watermark,
+            prefix,
+            start_after,
+            limit,
+            "Try to list objects."
+        );
+        let mut total_object_count = 0;
+        let mut total_object_size = 0;
+        let mut next_start_after: Option<String> = None;
+        let metadata_iter = self
+            .list_object_metadata_from_object_store(prefix, start_after, limit.map(|i| i as usize))
+            .await?;
+        let filtered = metadata_iter
+            .filter_map(|r| {
+                let result = match r {
+                    Ok(o) => {
+                        total_object_count += 1;
+                        total_object_size += o.total_size;
+                        // Determine if the LIST has been truncated.
+                        // A false positives would at most cost one additional LIST later.
+                        if let Some(limit) = limit
+                            && limit == total_object_count
+                        {
+                            next_start_after = Some(o.key.clone());
+                            tracing::debug!(next_start_after, "set next start after");
+                        }
+                        if o.last_modified < sst_retention_watermark as f64 {
+                            Some(Ok(get_object_id_from_path(&o.key)))
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => Some(Err(Error::ObjectStore(e))),
+                };
+                async move { result }
+            })
+            .try_collect::<Vec<HummockSstableObjectId>>()
+            .await?;
+        Ok((
+            filtered,
+            total_object_count,
+            total_object_size as u64,
+            next_start_after,
+        ))
     }
 }
 
 impl HummockManager {
-    /// Gets SST objects that is safe to be deleted from object store.
-    pub fn get_objects_to_delete(&self) -> Vec<HummockSstableObjectId> {
-        self.delete_object_tracker
-            .current()
-            .iter()
-            .cloned()
-            .collect_vec()
-    }
-
-    /// Acknowledges SSTs have been deleted from object store.
-    pub async fn ack_deleted_objects(&self, object_ids: &[HummockSstableObjectId]) -> Result<()> {
-        self.delete_object_tracker.ack(object_ids.iter());
-        let mut versioning_guard = self.versioning.write().await;
-        for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
-            stale_objects.id.retain(|id| !object_ids.contains(id));
-        }
-        versioning_guard
-            .checkpoint
-            .stale_objects
-            .retain(|_, stale_objects| !stale_objects.id.is_empty());
-        drop(versioning_guard);
-        Ok(())
-    }
-
     /// Deletes at most `batch_size` deltas.
     ///
     /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
@@ -131,18 +191,15 @@ impl HummockManager {
         Ok((batch.len(), deltas_to_delete.len() - batch.len()))
     }
 
-    /// Extends `objects_to_delete` according to object store full scan result.
-    /// Caller should ensure `object_ids` doesn't include any SST objects belong to a on-going
-    /// version write. That's to say, these `object_ids` won't appear in either `commit_epoch` or
-    /// `report_compact_task`.
-    pub async fn extend_objects_to_delete_from_scan(
+    /// Filters by Hummock version and Writes GC history.
+    pub async fn finalize_objects_to_delete(
         &self,
-        object_ids: &[HummockSstableObjectId],
-    ) -> Result<usize> {
+        object_ids: impl Iterator<Item = HummockSstableObjectId> + Clone,
+    ) -> Result<Vec<HummockSstableObjectId>> {
+        // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
+        let versioning = self.versioning.read().await;
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
-            let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
-
             // object ids in checkpoint version
             let mut tracked_object_ids = versioning.checkpoint.version.get_object_ids();
             // add object ids added between checkpoint version and current version
@@ -165,89 +222,103 @@ impl HummockManager {
             );
             tracked_object_ids
         };
-        let to_delete = object_ids
-            .iter()
-            .filter(|object_id| !tracked_object_ids.contains(object_id))
-            .copied()
-            .collect_vec();
-        let to_delete_num = to_delete.len();
-        self.write_gc_history(to_delete.iter().cloned()).await?;
-        // This lock ensures that during commit_epoch or report_compact_tasks, where versioning lock is held,
-        // no new objects will be marked for deletion here.
-        let _versioning = self.versioning.read().await;
-        self.delete_object_tracker.add(to_delete.into_iter());
-        Ok(to_delete_num)
+        let to_delete = object_ids.filter(|object_id| !tracked_object_ids.contains(object_id));
+        self.write_gc_history(to_delete.clone()).await?;
+        Ok(to_delete.collect())
     }
 
-    /// Starts a full GC.
-    /// 1. Meta node sends a `FullScanTask` to a compactor in this method.
-    /// 2. The compactor returns scan result of object store to meta node. See
-    ///    `HummockManager::full_scan_inner` in storage crate.
-    /// 3. Meta node decides which SSTs to delete. See `HummockManager::complete_full_gc`.
-    ///
-    /// Returns Ok(false) if there is no worker available.
+    /// LIST object store and DELETE stale objects, in batches.
+    /// GC can be very slow. Spawn a dedicated tokio task for it.
     pub async fn start_full_gc(
         &self,
         sst_retention_time: Duration,
         prefix: Option<String>,
-    ) -> Result<bool> {
+        backup_manager: Option<BackupManagerRef>,
+    ) -> Result<()> {
+        if !self.full_gc_state.try_start() {
+            return Err(anyhow::anyhow!("failed to start GC due to an ongoing process").into());
+        }
+        let _guard = scopeguard::guard(self.full_gc_state.clone(), |full_gc_state| {
+            full_gc_state.stop()
+        });
         self.metrics.full_gc_trigger_count.inc();
-        // Set a minimum sst_retention_time.
         let sst_retention_time = cmp::max(
             sst_retention_time,
             Duration::from_secs(self.env.opts.min_sst_retention_time_sec),
         );
-        let start_after = self.full_gc_state.next_start_after();
-        let limit = self.full_gc_state.limit;
-        tracing::info!(
-            retention_sec = sst_retention_time.as_secs(),
-            prefix = prefix.as_ref().unwrap_or(&String::from("")),
-            start_after,
-            limit,
-            "run full GC"
-        );
-
-        let compactor = match self.compactor_manager.next_compactor() {
-            None => {
-                tracing::warn!("full GC attempt but no available idle worker");
-                return Ok(false);
-            }
-            Some(compactor) => compactor,
-        };
+        let limit = self.env.opts.full_gc_object_limit;
+        let mut start_after = None;
         let sst_retention_watermark = self
             .now()
             .await?
             .saturating_sub(sst_retention_time.as_secs());
-        compactor
-            .send_event(ResponseEvent::FullScanTask(FullScanTask {
-                sst_retention_watermark,
+        let mut total_object_count = 0;
+        let mut total_object_size = 0;
+        tracing::info!(
+            retention_sec = sst_retention_time.as_secs(),
+            prefix,
+            limit,
+            "Start GC."
+        );
+        loop {
+            tracing::debug!(
+                retention_sec = sst_retention_time.as_secs(),
                 prefix,
                 start_after,
                 limit,
-            }))
-            .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))?;
-        Ok(true)
+                "Start a GC batch."
+            );
+            let (object_ids, batch_object_count, batch_object_size, next_start_after) = self
+                .gc_manager
+                .list_objects(
+                    sst_retention_watermark,
+                    prefix.clone(),
+                    start_after.clone(),
+                    Some(limit),
+                )
+                .await?;
+            total_object_count += batch_object_count;
+            total_object_size += batch_object_size;
+            tracing::debug!(
+                ?object_ids,
+                batch_object_count,
+                batch_object_size,
+                "Finish listing a GC batch."
+            );
+            self.complete_gc_batch(object_ids, backup_manager.clone())
+                .await?;
+            if next_start_after.is_none() {
+                break;
+            }
+            start_after = next_start_after;
+        }
+        tracing::info!(total_object_count, total_object_size, "Finish GC");
+        self.metrics.total_object_size.set(total_object_size as _);
+        self.metrics.total_object_count.set(total_object_count as _);
+        Ok(())
     }
 
-    /// Given candidate SSTs to GC, filter out false positive.
-    /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(
+    /// Given candidate SSTs to delete, filter out false positive.
+    /// Returns number of SSTs to delete.
+    pub(crate) async fn complete_gc_batch(
         &self,
         object_ids: Vec<HummockSstableObjectId>,
-        next_start_after: Option<String>,
-        pinned_by_metadata_backup: HashSet<HummockSstableObjectId>,
+        backup_manager: Option<BackupManagerRef>,
     ) -> Result<usize> {
+        if object_ids.is_empty() {
+            return Ok(0);
+        }
+        // It's crucial to get pinned_by_metadata_backup only after object_ids.
+        let pinned_by_metadata_backup = backup_manager
+            .as_ref()
+            .map(|b| b.list_pinned_ssts())
+            .unwrap_or_default();
         // It's crucial to collect_min_uncommitted_sst_id (i.e. `min_sst_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_sst_id`, new compute nodes may join and generate new uncommitted SSTs that are not covered by `min_sst_id`.
         // By getting `min_sst_id` after `object_ids`, it's ensured `object_ids` won't include any SSTs from those new compute nodes.
         let min_sst_id =
             collect_min_uncommitted_sst_id(&self.metadata_manager, self.env.stream_client_pool())
                 .await?;
-        self.full_gc_state.set_next_start_after(next_start_after);
-        if object_ids.is_empty() {
-            tracing::info!("SST full scan returns no SSTs.");
-            return Ok(0);
-        }
         let metrics = &self.metrics;
         let candidate_object_number = object_ids.len();
         metrics
@@ -279,19 +350,23 @@ impl HummockManager {
             .collect_vec();
         let after_metadata_backup = object_ids.len();
         // filter by version
-        let after_version = self.extend_objects_to_delete_from_scan(&object_ids).await?;
+        let after_version = self
+            .finalize_objects_to_delete(object_ids.into_iter())
+            .await?;
+        let after_version_count = after_version.len();
         metrics
             .full_gc_selected_object_count
-            .observe(after_version as _);
+            .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
             after_min_sst_id,
             after_time_travel,
             after_metadata_backup,
-            after_version,
-            "complete full gc"
+            after_version_count,
+            "complete gc batch"
         );
-        Ok(after_version)
+        self.delete_objects(after_version).await?;
+        Ok(after_version_count)
     }
 
     pub async fn now(&self) -> Result<u64> {
@@ -333,32 +408,6 @@ impl HummockManager {
         Ok(now)
     }
 
-    pub fn update_paged_metrics(
-        &self,
-        start_after: Option<String>,
-        next_start_after: Option<String>,
-        total_object_count_in_page: u64,
-        total_object_size_in_page: u64,
-    ) {
-        let mut paged_metrics = self.paged_metrics.lock();
-        paged_metrics.total_object_size.update(
-            start_after.clone(),
-            next_start_after.clone(),
-            total_object_size_in_page,
-        );
-        paged_metrics.total_object_count.update(
-            start_after,
-            next_start_after,
-            total_object_count_in_page,
-        );
-        if let Some(total_object_size) = paged_metrics.total_object_size.take() {
-            self.metrics.total_object_size.set(total_object_size as _);
-        }
-        if let Some(total_object_count) = paged_metrics.total_object_count.take() {
-            self.metrics.total_object_count.set(total_object_count as _);
-        }
-    }
-
     async fn write_gc_history(
         &self,
         object_ids: impl Iterator<Item = HummockSstableObjectId>,
@@ -395,6 +444,68 @@ impl HummockManager {
             .await?;
         Ok(())
     }
+
+    /// Deletes stale Hummock metadata.
+    ///
+    /// Returns number of deleted deltas
+    pub async fn delete_metadata(&self) -> MetaResult<usize> {
+        let batch_size = 64usize;
+        let mut total_deleted = 0;
+        loop {
+            if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
+                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
+                    .await;
+            }
+            let (deleted, remain) = self.delete_version_deltas(batch_size).await?;
+            total_deleted += deleted;
+            if total_deleted == 0 || remain < batch_size {
+                break;
+            }
+        }
+
+        let current_epoch_time = Epoch::now().physical_time();
+        let epoch_watermark = Epoch::from_physical_time(
+            current_epoch_time.saturating_sub(
+                self.env
+                    .system_params_reader()
+                    .await
+                    .time_travel_retention_ms(),
+            ),
+        )
+        .0;
+        self.truncate_time_travel_metadata(epoch_watermark).await?;
+
+        Ok(total_deleted)
+    }
+
+    /// Deletes stale SST objects from object store.
+    ///
+    /// Returns the total count of deleted SST objects.
+    pub async fn delete_objects(
+        &self,
+        mut objects_to_delete: Vec<HummockSstableObjectId>,
+    ) -> Result<usize> {
+        let total = objects_to_delete.len();
+        let mut batch_size = 1000usize;
+        while !objects_to_delete.is_empty() {
+            if self.env.opts.vacuum_spin_interval_ms != 0 {
+                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
+                    .await;
+            }
+            batch_size = cmp::min(objects_to_delete.len(), batch_size);
+            if batch_size == 0 {
+                break;
+            }
+            let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
+            tracing::debug!(?objects_to_delete, "Attempt to delete objects.");
+            let deleted_object_ids = delete_batch.clone();
+            self.gc_manager
+                .delete_objects(delete_batch.into_iter())
+                .await?;
+            tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
+        }
+        Ok(total)
+    }
 }
 
 async fn collect_min_uncommitted_sst_id(
@@ -422,108 +533,29 @@ async fn collect_min_uncommitted_sst_id(
 }
 
 pub struct FullGcState {
-    next_start_after: Mutex<Option<String>>,
-    limit: Option<u64>,
+    is_started: AtomicBool,
 }
 
 impl FullGcState {
-    pub fn new(limit: Option<u64>) -> Self {
-        Self {
-            next_start_after: Mutex::new(None),
-            limit,
-        }
-    }
-
-    pub fn set_next_start_after(&self, next_start_after: Option<String>) {
-        *self.next_start_after.lock() = next_start_after;
-    }
-
-    pub fn next_start_after(&self) -> Option<String> {
-        self.next_start_after.lock().clone()
-    }
-}
-
-pub struct PagedMetrics {
-    total_object_count: PagedMetric,
-    total_object_size: PagedMetric,
-}
-
-impl PagedMetrics {
     pub fn new() -> Self {
         Self {
-            total_object_count: PagedMetric::new(),
-            total_object_size: PagedMetric::new(),
-        }
-    }
-}
-
-/// The metrics should be accumulated on a per-page basis and then finalized at the end.
-pub struct PagedMetric {
-    /// identifier of a page
-    expect_start_key: Option<String>,
-    /// accumulated metric value of pages seen so far
-    running_value: u64,
-    /// final metric value
-    sealed_value: Option<u64>,
-}
-
-impl PagedMetric {
-    fn new() -> Self {
-        Self {
-            expect_start_key: None,
-            running_value: 0,
-            sealed_value: None,
+            is_started: AtomicBool::new(false),
         }
     }
 
-    fn update(
-        &mut self,
-        current_start_key: Option<String>,
-        next_start_key: Option<String>,
-        value: u64,
-    ) {
-        // Encounter an update without pagination, replace current state.
-        if current_start_key.is_none() && next_start_key.is_none() {
-            self.running_value = value;
-            self.seal();
-            return;
-        }
-        // Encounter an update from unexpected page, reset current state.
-        if current_start_key != self.expect_start_key {
-            self.reset();
-            return;
-        }
-        self.running_value += value;
-        // There are more pages to add.
-        if next_start_key.is_some() {
-            self.expect_start_key = next_start_key;
-            return;
-        }
-        // This is the last page, seal the metric value.
-        self.seal();
+    pub fn try_start(&self) -> bool {
+        self.is_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
     }
 
-    fn seal(&mut self) {
-        self.sealed_value = Some(self.running_value);
-        self.reset();
-    }
-
-    fn reset(&mut self) {
-        self.running_value = 0;
-        self.expect_start_key = None;
-    }
-
-    fn take(&mut self) -> Option<u64> {
-        if self.sealed_value.is_some() {
-            self.reset();
-        }
-        self.sealed_value.take()
+    pub fn stop(&self) {
+        self.is_started.store(false, Ordering::SeqCst);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -531,7 +563,6 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_rpc_client::HummockMetaClient;
 
-    use super::{PagedMetric, ResponseEvent};
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
     use crate::hummock::MockHummockMetaClient;
 
@@ -543,49 +574,18 @@ mod tests {
             worker_id as _,
         ));
         let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
-        let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        // No task scheduled because no available worker.
-        assert!(!hummock_manager
-            .start_full_gc(
-                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1,),
-                None
-            )
-            .await
-            .unwrap());
-
-        let mut receiver = compactor_manager.add_compactor(worker_id as _);
-
-        assert!(hummock_manager
-            .start_full_gc(
-                Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec - 1),
-                None
-            )
-            .await
-            .unwrap());
-        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
-            ResponseEvent::FullScanTask(task) => task,
-            _ => {
-                panic!()
-            }
-        };
-
-        assert!(hummock_manager
+        hummock_manager
             .start_full_gc(
                 Duration::from_secs(hummock_manager.env.opts.min_sst_retention_time_sec + 1),
-                None
+                None,
+                None,
             )
             .await
-            .unwrap());
-        let _full_scan_task = match receiver.recv().await.unwrap().unwrap().event.unwrap() {
-            ResponseEvent::FullScanTask(task) => task,
-            _ => {
-                panic!()
-            }
-        };
+            .unwrap();
 
         // Empty input results immediate return, without waiting heartbeat.
         hummock_manager
-            .complete_full_gc(vec![], None, HashSet::default())
+            .complete_gc_batch(vec![], None)
             .await
             .unwrap();
 
@@ -594,10 +594,9 @@ mod tests {
         assert_eq!(
             3,
             hummock_manager
-                .complete_full_gc(
+                .complete_gc_batch(
                     vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64],
                     None,
-                    HashSet::new(),
                 )
                 .await
                 .unwrap()
@@ -621,44 +620,12 @@ mod tests {
         assert_eq!(
             1,
             hummock_manager
-                .complete_full_gc(
+                .complete_gc_batch(
                     [committed_object_ids, vec![max_committed_object_id + 1]].concat(),
                     None,
-                    HashSet::default(),
                 )
                 .await
                 .unwrap()
         );
-    }
-
-    #[test]
-    fn test_paged_metric() {
-        let mut metric = PagedMetric::new();
-        fn assert_empty_state(metric: &mut PagedMetric) {
-            assert_eq!(metric.running_value, 0);
-            assert!(metric.expect_start_key.is_none());
-        }
-        assert!(metric.sealed_value.is_none());
-        assert_empty_state(&mut metric);
-
-        metric.update(None, None, 100);
-        assert_eq!(metric.take().unwrap(), 100);
-        assert!(metric.take().is_none());
-        assert_empty_state(&mut metric);
-
-        // "start" is not a legal identifier for the first page
-        metric.update(Some("start".into()), Some("end".into()), 100);
-        assert!(metric.take().is_none());
-        assert_empty_state(&mut metric);
-
-        metric.update(None, Some("middle".into()), 100);
-        assert!(metric.take().is_none());
-        assert_eq!(metric.running_value, 100);
-        assert_eq!(metric.expect_start_key, Some("middle".into()));
-
-        metric.update(Some("middle".into()), None, 50);
-        assert_eq!(metric.take().unwrap(), 150);
-        assert!(metric.take().is_none());
-        assert_empty_state(&mut metric);
     }
 }

@@ -31,11 +31,15 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
 impl HummockManager {
-    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(
+        hummock_manager: Arc<Self>,
+        backup_manager: Option<BackupManagerRef>,
+    ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
@@ -342,13 +346,21 @@ impl HummockManager {
                                 HummockTimerEvent::FullGc => {
                                     let retention_sec =
                                         hummock_manager.env.opts.min_sst_retention_time_sec;
-                                    if hummock_manager
-                                        .start_full_gc(Duration::from_secs(retention_sec), None)
-                                        .await
-                                        .is_ok()
-                                    {
-                                        tracing::info!("Start full GC from meta node.");
-                                    }
+                                    let backup_manager_2 = backup_manager.clone();
+                                    let hummock_manager_2 = hummock_manager.clone();
+                                    tokio::task::spawn(async move {
+                                        use thiserror_ext::AsReport;
+                                        let _ = hummock_manager_2
+                                            .start_full_gc(
+                                                Duration::from_secs(retention_sec),
+                                                None,
+                                                backup_manager_2,
+                                            )
+                                            .await
+                                            .inspect_err(|e| {
+                                                warn!(error = %e.as_report(), "Failed to start GC.")
+                                            });
+                                    });
                                 }
                             }
                         }

@@ -30,8 +30,8 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    SstObjectIdRange, SyncResult,
+    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
+    SyncResult,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -39,7 +39,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTa
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     compact_task, PbHummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse, VacuumTask,
+    SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
@@ -228,10 +228,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
-    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
-        Ok(())
-    }
-
     async fn trigger_manual_compaction(
         &self,
         _compaction_group_id: u64,
@@ -240,17 +236,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         _sst_ids: Vec<u64>,
     ) -> Result<()> {
         todo!()
-    }
-
-    async fn report_full_scan_task(
-        &self,
-        _filtered_object_ids: Vec<HummockSstableObjectId>,
-        _total_object_count: u64,
-        _total_object_size: u64,
-        _start_after: Option<String>,
-        _next_start_after: Option<String>,
-    ) -> Result<()> {
-        unimplemented!()
     }
 
     async fn trigger_full_gc(
