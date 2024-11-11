@@ -35,7 +35,7 @@ pub struct BatchLogSeqScan {
 
 impl BatchLogSeqScan {
     fn new_inner(core: generic::LogScan, dist: Distribution) -> Self {
-        let order = Order::any();
+        let order = Order::new(core.table_desc.pk.clone());
         let base = PlanBase::new_batch(core.ctx(), core.schema(), dist, order);
 
         Self { base, core }
@@ -88,8 +88,11 @@ impl Distill for BatchLogSeqScan {
             });
             vec.push(("distribution", dist));
         }
+        vec.push(("old_epoch", Pretty::from(self.core.old_epoch.to_string())));
+        vec.push(("new_epoch", Pretty::from(self.core.new_epoch.to_string())));
+        vec.push(("version_id", Pretty::from(self.core.version_id.to_string())));
 
-        childless_record("BatchScan", vec)
+        childless_record("BatchLogSeqScan", vec)
     }
 }
 
@@ -126,6 +129,8 @@ impl TryToBatchPb for BatchLogSeqScan {
                     },
                 )),
             }),
+            // It's currently true.
+            ordered: !self.order().is_any(),
         }))
     }
 }
