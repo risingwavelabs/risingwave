@@ -48,7 +48,7 @@ use risingwave_expr::aggregate;
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("bool_and(boolean) -> boolean", state = "ref")]
+#[aggregate("bool_and(boolean) -> boolean")]
 fn bool_and_append_only(state: bool, input: bool) -> bool {
     state && input
 }
