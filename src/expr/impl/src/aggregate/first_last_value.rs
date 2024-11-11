@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{Datum, ScalarRefImpl};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate;
+use risingwave_expr::aggregate::AggStateDyn;
 
 /// Note that different from `min` and `max`, `first_value` doesn't ignore `NULL` values.
 ///
@@ -32,9 +34,32 @@ use risingwave_expr::aggregate;
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("first_value(*) -> auto", state = "ref")]
-fn first_value<T>(state: Option<T>, _: Option<T>) -> Option<T> {
-    state
+#[aggregate("first_value(any) -> any")]
+fn first_value(state: &mut FirstValueState, input: Option<ScalarRefImpl<'_>>) {
+    if state.0.is_none() {
+        state.0 = Some(input.map(|x| x.into_scalar_impl()));
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct FirstValueState(Option<Datum>);
+
+impl EstimateSize for FirstValueState {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size()
+    }
+}
+
+impl AggStateDyn for FirstValueState {}
+
+impl From<&FirstValueState> for Datum {
+    fn from(state: &FirstValueState) -> Self {
+        if let Some(state) = &state.0 {
+            state.clone()
+        } else {
+            None
+        }
+    }
 }
 
 /// Note that different from `min` and `max`, `last_value` doesn't ignore `NULL` values.
@@ -54,7 +79,7 @@ fn first_value<T>(state: Option<T>, _: Option<T>) -> Option<T> {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(): `last_value(any) -> any`
+#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(rc): `last_value(any) -> any`
 fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     input
 }
