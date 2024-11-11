@@ -242,6 +242,7 @@ impl HummockManagerService for HummockServiceImpl {
         let backup_manager_2 = self.backup_manager.clone();
         let hummock_manager_2 = self.hummock_manager.clone();
         tokio::task::spawn(async move {
+            use thiserror_ext::AsReport;
             let _ = hummock_manager_2
                 .start_full_gc(
                     Duration::from_secs(req.sst_retention_time_sec),
@@ -249,7 +250,7 @@ impl HummockManagerService for HummockServiceImpl {
                     Some(backup_manager_2),
                 )
                 .await
-                .inspect_err(|e| tracing::warn!(?e, "Failed to start GC."));
+                .inspect_err(|e| tracing::warn!(error = e.as_report(), "Failed to start GC."));
         });
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }

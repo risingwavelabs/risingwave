@@ -440,6 +440,7 @@ impl HummockManager {
                                     let backup_manager_2 = backup_manager.clone();
                                     let hummock_manager_2 = hummock_manager.clone();
                                     tokio::task::spawn(async move {
+                                        use thiserror_ext::AsReport;
                                         let _ = hummock_manager_2
                                             .start_full_gc(
                                                 Duration::from_secs(retention_sec),
@@ -447,7 +448,9 @@ impl HummockManager {
                                                 backup_manager_2,
                                             )
                                             .await
-                                            .inspect_err(|e| warn!(?e, "Failed to start GC."));
+                                            .inspect_err(|e| {
+                                                warn!(error = e.as_report(), "Failed to start GC.")
+                                            });
                                     });
                                 }
                             }
