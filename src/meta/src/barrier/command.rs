@@ -200,7 +200,7 @@ pub enum CreateStreamingJobType {
     SnapshotBackfill(SnapshotBackfillInfo),
 }
 
-/// [`Command`] is the input of [`crate::barrier::GlobalBarrierWorker`]. For different commands,
+/// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
 /// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
 #[derive(Debug, strum::Display)]

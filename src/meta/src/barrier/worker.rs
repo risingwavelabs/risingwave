@@ -60,15 +60,15 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{build_actor_connector_splits, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
-/// [`crate::barrier::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
+/// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`crate::barrier::GlobalBarrierWorker`] provides a set of interfaces like a state machine,
-/// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
+/// [`crate::barrier::worker::GlobalBarrierWorker`] provides a set of interfaces like a state machine,
+/// accepting [`crate::barrier::command::Command`] that carries info to build `Mutation`. To keep the consistency between
 /// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
-/// must be done in barrier manager transactional using [`Command`].
+/// must be done in barrier manager transactional using [`crate::barrier::command::Command`].
 pub(super) struct GlobalBarrierWorker<C> {
     /// Enable recovery or not when failover.
     enable_recovery: bool,
@@ -99,7 +99,7 @@ pub(super) struct GlobalBarrierWorker<C> {
 }
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
-    /// Create a new [`crate::barrier::GlobalBarrierWorker`].
+    /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,

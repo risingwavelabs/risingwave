@@ -316,7 +316,7 @@ pub struct ScheduledBarriers {
     inner: Arc<Inner>,
 }
 
-/// Held by the [`super::GlobalBarrierWorker`] to execute these commands.
+/// Held by the [`crate::barrier::worker::GlobalBarrierWorker`] to execute these commands.
 pub(super) struct PeriodicBarriers {
     min_interval: Interval,
 
