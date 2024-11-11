@@ -829,18 +829,6 @@ impl FunctionAttr {
             let first_state = if self.init_state.is_some() {
                 // if `init_state` is specified, the state will never be None
                 quote! { unreachable!() }
-            } else if let Some(s) = &self.state
-                && s == "ref"
-            {
-                if self.args.is_empty() {
-                    return Err(Error::new(
-                        Span::call_site(),
-                        "`state` cannot be `ref` if there's no argument",
-                    ));
-                }
-
-                // for min/max/..., the first state is the first non-NULL value
-                quote! { Some(v0) }
             } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
                 && impl_.create_state.is_some()
             {
@@ -849,11 +837,27 @@ impl FunctionAttr {
                     let state = self.function.create_state();
                     #next_state
                 }}
+            } else if let Some(state) = &self.state {
+                if state == "ref" {
+                    if self.args.is_empty() {
+                        return Err(Error::new(
+                            Span::call_site(),
+                            "`state` cannot be `ref` if there's no argument",
+                        ));
+                    }
+
+                    // for ref state, use the first non-NULL input as the initial state
+                    quote! { Some(v0) }
+                } else {
+                    // for state with specifed data type, use the default value of the type
+                    quote! {{
+                        let state = #state_type::default();
+                        #next_state
+                    }}
+                }
             } else {
-                quote! {{
-                    let state = #state_type::default();
-                    #next_state
-                }}
+                // for the remaining case, clone the first input as the initial state
+                quote! { Some(v0.clone().into()) }
             };
 
             match self.args.len() {
