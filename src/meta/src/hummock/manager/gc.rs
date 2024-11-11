@@ -131,7 +131,7 @@ impl GcManager {
         start_after: Option<String>,
         limit: Option<u64>,
     ) -> Result<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
-        tracing::info!(
+        tracing::debug!(
             sst_retention_watermark,
             prefix,
             start_after,
@@ -190,7 +190,10 @@ impl HummockManager {
     }
 
     /// Acknowledges SSTs have been deleted from object store.
-    pub async fn ack_deleted_objects(&self, object_ids: &[HummockSstableObjectId]) -> Result<()> {
+    pub async fn ack_deleted_objects(
+        &self,
+        object_ids: &HashSet<HummockSstableObjectId>,
+    ) -> Result<()> {
         self.delete_object_tracker.ack(object_ids.iter());
         let mut versioning_guard = self.versioning.write().await;
         for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
@@ -200,7 +203,6 @@ impl HummockManager {
             .checkpoint
             .stale_objects
             .retain(|_, stale_objects| !stale_objects.id.is_empty());
-        drop(versioning_guard);
         Ok(())
     }
 
@@ -340,16 +342,16 @@ impl HummockManager {
                 ?object_ids,
                 batch_object_count,
                 batch_object_size,
-                "Finish a GC batch."
+                "Finish listing a GC batch."
             );
             self.complete_gc_batch(object_ids, backup_manager.clone())
                 .await?;
             if next_start_after.is_none() {
-                tracing::info!(total_object_count, total_object_size, "Finish GC");
                 break;
             }
             start_after = next_start_after;
         }
+        tracing::info!(total_object_count, total_object_size, "Finish GC");
         self.metrics.total_object_size.set(total_object_size as _);
         self.metrics.total_object_count.set(total_object_count as _);
         Ok(())
@@ -535,8 +537,6 @@ impl HummockManager {
         if objects_to_delete.is_empty() {
             return Ok(0);
         }
-        tracing::debug!(?objects_to_delete, "Attempt to delete objects.");
-        let deleted_object_ids = objects_to_delete.clone();
         let total = objects_to_delete.len();
         let mut batch_size = 1000usize;
         while !objects_to_delete.is_empty() {
@@ -548,11 +548,15 @@ impl HummockManager {
             if batch_size == 0 {
                 break;
             }
-            let delete_batch = objects_to_delete.drain(..batch_size);
-            self.gc_manager.delete_objects(delete_batch).await?;
+            let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
+            tracing::debug!(?objects_to_delete, "Attempt to delete objects.");
+            let deleted_object_ids = delete_batch.clone();
+            self.gc_manager
+                .delete_objects(delete_batch.into_iter())
+                .await?;
+            self.ack_deleted_objects(&deleted_object_ids).await?;
+            tracing::info!(?deleted_object_ids, "Finish deleting objects.");
         }
-        self.ack_deleted_objects(&deleted_object_ids).await?;
-        tracing::info!(?deleted_object_ids, "Finish deleting objects.");
         Ok(total)
     }
 }
