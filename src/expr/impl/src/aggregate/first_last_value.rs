@@ -41,14 +41,8 @@ fn first_value(state: &mut FirstValueState, input: Option<ScalarRefImpl<'_>>) {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, EstimateSize)]
 struct FirstValueState(Option<Datum>);
-
-impl EstimateSize for FirstValueState {
-    fn estimated_heap_size(&self) -> usize {
-        self.0.estimated_heap_size()
-    }
-}
 
 impl AggStateDyn for FirstValueState {}
 
