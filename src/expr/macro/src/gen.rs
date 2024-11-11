@@ -898,7 +898,7 @@ impl FunctionAttr {
                     }
                 }
             } else {
-                // if some arguments are `Option`, we interprete the shortcurcuit condition as it is
+                // if some arguments are `Option`, we interpret the shortcurcuit condition as it is
                 quote! {
                     if #cond {
                         break; // this will break the loop in `update`/`update_range`
