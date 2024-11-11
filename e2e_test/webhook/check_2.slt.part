@@ -9,3 +9,9 @@ select data ->> 'source', data->> 'auth_algo' from github_sha1;
 ----
 github sha1
 github sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from rudderstack;
+----
+rudderstack plain
+rudderstack plain

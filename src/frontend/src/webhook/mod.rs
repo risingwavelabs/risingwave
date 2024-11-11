@@ -60,6 +60,10 @@ pub(super) mod handlers {
         Path((user, database, schema, table)): Path<(String, String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
+        println!(
+            "WKXLOG receive something: {:?}, \ndatabase: {}, \ntable: {}, \nheaders: {:?}",
+            body, database, table, headers
+        );
         let session_mgr = SESSION_MANAGER
             .get()
             .expect("session manager has been initialized");
@@ -113,6 +117,8 @@ pub(super) mod handlers {
             .fill_secret(secret_ref.unwrap())
             .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
 
+        println!("WKXLOG header_key: {:?}", header_key);
+
         let signature = headers
             .get(header_key)
             .ok_or_else(|| {
@@ -122,14 +128,18 @@ pub(super) mod handlers {
                 )
             })?
             .as_bytes();
+        println!("WKXLOG signature: {:?}", signature);
+        println!("WKXLOG secret_string: {:?}", secret_string);
 
         let is_valid = verify_signature(
-            secret_string.as_str(),
+            secret_string.as_bytes(),
             body.as_ref(),
             signature_expr.unwrap(),
             signature,
         )
         .await?;
+        println!("WKXLOG is_valid: {:?}", is_valid);
+
         if !is_valid {
             return Err(err(
                 anyhow!("Signature verification failed"),
@@ -162,12 +172,7 @@ pub(super) mod handlers {
 
         let _rsp = handle(session, insert_stmt, Arc::from(""), vec![])
             .await
-            .map_err(|e| {
-                err(
-                    anyhow!(e).context("Failed to insert to table"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                )
-            })?;
+            .map_err(|e| anyhow!("failed to insert: {:?}", e))?;
 
         Ok(())
     }

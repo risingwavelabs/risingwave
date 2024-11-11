@@ -57,15 +57,17 @@ impl IntoResponse for WebhookError {
 }
 
 pub async fn verify_signature(
-    secret: &str,
+    secret: &[u8],
     payload: &[u8],
     signature_expr: ExprNode,
     signature: &[u8],
 ) -> Result<bool> {
     let row = OwnedRow::new(vec![Some(secret.into()), Some(payload.into())]);
+    println!("WKXLOG signature_expr: {:?}", signature_expr);
 
     let signature_expr_impl = ExprImpl::from_expr_proto(&signature_expr)
         .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+    println!("WKXLOG signature_expr_impl: {:?}", signature_expr_impl);
 
     let result = signature_expr_impl
         .eval_row(&row)

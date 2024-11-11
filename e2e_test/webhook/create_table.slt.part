@@ -1,3 +1,12 @@
+statement ok
+create table rudderstack (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'Authorization',
+  test_secret
+);
 
 statement ok
 create table github_sha1 (

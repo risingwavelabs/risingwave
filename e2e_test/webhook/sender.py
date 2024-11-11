@@ -78,6 +78,22 @@ def send_github_sha256(secret):
     send_webhook(url, headers, payload_json)
 
 
+def send_rudderstack(secret):
+    payload = message
+    payload['source'] = "rudderstack"
+    payload['auth_algo'] = "plain"
+    url = SERVER_URL + "rudderstack"
+
+    payload_json = json.dumps(payload)
+    signature = secret
+    # Webhook message headers
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_json)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate sending Webhook messages")
     parser.add_argument("--secret", required=True, help="Secret key for generating signature")
@@ -86,3 +102,4 @@ if __name__ == "__main__":
     # send data
     send_github_sha1(secret)
     send_github_sha256(secret)
+    send_rudderstack(secret)

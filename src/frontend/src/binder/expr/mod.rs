@@ -91,7 +91,7 @@ impl Binder {
                     }
                 } else if let Some(ctx) = self.secure_compare_context.as_ref() {
                     if ident.real_value() == ctx.secret_name {
-                        Ok(InputRef::new(0, DataType::Varchar).into())
+                        Ok(InputRef::new(0, DataType::Bytea).into())
                     } else if ident.real_value() == ctx.column_name {
                         Ok(InputRef::new(1, DataType::Bytea).into())
                     } else {

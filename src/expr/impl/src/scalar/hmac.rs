@@ -18,8 +18,8 @@ use risingwave_expr::function;
 use sha1::Sha1;
 use sha2::Sha256;
 
-#[function("hmac(varchar, bytea, varchar) -> bytea")]
-pub fn hmac(secret: &str, payload: &[u8], sha_type: &str) -> Box<[u8]> {
+#[function("hmac(bytea, bytea, varchar) -> bytea")]
+pub fn hmac(secret: &[u8], payload: &[u8], sha_type: &str) -> Box<[u8]> {
     if sha_type == "sha1" {
         sha1_hmac(secret, payload)
     } else if sha_type == "sha256" {
@@ -29,9 +29,8 @@ pub fn hmac(secret: &str, payload: &[u8], sha_type: &str) -> Box<[u8]> {
     }
 }
 
-fn sha256_hmac(secret: &str, payload: &[u8]) -> Box<[u8]> {
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+fn sha256_hmac(secret: &[u8], payload: &[u8]) -> Box<[u8]> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC can take key of any size");
 
     mac.update(payload);
 
@@ -41,9 +40,8 @@ fn sha256_hmac(secret: &str, payload: &[u8]) -> Box<[u8]> {
     computed_signature.as_bytes().into()
 }
 
-fn sha1_hmac(secret: &str, payload: &[u8]) -> Box<[u8]> {
-    let mut mac =
-        Hmac::<Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
+fn sha1_hmac(secret: &[u8], payload: &[u8]) -> Box<[u8]> {
+    let mut mac = Hmac::<Sha1>::new_from_slice(secret).expect("HMAC can take key of any size");
 
     mac.update(payload);
 
