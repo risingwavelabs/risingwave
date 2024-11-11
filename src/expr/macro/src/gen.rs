@@ -849,7 +849,7 @@ impl FunctionAttr {
                     // for ref state, use the first non-NULL input as the initial state
                     quote! { Some(v0) }
                 } else {
-                    // for state with specifed data type, use the default value of the type
+                    // for state with specified data type, use the default value of the type
                     quote! {{
                         let state = #state_type::default();
                         #next_state
