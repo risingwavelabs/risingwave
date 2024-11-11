@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [workspace]
 members = [
     "src/batch",
@@ -295,6 +297,8 @@ redundant_explicit_links = "allow"
 # See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
 lto = "off"
+rustflags = ["-Z", "threads=8"] # use parallel frontend to speed up build
+                                # TODO: may consider applying to release/production profile as well
 
 [profile.release]
 debug = "full"
