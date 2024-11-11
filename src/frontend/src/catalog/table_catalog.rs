@@ -420,7 +420,12 @@ impl TableCatalog {
             schema_id,
             database_id,
             name: self.name.clone(),
-            columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            // ignore `_rw_timestamp` when serializing
+            columns: self
+                .columns_without_rw_timestamp()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
