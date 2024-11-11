@@ -437,21 +437,18 @@ impl HummockManager {
                                 HummockTimerEvent::FullGc => {
                                     let retention_sec =
                                         hummock_manager.env.opts.min_sst_retention_time_sec;
-                                    match hummock_manager
-                                        .start_full_gc(
-                                            Duration::from_secs(retention_sec),
-                                            None,
-                                            backup_manager.clone(),
-                                        )
-                                        .await
-                                    {
-                                        Ok(_) => {
-                                            tracing::info!("Start periodic GC.");
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(?e, "Failed to start GC.");
-                                        }
-                                    }
+                                    let backup_manager_2 = backup_manager.clone();
+                                    let hummock_manager_2 = hummock_manager.clone();
+                                    tokio::task::spawn(async move {
+                                        let _ = hummock_manager_2
+                                            .start_full_gc(
+                                                Duration::from_secs(retention_sec),
+                                                None,
+                                                backup_manager_2,
+                                            )
+                                            .await
+                                            .inspect_err(|e| warn!(?e, "Failed to start GC."));
+                                    });
                                 }
                             }
                         }

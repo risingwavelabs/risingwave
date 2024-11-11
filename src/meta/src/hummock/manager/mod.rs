@@ -42,7 +42,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, GcManager};
+use crate::hummock::manager::gc::{FullGcState, GcManager};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
@@ -91,9 +91,6 @@ pub struct HummockManager {
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
-
-    delete_object_tracker: DeleteObjectTracker,
-
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
     version_archive_dir: String,
@@ -275,7 +272,6 @@ impl HummockManager {
             // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
             event_sender: tx,
-            delete_object_tracker: Default::default(),
             object_store,
             version_checkpoint_path,
             version_archive_dir,
@@ -412,7 +408,6 @@ impl HummockManager {
             .map(|m| (m.context_id as HummockContextId, m.into()))
             .collect();
 
-        self.delete_object_tracker.clear();
         self.initial_compaction_group_config_after_load(
             versioning_guard,
             self.compaction_group_manager.write().await.deref_mut(),

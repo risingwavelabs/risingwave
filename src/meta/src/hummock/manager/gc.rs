@@ -23,7 +23,6 @@ use chrono::DateTime;
 use futures::future::try_join_all;
 use futures::{future, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use parking_lot::Mutex;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::{
@@ -44,34 +43,6 @@ use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
 use crate::MetaResult;
-
-#[derive(Default)]
-pub(super) struct DeleteObjectTracker {
-    /// Objects that waits to be deleted from object store. It comes from either compaction, or
-    /// full GC (listing object store).
-    objects_to_delete: Mutex<HashSet<HummockSstableObjectId>>,
-}
-
-impl DeleteObjectTracker {
-    pub(super) fn add(&self, objects: impl Iterator<Item = HummockSstableObjectId>) {
-        self.objects_to_delete.lock().extend(objects)
-    }
-
-    pub(super) fn current(&self) -> HashSet<HummockSstableObjectId> {
-        self.objects_to_delete.lock().clone()
-    }
-
-    pub(super) fn clear(&self) {
-        self.objects_to_delete.lock().clear();
-    }
-
-    pub(super) fn ack<'a>(&self, objects: impl Iterator<Item = &'a HummockSstableObjectId>) {
-        let mut lock = self.objects_to_delete.lock();
-        for object in objects {
-            lock.remove(object);
-        }
-    }
-}
 
 pub(crate) struct GcManager {
     store: ObjectStoreRef,
@@ -180,21 +151,11 @@ impl GcManager {
 }
 
 impl HummockManager {
-    /// Gets SST objects that is safe to be deleted from object store.
-    pub fn get_objects_to_delete(&self) -> Vec<HummockSstableObjectId> {
-        self.delete_object_tracker
-            .current()
-            .iter()
-            .cloned()
-            .collect()
-    }
-
     /// Acknowledges SSTs have been deleted from object store.
     pub async fn ack_deleted_objects(
         &self,
         object_ids: &HashSet<HummockSstableObjectId>,
     ) -> Result<()> {
-        self.delete_object_tracker.ack(object_ids.iter());
         let mut versioning_guard = self.versioning.write().await;
         for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
             stale_objects.id.retain(|id| !object_ids.contains(id));
@@ -246,11 +207,11 @@ impl HummockManager {
         Ok((batch.len(), deltas_to_delete.len() - batch.len()))
     }
 
-    /// Extends `objects_to_delete` according to object store list result.
-    pub async fn extend_objects_to_delete(
+    /// Filters by Hummock version and Writes GC history.
+    pub async fn finalize_objects_to_delete(
         &self,
-        object_ids: &[HummockSstableObjectId],
-    ) -> Result<usize> {
+        object_ids: impl Iterator<Item = HummockSstableObjectId> + Clone,
+    ) -> Result<Vec<HummockSstableObjectId>> {
         // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
         let versioning = self.versioning.read().await;
         let tracked_object_ids: HashSet<HummockSstableObjectId> = {
@@ -277,17 +238,13 @@ impl HummockManager {
             );
             tracked_object_ids
         };
-        let to_delete = object_ids
-            .iter()
-            .filter(|object_id| !tracked_object_ids.contains(object_id))
-            .copied()
-            .collect_vec();
-        let to_delete_num = to_delete.len();
-        self.write_gc_history(to_delete.iter().cloned()).await?;
-        self.delete_object_tracker.add(to_delete.into_iter());
-        Ok(to_delete_num)
+        let to_delete = object_ids.filter(|object_id| !tracked_object_ids.contains(object_id));
+        self.write_gc_history(to_delete.clone()).await?;
+        Ok(to_delete.collect())
     }
 
+    /// LIST object store and DELETE stale objects, in batches.
+    /// GC can be very slow. Spawn a dedicated tokio task for it.
     pub async fn start_full_gc(
         &self,
         sst_retention_time: Duration,
@@ -315,14 +272,14 @@ impl HummockManager {
         let mut total_object_size = 0;
         tracing::info!(
             retention_sec = sst_retention_time.as_secs(),
-            prefix = prefix.as_ref().unwrap_or(&String::from("")),
+            prefix,
             limit,
             "Start GC."
         );
         loop {
             tracing::debug!(
                 retention_sec = sst_retention_time.as_secs(),
-                prefix = prefix.as_ref().unwrap_or(&String::from("")),
+                prefix,
                 start_after,
                 limit,
                 "Start a GC batch."
@@ -409,19 +366,23 @@ impl HummockManager {
             .collect_vec();
         let after_metadata_backup = object_ids.len();
         // filter by version
-        let after_version = self.extend_objects_to_delete(&object_ids).await?;
+        let after_version = self
+            .finalize_objects_to_delete(object_ids.into_iter())
+            .await?;
+        let after_version_count = after_version.len();
         metrics
             .full_gc_selected_object_count
-            .observe(after_version as _);
+            .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
             after_min_sst_id,
             after_time_travel,
             after_metadata_backup,
-            after_version,
+            after_version_count,
             "complete gc batch"
         );
-        Ok(after_version)
+        self.delete_objects(after_version).await?;
+        Ok(after_version_count)
     }
 
     pub async fn now(&self) -> Result<u64> {
@@ -531,12 +492,10 @@ impl HummockManager {
     /// Deletes stale SST objects from object store.
     ///
     /// Returns the total count of deleted SST objects.
-    pub async fn delete_objects(&self) -> MetaResult<usize> {
-        // Select SST objects to delete.
-        let mut objects_to_delete = self.get_objects_to_delete();
-        if objects_to_delete.is_empty() {
-            return Ok(0);
-        }
+    pub async fn delete_objects(
+        &self,
+        mut objects_to_delete: Vec<HummockSstableObjectId>,
+    ) -> Result<usize> {
         let total = objects_to_delete.len();
         let mut batch_size = 1000usize;
         while !objects_to_delete.is_empty() {
@@ -555,7 +514,7 @@ impl HummockManager {
                 .delete_objects(delete_batch.into_iter())
                 .await?;
             self.ack_deleted_objects(&deleted_object_ids).await?;
-            tracing::info!(?deleted_object_ids, "Finish deleting objects.");
+            tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
         }
         Ok(total)
     }

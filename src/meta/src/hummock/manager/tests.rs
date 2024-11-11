@@ -567,8 +567,6 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    // objects_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -580,7 +578,6 @@ async fn test_hummock_manager_basic() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -1181,24 +1178,20 @@ async fn test_extend_objects_to_delete() {
         })
         .max()
         .unwrap();
-    let orphan_sst_num = 10;
+    let orphan_sst_num: usize = 10;
     let all_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.object_id)
-        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
+        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
         .collect_vec();
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
-    );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
 
     // Checkpoint
@@ -1206,50 +1199,30 @@ async fn test_extend_objects_to_delete() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
-    );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     // version1 is unpin, but version2 is pinned, and version2 is the checkpoint version.
     // stale objects are combined in the checkpoint of version2, so no sst to reclaim
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = version_max_committed_epoch(&pinned_version2).next_epoch();
     hummock_meta_client
         .commit_epoch(
@@ -1272,13 +1245,12 @@ async fn test_extend_objects_to_delete() {
     // in the stale objects of version2 checkpoint
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize + 3
+            .unwrap()
+            .len(),
+        orphan_sst_num + 3
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
 #[tokio::test]
@@ -2583,7 +2555,6 @@ async fn test_vacuum() {
         context_id,
     ));
     assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
-    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 0);
     hummock_manager.pin_version(context_id).await.unwrap();
     let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
     let sst_infos = add_test_tables(
@@ -2597,14 +2568,12 @@ async fn test_vacuum() {
     assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 6);
     assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
 
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     hummock_manager
         .unpin_version_before(context_id, HummockVersionId::MAX)
         .await
         .unwrap();
     hummock_manager.create_version_checkpoint(0).await.unwrap();
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
-    hummock_manager
+    let deleted = hummock_manager
         .complete_gc_batch(
             sst_infos
                 .iter()
@@ -2614,21 +2583,5 @@ async fn test_vacuum() {
         )
         .await
         .unwrap();
-    assert_eq!(hummock_manager.get_objects_to_delete().len(), 3);
-    assert_eq!(
-        hummock_manager
-            .get_objects_to_delete()
-            .into_iter()
-            .sorted()
-            .collect::<Vec<_>>(),
-        sst_infos[0]
-            .iter()
-            .map(|s| s.object_id)
-            .sorted()
-            .collect::<Vec<_>>()
-    );
-    // No SST deletion is scheduled because no available worker.
-    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 3);
-    // No objects_to_delete.
-    assert_eq!(hummock_manager.delete_objects().await.unwrap(), 0);
+    assert_eq!(deleted, 3);
 }

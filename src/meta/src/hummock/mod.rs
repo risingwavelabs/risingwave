@@ -52,10 +52,6 @@ pub fn start_hummock_workers(
             hummock_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
-        start_vacuum_object_loop(
-            hummock_manager,
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ),
     ];
     workers
 }
@@ -81,33 +77,6 @@ pub fn start_vacuum_metadata_loop(
             }
             if let Err(err) = vacuum.delete_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
-            }
-        }
-    });
-    (join_handle, shutdown_tx)
-}
-
-/// Starts a task to periodically vacuum stale objects.
-pub fn start_vacuum_object_loop(
-    vacuum: HummockManagerRef,
-    interval: Duration,
-) -> (JoinHandle<()>, Sender<()>) {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(interval);
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                // Wait for interval
-                _ = min_trigger_interval.tick() => {},
-                // Shutdown vacuum
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Vacuum object loop is stopped");
-                    return;
-                }
-            }
-            if let Err(err) = vacuum.delete_objects().await {
-                tracing::warn!(error = %err.as_report(), "Vacuum object error");
             }
         }
     });
