@@ -38,6 +38,7 @@ pub mod pulsar;
 pub mod redis;
 pub mod remote;
 pub mod sqlserver;
+pub mod postgres;
 pub mod starrocks;
 pub mod test_sink;
 pub mod trivial;
@@ -112,7 +113,6 @@ macro_rules! for_all_sinks {
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink },
                 { Nats, $crate::sink::nats::NatsSink },
                 { Jdbc, $crate::sink::remote::JdbcSink },
-                { Postgres, $crate::sink::postgres::PostgresSink }
                 // { ElasticSearchJava, $crate::sink::remote::ElasticSearchJavaSink },
                 // { OpensearchJava, $crate::sink::remote::OpenSearchJavaSink },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink },
@@ -134,6 +134,8 @@ macro_rules! for_all_sinks {
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
                 { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink },
+                { Postgres, $crate::sink::postgres::PostgresSink },
+
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -863,6 +865,12 @@ pub enum SinkError {
     ),
     #[error("SQL Server error: {0}")]
     SqlServer(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("Postgres error: {0}")]
+    Postgres(
         #[source]
         #[backtrace]
         anyhow::Error,
