@@ -53,7 +53,7 @@ fn first_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(): `last_value(any) -> any`
+#[aggregate("last_value(*) -> auto", state = "ref")] // TODO(rc): `last_value(any) -> any`
 fn last_value<T>(_: Option<T>, input: Option<T>) -> Option<T> {
     input
 }
