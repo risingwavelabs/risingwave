@@ -151,22 +151,6 @@ impl GcManager {
 }
 
 impl HummockManager {
-    /// Acknowledges SSTs have been deleted from object store.
-    pub async fn ack_deleted_objects(
-        &self,
-        object_ids: &HashSet<HummockSstableObjectId>,
-    ) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
-        for stale_objects in versioning_guard.checkpoint.stale_objects.values_mut() {
-            stale_objects.id.retain(|id| !object_ids.contains(id));
-        }
-        versioning_guard
-            .checkpoint
-            .stale_objects
-            .retain(|_, stale_objects| !stale_objects.id.is_empty());
-        Ok(())
-    }
-
     /// Deletes at most `batch_size` deltas.
     ///
     /// Returns (number of deleted deltas, number of remain `deltas_to_delete`).
@@ -513,7 +497,6 @@ impl HummockManager {
             self.gc_manager
                 .delete_objects(delete_batch.into_iter())
                 .await?;
-            self.ack_deleted_objects(&deleted_object_ids).await?;
             tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
         }
         Ok(total)
