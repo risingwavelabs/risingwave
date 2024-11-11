@@ -22,6 +22,7 @@ use risingwave_common::catalog::{TableId, SYS_CATALOG_START_ID};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_meta::backup_restore::BackupManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
@@ -31,25 +32,25 @@ use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::hummock::compaction::selector::ManualCompactionOption;
-use crate::hummock::{HummockManagerRef, VacuumManagerRef};
+use crate::hummock::HummockManagerRef;
 use crate::RwReceiverStream;
 
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
-    vacuum_manager: VacuumManagerRef,
     metadata_manager: MetadataManager,
+    backup_manager: BackupManagerRef,
 }
 
 impl HummockServiceImpl {
     pub fn new(
         hummock_manager: HummockManagerRef,
-        vacuum_trigger: VacuumManagerRef,
         metadata_manager: MetadataManager,
+        backup_manager: BackupManagerRef,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            vacuum_manager: vacuum_trigger,
             metadata_manager,
+            backup_manager,
         }
     }
 }
@@ -174,17 +175,6 @@ impl HummockManagerService for HummockServiceImpl {
         }))
     }
 
-    async fn report_vacuum_task(
-        &self,
-        request: Request<ReportVacuumTaskRequest>,
-    ) -> Result<Response<ReportVacuumTaskResponse>, Status> {
-        if let Some(vacuum_task) = request.into_inner().vacuum_task {
-            self.vacuum_manager.report_vacuum_task(vacuum_task).await?;
-        }
-        sync_point::sync_point!("AFTER_REPORT_VACUUM");
-        Ok(Response::new(ReportVacuumTaskResponse { status: None }))
-    }
-
     async fn trigger_manual_compaction(
         &self,
         request: Request<TriggerManualCompactionRequest>,
@@ -257,7 +247,7 @@ impl HummockManagerService for HummockServiceImpl {
             req.total_object_count,
             req.total_object_size,
         );
-        let pinned_by_metadata_backup = self.vacuum_manager.backup_manager.list_pinned_ssts();
+        let pinned_by_metadata_backup = self.backup_manager.list_pinned_ssts();
         // The following operation takes some time, so we do it in dedicated task and responds the
         // RPC immediately.
         tokio::spawn(async move {

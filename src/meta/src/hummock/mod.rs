@@ -25,8 +25,6 @@ pub mod mock_hummock_meta_client;
 pub mod model;
 pub mod test_utils;
 mod utils;
-mod vacuum;
-
 use std::time::Duration;
 
 pub use compactor_manager::*;
@@ -34,30 +32,28 @@ pub use compactor_manager::*;
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-pub use vacuum::*;
 
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
-    vacuum_manager: VacuumManagerRef,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
     let workers = vec![
         start_checkpoint_loop(
-            hummock_manager,
+            hummock_manager.clone(),
             Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
             meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
         ),
         start_vacuum_metadata_loop(
-            vacuum_manager.clone(),
+            hummock_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
         start_vacuum_object_loop(
-            vacuum_manager,
+            hummock_manager,
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
     ];
@@ -66,7 +62,7 @@ pub fn start_hummock_workers(
 
 /// Starts a task to periodically vacuum stale metadata.
 pub fn start_vacuum_metadata_loop(
-    vacuum: VacuumManagerRef,
+    vacuum: HummockManagerRef,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -83,7 +79,7 @@ pub fn start_vacuum_metadata_loop(
                     return;
                 }
             }
-            if let Err(err) = vacuum.vacuum_metadata().await {
+            if let Err(err) = vacuum.delete_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
             }
         }
@@ -93,7 +89,7 @@ pub fn start_vacuum_metadata_loop(
 
 /// Starts a task to periodically vacuum stale objects.
 pub fn start_vacuum_object_loop(
-    vacuum: VacuumManagerRef,
+    vacuum: HummockManagerRef,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -110,7 +106,7 @@ pub fn start_vacuum_object_loop(
                     return;
                 }
             }
-            if let Err(err) = vacuum.vacuum_object().await {
+            if let Err(err) = vacuum.delete_object().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum object error");
             }
         }

@@ -498,9 +498,9 @@ message SubscribeCompactionEventResponse {
 
   oneof event {
     CompactTask compact_task = 1;
-    VacuumTask vacuum_task = 2;
+    VacuumTask vacuum_task = 2 [deprecated = true];
     FullScanTask full_scan_task = 3;
-    ValidationTask validation_task = 4;
+    ValidationTask validation_task = 4 [deprecated = true];
     CancelCompactTask cancel_compact_task = 5;
 
     PullTaskAck pull_task_ack = 6;
@@ -552,14 +552,6 @@ message FullScanTask {
 message CancelCompactTask {
   uint32 context_id = 1;
   uint64 task_id = 2;
-}
-
-message ReportVacuumTaskRequest {
-  VacuumTask vacuum_task = 1;
-}
-
-message ReportVacuumTaskResponse {
-  common.Status status = 1;
 }
 
 message TriggerManualCompactionRequest {
@@ -819,7 +811,6 @@ service HummockManagerService {
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
-  rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);

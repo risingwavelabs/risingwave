@@ -522,13 +522,6 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         metadata_manager.clone(),
@@ -560,8 +553,8 @@ pub async fn start_service_as_election_leader(
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        vacuum_manager.clone(),
         metadata_manager.clone(),
+        backup_manager.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
@@ -585,7 +578,6 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        vacuum_manager,
         // compaction_scheduler,
         &env.opts,
     ));

@@ -42,7 +42,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, PagedMetrics};
+use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, GcManager, PagedMetrics};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
@@ -114,6 +114,7 @@ pub struct HummockManager {
     paged_metrics: parking_lot::Mutex<PagedMetrics>,
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
+    gc_manager: GcManager,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -202,6 +203,7 @@ impl HummockManager {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
+        let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
         let deterministic_mode = env.opts.compaction_deterministic_test;
         let mut object_store_config = env.opts.object_store_config.clone();
         // For fs and hdfs object store, operations are not always atomic.
@@ -245,6 +247,11 @@ impl HummockManager {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let full_gc_object_limit = env.opts.full_gc_object_limit;
         let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
+        let gc_manager = GcManager::new(
+            object_store.clone(),
+            state_store_dir,
+            use_new_object_prefix_strategy,
+        );
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -284,6 +291,7 @@ impl HummockManager {
             paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
+            gc_manager,
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;

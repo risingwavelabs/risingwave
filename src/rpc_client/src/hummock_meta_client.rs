@@ -19,7 +19,7 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::hummock::{
-    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -39,7 +39,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         sync_result: SyncResult,
         is_log_store: bool,
     ) -> Result<()>;
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,

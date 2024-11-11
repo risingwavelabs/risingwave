@@ -1537,14 +1537,6 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
-        let req = ReportVacuumTaskRequest {
-            vacuum_task: Some(vacuum_task),
-        };
-        self.inner.report_vacuum_task(req).await?;
-        Ok(())
-    }
-
     async fn report_full_scan_task(
         &self,
         filtered_object_ids: Vec<HummockSstableObjectId>,
@@ -2118,7 +2110,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
-            ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }

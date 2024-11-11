@@ -17,7 +17,7 @@ use std::sync::Arc;
 use futures::{StreamExt, TryStreamExt};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectMetadataIter;
-use risingwave_pb::hummock::{FullScanTask, VacuumTask};
+use risingwave_pb::hummock::FullScanTask;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -27,33 +27,6 @@ use crate::hummock::{SstableStore, SstableStoreRef};
 pub struct Vacuum;
 
 impl Vacuum {
-    /// Wrapper method that warns on any error and doesn't propagate it.
-    /// Returns false if any error.
-    pub async fn handle_vacuum_task(
-        sstable_store: SstableStoreRef,
-        sstable_object_ids: &[u64],
-    ) -> HummockResult<()> {
-        tracing::info!("try to vacuum SSTs {:?}", sstable_object_ids);
-        sstable_store.delete_list(sstable_object_ids).await?;
-        Ok(())
-    }
-
-    pub async fn report_vacuum_task(
-        vacuum_task: VacuumTask,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> bool {
-        match hummock_meta_client.report_vacuum_task(vacuum_task).await {
-            Ok(_) => {
-                tracing::info!("vacuuming SSTs succeeded");
-            }
-            Err(e) => {
-                tracing::warn!(error = %e.as_report(), "failed to report vacuum task");
-                return false;
-            }
-        }
-        true
-    }
-
     pub async fn full_scan_inner(
         full_scan_task: FullScanTask,
         metadata_iter: ObjectMetadataIter,

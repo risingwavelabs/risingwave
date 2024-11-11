@@ -21,7 +21,7 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{PbCompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use risingwave_pb::hummock::{PbCompactTask, ReportFullScanTaskRequest};
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -556,21 +556,7 @@ pub fn start_compactor(
                                 });
                             }
                             ResponseEvent::VacuumTask(vacuum_task) => {
-                                executor.spawn(async move {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
-                                });
+                                tracing::error!(?vacuum_task, "unexpected vacuum task");
                             }
                             ResponseEvent::FullScanTask(full_scan_task) => {
                                 executor.spawn(async move {
@@ -765,25 +751,7 @@ pub fn start_shared_compactor(
 
                                 }
                                 dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            let report_vacuum_task_request = ReportVacuumTaskRequest {
-                                                vacuum_task: Some(vacuum_task),
-                                            };
-                                            match cloned_grpc_proxy_client.report_vacuum_task(report_vacuum_task_request).await {
-                                                Ok(_) => tracing::info!("Finished vacuuming SSTs"),
-                                                Err(e) => tracing::warn!(error = %e.as_report(), "Failed to report vacuum task"),
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
+                                    tracing::error!(?vacuum_task, "unexpected vacuum task");
                                 }
                                 dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
                                     let start_after = full_scan_task.start_after.clone();

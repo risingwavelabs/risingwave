@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
 use tokio::sync::mpsc::UnboundedSender;
@@ -69,10 +69,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         _is_log_store: bool,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
-    }
-
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
-        self.meta_client.report_vacuum_task(vacuum_task).await
     }
 
     async fn trigger_manual_compaction(

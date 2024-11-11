@@ -21,7 +21,6 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::{
     GetNewSstIdsRequest, GetNewSstIdsResponse, ReportCompactionTaskRequest,
     ReportCompactionTaskResponse, ReportFullScanTaskRequest, ReportFullScanTaskResponse,
-    ReportVacuumTaskRequest, ReportVacuumTaskResponse,
 };
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
@@ -148,13 +147,6 @@ impl GrpcCompactorProxyClient {
             request,
             ReportFullScanTaskResponse
         )
-    }
-
-    pub async fn report_vacuum_task(
-        &self,
-        request: ReportVacuumTaskRequest,
-    ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
-        retry_rpc!(self, report_vacuum_task, request, ReportVacuumTaskResponse)
     }
 
     pub async fn get_system_params(

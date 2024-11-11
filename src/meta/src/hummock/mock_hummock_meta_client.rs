@@ -39,7 +39,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{Event, ReportTa
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     compact_task, PbHummockVersion, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse, VacuumTask,
+    SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient};
@@ -224,10 +224,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             })
             .await
             .map_err(mock_err)?;
-        Ok(())
-    }
-
-    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
         Ok(())
     }
 

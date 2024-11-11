@@ -22,10 +22,13 @@ use chrono::DateTime;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::{get_sst_data_path, HummockSstableObjectId};
 use risingwave_meta_model::hummock_sequence::HUMMOCK_NOW;
 use risingwave_meta_model::{hummock_gc_history, hummock_sequence};
 use risingwave_meta_model_migration::OnConflict;
+use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::FullScanTask;
 use risingwave_pb::stream_service::GetMinUncommittedSstIdRequest;
@@ -37,6 +40,7 @@ use crate::hummock::manager::commit_multi_var;
 use crate::hummock::HummockManager;
 use crate::manager::MetadataManager;
 use crate::model::BTreeMapTransaction;
+use crate::MetaResult;
 
 #[derive(Default)]
 pub(super) struct DeleteObjectTracker {
@@ -63,6 +67,39 @@ impl DeleteObjectTracker {
         for object in objects {
             lock.remove(object);
         }
+    }
+}
+
+pub(crate) struct GcManager {
+    store: ObjectStoreRef,
+    path_prefix: String,
+    use_new_object_prefix_strategy: bool,
+}
+
+impl GcManager {
+    pub fn new(
+        store: ObjectStoreRef,
+        path_prefix: &str,
+        use_new_object_prefix_strategy: bool,
+    ) -> Self {
+        Self {
+            store,
+            path_prefix: path_prefix.to_owned(),
+            use_new_object_prefix_strategy,
+        }
+    }
+
+    /// Deletes all SSTs specified in the given list of IDs from storage.
+    pub async fn delete_list(&self, object_id_list: &[HummockSstableObjectId]) -> Result<()> {
+        let mut paths = Vec::with_capacity(object_id_list.len() * 2);
+        for &object_id in object_id_list {
+            let obj_prefix = self
+                .store
+                .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
+            paths.push(get_sst_data_path(&obj_prefix, &self.path_prefix, object_id));
+        }
+        self.store.delete_objects(&paths).await?;
+        Ok(())
     }
 }
 
@@ -389,6 +426,73 @@ impl HummockManager {
             .exec(db)
             .await?;
         Ok(())
+    }
+
+    pub async fn delete_list(&self, object_id_list: &[HummockSstableObjectId]) -> Result<()> {
+        self.gc_manager.delete_list(object_id_list).await
+    }
+
+    /// Tries to delete stale Hummock metadata.
+    ///
+    /// Returns number of deleted deltas
+    pub async fn delete_metadata(&self) -> MetaResult<usize> {
+        let batch_size = 64usize;
+        let mut total_deleted = 0;
+        loop {
+            if total_deleted != 0 && self.env.opts.vacuum_spin_interval_ms != 0 {
+                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
+                    .await;
+            }
+            let (deleted, remain) = self.delete_version_deltas(batch_size).await?;
+            total_deleted += deleted;
+            if total_deleted == 0 || remain < batch_size {
+                break;
+            }
+        }
+
+        let current_epoch_time = Epoch::now().physical_time();
+        let epoch_watermark = Epoch::from_physical_time(
+            current_epoch_time.saturating_sub(
+                self.env
+                    .system_params_reader()
+                    .await
+                    .time_travel_retention_ms(),
+            ),
+        )
+        .0;
+        self.truncate_time_travel_metadata(epoch_watermark).await?;
+
+        Ok(total_deleted)
+    }
+
+    /// Deletes SST objects from object store.
+    ///
+    /// Returns the total count of deleted SST objects.
+    pub async fn delete_object(&self) -> MetaResult<usize> {
+        // Select SST objects to delete.
+        let mut objects_to_delete = self.get_objects_to_delete();
+        if objects_to_delete.is_empty() {
+            return Ok(0);
+        }
+        tracing::debug!(?objects_to_delete, "Attempt to delete objects.");
+        let deleted_object_ids = objects_to_delete.clone();
+        let total = objects_to_delete.len();
+        let mut batch_size = 1000usize;
+        while !objects_to_delete.is_empty() {
+            if self.env.opts.vacuum_spin_interval_ms != 0 {
+                tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
+                    .await;
+            }
+            batch_size = cmp::min(objects_to_delete.len(), batch_size);
+            if batch_size == 0 {
+                break;
+            }
+            let delete_batch = objects_to_delete.drain(..batch_size).collect_vec();
+            self.delete_list(&delete_batch).await?;
+        }
+        self.ack_deleted_objects(&deleted_object_ids).await?;
+        tracing::info!(?deleted_object_ids, "Finish deleting objects.");
+        Ok(total)
     }
 }
 
