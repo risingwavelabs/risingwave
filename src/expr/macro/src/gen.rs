@@ -883,6 +883,31 @@ impl FunctionAttr {
         } else {
             quote! { state = #next_state; }
         };
+        let shortcurcuit = if let Some(cond) = &self.shortcurcuit_if {
+            let cond: TokenStream2 = cond.parse().unwrap();
+            if user_fn.accumulate().args_option.iter().all(|b| !b) {
+                // non-`Option` arguments, unpack the state inner value
+                quote! {
+                    match state {
+                        Some(state) => {
+                            if #cond {
+                                break; // this will break the loop in `update`/`update_range`
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            } else {
+                // if some arguments are `Option`, we interprete the shortcurcuit condition as it is
+                quote! {
+                    if #cond {
+                        break; // this will break the loop in `update`/`update_range`
+                    }
+                }
+            }
+        } else {
+            quote! {}
+        };
         let get_result = if custom_state.is_some() {
             quote! { Ok(state.downcast_ref::<#state_type>().into()) }
         } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
@@ -962,6 +987,7 @@ impl FunctionAttr {
                             let op = unsafe { *input.ops().get_unchecked(row_id) };
                             #(#let_values)*
                             #update_state
+                            #shortcurcuit
                         }
                         #restore_state
                         Ok(())
@@ -976,6 +1002,7 @@ impl FunctionAttr {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
                                 #update_state
+                                #shortcurcuit
                             }
                         } else {
                             for row_id in input.visibility().iter_ones() {
@@ -987,6 +1014,7 @@ impl FunctionAttr {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
                                 #update_state
+                                #shortcurcuit
                             }
                         }
                         #restore_state

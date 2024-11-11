@@ -507,6 +507,9 @@ struct FunctionAttr {
     /// Initial state value for aggregate function.
     /// If not specified, it will be NULL.
     init_state: Option<String>,
+    /// Shortcurcuit condition for aggregate function.
+    /// If not specified, there won't be any shortcurcuit.
+    shortcurcuit_if: Option<String>,
     /// Prebuild function for arguments.
     /// This could be any Rust expression.
     prebuild: Option<String>,
