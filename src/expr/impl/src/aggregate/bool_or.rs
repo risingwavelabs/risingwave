@@ -48,7 +48,7 @@ use risingwave_expr::aggregate;
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("bool_or(boolean) -> boolean")]
+#[aggregate("bool_or(boolean) -> boolean", shortcurcuit_if = "state" /* shortcurcuit if state is true */)]
 fn bool_or_append_only(state: bool, input: bool) -> bool {
     state || input
 }
