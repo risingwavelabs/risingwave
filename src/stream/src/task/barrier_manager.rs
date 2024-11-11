@@ -531,11 +531,6 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        if barrier.kind == BarrierKind::Initial {
-            self.actor_manager
-                .watermark_epoch
-                .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
-        }
         debug!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, actor_ids_to_collect = {:?}",
