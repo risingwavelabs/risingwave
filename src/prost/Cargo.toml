@@ -22,7 +22,7 @@ tonic = { workspace = true }
 workspace-hack = { path = "../workspace-hack" }
 
 [build-dependencies]
-fs-err = "2.11"
+fs-err = "3.0"
 pbjson-build = "0.7"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
