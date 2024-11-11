@@ -24,8 +24,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
+use crate::barrier::checkpoint::EpochNode;
 use crate::barrier::{
-    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, EpochNode, ReplaceTablePlan,
+    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
 };
 use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, BackfillUpstreamType, TableFragments};
@@ -373,6 +374,45 @@ impl CreateMviewProgressTracker {
                 (table_id, ddl_progress)
             })
             .collect()
+    }
+
+    pub(super) fn update_tracking_jobs<'a>(
+        &mut self,
+        info: Option<(&CreateStreamingJobCommandInfo, Option<&ReplaceTablePlan>)>,
+        create_mview_progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
+        version_stats: &HummockVersionStats,
+    ) {
+        {
+            {
+                // Save `finished_commands` for Create MVs.
+                let finished_commands = {
+                    let mut commands = vec![];
+                    // Add the command to tracker.
+                    if let Some((create_job_info, replace_table)) = info
+                        && let Some(command) =
+                            self.add(create_job_info, replace_table, version_stats)
+                    {
+                        // Those with no actors to track can be finished immediately.
+                        commands.push(command);
+                    }
+                    // Update the progress of all commands.
+                    for progress in create_mview_progress {
+                        // Those with actors complete can be finished immediately.
+                        if let Some(command) = self.update(progress, version_stats) {
+                            tracing::trace!(?progress, "finish progress");
+                            commands.push(command);
+                        } else {
+                            tracing::trace!(?progress, "update progress");
+                        }
+                    }
+                    commands
+                };
+
+                for command in finished_commands {
+                    self.stash_command_to_finish(command);
+                }
+            }
+        }
     }
 
     /// Apply a collected epoch node command to the tracker

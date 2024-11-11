@@ -29,11 +29,18 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
 use super::notifier::Notifier;
-use super::{Command, GlobalBarrierWorkerContext, NewBarrier, Scheduled};
+use super::{Command, Scheduled};
+use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
 use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
+
+pub(super) struct NewBarrier {
+    pub command: Option<(DatabaseId, Command, Vec<Notifier>)>,
+    pub span: tracing::Span,
+    pub checkpoint: bool,
+}
 
 /// A queue for scheduling barriers.
 ///
@@ -391,6 +398,13 @@ impl ScheduledBarriers {
 }
 
 impl ScheduledBarriers {
+    /// Pre buffered drop and cancel command, return true if any.
+    pub(super) fn pre_apply_drop_cancel(&self) -> bool {
+        let (dropped_actors, cancelled) = self.pre_apply_drop_cancel_scheduled();
+
+        !dropped_actors.is_empty() || !cancelled.is_empty()
+    }
+
     /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
     /// specific reason.
     pub(super) fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {

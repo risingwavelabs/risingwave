@@ -19,6 +19,7 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
+use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_meta_model::WorkerId;
@@ -26,12 +27,9 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use status::{CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus};
 use tracing::info;
 
-use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierControl;
-use crate::barrier::creating_job::status::{
-    CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
-};
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -41,8 +39,8 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::MetaResult;
 
 #[derive(Debug)]
-pub(super) struct CreatingStreamingJobControl {
-    pub(super) info: CreateStreamingJobCommandInfo,
+pub(crate) struct CreatingStreamingJobControl {
+    pub(crate) info: CreateStreamingJobCommandInfo,
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     backfill_epoch: u64,
 
@@ -103,7 +101,7 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
+    pub(crate) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_wait_on_worker(worker_id)
             || (self.status.is_finishing()
                 && InflightFragmentInfo::contains_worker(
@@ -112,7 +110,7 @@ impl CreatingStreamingJobControl {
                 ))
     }
 
-    pub(super) fn gen_ddl_progress(&self) -> DdlProgress {
+    pub(crate) fn gen_ddl_progress(&self) -> DdlProgress {
         let progress = match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 create_mview_tracker,
