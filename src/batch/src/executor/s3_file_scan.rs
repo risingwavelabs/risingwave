@@ -18,7 +18,7 @@ use futures_util::stream::StreamExt;
 use parquet::arrow::ProjectionMask;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
+use risingwave_connector::source::{filesystem::opendal_source::{opendal_enumerator::OpendalEnumerator, OpendalS3}, iceberg::parquet_file_reader::create_parquet_stream_builder};
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -85,6 +85,14 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
+            let op: OpendalEnumerator<OpendalS3> =
+                            OpendalEnumerator::new_s3_reader(
+                                self.s3_region.clone(),
+                                self.s3_access_key.clone(),
+                                self.s3_secret_key.clone(),
+                                file.clone(),
+                            )?;
+                        
             let mut batch_stream_builder = create_parquet_stream_builder(
                 self.s3_region.clone(),
                 self.s3_access_key.clone(),
