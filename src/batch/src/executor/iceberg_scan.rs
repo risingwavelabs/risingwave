@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, I64Array};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, ICEBERG_SEQUENCE_NUM_COLUMN_NAME};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common_estimate_size::EstimateSize;
@@ -92,6 +92,7 @@ pub struct IcebergScanExecutor {
     schema: Schema,
     identity: String,
     metrics: Option<BatchMetrics>,
+    need_seq_num: bool,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -118,6 +119,7 @@ impl IcebergScanExecutor {
         schema: Schema,
         identity: String,
         metrics: Option<BatchMetrics>,
+        need_seq_num: bool,
     ) -> Self {
         Self {
             iceberg_config,
@@ -128,6 +130,7 @@ impl IcebergScanExecutor {
             file_scan_tasks: Some(file_scan_tasks),
             identity,
             metrics,
+            need_seq_num,
         }
     }
 
@@ -193,12 +196,17 @@ impl IcebergScanExecutor {
             while let Some((index, record_batch)) = record_batch_stream.next().await {
                 let record_batch = record_batch?;
 
-                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                let (mut columns, visibility) = chunk.into_parts();
-                columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
-                    vec![data_sequence_number; visibility.len()],
-                ))));
-                let mut chunk = DataChunk::from_parts(columns.into(), visibility);
+                // iceberg_t1_source
+                let mut chunk = if self.need_seq_num {
+                    let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                    let (mut columns, visibility) = chunk.into_parts();
+                    columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
+                        vec![data_sequence_number; visibility.len()],
+                    ))));
+                    DataChunk::from_parts(columns.into(), visibility)
+                } else {
+                    IcebergArrowConvert.chunk_from_record_batch(&record_batch)?
+                };
 
                 // position delete
                 if let Some(position_delete_filter) = &mut position_delete_filter {
@@ -264,6 +272,10 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         {
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
+            let need_seq_num = schema
+                .fields()
+                .iter()
+                .any(|f| f.name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME);
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
                 Some(split.snapshot_id),
@@ -273,6 +285,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 schema,
                 source.plan_node().get_identity().clone(),
                 metrics,
+                need_seq_num,
             )))
         } else {
             unreachable!()
