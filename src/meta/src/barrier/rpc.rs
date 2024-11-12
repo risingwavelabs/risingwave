@@ -43,10 +43,8 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::{
-    Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
-    InflightSubscriptionInfo,
-};
+use super::{Command, InflightSubscriptionInfo};
+use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
@@ -484,22 +482,6 @@ impl GlobalBarrierWorkerContextImpl {
             .start_streaming_control(subscriptions)
             .await?;
         Ok(handle)
-    }
-}
-
-impl<C> GlobalBarrierWorker<C> {
-    /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
-        // Record failure in event log.
-        use risingwave_pb::meta::event_log;
-        let event = event_log::EventCollectBarrierFail {
-            prev_epoch: barrier_info.prev_epoch(),
-            cur_epoch: barrier_info.curr_epoch.value().0,
-            error: error.to_report_string(),
-        };
-        self.env
-            .event_log_manager_ref()
-            .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
 }
 

@@ -24,7 +24,7 @@ use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
-pub(super) struct BarrierWorkerState {
+pub(crate) struct BarrierWorkerState {
     /// The last sent `prev_epoch`
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest

@@ -21,49 +21,21 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{StreamingParallelism, WorkerId};
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{PausedReason, Recovery};
-use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StreamActor};
+use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, info, warn, Instrument};
+use tracing::{debug, info, warn};
 
-use super::{
-    BarrierWorkerRuntimeInfoSnapshot, CheckpointControl, DatabaseCheckpointControl,
-    GlobalBarrierWorker, GlobalBarrierWorkerContext, InflightSubscriptionInfo, RecoveryReason,
-    TracedEpoch,
-};
-use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
-use crate::barrier::progress::CreateMviewProgressTracker;
-use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::schedule::ScheduledBarriers;
-use crate::barrier::state::BarrierWorkerState;
-use crate::barrier::{BarrierKind, GlobalBarrierWorkerContextImpl};
+use super::BarrierWorkerRuntimeInfoSnapshot;
+use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::info::InflightDatabaseInfo;
+use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, TableFragments, TableParallelism};
-use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{build_actor_connector_splits, RescheduleOptions, TableResizePolicy};
-use crate::{model, MetaError, MetaResult};
-
-impl<C> GlobalBarrierWorker<C> {
-    // Retry base interval in milliseconds.
-    const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
-    // Retry max interval.
-    const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
-
-    #[inline(always)]
-    /// Initialize a retry strategy for operation in recovery.
-    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
-            .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
-            .map(jitter)
-    }
-}
+use crate::stream::{RescheduleOptions, TableResizePolicy};
+use crate::{model, MetaResult};
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -117,41 +89,23 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(mview_map)
     }
-}
 
-impl ScheduledBarriers {
-    /// Pre buffered drop and cancel command, return true if any.
-    fn pre_apply_drop_cancel(&self) -> bool {
-        let (dropped_actors, cancelled) = self.pre_apply_drop_cancel_scheduled();
+    /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
+    /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
+    /// will create or drop before this barrier flow through them.
+    async fn resolve_graph_info(&self) -> MetaResult<HashMap<DatabaseId, InflightDatabaseInfo>> {
+        let all_actor_infos = self
+            .metadata_manager
+            .catalog_controller
+            .load_all_actors()
+            .await?;
 
-        !dropped_actors.is_empty() || !cancelled.is_empty()
+        Ok(all_actor_infos
+            .into_iter()
+            .map(|(database_id, actor_infos)| (database_id, InflightDatabaseInfo::new(actor_infos)))
+            .collect())
     }
-}
 
-impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
-    /// Recovery the whole cluster from the latest epoch.
-    ///
-    /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
-    /// immediately paused after recovery, until the user manually resume them either by restarting
-    /// the cluster or `risectl` command. Used for debugging purpose.
-    ///
-    /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(
-        &mut self,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-        recovery_reason: RecoveryReason,
-    ) {
-        self.context.abort_and_mark_blocked(recovery_reason);
-        // Clear all control streams to release resources (connections to compute nodes) first.
-        self.control_stream_manager.clear();
-
-        self.recovery_inner(paused_reason, err).await;
-        self.context.mark_ready();
-    }
-}
-
-impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn reload_runtime_info_impl(
         &self,
     ) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
@@ -271,210 +225,6 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             }
         }
-    }
-}
-
-impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
-    async fn recovery_inner(
-        &mut self,
-        paused_reason: Option<PausedReason>,
-        err: Option<MetaError>,
-    ) {
-        tracing::info!("recovery start!");
-        let retry_strategy = Self::get_retry_strategy();
-
-        // We take retry into consideration because this is the latency user sees for a cluster to
-        // get recovered.
-        let recovery_timer = GLOBAL_META_METRICS.recovery_latency.start_timer();
-
-        let new_state = tokio_retry::Retry::spawn(retry_strategy, || async {
-            if let Some(err) = &err {
-                self.context.notify_creating_job_failed(err).await;
-            };
-            let runtime_info_snapshot = self
-                .context
-                .reload_runtime_info()
-                .await?;
-            runtime_info_snapshot.validate().inspect_err(|e| {
-                warn!(err = ?e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
-            })?;
-            let BarrierWorkerRuntimeInfoSnapshot {
-                active_streaming_nodes,
-                database_fragment_infos,
-                mut state_table_committed_epochs,
-                mut subscription_infos,
-                mut stream_actors,
-                mut source_splits,
-                mut background_jobs,
-                hummock_version_stats,
-            } = runtime_info_snapshot;
-
-            self.sink_manager.reset().await;
-
-            let mut control_stream_manager = ControlStreamManager::new(self.env.clone());
-            let reset_start_time = Instant::now();
-            control_stream_manager
-                .reset(
-                    subscription_infos.values(),
-                    active_streaming_nodes.current(),
-                    &*self.context,
-                )
-                .await
-                .inspect_err(|err| {
-                    warn!(error = %err.as_report(), "reset compute nodes failed");
-                })?;
-            info!(elapsed=?reset_start_time.elapsed(), "control stream reset");
-
-            let mut databases = HashMap::new();
-
-            let recovery_result: MetaResult<_> = try {
-                for (database_id, info) in database_fragment_infos {
-                    let source_split_assignments = info
-                        .fragment_infos()
-                        .flat_map(|info| info.actors.keys())
-                        .filter_map(|actor_id| {
-                            let actor_id = *actor_id as ActorId;
-                            source_splits
-                                .remove(&actor_id)
-                                .map(|splits| (actor_id, splits))
-                        })
-                        .collect();
-                    let mutation = Mutation::Add(AddMutation {
-                        // Actors built during recovery is not treated as newly added actors.
-                        actor_dispatchers: Default::default(),
-                        added_actors: Default::default(),
-                        actor_splits: build_actor_connector_splits(&source_split_assignments),
-                        pause: paused_reason.is_some(),
-                        subscriptions_to_add: Default::default(),
-                    });
-
-                    let new_epoch = {
-                        let mut epochs = info.existing_table_ids().map(|table_id| {
-                            (
-                                table_id,
-                                state_table_committed_epochs
-                                    .remove(&table_id)
-                                    .expect("should exist"),
-                            )
-                        });
-                        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
-                        for (table_id, epoch) in epochs {
-                            assert_eq!(
-                                prev_epoch, epoch,
-                                "{} has different committed epoch to {}",
-                                first_table_id, table_id
-                            );
-                        }
-                        let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
-                        // Use a different `curr_epoch` for each recovery attempt.
-                        let curr_epoch = prev_epoch.next();
-                        let barrier_info = BarrierInfo {
-                            prev_epoch,
-                            curr_epoch,
-                            kind: BarrierKind::Initial,
-                        };
-
-                        let mut node_actors: HashMap<_, Vec<_>> = HashMap::new();
-                        for (actor_id, worker_id) in
-                            info.fragment_infos().flat_map(|info| info.actors.iter())
-                        {
-                            let worker_id = *worker_id as WorkerId;
-                            let actor_id = *actor_id as ActorId;
-                            let stream_actor =
-                                stream_actors.remove(&actor_id).expect("should exist");
-                            node_actors.entry(worker_id).or_default().push(stream_actor);
-                        }
-
-                        let mut node_to_collect = control_stream_manager.inject_barrier(
-                            database_id,
-                            None,
-                            Some(mutation),
-                            &barrier_info,
-                            info.fragment_infos(),
-                            info.fragment_infos(),
-                            Some(node_actors),
-                            vec![],
-                            vec![],
-                        )?;
-                        debug!(?node_to_collect, "inject initial barrier");
-                        while !node_to_collect.is_empty() {
-                            let (worker_id, result) =
-                                control_stream_manager.next_collect_barrier_response().await;
-                            let resp = result?;
-                            assert_eq!(resp.epoch, barrier_info.prev_epoch());
-                            assert!(node_to_collect.remove(&worker_id));
-                        }
-                        debug!("collected initial barrier");
-                        barrier_info.curr_epoch
-                    };
-
-                    let background_mviews = info
-                        .job_ids()
-                        .filter_map(|job_id| {
-                            background_jobs.remove(&job_id).map(|mview| (job_id, mview))
-                        })
-                        .collect();
-                    let tracker = CreateMviewProgressTracker::recover(
-                        background_mviews,
-                        &hummock_version_stats,
-                    );
-                    let state = BarrierWorkerState::recovery(
-                        new_epoch,
-                        info,
-                        subscription_infos.remove(&database_id).unwrap_or_default(),
-                        paused_reason,
-                    );
-                    databases.insert(
-                        database_id,
-                        DatabaseCheckpointControl::recovery(database_id, tracker, state),
-                    );
-                }
-                if !stream_actors.is_empty() {
-                    warn!(actor_ids = ?stream_actors.keys().collect_vec(), "unused stream actors in recovery");
-                }
-                if !source_splits.is_empty() {
-                    warn!(actor_ids = ?source_splits.keys().collect_vec(), "unused actor source splits in recovery");
-                }
-                if !background_jobs.is_empty() {
-                    warn!(job_ids = ?background_jobs.keys().collect_vec(), "unused recovered background mview in recovery");
-                }
-                if !subscription_infos.is_empty() {
-                    warn!(?subscription_infos, "unused subscription infos in recovery");
-                }
-                if !state_table_committed_epochs.is_empty() {
-                    warn!(?state_table_committed_epochs, "unused state table committed epoch in recovery");
-                }
-                (
-                    active_streaming_nodes,
-                    control_stream_manager,
-                    CheckpointControl {
-                        databases,
-                        hummock_version_stats,
-                    },
-                )
-            };
-            if recovery_result.is_err() {
-                GLOBAL_META_METRICS.recovery_failure_cnt.inc();
-            }
-            recovery_result
-        })
-        .instrument(tracing::info_span!("recovery_attempt"))
-        .await
-        .expect("Retry until recovery success.");
-
-        recovery_timer.observe_duration();
-
-        (
-            self.active_streaming_nodes,
-            self.control_stream_manager,
-            self.checkpoint_control,
-        ) = new_state;
-
-        tracing::info!("recovery success");
-
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
     }
 }
 
