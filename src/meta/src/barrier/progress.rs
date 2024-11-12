@@ -306,7 +306,12 @@ impl CreateMviewProgressTracker {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
         for (creating_table_id, (table_fragments, mview, internal_tables)) in mviews {
-            let actors = table_fragments.backfill_actor_ids();
+            let actors = table_fragments.tracking_progress_actor_ids();
+            assert!(
+                !actors.is_empty(),
+                "no actors for table_id: {:?}",
+                creating_table_id
+            );
             let mut states = HashMap::new();
             tracing::debug!(?actors, ?creating_table_id, "recover progress for actors");
             for actor in actors {
@@ -344,7 +349,12 @@ impl CreateMviewProgressTracker {
         let mut progress_map = HashMap::new();
         for (creating_table_id, (definition, table_fragments)) in mview_map {
             let mut states = HashMap::new();
-            let actors = table_fragments.backfill_actor_ids();
+            let actors = table_fragments.tracking_progress_actor_ids();
+            assert!(
+                !actors.is_empty(),
+                "no actors for table_id: {:?}",
+                creating_table_id
+            );
             for actor in actors {
                 actor_map.insert(actor, creating_table_id);
                 states.insert(actor, BackfillState::ConsumingUpstream(Epoch(0), 0));
