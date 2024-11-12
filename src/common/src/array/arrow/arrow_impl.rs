@@ -726,7 +726,7 @@ pub trait FromArrow {
         &self,
         array: &arrow_array::TimestampSecondArray,
     ) -> Result<ArrayImpl, ArrayError> {
-        Ok(ArrayImpl::Timestamp(array.into()))
+        Ok(ArrayImpl::Timestamptz(array.into()))
     }
 
     fn from_timestampms_array(
@@ -958,6 +958,8 @@ converts!(Utf8Array, arrow_array::StringArray);
 converts!(Utf8Array, arrow_array::LargeStringArray);
 converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
+converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
+converts!(SerialArray, arrow_array::Int64Array, @map);
 
 converts_with_timeunit!(TimestampArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
 converts_with_timeunit!(TimestampArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
@@ -968,9 +970,6 @@ converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampSecondArray, Tim
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMillisecondArray,TimeUnit::Millisecond, @map);
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMicrosecondArray, TimeUnit::Microsecond, @map);
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
-
-converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
-converts!(SerialArray, arrow_array::Int64Array, @map);
 
 /// Converts RisingWave value from and into Arrow value.
 trait FromIntoArrow {
@@ -1068,24 +1067,13 @@ impl FromIntoArrowWithUnit for Timestamp {
             TimeUnit::Second => {
                 Timestamp(DateTime::from_timestamp(value as _, 0).unwrap().naive_utc())
             }
-            TimeUnit::Millisecond => Timestamp(
-                DateTime::from_timestamp((value / 1_000) as _, (value % 1_000 * 1000000) as _)
-                    .unwrap()
-                    .naive_utc(),
-            ),
-            TimeUnit::Microsecond => Timestamp(
-                DateTime::from_timestamp((value / 1_000_000) as _, (value % 1_000_000 * 1000) as _)
-                    .unwrap()
-                    .naive_utc(),
-            ),
-            TimeUnit::Nanosecond => Timestamp(
-                DateTime::from_timestamp(
-                    (value / 1_000_000_000) as _,
-                    (value % 1_000_000_000) as _,
-                )
-                .unwrap()
-                .naive_utc(),
-            ),
+            TimeUnit::Millisecond => {
+                Timestamp(DateTime::from_timestamp_millis(value).unwrap().naive_utc())
+            }
+            TimeUnit::Microsecond => {
+                Timestamp(DateTime::from_timestamp_micros(value).unwrap().naive_utc())
+            }
+            TimeUnit::Nanosecond => Timestamp(DateTime::from_timestamp_nanos(value).naive_utc()),
         }
     }
 
