@@ -13,7 +13,7 @@ clap = { workspace = true }
 console = "0.15"
 dialoguer = "0.11"
 enum-iterator = "2"
-fs-err = "2.11.0"
+fs-err = "3.0.0"
 itertools = { workspace = true }
 
 [lints]

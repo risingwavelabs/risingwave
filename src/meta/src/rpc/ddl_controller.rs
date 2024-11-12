@@ -164,10 +164,24 @@ impl DdlCommand {
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob(_, _, _)
             | DdlCommand::DropConnection(_)
-            | DdlCommand::DropSecret(_) => true,
-
-            // Simply ban all other commands in recovery.
-            _ => false,
+            | DdlCommand::DropSecret(_)
+            | DdlCommand::DropSubscription(_, _)
+            | DdlCommand::AlterName(_, _)
+            | DdlCommand::AlterObjectOwner(_, _)
+            | DdlCommand::AlterSetSchema(_, _)
+            | DdlCommand::CreateDatabase(_)
+            | DdlCommand::CreateSchema(_)
+            | DdlCommand::CreateFunction(_)
+            | DdlCommand::CreateView(_)
+            | DdlCommand::CreateConnection(_)
+            | DdlCommand::CommentOn(_)
+            | DdlCommand::CreateSecret(_)
+            | DdlCommand::AlterSwapRename(_) => true,
+            DdlCommand::CreateStreamingJob(_, _, _, _)
+            | DdlCommand::CreateSourceWithoutStreamingJob(_)
+            | DdlCommand::ReplaceTable(_)
+            | DdlCommand::AlterSourceColumn(_)
+            | DdlCommand::CreateSubscription(_) => false,
         }
     }
 }

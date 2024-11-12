@@ -1094,7 +1094,7 @@ dependencies = [
  "rand",
  "regex",
  "ring 0.17.5",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "serde",
@@ -2338,9 +2338,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.7.2"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
+checksum = "9ac0150caa2ae65ca5bd83f25c7de183dea78d4d366469f148435e2acfbad0da"
 dependencies = [
  "serde",
 ]
@@ -5239,6 +5239,15 @@ name = "fs-err"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb60e7409f34ef959985bc9d9c5ee8f5db24ee46ed9775850548021710f807f"
 dependencies = [
  "autocfg",
 ]
@@ -10286,7 +10295,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.22.4",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -10406,7 +10415,7 @@ dependencies = [
  "chrono",
  "clap",
  "console",
- "fs-err",
+ "fs-err 3.0.0",
  "glob",
  "google-cloud-pubsub",
  "indicatif",
@@ -10437,7 +10446,7 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
- "fs-err",
+ "fs-err 3.0.0",
  "itertools 0.13.0",
 ]
 
@@ -11004,7 +11013,7 @@ dependencies = [
  "elasticsearch",
  "enum-as-inner 0.6.0",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "futures-async-stream",
  "gcp-bigquery-client",
@@ -11062,7 +11071,7 @@ dependencies = [
  "risingwave_rpc_client",
  "rumqttc",
  "rust_decimal",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.8.0",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
@@ -11108,7 +11117,7 @@ dependencies = [
  "chrono",
  "easy-ext",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "hex",
  "itertools 0.13.0",
  "jsonbb",
@@ -11536,7 +11545,7 @@ dependencies = [
  "chrono",
  "expect-test",
  "foyer",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "itertools 0.13.0",
  "jni",
@@ -11817,7 +11826,7 @@ name = "risingwave_pb"
 version = "2.2.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
- "fs-err",
+ "fs-err 3.0.0",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -12349,7 +12358,7 @@ dependencies = [
  "flume",
  "futures-util",
  "log",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "thiserror",
@@ -12547,9 +12556,22 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
+checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcaf18a4f2be7326cd874a5fa579fae794320a0f388d365dca7e480e55f83f8a"
 dependencies = [
  "openssl-probe",
  "rustls-pemfile 2.2.0",
@@ -12666,7 +12688,7 @@ dependencies = [
 name = "rw_resource_util"
 version = "0.0.0"
 dependencies = [
- "fs-err",
+ "fs-err 3.0.0",
  "sysinfo",
  "tempfile",
  "thiserror-ext",
@@ -13276,9 +13298,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "3.1.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb86f9315df5df6a70eae0cc22395a44e544a0d8897586820770a35ede74449"
+checksum = "1b258109f244e1d6891bf1053a55d63a5cd4f8f4c30cf9a1280989f80e7a1fa9"
 dependencies = [
  "futures",
  "log",
@@ -13290,9 +13312,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test_derive"
-version = "3.1.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9bb72430492e9549b0c4596725c0f82729bff861c45aa8099c0a8e67fc3b721"
+checksum = "5d69265a08751de7844521fd15003ae0a888e035773ba05695c5c759a6f89eef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13680,7 +13702,7 @@ checksum = "f2b6b8f606d3c4cdcaf2031c4320b79d7584e454b79562ba3d675f49701c160e"
 dependencies = [
  "async-trait",
  "educe",
- "fs-err",
+ "fs-err 2.11.0",
  "futures",
  "glob",
  "humantime",

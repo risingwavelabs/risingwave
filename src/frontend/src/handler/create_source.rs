@@ -79,7 +79,7 @@ use crate::error::{Result, RwError};
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
-    bind_sql_pk_names, ensure_table_constraints_supported, ColumnIdGenerator,
+    bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
 };
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -1564,8 +1564,7 @@ pub async fn bind_create_source_or_table_with_connector(
         }
     }
 
-    ensure_table_constraints_supported(&constraints)?;
-    let sql_pk_names = bind_sql_pk_names(sql_columns_defs, &constraints)?;
+    let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
     let columns_from_sql = bind_sql_columns(sql_columns_defs)?;
 

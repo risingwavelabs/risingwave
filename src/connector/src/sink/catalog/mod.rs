@@ -149,6 +149,7 @@ pub enum SinkEncode {
     Template,
     Parquet,
     Text,
+    Bytes,
 }
 
 impl Display for SinkEncode {
@@ -205,6 +206,7 @@ impl SinkFormatDesc {
             SinkEncode::Template => E::Template,
             SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
+            SinkEncode::Bytes => E::Bytes,
         };
 
         let encode = mapping_encode(&self.encode);
@@ -222,6 +224,18 @@ impl SinkFormatDesc {
             key_encode,
             secret_refs: self.secret_refs.clone(),
             connection_id: None,
+        }
+    }
+
+    // This function is for compatibility purposes. It sets the `SinkFormatDesc`
+    // when there is no configuration provided for the snowflake sink only.
+    pub fn plain_json_for_snowflake_only() -> Self {
+        Self {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: Default::default(),
+            secret_refs: Default::default(),
+            key_encode: None,
         }
     }
 }
@@ -262,10 +276,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
