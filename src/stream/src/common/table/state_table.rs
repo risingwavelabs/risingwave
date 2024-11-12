@@ -176,6 +176,8 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
+    /// In streaming executors, this methods must be called **after** receiving and yielding the first barrier,
+    /// and otherwise, deadlock can be likely to happen.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
         Ok(())
