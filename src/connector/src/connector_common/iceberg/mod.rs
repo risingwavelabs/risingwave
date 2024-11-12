@@ -514,10 +514,7 @@ mod v2 {
                     let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
                     Ok(Arc::new(catalog))
                 }
-                catalog_type
-                    if catalog_type == "hive"
-                        || catalog_type == "jdbc" =>
-                {
+                catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
                         self.build_jni_catalog_configs(java_catalog_props)?;

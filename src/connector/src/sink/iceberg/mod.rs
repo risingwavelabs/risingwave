@@ -242,6 +242,24 @@ impl IcebergSink {
 
     async fn create_table_if_not_exists(&self) -> Result<()> {
         let catalog = self.config.create_catalog_v2().await?;
+
+        let namespace = if let Some(database_name) = &self.config.common.database_name {
+            NamespaceIdent::new(database_name.clone())
+        } else {
+            bail!("database name must be set if you want to create table")
+        };
+
+        if !catalog
+            .namespace_exists(&namespace)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            catalog
+                .create_namespace(&namespace, HashMap::new())
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))?;
+        }
+
         let table_id = self
             .config
             .full_table_name_v2()
@@ -251,12 +269,6 @@ impl IcebergSink {
             .await
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
         {
-            let namespace = if let Some(database_name) = &self.config.common.database_name {
-                NamespaceIdent::new(database_name.clone())
-            } else {
-                bail!("database name must be set if you want to create table")
-            };
-
             let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
             // convert risingwave schema -> arrow schema -> iceberg schema
             let arrow_fields = self
