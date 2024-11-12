@@ -855,7 +855,6 @@ impl From<&Bitmap> for arrow_buffer::NullBuffer {
 }
 
 /// Implement bi-directional `From` between concrete array types.
-
 macro_rules! converts {
     ($ArrayType:ty, $ArrowType:ty) => {
         impl From<&$ArrayType> for $ArrowType {
@@ -1079,24 +1078,10 @@ impl FromIntoArrowWithUnit for Timestamp {
 
     fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType {
         match time_unit {
-            TimeUnit::Second => self
-                .0
-                .signed_duration_since(NaiveDateTime::default())
-                .num_seconds(),
-            TimeUnit::Millisecond => self
-                .0
-                .signed_duration_since(NaiveDateTime::default())
-                .num_milliseconds(),
-            TimeUnit::Microsecond => self
-                .0
-                .signed_duration_since(NaiveDateTime::default())
-                .num_microseconds()
-                .unwrap(),
-            TimeUnit::Nanosecond => self
-                .0
-                .signed_duration_since(NaiveDateTime::default())
-                .num_nanoseconds()
-                .unwrap(),
+            TimeUnit::Second => self.0.and_utc().timestamp(),
+            TimeUnit::Millisecond => self.0.and_utc().timestamp_millis(),
+            TimeUnit::Microsecond => self.0.and_utc().timestamp_micros(),
+            TimeUnit::Nanosecond => self.0.and_utc().timestamp_nanos_opt().unwrap(),
         }
     }
 }
@@ -1119,7 +1104,7 @@ impl FromIntoArrowWithUnit for Timestamptz {
             TimeUnit::Second => self.timestamp(),
             TimeUnit::Millisecond => self.timestamp_millis(),
             TimeUnit::Microsecond => self.timestamp_micros(),
-            TimeUnit::Nanosecond => self.timestamp_nanos().unwrap_or_default(),
+            TimeUnit::Nanosecond => self.timestamp_nanos().unwrap(),
         }
     }
 }
