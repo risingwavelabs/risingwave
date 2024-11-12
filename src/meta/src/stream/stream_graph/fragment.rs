@@ -156,6 +156,15 @@ impl BuildingFragment {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
+            NodeBody::StreamFsFetch(fs_fetch_node) => {
+                if let StreamingJob::Table(table_source, _, _) = job {
+                    if let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
+                        && let Some(source) = table_source
+                    {
+                        node_inner.source_id = source.id;
+                    }
+                }
+            }
             NodeBody::Source(_) => {
                 // Notice: Table job has a dumb Source node, we should be careful that `has_table` should not be overwrite to `false`
                 if !has_table {
