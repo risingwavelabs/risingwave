@@ -351,7 +351,7 @@ mod v1 {
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<CatalogRef> {
             match self.catalog_type() {
-                "storage" | "rest" => {
+                "storage" => {
                     let iceberg_configs = self.build_iceberg_configs()?;
                     let catalog = load_catalog(&iceberg_configs).await?;
                     Ok(catalog)
@@ -359,7 +359,8 @@ mod v1 {
                 catalog_type
                     if catalog_type == "hive"
                         || catalog_type == "jdbc"
-                        || catalog_type == "glue" =>
+                        || catalog_type == "glue"
+                        || catalog_type == "rest" =>
                 {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
@@ -368,6 +369,7 @@ mod v1 {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
                         "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
                         _ => unreachable!(),
                     };
 
@@ -444,32 +446,6 @@ mod v2 {
                     let catalog = storage_catalog::StorageCatalog::new(config)?;
                     Ok(Arc::new(catalog))
                 }
-                "rest" => {
-                    let mut iceberg_configs = HashMap::new();
-                    if let Some(region) = &self.region {
-                        iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
-                    }
-                    if let Some(endpoint) = &self.endpoint {
-                        iceberg_configs
-                            .insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
-                    }
-                    iceberg_configs.insert(
-                        S3_ACCESS_KEY_ID.to_string(),
-                        self.access_key.clone().to_string(),
-                    );
-                    iceberg_configs.insert(
-                        S3_SECRET_ACCESS_KEY.to_string(),
-                        self.secret_key.clone().to_string(),
-                    );
-                    let config = iceberg_catalog_rest::RestCatalogConfig::builder()
-                        .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_string()
-                        })?)
-                        .props(iceberg_configs)
-                        .build();
-                    let catalog = iceberg_catalog_rest::RestCatalog::new(config);
-                    Ok(Arc::new(catalog))
-                }
                 "glue" => {
                     let mut iceberg_configs = HashMap::new();
                     // glue
@@ -512,13 +488,18 @@ mod v2 {
                     let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
                     Ok(Arc::new(catalog))
                 }
-                catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+                catalog_type
+                    if catalog_type == "hive"
+                        || catalog_type == "jdbc"
+                        || catalog_type == "rest" =>
+                {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
                         self.build_jni_catalog_configs(java_catalog_props)?;
                     let catalog_impl = match catalog_type {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
                         _ => unreachable!(),
                     };
 
