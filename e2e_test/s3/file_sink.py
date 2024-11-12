@@ -29,8 +29,14 @@ def gen_data(file_num, item_num_per_file):
             'test_bytea': pa.scalar(b'\xDe00BeEf', type=pa.binary()),
             'test_date': pa.scalar(datetime.now().date(), type=pa.date32()),
             'test_time': pa.scalar(datetime.now().time(), type=pa.time64('us')),
-            'test_timestamp': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
-            'test_timestamptz': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamp_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s')),
+            'test_timestamp_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms')),
+            'test_timestamp_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
+            'test_timestamp_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns')),
+            'test_timestamptz_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s', tz='+00:00')),
+            'test_timestamptz_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms', tz='+00:00')),
+            'test_timestamptz_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamptz_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns', tz='+00:00')),
         } for item_id in range(item_num_per_file)]
         for file_id in range(file_num)
     ]
@@ -62,8 +68,15 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
+
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -130,8 +143,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea,
         test_date,
         test_time,
-        test_timestamp,
-        test_timestamptz
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -148,7 +167,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     print('Sink into s3 in parquet encode...')
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE test_parquet_sink_table(
-        id bigint primary key,
+        id bigint primary key,\
         name TEXT,
         sex bigint,
         mark bigint,
@@ -159,8 +178,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_parquet_sink/*.parquet',
@@ -198,8 +223,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea,
         test_date,
         test_time,
-        test_timestamp,
-        test_timestamptz
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
         from {_table()} WITH (
         connector = 'snowflake',
         match_pattern = '*.parquet',
@@ -227,8 +258,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_json_sink/*.json',
