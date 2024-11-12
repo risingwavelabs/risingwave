@@ -64,7 +64,6 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(
         &self,
     ) -> MetaResult<HashMap<TableId, (String, TableFragments)>> {
@@ -82,7 +81,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            if table_fragments.backfill_actor_ids().is_empty() {
+            if table_fragments.tracking_progress_actor_ids().is_empty() {
                 // If the backfill actors are empty, we can finish the job directly.
                 mgr.catalog_controller
                     .finish_streaming_job(mview.table_id, None)
