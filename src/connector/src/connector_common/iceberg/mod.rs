@@ -518,7 +518,7 @@ mod v2 {
                 catalog_type
                     if catalog_type == "hive"
                         || catalog_type == "jdbc"
-                        || catalog_type == "rest"=>
+                        || catalog_type == "rest" =>
                 {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
