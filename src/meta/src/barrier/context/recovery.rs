@@ -82,7 +82,14 @@ impl GlobalBarrierWorkerContextImpl {
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            if table_fragments.backfill_actor_ids().is_empty() {
+                // If the backfill actors are empty, we can finish the job directly.
+                mgr.catalog_controller
+                    .finish_streaming_job(mview.table_id, None)
+                    .await?;
+            } else {
+                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            }
         }
 
         // If failed, enter recovery mode.
