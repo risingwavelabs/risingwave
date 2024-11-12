@@ -149,6 +149,14 @@ impl GlobalBarrierManagerContext {
                     .finish_create_materialized_view_procedure(internal_tables, mview)
                     .await?;
                 tracing::debug!("notified frontend for stream job {}", table_id.table_id);
+            } else if fragments.tracking_progress_actor_ids().is_empty() {
+                // If there's no tracking actor, we can mark the mview as finished directly.
+                mgr.fragment_manager
+                    .mark_table_fragments_created(table_id)
+                    .await?;
+                mgr.catalog_manager
+                    .finish_create_materialized_view_procedure(internal_tables, mview)
+                    .await?;
             } else {
                 table_mview_map.insert(table_id, (fragments, mview, internal_tables));
             }
@@ -178,7 +186,14 @@ impl GlobalBarrierManagerContext {
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            if table_fragments.tracking_progress_actor_ids().is_empty() {
+                // If there's no tracking actor, we can mark the mview as finished directly.
+                mgr.catalog_controller
+                    .finish_streaming_job(mview.table_id, None)
+                    .await?;
+            } else {
+                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            }
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
