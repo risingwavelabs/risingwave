@@ -510,20 +510,14 @@ impl TableFragments {
     }
 
     /// Returns the status of actors group by worker id.
-    pub fn worker_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
-        let mut actors = BTreeMap::default();
+    pub fn active_actors(&self) -> Vec<StreamActor> {
+        let mut actors = vec![];
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id].worker_id() as WorkerId;
-                if !include_inactive
-                    && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
-                {
+                if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
                     continue;
                 }
-                actors
-                    .entry(node_id)
-                    .or_insert_with(Vec::new)
-                    .push(actor.clone());
+                actors.push(actor.clone());
             }
         }
         actors

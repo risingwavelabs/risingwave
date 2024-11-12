@@ -19,19 +19,17 @@ use std::cmp::max;
 use std::collections::HashMap;
 use std::ops::Bound::{Excluded, Unbounded};
 
-use risingwave_common::catalog::TableId;
+use barrier_control::CreatingStreamingJobBarrierControl;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use status::{CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus};
 use tracing::info;
 
-use crate::barrier::creating_job::barrier_control::CreatingStreamingJobBarrierControl;
-use crate::barrier::creating_job::status::{
-    CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus,
-};
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::rpc::ControlStreamManager;
@@ -41,8 +39,8 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::MetaResult;
 
 #[derive(Debug)]
-pub(super) struct CreatingStreamingJobControl {
-    pub(super) info: CreateStreamingJobCommandInfo,
+pub(crate) struct CreatingStreamingJobControl {
+    pub(crate) info: CreateStreamingJobCommandInfo,
     pub(super) snapshot_backfill_info: SnapshotBackfillInfo,
     backfill_epoch: u64,
 
@@ -78,7 +76,6 @@ impl CreatingStreamingJobControl {
         let actors_to_create = info.table_fragments.actors_to_create();
         let graph_info = InflightStreamingJobInfo {
             job_id: table_id,
-            database_id: info.streaming_job.database_id().into(),
             fragment_infos,
         };
 
@@ -104,7 +101,7 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
+    pub(crate) fn is_wait_on_worker(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_wait_on_worker(worker_id)
             || (self.status.is_finishing()
                 && InflightFragmentInfo::contains_worker(
@@ -113,7 +110,7 @@ impl CreatingStreamingJobControl {
                 ))
     }
 
-    pub(super) fn gen_ddl_progress(&self) -> DdlProgress {
+    pub(crate) fn gen_ddl_progress(&self) -> DdlProgress {
         let progress = match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 create_mview_tracker,
@@ -165,6 +162,7 @@ impl CreatingStreamingJobControl {
     }
 
     fn inject_barrier(
+        database_id: DatabaseId,
         table_id: TableId,
         control_stream_manager: &mut ControlStreamManager,
         barrier_control: &mut CreatingStreamingJobBarrierControl,
@@ -177,6 +175,7 @@ impl CreatingStreamingJobControl {
         }: CreatingJobInjectBarrierInfo,
     ) -> MetaResult<()> {
         let node_to_collect = control_stream_manager.inject_barrier(
+            database_id,
             Some(table_id),
             mutation,
             &barrier_info,
@@ -235,6 +234,7 @@ impl CreatingStreamingJobControl {
             .on_new_upstream_epoch(barrier_info, start_consume_upstream)
         {
             Self::inject_barrier(
+                DatabaseId::new(self.info.streaming_job.database_id()),
                 self.info.table_fragments.table_id(),
                 control_stream_manager,
                 &mut self.barrier_control,
@@ -263,6 +263,7 @@ impl CreatingStreamingJobControl {
             let table_id = self.info.table_fragments.table_id();
             for info in prev_barriers_to_inject {
                 Self::inject_barrier(
+                    DatabaseId::new(self.info.streaming_job.database_id()),
                     table_id,
                     control_stream_manager,
                     &mut self.barrier_control,
