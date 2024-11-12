@@ -258,7 +258,7 @@ impl HummockStorage {
         key: TableKey<Bytes>,
         epoch: HummockEpoch,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
         let (key_range, read_version_tuple) = self
@@ -569,12 +569,12 @@ impl StateStoreRead for HummockStorage {
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
+    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         self.get_inner(key, epoch, read_options)
     }
 

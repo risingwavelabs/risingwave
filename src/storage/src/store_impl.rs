@@ -316,7 +316,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -338,7 +338,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -455,7 +455,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -476,7 +476,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -871,7 +871,7 @@ pub mod boxed_state_store {
 
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreIterItem>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreKeyedRow>;
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
@@ -949,7 +949,7 @@ pub mod boxed_state_store {
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn get(

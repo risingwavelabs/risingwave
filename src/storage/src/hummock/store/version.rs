@@ -530,7 +530,7 @@ impl HummockVersionReader {
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
@@ -558,7 +558,14 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    data.into_user_value()
+                    Some((
+                        FullKey::new_with_gap_epoch(
+                            read_options.table_id,
+                            table_key.clone(),
+                            data_epoch,
+                        ),
+                        data.into_user_value(),
+                    ))
                 });
             }
         }
@@ -590,7 +597,14 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    data.into_user_value()
+                    Some((
+                        FullKey::new_with_gap_epoch(
+                            read_options.table_id,
+                            table_key.clone(),
+                            data_epoch,
+                        ),
+                        data.into_user_value(),
+                    ))
                 });
             }
         }
@@ -626,7 +640,14 @@ impl HummockVersionReader {
                             return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
                             } else {
-                                data.into_user_value()
+                                Some((
+                                    FullKey::new_with_gap_epoch(
+                                        read_options.table_id,
+                                        table_key.clone(),
+                                        data_epoch,
+                                    ),
+                                    data.into_user_value(),
+                                ))
                             });
                         }
                     }
@@ -661,7 +682,14 @@ impl HummockVersionReader {
                         return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
                         } else {
-                            data.into_user_value()
+                            Some((
+                                FullKey::new_with_gap_epoch(
+                                    read_options.table_id,
+                                    table_key.clone(),
+                                    data_epoch,
+                                ),
+                                data.into_user_value(),
+                            ))
                         });
                     }
                 }

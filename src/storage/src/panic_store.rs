@@ -35,8 +35,8 @@ pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
-    type Iter = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -90,8 +90,8 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
     async fn get(

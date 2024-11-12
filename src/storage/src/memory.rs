@@ -767,7 +767,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     last_key: Option<UserKey<Bytes>>,
 
-    item_buffer: Option<StateStoreIterItem>,
+    item_buffer: Option<StateStoreKeyedRow>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -788,7 +788,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     #[allow(clippy::unused_async)]
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
             .item_buffer
@@ -826,7 +826,7 @@ pub struct RangeKvStateStoreRevIter<R: RangeKv> {
     epoch: HummockEpoch,
     is_inclusive_epoch: bool,
 
-    item_buffer: VecDeque<StateStoreIterItem>,
+    item_buffer: VecDeque<StateStoreKeyedRow>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
@@ -846,7 +846,7 @@ impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreRevIter<R> {
     #[allow(clippy::unused_async)]
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
             .item_buffer
