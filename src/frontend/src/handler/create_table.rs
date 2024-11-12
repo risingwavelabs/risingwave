@@ -1032,7 +1032,20 @@ pub(super) async fn handle_create_table_plan(
 
                 let (columns, pk_names) = match wildcard_idx {
                     Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
-                    None => bind_cdc_table_schema(&column_defs, &constraints, None)?,
+                    None => {
+                        let (mut columns, pk_names) =
+                            bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                        // read default value definition from external db
+                        let (external_columns, _) =
+                            bind_cdc_table_schema_externally(cdc_with_options.clone()).await?;
+                        for (col, external_col) in
+                            columns.iter_mut().zip_eq_fast(external_columns.into_iter())
+                        {
+                            col.column_desc.generated_or_default_column =
+                                external_col.column_desc.generated_or_default_column;
+                        }
+                        (columns, pk_names)
+                    }
                 };
 
                 let context: OptimizerContextRef =
