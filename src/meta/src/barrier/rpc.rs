@@ -474,16 +474,12 @@ impl GlobalBarrierWorkerContextImpl {
         node: &WorkerNode,
         subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> MetaResult<StreamingControlHandle> {
-        let initial_version_id = self
-            .hummock_manager()
-            .on_current_version(|version| version.id)
-            .await;
         let handle = self
             .env
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(initial_version_id, subscriptions)
+            .start_streaming_control(subscriptions)
             .await?;
         Ok(handle)
     }

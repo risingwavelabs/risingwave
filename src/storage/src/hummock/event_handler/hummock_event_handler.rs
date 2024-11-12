@@ -28,7 +28,7 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -465,66 +465,13 @@ impl HummockEventHandler {
             .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
     }
 
-    async fn handle_clear(&mut self, notifier: oneshot::Sender<()>, version_id: HummockVersionId) {
+    fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
         info!(
-            ?version_id,
             current_version_id = ?self.uploader.hummock_version().id(),
             "handle clear event"
         );
 
         self.uploader.clear();
-
-        let current_version = self.uploader.hummock_version();
-
-        if current_version.id < version_id {
-            let mut latest_version = if let Some(CacheRefillerEvent {
-                pinned_version,
-                new_pinned_version,
-            }) = self.refiller.clear()
-            {
-                assert_eq!(
-                    current_version.id(),
-                    pinned_version.id(),
-                    "refiller earliest version {:?} not equal to current version {:?}",
-                    *pinned_version,
-                    **current_version
-                );
-
-                info!(?version_id, "refiller is clear in recovery");
-
-                Some(new_pinned_version)
-            } else {
-                None
-            };
-
-            while let latest_version_ref = latest_version.as_ref().unwrap_or(current_version)
-                && latest_version_ref.id < version_id
-            {
-                let version_update = self
-                    .version_update_rx
-                    .recv()
-                    .await
-                    .expect("should not be empty");
-                let prev_version_id = latest_version_ref.id();
-                if let Some(new_version) = Self::resolve_version_update_info(
-                    latest_version_ref.clone(),
-                    version_update,
-                    None,
-                ) {
-                    info!(
-                        ?prev_version_id,
-                        new_version_id = ?new_version.id(),
-                        "recv new version"
-                    );
-                    latest_version = Some(new_version);
-                }
-            }
-
-            self.apply_version_update(
-                current_version.clone(),
-                latest_version.expect("must have some version update to raise the mce"),
-            );
-        }
 
         assert!(
             self.local_read_version_mapping.is_empty(),
@@ -540,7 +487,7 @@ impl HummockEventHandler {
             error!("failed to notify completion of clear event: {:?}", e);
         });
 
-        info!(?version_id, "clear finished");
+        info!("clear finished");
     }
 
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
@@ -646,9 +593,6 @@ impl HummockEventHandler {
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
                     match event {
-                        HummockEvent::Clear(notifier, version_id) => {
-                            self.handle_clear(notifier, version_id).await
-                        },
                         HummockEvent::Shutdown => {
                             info!("event handler shutdown");
                             return;
@@ -690,8 +634,8 @@ impl HummockEventHandler {
             } => {
                 self.handle_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
             }
-            HummockEvent::Clear(_, _) => {
-                unreachable!("clear is handled in separated async context")
+            HummockEvent::Clear(notifier) => {
+                self.handle_clear(notifier);
             }
             HummockEvent::Shutdown => {
                 unreachable!("shutdown is handled specially")
@@ -886,7 +830,7 @@ impl SyncedData {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::future::{poll_fn, Future};
+    use std::future::poll_fn;
     use std::sync::Arc;
     use std::task::Poll;
 
@@ -905,7 +849,7 @@ mod tests {
     use crate::hummock::event_handler::refiller::CacheRefiller;
     use crate::hummock::event_handler::uploader::test_utils::{gen_imm, TEST_TABLE_ID};
     use crate::hummock::event_handler::uploader::UploadTaskOutput;
-    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, HummockVersionUpdate};
+    use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::store::version::{StagingData, VersionUpdate};
@@ -913,132 +857,6 @@ mod tests {
     use crate::hummock::HummockError;
     use crate::monitor::HummockStateStoreMetrics;
     use crate::store::SealCurrentEpochOptions;
-
-    #[tokio::test]
-    async fn test_clear_shared_buffer() {
-        let mut next_version_id = 1;
-        let mut make_new_version = || {
-            let id = next_version_id;
-            next_version_id += 1;
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id,
-                ..Default::default()
-            })
-        };
-
-        let initial_version = PinnedVersion::new(make_new_version(), unbounded_channel().0);
-
-        let (version_update_tx, version_update_rx) = unbounded_channel();
-        let (refill_task_tx, mut refill_task_rx) = unbounded_channel();
-
-        let refill_task_tx_clone = refill_task_tx.clone();
-
-        let event_handler = HummockEventHandler::new_inner(
-            version_update_rx,
-            initial_version.clone(),
-            mock_sstable_store().await,
-            Arc::new(HummockStateStoreMetrics::unused()),
-            &default_opts_for_test(),
-            Arc::new(|_, _| unreachable!("should not spawn upload task")),
-            Arc::new(move |_, _, old_version, new_version| {
-                let (tx, rx) = oneshot::channel();
-                refill_task_tx_clone
-                    .send((old_version, new_version, tx))
-                    .unwrap();
-                spawn(async move {
-                    let _ = rx.await;
-                })
-            }),
-        );
-
-        let event_tx = event_handler.event_sender();
-        let latest_version = event_handler.recent_versions.clone();
-        let latest_version_update_tx = event_handler.version_update_notifier_tx.clone();
-
-        let send_clear = |version_id| {
-            let (tx, rx) = oneshot::channel();
-            event_tx.send(HummockEvent::Clear(tx, version_id)).unwrap();
-            rx
-        };
-
-        let _join_handle = spawn(event_handler.start_hummock_event_handler_worker());
-
-        // test normal recovery
-        send_clear(initial_version.id()).await.unwrap();
-
-        // test normal refill finish
-        let version1 = make_new_version();
-        {
-            version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                    version1.clone(),
-                )))
-                .unwrap();
-            let (old_version, new_version, refill_finish_tx) = refill_task_rx.recv().await.unwrap();
-            assert_eq!(*old_version, *initial_version);
-            assert_eq!(*new_version, version1);
-            assert_eq!(**latest_version.load().latest_version(), *initial_version);
-
-            let mut changed = latest_version_update_tx.subscribe();
-            refill_finish_tx.send(()).unwrap();
-            changed.changed().await.unwrap();
-            assert_eq!(**latest_version.load().latest_version(), version1);
-        }
-
-        // test recovery with pending refill task
-        let version2 = make_new_version();
-        let version3 = make_new_version();
-        {
-            version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                    version2.clone(),
-                )))
-                .unwrap();
-            version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                    version3.clone(),
-                )))
-                .unwrap();
-            let (old_version2, new_version2, _refill_finish_tx2) =
-                refill_task_rx.recv().await.unwrap();
-            assert_eq!(*old_version2, version1);
-            assert_eq!(*new_version2, version2);
-            let (old_version3, new_version3, _refill_finish_tx3) =
-                refill_task_rx.recv().await.unwrap();
-            assert_eq!(*old_version3, version2);
-            assert_eq!(*new_version3, version3);
-            assert_eq!(**latest_version.load().latest_version(), version1);
-
-            let rx = send_clear(version3.id);
-            rx.await.unwrap();
-            assert_eq!(**latest_version.load().latest_version(), version3);
-        }
-
-        async fn assert_pending(fut: &mut (impl Future + Unpin)) {
-            assert!(poll_fn(|cx| Poll::Ready(fut.poll_unpin(cx).is_pending())).await);
-        }
-
-        // test recovery with later arriving version update
-        let version4 = make_new_version();
-        let version5 = make_new_version();
-        {
-            let mut rx = send_clear(version5.id);
-            assert_pending(&mut rx).await;
-            version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                    version4.clone(),
-                )))
-                .unwrap();
-            assert_pending(&mut rx).await;
-            version_update_tx
-                .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                    version5.clone(),
-                )))
-                .unwrap();
-            rx.await.unwrap();
-            assert_eq!(**latest_version.load().latest_version(), version5);
-        }
-    }
 
     #[tokio::test]
     async fn test_old_epoch_sync_fail() {
