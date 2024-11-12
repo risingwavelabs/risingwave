@@ -21,7 +21,6 @@ use futures::TryStreamExt;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
@@ -87,13 +86,11 @@ pub type StreamingControlHandle =
 impl StreamClient {
     pub async fn start_streaming_control(
         &self,
-        version_id: HummockVersionId,
         subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> Result<StreamingControlHandle> {
         let first_request = StreamingControlStreamRequest {
             request: Some(streaming_control_stream_request::Request::Init(
                 InitRequest {
-                    version_id: version_id.to_u64(),
                     subscriptions: subscriptions.collect(),
                 },
             )),

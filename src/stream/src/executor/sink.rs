@@ -278,17 +278,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
-
         let epoch_pair = barrier.epoch;
-
-        log_writer
-            .init(epoch_pair, barrier.is_pause_on_startup())
-            .await?;
-
-        let mut is_paused = false;
-
+        let is_pause_on_startup = barrier.is_pause_on_startup();
         // Propagate the first barrier
         yield Message::Barrier(barrier);
+
+        log_writer.init(epoch_pair, is_pause_on_startup).await?;
+
+        let mut is_paused = false;
 
         #[for_await]
         for msg in input {

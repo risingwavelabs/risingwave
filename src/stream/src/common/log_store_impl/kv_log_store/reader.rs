@@ -110,7 +110,9 @@ impl RewindDelay {
         self.rewind_count.inc();
         if let Some(delay) = self.backoff_policy.next() {
             self.rewind_delay.observe(delay.as_secs_f64());
-            sleep(delay).await;
+            if !cfg!(test) {
+                sleep(delay).await;
+            }
         }
     }
 }
