@@ -258,7 +258,6 @@ mod v1 {
 
             let catalog_type = self.catalog_type().to_string();
 
-            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
             iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
 
             match catalog_type.as_str() {
@@ -267,14 +266,16 @@ mod v1 {
                         format!("iceberg.catalog.{}.warehouse", self.catalog_name()),
                         self.warehouse_path.clone(),
                     );
+                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "storage".into());
                 }
-                "rest" => {
+                "rest_rust" => {
                     let uri = self
                         .catalog_uri
                         .clone()
                         .with_context(|| "`catalog.uri` must be set in rest catalog".to_string())?;
                     iceberg_configs
                         .insert(format!("iceberg.catalog.{}.uri", self.catalog_name()), uri);
+                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "rest".into());
                 }
                 _ => {
                     bail!(
@@ -351,7 +352,7 @@ mod v1 {
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<CatalogRef> {
             match self.catalog_type() {
-                "storage" => {
+                "storage" | "rest_rust" => {
                     let iceberg_configs = self.build_iceberg_configs()?;
                     let catalog = load_catalog(&iceberg_configs).await?;
                     Ok(catalog)
@@ -446,7 +447,7 @@ mod v2 {
                     let catalog = storage_catalog::StorageCatalog::new(config)?;
                     Ok(Arc::new(catalog))
                 }
-                "rest" => {
+                "rest_rust" => {
                     let mut iceberg_configs = HashMap::new();
                     if let Some(region) = &self.region {
                         iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
@@ -516,7 +517,8 @@ mod v2 {
                 }
                 catalog_type
                     if catalog_type == "hive"
-                        || catalog_type == "jdbc" =>
+                        || catalog_type == "jdbc"
+                        || catalog_type == "rest"=>
                 {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
@@ -524,6 +526,7 @@ mod v2 {
                     let catalog_impl = match catalog_type {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
                         _ => unreachable!(),
                     };
 
