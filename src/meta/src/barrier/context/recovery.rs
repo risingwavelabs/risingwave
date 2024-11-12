@@ -82,7 +82,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
             if table_fragments.tracking_progress_actor_ids().is_empty() {
-                // If the backfill actors are empty, we can finish the job directly.
+                // If there's no tracking actor in the mview, we can finish the job directly.
                 mgr.catalog_controller
                     .finish_streaming_job(mview.table_id, None)
                     .await?;
