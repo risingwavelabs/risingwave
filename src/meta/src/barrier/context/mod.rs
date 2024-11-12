@@ -66,18 +66,44 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
 }
 
-pub(crate) struct GlobalBarrierWorkerContextImpl {
-    pub(crate) scheduled_barriers: ScheduledBarriers,
+pub(super) struct GlobalBarrierWorkerContextImpl {
+    scheduled_barriers: ScheduledBarriers,
 
-    pub(crate) status: Arc<ArcSwap<BarrierManagerStatus>>,
+    status: Arc<ArcSwap<BarrierManagerStatus>>,
 
-    pub(crate) metadata_manager: MetadataManager,
+    pub(super) metadata_manager: MetadataManager,
 
-    pub(crate) hummock_manager: HummockManagerRef,
+    hummock_manager: HummockManagerRef,
 
-    pub(crate) source_manager: SourceManagerRef,
+    source_manager: SourceManagerRef,
 
-    pub(crate) scale_controller: ScaleControllerRef,
+    scale_controller: ScaleControllerRef,
 
-    pub(crate) env: MetaSrvEnv,
+    pub(super) env: MetaSrvEnv,
+}
+
+impl GlobalBarrierWorkerContextImpl {
+    pub(super) fn new(
+        scheduled_barriers: ScheduledBarriers,
+        status: Arc<ArcSwap<BarrierManagerStatus>>,
+        metadata_manager: MetadataManager,
+        hummock_manager: HummockManagerRef,
+        source_manager: SourceManagerRef,
+        scale_controller: ScaleControllerRef,
+        env: MetaSrvEnv,
+    ) -> Self {
+        Self {
+            scheduled_barriers,
+            status,
+            metadata_manager,
+            hummock_manager,
+            source_manager,
+            scale_controller,
+            env,
+        }
+    }
+
+    pub(super) fn status(&self) -> Arc<ArcSwap<BarrierManagerStatus>> {
+        self.status.clone()
+    }
 }
