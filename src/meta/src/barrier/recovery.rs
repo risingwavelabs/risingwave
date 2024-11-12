@@ -87,7 +87,6 @@ impl GlobalBarrierManagerContext {
         Ok(())
     }
 
-    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(&self) -> MetaResult<CreateMviewProgressTracker> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
@@ -103,7 +102,14 @@ impl GlobalBarrierManagerContext {
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            if table_fragments.tracking_progress_actor_ids().is_empty() {
+                // If there's no tracking actor in the mview, we can finish the job directly.
+                mgr.catalog_controller
+                    .finish_streaming_job(mview.table_id, None)
+                    .await?;
+            } else {
+                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            }
         }
 
         let version_stats = self.hummock_manager.get_version_stats().await;
