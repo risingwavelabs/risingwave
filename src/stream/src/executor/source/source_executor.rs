@@ -608,6 +608,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
+                                    tracing::debug!(
+                                        "updating rate limit from {:?} to {:?}",
+                                        self.rate_limit_rps,
+                                        *new_rate_limit
+                                    );
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
