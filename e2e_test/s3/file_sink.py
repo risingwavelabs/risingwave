@@ -29,8 +29,14 @@ def gen_data(file_num, item_num_per_file):
             'test_bytea': pa.scalar(b'\xDe00BeEf', type=pa.binary()),
             'test_date': pa.scalar(datetime.now().date(), type=pa.date32()),
             'test_time': pa.scalar(datetime.now().time(), type=pa.time64('us')),
-            'test_timestamp': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
-            'test_timestamptz': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamp_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s')),
+            'test_timestamp_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms')),
+            'test_timestamp_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
+            'test_timestamp_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns')),
+            'test_timestamptz_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s', tz='+00:00')),
+            'test_timestamptz_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms', tz='+00:00')),
+            'test_timestamptz_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamptz_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns', tz='+00:00')),
         } for item_id in range(item_num_per_file)]
         for file_id in range(file_num)
     ]
@@ -62,8 +68,15 @@ def do_test(config, file_num, item_num_per_file, prefix):
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
+
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -130,8 +143,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea,
         test_date,
         test_time,
-        test_timestamp,
-        test_timestamptz
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -148,8 +167,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
 
     print('Sink into s3...')
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE test_sink_table(
-        id bigint primary key,
+    cur.execute(f'''CREATE TABLE test_parquet_sink_table(
+        id bigint primary key,\
         name TEXT,
         sex bigint,
         mark bigint,
@@ -160,8 +179,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -182,7 +207,87 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s")
         sleep(10)
 
-    stmt = f'select count(*), sum(id) from test_sink_table'
+    stmt = f'select count(*), sum(id) from test_parquet_sink_table'
+    print(f'Execute reading sink files: {stmt}')
+
+    print(f'Create snowflake s3 sink ')
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE sink test_file_sink_json as select
+        id,
+        name,
+        sex,
+        mark,
+        test_int,
+        test_real,
+        test_double_precision,
+        test_varchar,
+        test_bytea,
+        test_date,
+        test_time,
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
+        from {_table()} WITH (
+        connector = 'snowflake',
+        match_pattern = '*.parquet',
+        snowflake.aws_region = 'custom',
+        snowflake.s3_bucket = 'hummock001',
+        snowflake.aws_access_key_id = 'hummockadmin',
+        snowflake.aws_secret_access_key = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.path = 'test_json_sink/',
+        type = 'append-only',
+        force_append_only='true'
+    ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
+
+    print('Sink into s3 in json encode...')
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE TABLE test_json_sink_table(
+        id bigint primary key,
+        name TEXT,
+        sex bigint,
+        mark bigint,
+        test_int int,
+        test_real real,
+        test_double_precision double precision,
+        test_varchar varchar,
+        test_bytea bytea,
+        test_date date,
+        test_time time,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
+    ) WITH (
+        connector = 's3',
+        match_pattern = 'test_json_sink/*.json',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+    ) FORMAT PLAIN ENCODE JSON;''')
+
+    total_rows = file_num * item_num_per_file
+    MAX_RETRIES = 40
+    for retry_no in range(MAX_RETRIES):
+        cur.execute(f'select count(*) from test_json_sink_table')
+        result = cur.fetchone()
+        if result[0] == total_rows:
+            break
+        print(f"[retry {retry_no}] Now got {result[0]} rows in table, {total_rows} expected, wait 10s")
+        sleep(10)
+
+    stmt = f'select count(*), sum(id) from test_json_sink_table'
     print(f'Execute reading sink files: {stmt}')
     cur.execute(stmt)
     result = cur.fetchone()
