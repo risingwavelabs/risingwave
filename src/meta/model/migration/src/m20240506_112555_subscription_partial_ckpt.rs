@@ -1,6 +1,7 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
 use crate::drop_tables;
+use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -20,7 +21,11 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Subscription::Name).string().not_null())
-                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Subscription::RetentionSeconds)
                             .string()
@@ -66,9 +71,21 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Subscription::Name).string().not_null())
-                    .col(ColumnDef::new(Subscription::Definition).string().not_null())
-                    .col(ColumnDef::new(Subscription::Columns).binary().not_null())
-                    .col(ColumnDef::new(Subscription::PlanPk).binary().not_null())
+                    .col(
+                        ColumnDef::new(Subscription::Definition)
+                            .rw_long_text(manager)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::Columns)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Subscription::PlanPk)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(Subscription::DistributionKey)
                             .json_binary()

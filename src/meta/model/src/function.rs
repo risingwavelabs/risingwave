@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::{DataType, DataTypeArray, FunctionId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum FunctionKind {
     #[sea_orm(string_value = "Scalar")]
     Scalar,

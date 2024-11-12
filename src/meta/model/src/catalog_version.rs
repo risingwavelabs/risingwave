@@ -16,7 +16,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum VersionCategory {
     #[sea_orm(string_value = "NOTIFICATION")]
     Notification,

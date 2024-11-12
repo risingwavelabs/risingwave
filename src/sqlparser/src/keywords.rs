@@ -503,6 +503,7 @@ define_keywords!(
     SUCCEEDS,
     SUM,
     SUPERUSER,
+    SWAP,
     SYMMETRIC,
     SYNC,
     SYSTEM,

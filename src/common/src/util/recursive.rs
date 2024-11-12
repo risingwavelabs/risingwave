@@ -82,7 +82,7 @@ impl Tracker {
             }
         }
 
-        impl<'a> Drop for DepthGuard<'a> {
+        impl Drop for DepthGuard<'_> {
             fn drop(&mut self) {
                 let mut d = self.depth.borrow_mut();
                 d.last_max = d.last_max.max(d.current); // update the last max depth

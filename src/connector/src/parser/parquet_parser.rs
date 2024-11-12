@@ -87,11 +87,10 @@ impl ParquetParser {
     /// # Returns
     ///
     /// A `StreamChunk` containing the converted data from the `RecordBatch`.
-
-    // The hidden columns that must be included here are _rw_file and _rw_offset.
-    // Depending on whether the user specifies a primary key (pk), there may be an additional hidden column row_id.
-    // Therefore, the maximum number of hidden columns is three.
-
+    ///
+    /// The hidden columns that must be included here are `_rw_file` and `_rw_offset`.
+    /// Depending on whether the user specifies a primary key (pk), there may be an additional hidden column `row_id`.
+    /// Therefore, the maximum number of hidden columns is three.
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,

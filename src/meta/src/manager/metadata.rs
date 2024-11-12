@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::{Debug, Formatter};
 use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
@@ -36,7 +37,9 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{ActorId, ClusterId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{
+    ActorId, ClusterId, FragmentId, SubscriptionId, TableFragments, TableParallelism,
+};
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -60,6 +63,14 @@ pub struct ActiveStreamingWorkerNodes {
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
     meta_manager: MetadataManager,
+}
+
+impl Debug for ActiveStreamingWorkerNodes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveStreamingWorkerNodes")
+            .field("worker_nodes", &self.worker_nodes)
+            .finish()
+    }
 }
 
 impl ActiveStreamingWorkerNodes {
@@ -312,6 +323,47 @@ impl MetadataManager {
         self.cluster_controller.list_active_serving_workers().await
     }
 
+    pub async fn list_active_database_ids(&self) -> MetaResult<HashSet<DatabaseId>> {
+        Ok(self
+            .catalog_controller
+            .list_fragment_database_ids(None)
+            .await?
+            .into_iter()
+            .map(|(_, database_id)| DatabaseId::new(database_id as _))
+            .collect())
+    }
+
+    pub async fn split_fragment_map_by_database<T: Debug>(
+        &self,
+        fragment_map: HashMap<FragmentId, T>,
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<FragmentId, T>>> {
+        let fragment_to_database_map: HashMap<_, _> = self
+            .catalog_controller
+            .list_fragment_database_ids(Some(
+                fragment_map
+                    .keys()
+                    .map(|fragment_id| *fragment_id as _)
+                    .collect(),
+            ))
+            .await?
+            .into_iter()
+            .map(|(fragment_id, database_id)| {
+                (fragment_id as FragmentId, DatabaseId::new(database_id as _))
+            })
+            .collect();
+        let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
+        for (fragment_id, value) in fragment_map {
+            let database_id = *fragment_to_database_map
+                .get(&fragment_id)
+                .ok_or_else(|| anyhow!("cannot get database_id of fragment {fragment_id}"))?;
+            ret.entry(database_id)
+                .or_default()
+                .try_insert(fragment_id, value)
+                .expect("non duplicate");
+        }
+        Ok(ret)
+    }
+
     pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<TableId>> {
         let tables = self
             .catalog_controller
@@ -555,17 +607,15 @@ impl MetadataManager {
         Ok(table_fragments)
     }
 
-    pub async fn all_node_actors(
-        &self,
-        include_inactive: bool,
-    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
+    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
             let tf = TableFragments::from_protobuf(fragments);
-            for (node_id, actors) in tf.worker_actors(include_inactive) {
-                let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors)
+            for actor in tf.active_actors() {
+                actor_maps
+                    .try_insert(actor.actor_id, actor)
+                    .expect("non duplicate");
             }
         }
         Ok(actor_maps)
@@ -581,7 +631,7 @@ impl MetadataManager {
 
     pub async fn count_streaming_job(&self) -> MetaResult<usize> {
         self.catalog_controller
-            .list_streaming_job_states()
+            .list_streaming_job_infos()
             .await
             .map(|x| x.len())
     }
@@ -633,10 +683,32 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
-        self.catalog_controller
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        Ok(self
+            .catalog_controller
             .get_mv_depended_subscriptions()
-            .await
+            .await?
+            .into_iter()
+            .map(|(database_id, mv_depended_subscriptions)| {
+                (
+                    DatabaseId::new(database_id as _),
+                    mv_depended_subscriptions
+                        .into_iter()
+                        .map(|(table_id, subscriptions)| {
+                            (
+                                TableId::new(table_id as _),
+                                subscriptions
+                                    .into_iter()
+                                    .map(|(subscription_id, retention_time)| {
+                                        (subscription_id as SubscriptionId, retention_time)
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect())
     }
 
     pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {

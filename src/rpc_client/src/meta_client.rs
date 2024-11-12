@@ -43,8 +43,7 @@ use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
-    SyncResult,
+    CompactionGroupId, HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -573,6 +572,19 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_swap_rename(
+        &self,
+        object: alter_swap_rename_request::Object,
+    ) -> Result<WaitVersion> {
+        let request = AlterSwapRenameRequest {
+            object: Some(object),
+        };
+        let resp = self.inner.alter_swap_rename(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -905,8 +917,8 @@ impl MetaClient {
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self, checkpoint: bool) -> Result<HummockVersionId> {
-        let request = FlushRequest { checkpoint };
+    pub async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
+        let request = FlushRequest { database_id };
         let resp = self.inner.flush(request).await?;
         Ok(HummockVersionId::new(resp.hummock_version_id))
     }
@@ -1524,33 +1536,6 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
-        let req = ReportVacuumTaskRequest {
-            vacuum_task: Some(vacuum_task),
-        };
-        self.inner.report_vacuum_task(req).await?;
-        Ok(())
-    }
-
-    async fn report_full_scan_task(
-        &self,
-        filtered_object_ids: Vec<HummockSstableObjectId>,
-        total_object_count: u64,
-        total_object_size: u64,
-        start_after: Option<String>,
-        next_start_after: Option<String>,
-    ) -> Result<()> {
-        let req = ReportFullScanTaskRequest {
-            object_ids: filtered_object_ids,
-            total_object_count,
-            total_object_size,
-            next_start_after,
-            start_after,
-        };
-        self.inner.report_full_scan_task(req).await?;
-        Ok(())
-    }
-
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
@@ -2096,6 +2081,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
+            ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -2104,9 +2090,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, trigger_compaction_deterministic, TriggerCompactionDeterministicRequest, TriggerCompactionDeterministicResponse }
             ,{ hummock_client, disable_commit_epoch, DisableCommitEpochRequest, DisableCommitEpochResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
-            ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
-            ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
             ,{ hummock_client, rise_ctl_get_pinned_versions_summary, RiseCtlGetPinnedVersionsSummaryRequest, RiseCtlGetPinnedVersionsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }

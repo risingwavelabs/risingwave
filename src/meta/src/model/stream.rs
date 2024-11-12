@@ -32,9 +32,7 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableFragments, PbTableParallelism};
 use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbFragmentTypeFlag, PbStreamContext, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{FragmentTypeFlag, PbStreamContext, StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::model::MetadataModelResult;
@@ -341,17 +339,6 @@ impl TableFragments {
             .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
     }
 
-    /// Check if the fragment type mask is injectable.
-    pub fn is_injectable(fragment_type_mask: u32) -> bool {
-        (fragment_type_mask
-            & (PbFragmentTypeFlag::Source as u32
-                | PbFragmentTypeFlag::Now as u32
-                | PbFragmentTypeFlag::Values as u32
-                | PbFragmentTypeFlag::BarrierRecv as u32
-                | PbFragmentTypeFlag::SnapshotBackfillStreamScan as u32))
-            != 0
-    }
-
     /// Returns mview actor ids.
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
@@ -523,20 +510,14 @@ impl TableFragments {
     }
 
     /// Returns the status of actors group by worker id.
-    pub fn worker_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
-        let mut actors = BTreeMap::default();
+    pub fn active_actors(&self) -> Vec<StreamActor> {
+        let mut actors = vec![];
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
-                let node_id = self.actor_status[&actor.actor_id].worker_id() as WorkerId;
-                if !include_inactive
-                    && self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32
-                {
+                if self.actor_status[&actor.actor_id].state == ActorState::Inactive as i32 {
                     continue;
                 }
-                actors
-                    .entry(node_id)
-                    .or_insert_with(Vec::new)
-                    .push(actor.clone());
+                actors.push(actor.clone());
             }
         }
         actors

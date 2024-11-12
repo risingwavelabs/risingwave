@@ -19,22 +19,23 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo, InflightSubscriptionInfo};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::controller::fragment::InflightFragmentInfo;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
-pub(super) struct BarrierWorkerState {
+pub(crate) struct BarrierWorkerState {
     /// The last sent `prev_epoch`
     ///
     /// There's no need to persist this field. On recovery, we will restore this from the latest
     /// committed snapshot in `HummockManager`.
-    in_flight_prev_epoch: Option<TracedEpoch>,
+    in_flight_prev_epoch: TracedEpoch,
 
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
 
     /// Inflight running actors info.
-    pub(crate) inflight_graph_info: InflightGraphInfo,
+    pub(crate) inflight_graph_info: InflightDatabaseInfo,
 
     pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
 
@@ -43,9 +44,19 @@ pub(super) struct BarrierWorkerState {
 }
 
 impl BarrierWorkerState {
-    pub fn new(
-        in_flight_prev_epoch: Option<TracedEpoch>,
-        inflight_graph_info: InflightGraphInfo,
+    pub fn new() -> Self {
+        Self {
+            in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
+            pending_non_checkpoint_barriers: vec![],
+            inflight_graph_info: InflightDatabaseInfo::empty(),
+            inflight_subscription_info: InflightSubscriptionInfo::default(),
+            paused_reason: None,
+        }
+    }
+
+    pub fn recovery(
+        in_flight_prev_epoch: TracedEpoch,
+        inflight_graph_info: InflightDatabaseInfo,
         inflight_subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
     ) -> Self {
@@ -69,27 +80,30 @@ impl BarrierWorkerState {
         }
     }
 
-    pub fn in_flight_prev_epoch(&self) -> Option<&TracedEpoch> {
-        self.in_flight_prev_epoch.as_ref()
+    pub fn in_flight_prev_epoch(&self) -> &TracedEpoch {
+        &self.in_flight_prev_epoch
     }
 
     /// Returns the `BarrierInfo` for the next barrier, and updates the state.
     pub fn next_barrier_info(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
         is_checkpoint: bool,
+        curr_epoch: TracedEpoch,
     ) -> Option<BarrierInfo> {
         if self.inflight_graph_info.is_empty()
-            && !matches!(&command, Command::CreateStreamingJob { .. })
+            && !matches!(&command, Some(Command::CreateStreamingJob { .. }))
         {
             return None;
         };
-        let in_flight_prev_epoch = self
-            .in_flight_prev_epoch
-            .get_or_insert_with(|| TracedEpoch::new(Epoch::now()));
-        let prev_epoch = in_flight_prev_epoch.clone();
-        let curr_epoch = prev_epoch.next();
-        *in_flight_prev_epoch = curr_epoch.clone();
+        assert!(
+            self.in_flight_prev_epoch.value() < curr_epoch.value(),
+            "curr epoch regress. {} > {}",
+            self.in_flight_prev_epoch.value(),
+            curr_epoch.value()
+        );
+        let prev_epoch = self.in_flight_prev_epoch.clone();
+        self.in_flight_prev_epoch = curr_epoch.clone();
         self.pending_non_checkpoint_barriers
             .push(prev_epoch.value().0);
         let kind = if is_checkpoint {
@@ -111,28 +125,30 @@ impl BarrierWorkerState {
     /// Return (`graph_info`, `subscription_info`, `table_ids_to_commit`, `jobs_to_wait`, `prev_paused_reason`)
     pub fn apply_command(
         &mut self,
-        command: &Command,
+        command: Option<&Command>,
     ) -> (
-        InflightGraphInfo,
+        InflightDatabaseInfo,
         InflightSubscriptionInfo,
         HashSet<TableId>,
         HashSet<TableId>,
         Option<PausedReason>,
     ) {
         // update the fragment_infos outside pre_apply
-        let fragment_changes = if let Command::CreateStreamingJob {
+        let fragment_changes = if let Some(Command::CreateStreamingJob {
             job_type: CreateStreamingJobType::SnapshotBackfill(_),
             ..
-        } = command
+        }) = command
         {
             None
-        } else if let Some(fragment_changes) = command.fragment_changes() {
+        } else if let Some(fragment_changes) = command.and_then(Command::fragment_changes) {
             self.inflight_graph_info.pre_apply(&fragment_changes);
             Some(fragment_changes)
         } else {
             None
         };
-        self.inflight_subscription_info.pre_apply(command);
+        if let Some(command) = &command {
+            self.inflight_subscription_info.pre_apply(command);
+        }
 
         let info = self.inflight_graph_info.clone();
         let subscription_info = self.inflight_subscription_info.clone();
@@ -143,18 +159,22 @@ impl BarrierWorkerState {
 
         let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
-        if let Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) = command {
+        if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
-                table_ids_to_commit.extend(graph_info.existing_table_ids());
+                table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
+                    graph_info.fragment_infos(),
+                ));
                 self.inflight_graph_info.extend(graph_info.clone());
             }
         }
 
-        self.inflight_subscription_info.post_apply(command);
+        if let Some(command) = command {
+            self.inflight_subscription_info.post_apply(command);
+        }
 
         let prev_paused_reason = self.paused_reason;
-        let curr_paused_reason = command.next_paused_reason(prev_paused_reason);
+        let curr_paused_reason = Command::next_paused_reason(command, prev_paused_reason);
         self.set_paused_reason(curr_paused_reason);
 
         (

@@ -27,7 +27,6 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
-#![feature(is_sorted)]
 #![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
@@ -52,7 +51,7 @@ pub mod opts;
 pub mod store_impl;
 pub mod table;
 
-pub mod filter_key_extractor;
+pub mod compaction_catalog_manager;
 pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]

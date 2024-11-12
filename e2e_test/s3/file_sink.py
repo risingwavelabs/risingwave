@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from time import sleep
 from minio import Minio
 from random import uniform
+from time import sleep
+import time
 
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
@@ -158,7 +160,6 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_parquet_sink/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
@@ -208,6 +209,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     stmt = f'select count(*), sum(id) from test_parquet_sink_table'
     print(f'Execute reading sink files: {stmt}')
 
+    print(f'Create snowflake s3 sink ')
     # Execute a SELECT statement
     cur.execute(f'''CREATE sink test_file_sink_json as select
         id,
@@ -230,15 +232,14 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_us,
         test_timestamptz_ns
         from {_table()} WITH (
-        connector = 's3',
+        connector = 'snowflake',
         match_pattern = '*.parquet',
-        s3.region_name = 'custom',
-        s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        snowflake.aws_region = 'custom',
+        snowflake.s3_bucket = 'hummock001',
+        snowflake.aws_access_key_id = 'hummockadmin',
+        snowflake.aws_secret_access_key = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
-        s3.file_type = 'json',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE JSON(force_append_only='true');''')
@@ -303,8 +304,127 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     cur.execute(f'drop table test_parquet_sink_table')
     cur.execute(f'drop sink test_file_sink_json')
     cur.execute(f'drop table test_json_sink_table')
+    cur.execute(f'drop table s3_test_parquet')
     cur.close()
     conn.close()
+
+def test_file_sink_batching():
+    conn = psycopg2.connect(
+        host="localhost",
+        port="4566",
+        user="root",
+        database="dev"
+    )
+
+    # Open a cursor to execute SQL statements
+    cur = conn.cursor()
+
+
+    # Execute a SELECT statement
+    cur.execute(f'''CREATE TABLE t (v1 int, v2 int);''')
+
+    print('test file sink batching...\n')
+    cur.execute(f'''CREATE sink test_file_sink_batching as select
+        v1, v2 from t WITH (
+        connector = 's3',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.path = 'test_file_sink_batching/',
+        type = 'append-only',
+        rollover_seconds = 5,
+        max_row_count = 5,
+        force_append_only='true'
+    ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
+
+    cur.execute(f'''CREATE TABLE test_file_sink_batching_table(
+        v1 int,
+        v2 int,
+    ) WITH (
+        connector = 's3',
+        match_pattern = 'test_file_sink_batching/*.parquet',
+        refresh.interval.sec = 1,
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+    ) FORMAT PLAIN ENCODE PARQUET;''')
+
+    cur.execute(f'''ALTER SINK test_file_sink_batching SET PARALLELISM = 2;''')
+
+    cur.execute(f'''INSERT INTO t VALUES (10, 10);''')
+
+
+    cur.execute(f'select count(*) from test_file_sink_batching_table')
+    # no item will be selectedpsq
+    result = cur.fetchone()
+
+    def _assert_eq(field, got, expect):
+        assert got == expect, f'{field} assertion failed: got {got}, expect {expect}.'
+    def _assert_greater(field, got, expect):
+        assert got > expect, f'{field} assertion failed: got {got}, expect {expect}.'
+
+    _assert_eq('count(*)', result[0], 0)
+    print('the rollover_seconds has not reached, count(*) = 0')
+
+
+    time.sleep(11)
+
+    cur.execute(f'select count(*) from test_file_sink_batching_table')
+    result = cur.fetchone()
+    _assert_eq('count(*)', result[0], 1)
+    print('the rollover_seconds has reached, count(*) = ', result[0])
+
+    cur.execute(f'''
+    INSERT INTO t VALUES (20, 20);
+    INSERT INTO t VALUES (30, 30);
+    INSERT INTO t VALUES (40, 40);
+    INSERT INTO t VALUES (50, 10);
+    ''')
+
+    cur.execute(f'select count(*) from test_file_sink_batching_table')
+    # count(*) = 1
+    result = cur.fetchone()
+    _assert_eq('count(*)', result[0], 1)
+    print('the max row count has not reached, count(*) = ', result[0])
+
+    cur.execute(f'''
+    INSERT INTO t VALUES (60, 20);
+    INSERT INTO t VALUES (70, 30);
+    INSERT INTO t VALUES (80, 10);
+    INSERT INTO t VALUES (90, 20);
+    INSERT INTO t VALUES (100, 30);
+    INSERT INTO t VALUES (100, 10);
+    ''')
+
+    time.sleep(10)
+
+    cur.execute(f'select count(*) from test_file_sink_batching_table')
+    result = cur.fetchone()
+    _assert_greater('count(*)', result[0], 1)
+    print('the rollover_seconds has reached, count(*) = ', result[0])
+
+    cur.execute(f'drop sink test_file_sink_batching;')
+    cur.execute(f'drop table t;')
+    cur.execute(f'drop table test_file_sink_batching_table;')
+    cur.close()
+    conn.close()
+    # delete objects
+
+    client = Minio(
+        "127.0.0.1:9301",
+        "hummockadmin",
+        "hummockadmin",
+        secure=False,
+    )
+    objects = client.list_objects("hummock001", prefix="test_file_sink_batching/", recursive=True)
+
+    for obj in objects:
+        client.remove_object("hummock001", obj.object_name)
+        print(f"Deleted: {obj.object_name}")
 
 
 
@@ -344,7 +464,9 @@ if __name__ == "__main__":
 
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
-     # clean up s3 files
+    # clean up s3 files
     for idx, _ in enumerate(data):
        client.remove_object("hummock001", _s3(idx))
 
+    # test file sink batching
+    test_file_sink_batching()

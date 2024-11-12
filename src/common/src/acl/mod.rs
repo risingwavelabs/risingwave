@@ -104,7 +104,7 @@ pub static ALL_AVAILABLE_TABLE_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| make_bitflags!(AclMode::{Select | Insert | Update | Delete}).into());
 pub static ALL_AVAILABLE_SOURCE_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_MVIEW_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::empty);
+pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_SUBSCRIPTION_MODES: LazyLock<AclModeSet> =
     LazyLock::new(AclModeSet::empty);
 pub static ALL_AVAILABLE_FUNCTION_MODES: LazyLock<AclModeSet> =

@@ -21,7 +21,7 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{PbCompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use risingwave_pb::hummock::PbCompactTask;
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -80,13 +80,12 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
 };
-use crate::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
+use crate::compaction_catalog_manager::{
+    CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
     SstableWriterFactory, UnifiedSstableWriterFactory,
@@ -130,7 +129,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
         task_id: Option<HummockCompactionTaskId>,
         split_index: Option<usize>,
@@ -155,7 +154,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    filter_key_extractor,
+                    compaction_catalog_agent_ref,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
@@ -166,7 +165,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    filter_key_extractor,
+                    compaction_catalog_agent_ref,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
                 )
@@ -230,7 +229,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
@@ -240,7 +239,7 @@ impl Compactor {
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
-            filter_key_extractor,
+            compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
             sstable_writer_factory: writer_factory,
             _phantom: PhantomData,
         };
@@ -253,6 +252,7 @@ impl Compactor {
             self.context
                 .storage_opts
                 .compactor_concurrent_uploading_sst_count,
+            compaction_catalog_agent_ref,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
@@ -280,7 +280,7 @@ pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_object_id_manager: Arc<SstableObjectIdManager>,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
 ) -> (JoinHandle<()>, Sender<()>) {
     type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -468,9 +468,8 @@ pub fn start_compactor(
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 
-                        let meta_client = hummock_meta_client.clone();
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
-                        let filter_key_extractor_manager = filter_key_extractor_manager.clone();
+                        let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
@@ -515,14 +514,16 @@ pub fn start_compactor(
                                     let (tx, rx) = tokio::sync::oneshot::channel();
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker) =
-                                        compactor_runner::compact(
-                                            context.clone(),
-                                            compact_task,
-                                            rx,
-                                            Box::new(sstable_object_id_manager.clone()),
-                                            filter_key_extractor_manager.clone(),
-                                        ).await;
+
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
+                                        context.clone(),
+                                        compact_task,
+                                        rx,
+                                        Box::new(sstable_object_id_manager.clone()),
+                                        compaction_catalog_manager_ref.clone(),
+                                    )
+                                    .await;
+
                                     shutdown.lock().unwrap().remove(&task_id);
                                     running_task_parallelism.fetch_sub(parallelism as u32, Ordering::SeqCst);
 
@@ -552,48 +553,11 @@ pub fn start_compactor(
                                     }
                                 });
                             }
-                            ResponseEvent::VacuumTask(vacuum_task) => {
-                                executor.spawn(async move {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
-                                });
+                            ResponseEvent::VacuumTask(_) => {
+                                unreachable!("unexpected vacuum task");
                             }
-                            ResponseEvent::FullScanTask(full_scan_task) => {
-                                executor.spawn(async move {
-                                    let start_after = full_scan_task.start_after.clone();
-                                    match Vacuum::handle_full_scan_task(
-                                        full_scan_task,
-                                        context.sstable_store.clone(),
-                                    )
-                                    .await
-                                    {
-                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
-                                            Vacuum::report_full_scan_task(
-                                                object_ids,
-                                                total_object_count,
-                                                total_object_size,
-                                                start_after,
-                                                next_start_after,
-                                                meta_client,
-                                            )
-                                            .await;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to iter object");
-                                        }
-                                    }
-                                });
+                            ResponseEvent::FullScanTask(_) => {
+                                unreachable!("unexpected scan task");
                             }
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
@@ -703,16 +667,10 @@ pub fn start_shared_compactor(
                             output_object_ids,
                             task: dispatch_task,
                         } = request.into_inner();
-                        let id_to_tables = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
+                        let table_id_to_catalog = tables.into_iter().fold(HashMap::new(), |mut acc, table| {
                             acc.insert(table.id, table);
                             acc
                         });
-                        let static_filter_key_extractor_manager: Arc<StaticFilterKeyExtractorManager> =
-                            Arc::new(StaticFilterKeyExtractorManager::new(id_to_tables));
-                        let filter_key_extractor_manager =
-                            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
-                                static_filter_key_extractor_manager,
-                            );
 
                         let mut output_object_ids_deque: VecDeque<_> = VecDeque::new();
                         output_object_ids_deque.extend(output_object_ids);
@@ -725,12 +683,13 @@ pub fn start_shared_compactor(
                                     let task_id = compact_task.task_id;
                                     shutdown.lock().unwrap().insert(task_id, tx);
 
-                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact(
+                                    let compaction_catalog_agent_ref = CompactionCatalogManager::build_compaction_catalog_agent(table_id_to_catalog);
+                                    let ((compact_task, table_stats, object_timestamps), _memory_tracker)= compactor_runner::compact_with_agent(
                                         context.clone(),
                                         compact_task,
                                         rx,
                                         Box::new(shared_compactor_object_id_manager),
-                                        filter_key_extractor_manager.clone(),
+                                        compaction_catalog_agent_ref,
                                     )
                                     .await;
                                     shutdown.lock().unwrap().remove(&task_id);
@@ -766,52 +725,11 @@ pub fn start_shared_compactor(
                                     }
 
                                 }
-                                dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            let report_vacuum_task_request = ReportVacuumTaskRequest {
-                                                vacuum_task: Some(vacuum_task),
-                                            };
-                                            match cloned_grpc_proxy_client.report_vacuum_task(report_vacuum_task_request).await {
-                                                Ok(_) => tracing::info!("Finished vacuuming SSTs"),
-                                                Err(e) => tracing::warn!(error = %e.as_report(), "Failed to report vacuum task"),
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
+                                dispatch_compaction_task_request::Task::VacuumTask(_) => {
+                                    unreachable!("unexpected vacuum task");
                                 }
-                                dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
-                                    let start_after = full_scan_task.start_after.clone();
-                                    match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
-                                        .await
-                                    {
-                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
-                                            let report_full_scan_task_request = ReportFullScanTaskRequest {
-                                                object_ids,
-                                                total_object_count,
-                                                total_object_size,
-                                                next_start_after,
-                                                start_after,
-                                            };
-                                            match cloned_grpc_proxy_client
-                                                .report_full_scan_task(report_full_scan_task_request)
-                                                .await
-                                            {
-                                                Ok(_) => tracing::info!("Finished full scan SSTs"),
-                                                Err(e) => tracing::warn!(error = %e.as_report(), "Failed to report full scan task"),
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to iter object");
-                                        }
-                                    }
+                                dispatch_compaction_task_request::Task::FullScanTask(_) => {
+                                    unreachable!("unexpected scan task");
                                 }
                                 dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
                                     let validation_task = ValidationTask::from(validation_task);

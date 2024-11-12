@@ -15,14 +15,13 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
-use futures::future::try_join_all;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_meta_model::{ObjectId, WorkerId};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
 use risingwave_pb::meta::table_fragments::PbActorStatus;
@@ -37,17 +36,15 @@ use risingwave_pb::stream_plan::{
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
     StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
-use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use tracing::warn;
 
-use super::info::{CommandFragmentChanges, InflightGraphInfo};
+use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::{GlobalBarrierWorkerContextImpl, InflightSubscriptionInfo};
+use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::{DdlType, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
-use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -78,10 +75,6 @@ pub struct Reschedule {
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    /// Whether this fragment is injectable. The injectable means whether the fragment contains
-    /// any executors that are able to receive barrier.
-    pub injectable: bool,
-
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
@@ -109,28 +102,30 @@ impl ReplaceTablePlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_table_fragments.fragments.values() {
-            let fragment_change = CommandFragmentChanges::NewFragment(InflightFragmentInfo {
-                actors: fragment
-                    .actors
-                    .iter()
-                    .map(|actor| {
-                        (
-                            actor.actor_id as i32,
-                            self.new_table_fragments
-                                .actor_status
-                                .get(&actor.actor_id)
-                                .expect("should exist")
-                                .worker_id(),
-                        )
-                    })
-                    .collect(),
-                state_table_ids: fragment
-                    .state_table_ids
-                    .iter()
-                    .map(|table_id| *table_id as ObjectId)
-                    .collect(),
-                is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
-            });
+            let fragment_change = CommandFragmentChanges::NewFragment(
+                self.streaming_job.id().into(),
+                InflightFragmentInfo {
+                    actors: fragment
+                        .actors
+                        .iter()
+                        .map(|actor| {
+                            (
+                                actor.actor_id,
+                                self.new_table_fragments
+                                    .actor_status
+                                    .get(&actor.actor_id)
+                                    .expect("should exist")
+                                    .worker_id() as WorkerId,
+                            )
+                        })
+                        .collect(),
+                    state_table_ids: fragment
+                        .state_table_ids
+                        .iter()
+                        .map(|table_id| TableId::new(*table_id))
+                        .collect(),
+                },
+            );
             assert!(fragment_changes
                 .insert(fragment.fragment_id, fragment_change)
                 .is_none());
@@ -173,21 +168,20 @@ impl CreateStreamingJobCommandInfo {
                         .iter()
                         .map(|actor| {
                             (
-                                actor.actor_id as i32,
+                                actor.actor_id,
                                 self.table_fragments
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
-                                    .worker_id(),
+                                    .worker_id() as WorkerId,
                             )
                         })
                         .collect(),
                     state_table_ids: fragment
                         .state_table_ids
                         .iter()
-                        .map(|table_id| *table_id as ObjectId)
+                        .map(|table_id| TableId::new(*table_id))
                         .collect(),
-                    is_injectable: TableFragments::is_injectable(fragment.fragment_type_mask),
                 },
             )
         })
@@ -206,16 +200,14 @@ pub enum CreateStreamingJobType {
     SnapshotBackfill(SnapshotBackfillInfo),
 }
 
-/// [`Command`] is the input of [`crate::barrier::GlobalBarrierWorker`]. For different commands,
+/// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
 /// it will build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
-#[derive(Debug, Clone, strum::Display)]
+#[derive(Debug, strum::Display)]
 pub enum Command {
-    /// `Plain` command generates a barrier with the mutation it carries.
-    ///
-    /// Barriers from all actors marked as `Created` state will be collected.
-    /// After the barrier is collected, it does nothing.
-    Plain(Option<Mutation>),
+    /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
+    /// all messages before the checkpoint barrier should have been committed.
+    Flush,
 
     /// `Pause` command generates a `Pause` barrier with the provided [`PausedReason`] **only if**
     /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
@@ -252,7 +244,9 @@ pub enum Command {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
     },
-    MergeSnapshotBackfillStreamingJobs(HashMap<TableId, (SnapshotBackfillInfo, InflightGraphInfo)>),
+    MergeSnapshotBackfillStreamingJobs(
+        HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
+    ),
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
     ///
@@ -305,10 +299,6 @@ pub enum Command {
 }
 
 impl Command {
-    pub fn barrier() -> Self {
-        Self::Plain(None)
-    }
-
     pub fn pause(reason: PausedReason) -> Self {
         Self::Pause(reason)
     }
@@ -319,7 +309,7 @@ impl Command {
 
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
-            Command::Plain(_) => None,
+            Command::Flush => None,
             Command::Pause(_) => None,
             Command::Resume(_) => None,
             Command::DropStreamingJobs {
@@ -338,8 +328,14 @@ impl Command {
                 );
                 let mut changes: HashMap<_, _> = info
                     .new_fragment_info()
-                    .map(|(fragment_id, info)| {
-                        (fragment_id, CommandFragmentChanges::NewFragment(info))
+                    .map(|(fragment_id, fragment_info)| {
+                        (
+                            fragment_id,
+                            CommandFragmentChanges::NewFragment(
+                                info.streaming_job.id().into(),
+                                fragment_info,
+                            ),
+                        )
                     })
                     .collect();
 
@@ -398,7 +394,7 @@ impl Command {
 
     pub fn need_checkpoint(&self) -> bool {
         // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Plain(None) | Command::Resume(_))
+        !matches!(self, Command::Resume(_))
     }
 }
 
@@ -443,7 +439,7 @@ pub struct CommandContext {
 
     pub table_ids_to_commit: HashSet<TableId>,
 
-    pub command: Command,
+    pub command: Option<Command>,
 
     /// The tracing span of this command.
     ///
@@ -468,7 +464,7 @@ impl CommandContext {
         barrier_info: BarrierInfo,
         subscription_info: InflightSubscriptionInfo,
         table_ids_to_commit: HashSet<TableId>,
-        command: Command,
+        command: Option<Command>,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -480,6 +476,21 @@ impl CommandContext {
             _span: span,
         }
     }
+
+    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
+        let Some(truncate_timestamptz) = Timestamptz::from_secs(
+            self.barrier_info
+                .prev_epoch
+                .value()
+                .as_timestamptz()
+                .timestamp()
+                - retention_second as i64,
+        ) else {
+            warn!(retention_second, prev_epoch = ?self.barrier_info.prev_epoch.value(), "invalid retention second value");
+            return self.barrier_info.prev_epoch.value();
+        };
+        Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
+    }
 }
 
 impl Command {
@@ -487,7 +498,7 @@ impl Command {
     pub fn to_mutation(&self, current_paused_reason: Option<PausedReason>) -> Option<Mutation> {
         let mutation =
             match self {
-                Command::Plain(mutation) => mutation.clone(),
+                Command::Flush => None,
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
@@ -889,11 +900,11 @@ impl Command {
 
     /// Returns the paused reason after executing the current command.
     pub fn next_paused_reason(
-        &self,
+        this: Option<&Self>,
         current_paused_reason: Option<PausedReason>,
     ) -> Option<PausedReason> {
-        match self {
-            Command::Pause(reason) => {
+        match this {
+            Some(Command::Pause(reason)) => {
                 // Only pause when the cluster is not already paused.
                 if current_paused_reason.is_none() {
                     Some(*reason)
@@ -902,7 +913,7 @@ impl Command {
                 }
             }
 
-            Command::Resume(reason) => {
+            Some(Command::Resume(reason)) => {
                 // Only resume when the cluster is paused with the same reason.
                 if current_paused_reason == Some(*reason) {
                     None
@@ -921,227 +932,5 @@ impl Command {
             Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
             _ => None,
         }
-    }
-}
-
-impl CommandContext {
-    pub async fn wait_epoch_commit(
-        &self,
-        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
-    ) -> MetaResult<()> {
-        let table_id = self.table_ids_to_commit.iter().next().cloned();
-        // try wait epoch on an existing random table id
-        let Some(table_id) = table_id else {
-            // no need to wait epoch when there is no table id
-            return Ok(());
-        };
-        let futures = self.node_map.values().map(|worker_node| async {
-            let client = barrier_manager_context
-                .env
-                .stream_client_pool()
-                .get(worker_node)
-                .await?;
-            let request = WaitEpochCommitRequest {
-                epoch: self.barrier_info.prev_epoch(),
-                table_id: table_id.table_id,
-            };
-            client.wait_epoch_commit(request).await
-        });
-
-        try_join_all(futures).await?;
-
-        Ok(())
-    }
-
-    /// Do some stuffs after barriers are collected and the new storage version is committed, for
-    /// the given command.
-    pub async fn post_collect(
-        &self,
-        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
-    ) -> MetaResult<()> {
-        match &self.command {
-            Command::Plain(_) => {}
-
-            Command::Throttle(_) => {}
-
-            Command::Pause(reason) => {
-                if let PausedReason::ConfigChange = reason {
-                    // After the `Pause` barrier is collected and committed, we must ensure that the
-                    // storage version with this epoch is synced to all compute nodes before the
-                    // execution of the next command of `Update`, as some newly created operators
-                    // may immediately initialize their states on that barrier.
-                    self.wait_epoch_commit(barrier_manager_context).await?;
-                }
-            }
-
-            Command::Resume(_) => {}
-
-            Command::SourceSplitAssignment(split_assignment) => {
-                barrier_manager_context
-                    .metadata_manager
-                    .update_actor_splits_by_split_assignment(split_assignment)
-                    .await?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
-                    .await;
-            }
-
-            Command::DropStreamingJobs {
-                unregistered_state_table_ids,
-                ..
-            } => {
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
-                    .await?;
-            }
-
-            Command::CancelStreamingJob(table_fragments) => {
-                tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
-
-                // NOTE(kwannoel): At this point, meta has already registered the table ids.
-                // We should unregister them.
-                // This is required for background ddl, for foreground ddl this is a no-op.
-                // Foreground ddl is handled entirely by stream manager, so it will unregister
-                // the table ids on failure.
-                // On the other hand background ddl could be handled by barrier manager.
-                // It won't clean the tables on failure,
-                // since the failure could be recoverable.
-                // As such it needs to be handled here.
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
-                    .await?;
-            }
-
-            Command::CreateStreamingJob { info, job_type } => {
-                let CreateStreamingJobCommandInfo {
-                    table_fragments,
-                    dispatchers,
-                    init_split_assignment,
-                    ..
-                } = info;
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .post_collect_table_fragments(
-                        table_fragments.table_id().table_id as _,
-                        table_fragments.actor_ids(),
-                        dispatchers.clone(),
-                        init_split_assignment,
-                    )
-                    .await?;
-
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                    new_table_fragments,
-                    dispatchers,
-                    init_split_assignment,
-                    ..
-                }) = job_type
-                {
-                    barrier_manager_context
-                        .metadata_manager
-                        .catalog_controller
-                        .post_collect_table_fragments(
-                            new_table_fragments.table_id().table_id as _,
-                            new_table_fragments.actor_ids(),
-                            dispatchers.clone(),
-                            init_split_assignment,
-                        )
-                        .await?;
-                }
-
-                // Extract the fragments that include source operators.
-                let source_fragments = table_fragments.stream_source_fragments();
-                let backfill_fragments = table_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
-                    )
-                    .await;
-            }
-            Command::RescheduleFragment {
-                reschedules,
-                table_parallelism,
-                ..
-            } => {
-                barrier_manager_context
-                    .scale_controller
-                    .post_apply_reschedule(reschedules, table_parallelism)
-                    .await?;
-            }
-
-            Command::ReplaceTable(ReplaceTablePlan {
-                old_table_fragments,
-                new_table_fragments,
-                dispatchers,
-                init_split_assignment,
-                ..
-            }) => {
-                // Update actors and actor_dispatchers for new table fragments.
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .post_collect_table_fragments(
-                        new_table_fragments.table_id().table_id as _,
-                        new_table_fragments.actor_ids(),
-                        dispatchers.clone(),
-                        init_split_assignment,
-                    )
-                    .await?;
-
-                // Apply the split changes in source manager.
-                barrier_manager_context
-                    .source_manager
-                    .drop_source_fragments_vec(std::slice::from_ref(old_table_fragments))
-                    .await;
-                let source_fragments = new_table_fragments.stream_source_fragments();
-                // XXX: is it possible to have backfill fragments here?
-                let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(
-                        Some(source_fragments),
-                        Some(backfill_fragments),
-                        Some(init_split_assignment.clone()),
-                        None,
-                    )
-                    .await;
-            }
-
-            Command::CreateSubscription {
-                subscription_id, ..
-            } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .finish_create_subscription_catalog(*subscription_id)
-                    .await?
-            }
-            Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-        }
-
-        Ok(())
-    }
-
-    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
-        let Some(truncate_timestamptz) = Timestamptz::from_secs(
-            self.barrier_info
-                .prev_epoch
-                .value()
-                .as_timestamptz()
-                .timestamp()
-                - retention_second as i64,
-        ) else {
-            warn!(retention_second, prev_epoch = ?self.barrier_info.prev_epoch.value(), "invalid retention second value");
-            return self.barrier_info.prev_epoch.value();
-        };
-        Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
 }

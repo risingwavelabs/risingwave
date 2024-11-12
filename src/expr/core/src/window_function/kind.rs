@@ -21,6 +21,7 @@ use crate::aggregate::AggType;
 use crate::Result;
 
 /// Kind of window functions.
+#[expect(clippy::large_enum_variant)]
 #[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {

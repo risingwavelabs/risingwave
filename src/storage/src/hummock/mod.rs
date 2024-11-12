@@ -44,7 +44,6 @@ pub mod local_version;
 pub mod observer_manager;
 pub mod store;
 pub use store::*;
-pub mod vacuum;
 mod validator;
 pub mod value;
 pub mod write_limiter;
