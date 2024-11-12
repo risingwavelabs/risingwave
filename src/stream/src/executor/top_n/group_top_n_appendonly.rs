@@ -201,7 +201,7 @@ where
         self.caches.evict()
     }
 
-    async fn init_after_yield_barrier(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.init_epoch(epoch).await
     }
 

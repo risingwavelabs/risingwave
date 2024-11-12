@@ -245,7 +245,7 @@ impl LogReader for BoundedInMemLogStoreReader {
 }
 
 impl LogWriter for BoundedInMemLogStoreWriter {
-    async fn init_after_yield_barrier(
+    async fn init(
         &mut self,
         epoch: EpochPair,
         _pause_read_on_bootstrap: bool,
@@ -361,7 +361,7 @@ mod tests {
 
         let mut join_handle = tokio::spawn(async move {
             writer
-                .init_after_yield_barrier(EpochPair::new_test_epoch(init_epoch), false)
+                .init(EpochPair::new_test_epoch(init_epoch), false)
                 .await
                 .unwrap();
             writer

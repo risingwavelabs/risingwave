@@ -50,10 +50,7 @@ pub trait TopNExecutorBase: Send + 'static {
 
     fn evict(&mut self) {}
 
-    fn init_after_yield_barrier(
-        &mut self,
-        epoch: EpochPair,
-    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Handle incoming watermarks
     fn handle_watermark(
@@ -92,7 +89,7 @@ where
         let barrier = expect_first_barrier(&mut input).await?;
         let barrier_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
-        self.inner.init_after_yield_barrier(barrier_epoch).await?;
+        self.inner.init(barrier_epoch).await?;
 
         #[for_await]
         for msg in input {

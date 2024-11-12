@@ -55,7 +55,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
         let mut state = self.state;
-        state.init_after_yield_barrier(first_epoch).await?;
+        state.init(first_epoch).await?;
 
         // Get row count state, and row_count.
         #[for_await]

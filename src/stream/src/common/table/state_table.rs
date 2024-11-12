@@ -176,8 +176,6 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
-    /// No need to `wait_for_epoch`, so it should complete immediately.
     pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.local_store.init(InitOptions::new(epoch)).await?;
         Ok(())

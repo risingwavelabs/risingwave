@@ -283,9 +283,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         // Propagate the first barrier
         yield Message::Barrier(barrier);
 
-        log_writer
-            .init_after_yield_barrier(epoch_pair, is_pause_on_startup)
-            .await?;
+        log_writer.init(epoch_pair, is_pause_on_startup).await?;
 
         let mut is_paused = false;
 
