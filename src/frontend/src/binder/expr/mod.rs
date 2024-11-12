@@ -90,10 +90,12 @@ impl Binder {
                         )
                     }
                 } else if let Some(ctx) = self.secure_compare_context.as_ref() {
-                    if ident.real_value() == ctx.secret_name {
-                        Ok(InputRef::new(0, DataType::Bytea).into())
-                    } else if ident.real_value() == ctx.column_name {
+                    if ident.real_value() == "headers".to_string() {
+                        Ok(InputRef::new(0, DataType::Jsonb).into())
+                    } else if ident.real_value() == ctx.secret_name {
                         Ok(InputRef::new(1, DataType::Bytea).into())
+                    } else if ident.real_value() == ctx.column_name {
+                        Ok(InputRef::new(2, DataType::Bytea).into())
                     } else {
                         Err(
                             ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))

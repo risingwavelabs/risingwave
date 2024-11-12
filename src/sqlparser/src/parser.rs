@@ -2560,6 +2560,7 @@ impl Parser<'_> {
         let contain_webhook = if let Some(connector) = &connector
             && connector.contains("webhook")
         {
+            // for webhook source, we clear all the options and use `webhook_info` to store the webhook info
             with_options.clear();
             true
         } else {
@@ -2594,7 +2595,10 @@ impl Parser<'_> {
             None
         };
 
-        let webhook_info = if contain_webhook && self.parse_keyword(Keyword::VALIDATE) {
+        let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
+            if !contain_webhook {
+                parser_err!("VALIDATE is only supported for tables created with webhook source");
+            }
             self.expect_keyword(Keyword::SECRET)?;
             let secret_ref = SecretRef {
                 secret_name: self.parse_object_name()?,
@@ -2604,37 +2608,10 @@ impl Parser<'_> {
                 parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
             };
             self.expect_keyword(Keyword::AS)?;
-            let function_name = self.parse_identifier()?;
-            if function_name.real_value().to_uppercase() != *"SECURE_COMPARE" {
-                parser_err!(
-                    "SECURE_COMPARE() is the only function supported for secret validation"
-                );
-            }
-            self.expect_token(&Token::LParen)?;
-            let headers = self.parse_identifier()?;
-            if headers.real_value().to_uppercase() != *"HEADERS" {
-                parser_err!("The first argument of SECURE_COMPARE() should be like `HEADERS ->> {{header_key}}`");
-            }
-            self.expect_token(&Token::LongArrow)?;
-            let header_key = self.parse_literal_string()?;
-            self.expect_token(&Token::Comma)?;
-            let checkpoint = *self;
-            let signature_expr = if let Ok(ident) = self.parse_identifier()
-                && !matches!(self.peek_token().token, Token::LParen)
-            {
-                // secret name
-                Expr::Identifier(ident)
-            } else {
-                // function to generate signature, e.g., HMAC(secret, payload, 'sha256')
-                *self = checkpoint;
-                self.parse_function()?
-            };
-
-            self.expect_token(&Token::RParen)?;
+            let signature_expr = self.parse_function()?;
 
             Some(WebhookSourceInfo {
                 secret_ref,
-                header_key,
                 signature_expr,
             })
         } else {

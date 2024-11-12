@@ -38,17 +38,15 @@ mod utils;
 #[derive(Clone)]
 pub struct WebhookService {
     pub webhook_addr: SocketAddr,
-    // pub compute_clients: ComputeClientPool,
 }
 pub type Service = Arc<WebhookService>;
 
 pub(super) mod handlers {
-
     use std::net::Ipv4Addr;
 
     use risingwave_pb::catalog::WebhookSourceInfo;
     use risingwave_sqlparser::ast::{Query, SetExpr, Statement, Value, Values};
-    use utils::verify_signature;
+    use utils::{header_map_to_json, verify_signature};
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
@@ -60,10 +58,6 @@ pub(super) mod handlers {
         Path((user, database, schema, table)): Path<(String, String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
-        println!(
-            "WKXLOG receive something: {:?}, \ndatabase: {}, \ntable: {}, \nheaders: {:?}",
-            body, database, table, headers
-        );
         let session_mgr = SESSION_MANAGER
             .get()
             .expect("session manager has been initialized");
@@ -80,7 +74,7 @@ pub(super) mod handlers {
             .map_err(|e| {
                 err(
                     anyhow!(e).context(format!(
-                        "failed to create session for database: {}, user: {}",
+                        "Failed to create session for database: {}, user: {}",
                         database, user
                     )),
                     StatusCode::UNAUTHORIZED,
@@ -89,7 +83,6 @@ pub(super) mod handlers {
 
         let WebhookSourceInfo {
             secret_ref,
-            header_key,
             signature_expr,
         } = {
             let search_path = session.config().search_path();
@@ -117,28 +110,17 @@ pub(super) mod handlers {
             .fill_secret(secret_ref.unwrap())
             .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
 
-        println!("WKXLOG header_key: {:?}", header_key);
-
-        let signature = headers
-            .get(header_key)
-            .ok_or_else(|| {
-                err(
-                    anyhow!("Signature not found in the header"),
-                    StatusCode::BAD_REQUEST,
-                )
-            })?
-            .as_bytes();
-        println!("WKXLOG signature: {:?}", signature);
-        println!("WKXLOG secret_string: {:?}", secret_string);
+        // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
+        let headers_jsonb = header_map_to_json(&headers);
 
         let is_valid = verify_signature(
+            headers_jsonb,
             secret_string.as_bytes(),
             body.as_ref(),
             signature_expr.unwrap(),
-            signature,
+            // signature,
         )
         .await?;
-        println!("WKXLOG is_valid: {:?}", is_valid);
 
         if !is_valid {
             return Err(err(
@@ -202,10 +184,10 @@ impl WebhookService {
 
         let listener = TcpListener::bind(&srv.webhook_addr)
             .await
-            .context("failed to bind dashboard address")?;
+            .context("Failed to bind dashboard address")?;
         axum::serve(listener, app)
             .await
-            .context("failed to serve dashboard service")?;
+            .context("Failed to serve dashboard service")?;
 
         Ok(())
     }

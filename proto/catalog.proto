@@ -96,8 +96,7 @@ message StreamSourceInfo {
 
 message WebhookSourceInfo {
   secret.SecretRef secret_ref = 1;
-  string header_key = 2;
-  expr.ExprNode signature_expr = 3;
+  expr.ExprNode signature_expr = 2;
 }
 
 message Source {

@@ -12,3 +12,8 @@ query TT
 select data ->> 'source', data->> 'auth_algo' from rudderstack;
 ----
 rudderstack plain
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from segment_encode_hmac;
+----
+segment encode_hmac

@@ -16,6 +16,7 @@ python3 e2e_test/webhook/sender.py --secret TEST_WEBHOOK
 
 sleep 3s
 
+# TODO(kexiang): will use a script to take place of check_1, check_2, check_3
 include ./check_1.slt.part
 
 # insert again

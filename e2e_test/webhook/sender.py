@@ -21,14 +21,14 @@ message = {
 SERVER_URL = "http://127.0.0.1:8080/message/root/dev/public/"
 
 
-def generate_signature_hmac(secret, payload, auth_algo):
+def generate_signature_hmac(secret, payload, auth_algo, prefix):
     secret_bytes = bytes(secret, 'utf-8')
     payload_bytes = bytes(payload, 'utf-8')
     signature = ""
     if auth_algo == "sha1":
-        signature = "sha1=" + hmac.new(secret_bytes, payload_bytes, digestmod=hashlib.sha1).hexdigest()
+        signature = prefix + hmac.new(secret_bytes, payload_bytes, digestmod=hashlib.sha1).hexdigest()
     elif auth_algo == "sha256":
-        signature = "sha256=" + hmac.new(secret_bytes, payload_bytes, digestmod=hashlib.sha256).hexdigest()
+        signature = prefix + hmac.new(secret_bytes, payload_bytes, digestmod=hashlib.sha256).hexdigest()
     else:
         print("Unsupported auth type")
         sys.exit(1)
@@ -53,7 +53,7 @@ def send_github_sha1(secret):
     url = SERVER_URL + "github_sha1"
 
     payload_json = json.dumps(payload)
-    signature = generate_signature_hmac(secret, payload_json, 'sha1')
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', "sha1=")
     # Webhook message headers
     headers = {
         "Content-Type": "application/json",
@@ -69,7 +69,7 @@ def send_github_sha256(secret):
     url = SERVER_URL + "github_sha256"
 
     payload_json = json.dumps(payload)
-    signature = generate_signature_hmac(secret, payload_json, 'sha256')
+    signature = generate_signature_hmac(secret, payload_json, 'sha256', "sha256=")
     # Webhook message headers
     headers = {
         "Content-Type": "application/json",
@@ -79,6 +79,7 @@ def send_github_sha256(secret):
 
 
 def send_rudderstack(secret):
+    # apply to both rudderstack and AWS EventBridge
     payload = message
     payload['source'] = "rudderstack"
     payload['auth_algo'] = "plain"
@@ -90,6 +91,23 @@ def send_rudderstack(secret):
     headers = {
         "Content-Type": "application/json",
         "Authorization": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_segment_encode_hmac(secret):
+    # apply to both rudderstack and AWS EventBridge
+    payload = message
+    payload['source'] = "segment"
+    payload['auth_algo'] = "encode_hmac"
+    url = SERVER_URL + "segment_encode_hmac"
+
+    payload_json = json.dumps(payload)
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', '')
+    # Webhook message headers
+    headers = {
+        "Content-Type": "application/json",
+        "x-signature": signature  # Custom signature header
     }
     send_webhook(url, headers, payload_json)
 

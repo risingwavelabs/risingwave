@@ -4,7 +4,7 @@ create table rudderstack (
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
-  headers->>'Authorization',
+  headers->>'authorization',
   test_secret
 );
 
@@ -14,8 +14,8 @@ create table github_sha1 (
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
-  headers->>'X-Hub-Signature',
-  hmac(test_secret, data, 'sha1')
+  headers->>'x-hub-signature',
+  hmac(test_secret, data, 'sha1', 'sha1=')
 );
 
 statement ok
@@ -24,7 +24,16 @@ create table github_sha256 (
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
-  headers->>'X-Hub-Signature-256',
-  hmac(test_secret, data, 'sha256')
+  headers->>'x-hub-signature-256',
+  hmac(test_secret, data, 'sha256', 'sha256=')
 );
 
+statement ok
+create table segment_sha1 (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'x-signature',
+  hmac(test_secret, data, 'sha1')
+);

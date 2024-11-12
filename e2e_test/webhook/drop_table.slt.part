@@ -1,5 +1,8 @@
 
 statement ok
+DROP TABLE segment_encode_hmac;
+
+statement ok
 DROP TABLE github_sha256;
 
 statement ok

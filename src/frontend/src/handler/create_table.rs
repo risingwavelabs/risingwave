@@ -1523,7 +1523,6 @@ fn bind_webhook_info(
 
     let WebhookSourceInfo {
         secret_ref,
-        header_key,
         signature_expr,
     } = webhook_info;
 
@@ -1550,7 +1549,6 @@ fn bind_webhook_info(
 
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: Some(pb_secret_ref),
-        header_key,
         signature_expr: Some(expr.to_expr_proto()),
     };
 

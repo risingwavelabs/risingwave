@@ -20,35 +20,53 @@ use sha2::Sha256;
 
 #[function("hmac(bytea, bytea, varchar) -> bytea")]
 pub fn hmac(secret: &[u8], payload: &[u8], sha_type: &str) -> Box<[u8]> {
+    hmac_with_prefix(secret, payload, sha_type, "")
+}
+
+#[function("hmac(bytea, bytea, varchar, varchar) -> bytea")]
+pub fn hmac_with_prefix(secret: &[u8], payload: &[u8], sha_type: &str, prefix: &str) -> Box<[u8]> {
     if sha_type == "sha1" {
-        sha1_hmac(secret, payload)
+        sha1_hmac(secret, payload, prefix)
     } else if sha_type == "sha256" {
-        sha256_hmac(secret, payload)
+        sha256_hmac(secret, payload, prefix)
     } else {
         panic!("Unsupported SHA type: {}", sha_type)
     }
 }
 
-fn sha256_hmac(secret: &[u8], payload: &[u8]) -> Box<[u8]> {
+fn sha256_hmac(secret: &[u8], payload: &[u8], prefix: &str) -> Box<[u8]> {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC can take key of any size");
 
     mac.update(payload);
 
     let result = mac.finalize();
     let code_bytes = result.into_bytes();
-    let computed_signature = format!("sha256={}", encode(code_bytes));
-    computed_signature.as_bytes().into()
+    if prefix.is_empty() {
+        code_bytes.as_slice().into()
+    } else {
+        let computed_signature = format!("{}{}", prefix, encode(code_bytes));
+        computed_signature.as_bytes().into()
+    }
 }
 
-fn sha1_hmac(secret: &[u8], payload: &[u8]) -> Box<[u8]> {
+fn sha1_hmac(secret: &[u8], payload: &[u8], prefix: &str) -> Box<[u8]> {
     let mut mac = Hmac::<Sha1>::new_from_slice(secret).expect("HMAC can take key of any size");
 
     mac.update(payload);
 
     let result = mac.finalize();
     let code_bytes = result.into_bytes();
-    let computed_signature = format!("sha1={}", encode(code_bytes));
-    computed_signature.as_bytes().into()
+    if prefix.is_empty() {
+        code_bytes.as_slice().into()
+    } else {
+        let computed_signature = format!("{}{}", prefix, encode(code_bytes));
+        computed_signature.as_bytes().into()
+    }
+}
+
+#[function("secure_compare(bytea, bytea) -> boolean")]
+pub fn secure_compare(left: &[u8], right: &[u8]) -> bool {
+    left == right
 }
 
 #[cfg(test)]

@@ -1902,7 +1902,7 @@ impl fmt::Display for Statement {
                 }
                 if let Some(info)= webhook_info {
                     write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
-                    write!(f, " AS secure_compare ()")?;
+                    write!(f, " AS {}", info.signature_expr)?;
                 }
                 Ok(())
             }

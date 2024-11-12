@@ -222,6 +222,7 @@ impl Strong {
             | ExprType::Sha384
             | ExprType::Sha512
             | ExprType::Hmac
+            | ExprType::SecureCompare
             | ExprType::Left
             | ExprType::Right
             | ExprType::Format
