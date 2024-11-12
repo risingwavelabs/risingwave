@@ -575,3 +575,22 @@ query II
 select * from upper_orders_shared order by id;
 ----
 1 happy
+
+statement ok
+CREATE TABLE test_default_value (
+    id int,
+    name varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.test_default_value';
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+INSERT INTO test_default_value VALUES (1, 'noris');
+
+query II
+select * from test_default_value;
+----
+1 noris Shanghai

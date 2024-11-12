@@ -1036,8 +1036,22 @@ pub(super) async fn handle_create_table_plan(
                         let (mut columns, pk_names) =
                             bind_cdc_table_schema(&column_defs, &constraints, None)?;
                         // read default value definition from external db
-                        let (external_columns, _) =
-                            bind_cdc_table_schema_externally(cdc_with_options.clone()).await?;
+                        let (options, secret_refs) = cdc_with_options.clone().into_parts();
+                        let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                            .context("failed to extract external table config")?;
+
+                        let table = ExternalTableImpl::connect(config)
+                            .await
+                            .context("failed to auto derive table schema")?;
+                        let external_columns: Vec<_> = table
+                            .column_descs()
+                            .iter()
+                            .cloned()
+                            .map(|column_desc| ColumnCatalog {
+                                column_desc,
+                                is_hidden: false,
+                            })
+                            .collect();
                         for (col, external_col) in
                             columns.iter_mut().zip_eq_fast(external_columns.into_iter())
                         {
