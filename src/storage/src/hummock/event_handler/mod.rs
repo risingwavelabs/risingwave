@@ -65,10 +65,7 @@ pub enum HummockEvent {
     },
 
     /// Clear shared buffer and reset all states
-    Clear(
-        oneshot::Sender<()>,
-        Option<HashSet<TableId>>,
-    ),
+    Clear(oneshot::Sender<()>, Option<HashSet<TableId>>),
 
     Shutdown,
 
