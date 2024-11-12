@@ -475,7 +475,7 @@ impl GlobalBarrierWorkerContextImpl {
         subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> MetaResult<StreamingControlHandle> {
         let initial_version_id = self
-            .hummock_manager
+            .hummock_manager()
             .on_current_version(|version| version.id)
             .await;
         let handle = self

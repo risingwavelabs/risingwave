@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::mem::{replace, take};
+use std::mem::replace;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -118,15 +118,15 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
-        let context = Arc::new(GlobalBarrierWorkerContextImpl {
+        let context = Arc::new(GlobalBarrierWorkerContextImpl::new(
             scheduled_barriers,
             status,
             metadata_manager,
             hummock_manager,
             source_manager,
             scale_controller,
-            env: env.clone(),
-        });
+            env.clone(),
+        ));
 
         let control_stream_manager = ControlStreamManager::new(env.clone());
 
@@ -258,15 +258,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
-                                let mut progress = HashMap::new();
-                                for database_checkpoint_control in self.checkpoint_control.databases.values() {
-                                    // Progress of normal backfill
-                                    progress.extend(database_checkpoint_control.create_mview_tracker.gen_ddl_progress());
-                                    // Progress of snapshot backfill
-                                    for creating_job in database_checkpoint_control.creating_streaming_job_controls.values() {
-                                        progress.extend([(creating_job.info.table_fragments.table_id().table_id, creating_job.gen_ddl_progress())]);
-                                    }
-                                }
+                                let progress = self.checkpoint_control.gen_ddl_progress();
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
@@ -287,7 +279,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     info!(?changed_worker, "worker changed");
 
                     if let ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) = changed_worker {
-                        self.control_stream_manager.add_worker(node, self.checkpoint_control.databases.values().flat_map(|database| &database.state.inflight_subscription_info), &*self.context).await;
+                        self.control_stream_manager.add_worker(node, self.checkpoint_control.subscriptions(), &*self.context).await;
                     }
                 }
 
@@ -328,23 +320,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                 (worker_id, resp_result) = self.control_stream_manager.next_collect_barrier_response() => {
                     if let Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
                         {
-                            let mut err = None;
-                            for database_checkpoint_control in self.checkpoint_control.databases.values() {
-                                let failed_barrier = database_checkpoint_control.barrier_wait_collect_from_worker(worker_id as _);
-                                if failed_barrier.is_some()
-                                    || database_checkpoint_control.state.inflight_graph_info.contains_worker(worker_id as _)
-                                    || database_checkpoint_control.creating_streaming_job_controls.values().any(|job| job.is_wait_on_worker(worker_id)) {
 
-                                    err = Some((e, failed_barrier));
-                                    break;
-                                }
-                            }
-                            if let Some((e, failed_barrier)) = err {
+                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
-                                if let Some(failed_barrier) = failed_barrier {
-                                    self.report_collect_failure(failed_barrier, &err);
-                                }
+                                self.report_collect_failure(&err);
                                 self.failure_recovery(err).await;
                             }  else {
                                 warn!(worker_id, "no barrier to collect from worker, ignore err");
@@ -424,21 +404,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
             }
         }
-        for (_, node) in self
-            .checkpoint_control
-            .databases
-            .values_mut()
-            .flat_map(|database| take(&mut database.command_ctx_queue))
-        {
-            for notifier in node.notifiers {
-                notifier.notify_failed(err.clone());
-            }
-            node.enqueue_time.observe_duration();
-        }
-        self.checkpoint_control
-            .databases
-            .values_mut()
-            .for_each(|database| database.create_mview_tracker.abort_all());
+        self.checkpoint_control.clear_on_err(err);
     }
 }
 
@@ -505,12 +471,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
 impl<C> GlobalBarrierWorker<C> {
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
+    pub(super) fn report_collect_failure(&self, error: &MetaError) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
-            prev_epoch: barrier_info.prev_epoch(),
-            cur_epoch: barrier_info.curr_epoch.value().0,
             error: error.to_report_string(),
         };
         self.env
@@ -728,10 +692,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 (
                     active_streaming_nodes,
                     control_stream_manager,
-                    CheckpointControl {
+                    CheckpointControl::new(
                         databases,
                         hummock_version_stats,
-                    },
+                    ),
                 )
             };
             if recovery_result.is_err() {
