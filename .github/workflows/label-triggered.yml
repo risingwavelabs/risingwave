@@ -1,30 +1,22 @@
-name: Label Triggered
+name: Label Triggered Comment
+
 on:
-  pull_request:
-    types:
-      - labeled
+  issues:
+    types: [labeled, unlabeled]
+  pull_request_target:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
-  add-comment-feature-telemetry:
-    if: github.event.label.name == 'type/feature'
-    runs-on: ubuntu-latest
-    permissions:
-      pull_request: write
+  comment:
+    runs-on: ubuntu-20.04
     steps:
-      - name: Add comment
-        run: gh issue comment "$NUMBER" --body "$BODY"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          NUMBER: ${{ github.event.issue.number }}
-          BODY: >
-            :memo: **Telemetry Reminder**:
-            If you're implementing this feature, please consider adding telemetry metrics to track its usage. This helps us understand how the feature is being used and improve it further.
-            You can find the function `report_event` of telemetry reporting in the following files. Feel free to ask questions if you need any guidance!
-            * `src/frontend/src/telemetry.rs`
-            * `src/meta/src/telemetry.rs`
-            * `src/stream/src/telemetry.rs`
-            * `src/storage/compactor/src/telemetry.rs`
-            Or calling `report_event_common` (`src/storage/compactor/src/telemetry.rs`) as if finding it hard to implement.
-            :sparkles: Thank you for your contribution to RisingWave! :sparkles:
-      
+      - uses: actions/checkout@v3
+      - name: Label Commenter
+        uses: peaceiris/actions-label-commenter@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
