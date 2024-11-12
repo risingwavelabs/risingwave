@@ -106,8 +106,4 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) fn status(&self) -> Arc<ArcSwap<BarrierManagerStatus>> {
         self.status.clone()
     }
-
-    pub(super) fn hummock_manager(&self) -> &HummockManagerRef {
-        &self.hummock_manager
-    }
 }
