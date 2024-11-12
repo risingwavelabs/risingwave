@@ -5,46 +5,7 @@
 statement ok
 set streaming_parallelism to 1;
 
-statement ok
-create table t(x int);
-
-statement ok
-create materialized view mv as select x, generate_series(1, 2, x) from t;
+include ./issue_11915.slt
 
 statement ok
 set streaming_parallelism to default;
-
-# x = 0 causes generate_series(1, 2, x) to return an error.
-statement ok
-insert into t values (0), (1);
-
-statement ok
-flush;
-
-# Output 0 row when the set-returning function returns error,
-# while x = 1 is fine.
-query II rowsort
-select * from mv;
-----
-1 1
-1 2
-
-# Delete the error row.
-statement ok
-delete from t where x = 0;
-
-statement ok
-flush;
-
-# The result should be the same as before.
-query II rowsort
-select * from mv;
-----
-1 1
-1 2
-
-statement ok
-drop materialized view mv;
-
-statement ok
-drop table t;
