@@ -299,22 +299,18 @@ impl LocalStateStore for LocalHummockStorage {
     type Iter<'a> = LocalHummockStorageIterator<'a>;
     type RevIter<'a> = LocalHummockStorageRevIterator<'a>;
 
-    async fn get_keyed_row(
+    async fn get(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+    ) -> StorageResult<Option<Bytes>> {
         match self.mem_table.buffer.get(&key) {
-            None => self.get_inner(key, self.epoch(), read_options).await,
+            None => self
+                .get_inner(key, self.epoch(), read_options)
+                .await
+                .map(|e| e.map(|item| item.1)),
             Some(op) => match op {
-                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some((
-                    FullKey::new_with_gap_epoch(
-                        read_options.table_id,
-                        key,
-                        EpochWithGap::new(self.epoch(), self.spill_offset),
-                    ),
-                    value.clone(),
-                ))),
+                KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
                 KeyOp::Delete(_) => Ok(None),
             },
         }

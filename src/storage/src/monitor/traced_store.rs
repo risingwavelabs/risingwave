@@ -279,7 +279,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
@@ -289,7 +289,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
             key.clone(),
             Some(epoch),
             read_options.clone(),
-            self.inner.get(key, epoch, read_options),
+            self.inner.get_keyed_row(key, epoch, read_options),
         )
     }
 

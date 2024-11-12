@@ -66,7 +66,7 @@ use crate::mem_table::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions};
+use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions, StateStoreKeyedRow};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -558,14 +558,16 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    Some((
-                        FullKey::new_with_gap_epoch(
-                            read_options.table_id,
-                            table_key.clone(),
-                            data_epoch,
-                        ),
-                        data.into_user_value(),
-                    ))
+                    data.into_user_value().map(|v| {
+                        (
+                            FullKey::new_with_gap_epoch(
+                                read_options.table_id,
+                                table_key.clone(),
+                                data_epoch,
+                            ),
+                            v,
+                        )
+                    })
                 });
             }
         }
@@ -597,14 +599,16 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    Some((
-                        FullKey::new_with_gap_epoch(
-                            read_options.table_id,
-                            table_key.clone(),
-                            data_epoch,
-                        ),
-                        data.into_user_value(),
-                    ))
+                    data.into_user_value().map(|v| {
+                        (
+                            FullKey::new_with_gap_epoch(
+                                read_options.table_id,
+                                table_key.clone(),
+                                data_epoch,
+                            ),
+                            v,
+                        )
+                    })
                 });
             }
         }
@@ -640,14 +644,16 @@ impl HummockVersionReader {
                             return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
                             } else {
-                                Some((
-                                    FullKey::new_with_gap_epoch(
-                                        read_options.table_id,
-                                        table_key.clone(),
-                                        data_epoch,
-                                    ),
-                                    data.into_user_value(),
-                                ))
+                                data.into_user_value().map(|v| {
+                                    (
+                                        FullKey::new_with_gap_epoch(
+                                            read_options.table_id,
+                                            table_key.clone(),
+                                            data_epoch,
+                                        ),
+                                        v,
+                                    )
+                                })
                             });
                         }
                     }
@@ -682,14 +688,16 @@ impl HummockVersionReader {
                         return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
                         } else {
-                            Some((
-                                FullKey::new_with_gap_epoch(
-                                    read_options.table_id,
-                                    table_key.clone(),
-                                    data_epoch,
-                                ),
-                                data.into_user_value(),
-                            ))
+                            data.into_user_value().map(|v| {
+                                (
+                                    FullKey::new_with_gap_epoch(
+                                        read_options.table_id,
+                                        table_key.clone(),
+                                        data_epoch,
+                                    ),
+                                    v,
+                                )
+                            })
                         });
                     }
                 }

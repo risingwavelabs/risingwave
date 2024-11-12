@@ -22,7 +22,7 @@ use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use prost::Message;
 use risingwave_common::array::Op;
@@ -247,7 +247,7 @@ pub trait StateStoreRead: StaticSendSync {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    /// Both FullKey and the value are returned.
+    /// Both full key and the value are returned.
     fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
@@ -417,24 +417,11 @@ pub trait LocalStateStore: StaticSendSync {
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
-    /// Both FullKey and the value are returned.
-    fn get_keyed_row(
-        &self,
-        key: TableKey<Bytes>,
-        read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_;
-
-    /// Point gets a value from the state store.
-    /// The result is based on the latest written snapshot.
-    /// Only the value is returned.
     fn get(
         &self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-        self.get_keyed_row(key, read_options)
-            .map_ok(|v| v.map(|(_, v)| v))
-    }
+    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

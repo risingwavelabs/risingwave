@@ -608,19 +608,22 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type RevIter = RangeKvStateStoreRevIter<R>;
 
     #[allow(clippy::unused_async)]
-    async fn get(
+    async fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
         // We do not really care about vnodes here, so we just use the default value.
         let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
         Ok(match res.as_slice() {
             [] => None,
-            [(_, value)] => Some(value.clone()),
+            [(key, value)] => Some((
+                FullKey::decode(key.as_ref()).to_vec().into_bytes(),
+                value.clone(),
+            )),
             _ => unreachable!(),
         })
     }
