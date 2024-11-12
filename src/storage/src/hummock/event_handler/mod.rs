@@ -18,7 +18,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -67,7 +67,6 @@ pub enum HummockEvent {
     /// Clear shared buffer and reset all states
     Clear(
         oneshot::Sender<()>,
-        HummockVersionId,
         Option<HashSet<TableId>>,
     ),
 
@@ -126,8 +125,8 @@ impl HummockEvent {
                 table_ids,
             } => format!("AwaitSyncEpoch epoch {} {:?}", new_sync_epoch, table_ids),
 
-            HummockEvent::Clear(_, version_id, table_ids) => {
-                format!("Clear {} {:?}", version_id, table_ids)
+            HummockEvent::Clear(_, table_ids) => {
+                format!("Clear {:?}", table_ids)
             }
 
             HummockEvent::Shutdown => "Shutdown".to_string(),

@@ -471,7 +471,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     );
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await?;
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),

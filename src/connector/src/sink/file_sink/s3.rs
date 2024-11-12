@@ -27,16 +27,24 @@ use crate::sink::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SI
 use crate::source::UnknownFields;
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct S3Common {
-    #[serde(rename = "s3.region_name")]
+    #[serde(rename = "s3.region_name", alias = "snowflake.aws_region")]
     pub region_name: String,
-    #[serde(rename = "s3.bucket_name")]
+    #[serde(rename = "s3.bucket_name", alias = "snowflake.s3_bucket")]
     pub bucket_name: String,
     /// The directory where the sink file is located.
-    #[serde(rename = "s3.path")]
-    pub path: String,
-    #[serde(rename = "s3.credentials.access", default)]
+    #[serde(rename = "s3.path", alias = "snowflake.s3_path", default)]
+    pub path: Option<String>,
+    #[serde(
+        rename = "s3.credentials.access",
+        alias = "snowflake.aws_access_key_id",
+        default
+    )]
     pub access: Option<String>,
-    #[serde(rename = "s3.credentials.secret", default)]
+    #[serde(
+        rename = "s3.credentials.secret",
+        alias = "snowflake.aws_secret_access_key",
+        default
+    )]
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
@@ -136,11 +144,56 @@ impl OpendalSinkBackend for S3Sink {
     }
 
     fn get_path(properties: Self::Properties) -> String {
-        properties.common.path
+        properties.common.path.unwrap_or_default()
     }
 
     fn get_engine_type() -> super::opendal_sink::EngineType {
         super::opendal_sink::EngineType::S3
+    }
+
+    fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {
+        BatchingStrategy {
+            max_row_count: properties.batching_strategy.max_row_count,
+            rollover_seconds: properties.batching_strategy.rollover_seconds,
+            path_partition_prefix: properties.batching_strategy.path_partition_prefix,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnowflakeSink;
+
+pub const SNOWFLAKE_SINK: &str = "snowflake";
+
+impl OpendalSinkBackend for SnowflakeSink {
+    type Properties = S3Config;
+
+    const SINK_NAME: &'static str = SNOWFLAKE_SINK;
+
+    fn from_btreemap(btree_map: BTreeMap<String, String>) -> Result<Self::Properties> {
+        let config = serde_json::from_value::<S3Config>(serde_json::to_value(btree_map).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`{}` must be {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_UPSERT
+            )));
+        }
+        Ok(config)
+    }
+
+    fn new_operator(properties: S3Config) -> Result<Operator> {
+        FileSink::<SnowflakeSink>::new_s3_sink(properties)
+    }
+
+    fn get_path(properties: Self::Properties) -> String {
+        properties.common.path.unwrap_or_default()
+    }
+
+    fn get_engine_type() -> super::opendal_sink::EngineType {
+        super::opendal_sink::EngineType::Snowflake
     }
 
     fn get_batching_strategy(properties: Self::Properties) -> BatchingStrategy {

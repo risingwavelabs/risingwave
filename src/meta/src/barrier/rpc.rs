@@ -23,7 +23,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -43,16 +43,35 @@ use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::{
-    Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
-    InflightSubscriptionInfo,
-};
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use super::{Command, InflightSubscriptionInfo};
+use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn to_partial_graph_id(database_id: DatabaseId, job_id: Option<TableId>) -> u64 {
+    ((database_id.database_id as u64) << u32::BITS)
+        | (job_id
+            .map(|table| {
+                assert_ne!(table.table_id, u32::MAX);
+                table.table_id
+            })
+            .unwrap_or(u32::MAX) as u64)
+}
+
+pub(super) fn from_partial_graph_id(partial_graph_id: u64) -> (DatabaseId, Option<TableId>) {
+    let database_id = DatabaseId::new((partial_graph_id >> u32::BITS) as u32);
+    let job_id = (partial_graph_id & (u32::MAX as u64)) as u32;
+    let job_id = if job_id == u32::MAX {
+        None
+    } else {
+        Some(TableId::new(job_id))
+    };
+    (database_id, job_id)
+}
 
 struct ControlStreamNode {
     worker: WorkerNode,
@@ -75,7 +94,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        subscription: &InflightSubscriptionInfo,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -87,10 +106,11 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
+        let subscriptions = subscriptions.collect_vec();
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context
-                .new_control_stream(&node, &subscription.mv_depended_subscriptions)
+                .new_control_stream(&node, subscriptions.iter().cloned())
                 .await
             {
                 Ok(handle) => {
@@ -121,13 +141,15 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        subscriptions: &InflightSubscriptionInfo,
+        subscriptions: impl Iterator<Item = &InflightSubscriptionInfo>,
         nodes: &HashMap<WorkerId, WorkerNode>,
         context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
+        let subscriptions = subscriptions.cloned().collect_vec();
+        let subscriptions = &subscriptions;
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
             let handle = context
-                .new_control_stream(node, &subscriptions.mv_depended_subscriptions)
+                .new_control_stream(node, subscriptions.iter().flatten())
                 .await?;
             Result::<_, MetaError>::Ok((
                 *worker_id,
@@ -253,11 +275,12 @@ impl ControlStreamManager {
 impl ControlStreamManager {
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
+        database_id: DatabaseId,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
         prev_paused_reason: Option<PausedReason>,
-        pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: &InflightGraphInfo,
+        pre_applied_graph_info: &InflightDatabaseInfo,
+        applied_graph_info: &InflightDatabaseInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
         let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
@@ -271,6 +294,7 @@ impl ControlStreamManager {
             vec![]
         };
         self.inject_barrier(
+            database_id,
             None,
             mutation,
             barrier_info,
@@ -287,6 +311,7 @@ impl ControlStreamManager {
 
     pub(super) fn inject_barrier<'a>(
         &mut self,
+        database_id: DatabaseId,
         creating_table_id: Option<TableId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
@@ -300,9 +325,7 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = creating_table_id
-            .map(|table_id| table_id.table_id)
-            .unwrap_or(u32::MAX);
+        let partial_graph_id = to_partial_graph_id(database_id, creating_table_id);
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
@@ -413,7 +436,18 @@ impl ControlStreamManager {
         Ok(node_need_collect)
     }
 
-    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
+    pub(super) fn remove_partial_graph(
+        &mut self,
+        database_id: DatabaseId,
+        creating_job_ids: Vec<TableId>,
+    ) {
+        if creating_job_ids.is_empty() {
+            return;
+        }
+        let partial_graph_ids = creating_job_ids
+            .into_iter()
+            .map(|job_id| to_partial_graph_id(database_id, Some(job_id)))
+            .collect_vec();
         self.nodes.iter().for_each(|(_, node)| {
             if node.handle
                 .request_sender
@@ -438,36 +472,16 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn new_control_stream_impl(
         &self,
         node: &WorkerNode,
-        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> MetaResult<StreamingControlHandle> {
-        let initial_version_id = self
-            .hummock_manager
-            .on_current_version(|version| version.id)
-            .await;
         let handle = self
             .env
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
+            .start_streaming_control(subscriptions)
             .await?;
         Ok(handle)
-    }
-}
-
-impl<C> GlobalBarrierWorker<C> {
-    /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
-        // Record failure in event log.
-        use risingwave_pb::meta::event_log;
-        let event = event_log::EventCollectBarrierFail {
-            prev_epoch: barrier_info.prev_epoch(),
-            cur_epoch: barrier_info.curr_epoch.value().0,
-            error: error.to_report_string(),
-        };
-        self.env
-            .event_log_manager_ref()
-            .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
 }
 
@@ -521,4 +535,35 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
             s
         });
     anyhow!(concat).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DatabaseId, TableId};
+
+    use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
+
+    #[test]
+    fn test_partial_graph_id_convert() {
+        fn test_convert(database_id: u32, job_id: Option<u32>) {
+            let database_id = DatabaseId::new(database_id);
+            let job_id = job_id.map(TableId::new);
+            assert_eq!(
+                (database_id, job_id),
+                from_partial_graph_id(to_partial_graph_id(database_id, job_id))
+            );
+        }
+        for database_id in [0, 1, 2, u32::MAX - 1, u32::MAX >> 1] {
+            for job_id in [
+                Some(0),
+                Some(1),
+                Some(2),
+                None,
+                Some(u32::MAX >> 1),
+                Some(u32::MAX - 1),
+            ] {
+                test_convert(database_id, job_id);
+            }
+        }
+    }
 }

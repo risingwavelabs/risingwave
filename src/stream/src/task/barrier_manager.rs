@@ -49,7 +49,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
@@ -334,7 +334,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(HummockVersionId::new(init_request.version_id)).await;
+                                self.reset().await;
                                 self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
@@ -916,7 +916,6 @@ pub(crate) mod barrier_test_utils {
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
                 init_request: InitRequest {
-                    version_id: 0,
                     subscriptions: vec![],
                 },
             });
@@ -952,7 +951,7 @@ pub(crate) mod barrier_test_utils {
                             barrier: Some(barrier.to_protobuf()),
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
-                            partial_graph_id: u32::MAX,
+                            partial_graph_id: u64::MAX,
                             broadcast_info: vec![],
                             actors_to_build: vec![],
                             subscriptions_to_add: vec![],
