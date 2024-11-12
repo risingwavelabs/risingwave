@@ -1792,6 +1792,7 @@ impl ScaleController {
 
         let TableResizePolicy {
             worker_ids,
+            refilter_node_label,
             table_parallelisms,
         } = policy;
 
@@ -1812,6 +1813,20 @@ impl ScaleController {
             .into_iter()
             .filter(|worker| worker_ids.contains(&(worker.id as _)))
             .collect::<Vec<_>>();
+
+        let workers = if let Some(label) = refilter_node_label {
+            workers
+                .into_iter()
+                .filter(|worker| {
+                    worker
+                        .node_label()
+                        .map(|node_label| node_label.as_str() == label.as_str())
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            workers
+        };
 
         let workers: HashMap<_, _> = workers
             .into_iter()
@@ -2284,6 +2299,7 @@ impl ScaleController {
 #[derive(Debug)]
 pub struct TableResizePolicy {
     pub(crate) worker_ids: BTreeSet<WorkerId>,
+    pub(crate) refilter_node_label: Option<String>,
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
 }
 
@@ -2462,6 +2478,7 @@ impl GlobalStreamManager {
                 .scale_controller
                 .generate_table_resize_plan(TableResizePolicy {
                     worker_ids: schedulable_worker_ids.clone(),
+                    refilter_node_label: None,
                     table_parallelisms: parallelisms.clone(),
                 })
                 .await?;

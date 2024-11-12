@@ -721,6 +721,18 @@ impl CatalogController {
         )
     }
 
+    pub async fn get_job_parallelism_by_id(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<StreamingParallelism> {
+        let inner = self.inner.read().await;
+        let job_info = StreamingJob::find_by_id(job_id)
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("job {} not found in database", job_id))?;
+        Ok(job_info.parallelism)
+    }
+
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()

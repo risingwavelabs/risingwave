@@ -29,6 +29,10 @@ macro_rules! fail {
     }};
 }
 
+pub async fn update_label(  context: &CtlContext, table_id: u32, label: String) -> anyhow::Result<()> {
+
+}
+
 pub async fn update_schedulability(
     context: &CtlContext,
     workers: Vec<String>,
