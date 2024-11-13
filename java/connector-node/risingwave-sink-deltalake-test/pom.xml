@@ -9,9 +9,15 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    <name>risingwave-connector-test</name>
+    <name>risingwave-sink-deltalake-test</name>
     <packaging>jar</packaging>
-    <artifactId>risingwave-connector-test</artifactId>
+    <artifactId>risingwave-sink-deltalake-test</artifactId>
+    <description>
+        This module contains the unit test of Delta Lake Sink. Usually we just put the unit test alongside
+        the main code, but Delta Lake's test relies on Apache Spark, which contains numerous dependencies and
+        can easily conflict with ours. By splitting it as a dedicated module, these Spark's dependencies
+        (especially the stale ones) only affect the test itself.
+    </description>
 
     <properties>
         <iceberg.version>1.0.0</iceberg.version>
@@ -53,14 +59,17 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-protobuf</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-api</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>

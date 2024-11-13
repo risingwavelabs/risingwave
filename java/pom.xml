@@ -48,7 +48,7 @@
         <module>connector-node/risingwave-sink-cassandra</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
-        <module>connector-node/risingwave-connector-test</module>
+        <module>connector-node/risingwave-sink-deltalake-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/risingwave-source-test</module>
         <module>connector-node/assembly</module>
