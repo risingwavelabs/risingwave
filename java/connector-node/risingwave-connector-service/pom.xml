@@ -28,10 +28,6 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>tracing</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>java-binding</artifactId>
         </dependency>
         <dependency>
@@ -42,7 +38,6 @@
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
         </dependency>
-
 
         <dependency>
             <groupId>com.google.code.gson</groupId>
