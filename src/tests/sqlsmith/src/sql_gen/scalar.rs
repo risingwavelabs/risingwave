@@ -81,11 +81,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: AstDataType::SmallInt,
                 value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
             })),
-            T::Varchar => Expr::Value(Value::SingleQuotedString(
-                (0..10)
-                    .map(|_| self.rng.sample(Alphanumeric) as char)
-                    .collect(),
-            )),
+            T::Varchar => Expr::Cast {
+                // since we are generating random scalar literal, we should cast it to avoid unknown type
+                expr: Box::new(Expr::Value(Value::SingleQuotedString(
+                    (0..10)
+                        .map(|_| self.rng.sample(Alphanumeric) as char)
+                        .collect(),
+                ))),
+                data_type: AstDataType::Varchar,
+            },
             T::Decimal => Expr::Nested(Box::new(Expr::Value(Value::Number(self.gen_float())))),
             T::Float64 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Float(None),
