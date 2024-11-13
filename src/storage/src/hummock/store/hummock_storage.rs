@@ -39,7 +39,7 @@ use tokio::sync::oneshot;
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 use crate::compaction_catalog_manager::{CompactionCatalogManager, FakeRemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
@@ -724,7 +724,6 @@ impl HummockStorage {
     }
 
     /// Used in the compaction test tool
-    #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
