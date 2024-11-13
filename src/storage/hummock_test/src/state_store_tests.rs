@@ -1935,7 +1935,10 @@ async fn test_get_keyed_row() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(key, FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "bb"), epoch1));
+    assert_eq!(
+        key,
+        FullKey::new(table_id, gen_key_from_str(VirtualNode::ZERO, "bb"), epoch1)
+    );
     assert_eq!(value, Bytes::from("222"));
     let res = hummock_storage
         .get_keyed_row(
