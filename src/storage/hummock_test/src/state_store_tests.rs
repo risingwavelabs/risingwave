@@ -1873,7 +1873,7 @@ async fn test_get_keyed_row() {
         )
         .await
         .unwrap();
-    assert_eq!(value, None);
+    assert_eq!(res, None);
 
     // Get the anchor value at the first snapshot
     let (key, value) = hummock_storage
@@ -1906,7 +1906,7 @@ async fn test_get_keyed_row() {
         .unwrap();
     assert_eq!(key, FullKey::new(table_id, anchor.clone(), epoch2));
     assert_eq!(value, Bytes::from("111111"));
-    
+
     let res = hummock_storage
         .seal_and_sync_epoch(epoch1, HashSet::from_iter([local.table_id()]))
         .await
