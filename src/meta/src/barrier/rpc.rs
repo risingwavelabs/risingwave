@@ -30,7 +30,9 @@ use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
-use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    CreatePartialGraphRequest, PbInitRequest, PbInitialPartialGraph, RemovePartialGraphRequest,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     InjectBarrierRequest, StreamingControlStreamRequest,
@@ -94,7 +96,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -106,13 +108,10 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
-        let subscriptions = subscriptions.collect_vec();
+        let init_request = Self::collect_init_request(initial_subscriptions);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
-            match context
-                .new_control_stream(&node, subscriptions.iter().cloned())
-                .await
-            {
+            match context.new_control_stream(&node, &init_request).await {
                 Ok(handle) => {
                     assert!(self
                         .nodes
@@ -141,16 +140,14 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        subscriptions: impl Iterator<Item = &InflightSubscriptionInfo>,
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
         nodes: &HashMap<WorkerId, WorkerNode>,
         context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
-        let subscriptions = subscriptions.cloned().collect_vec();
-        let subscriptions = &subscriptions;
+        let init_request = Self::collect_init_request(initial_subscriptions);
+        let init_request = &init_request;
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
-            let handle = context
-                .new_control_stream(node, subscriptions.iter().flatten())
-                .await?;
+            let handle = context.new_control_stream(node, init_request).await?;
             Result::<_, MetaError>::Ok((
                 *worker_id,
                 ControlStreamNode {
@@ -269,6 +266,19 @@ impl ControlStreamManager {
         }
         tracing::debug!(?errors, "collected stream errors");
         errors
+    }
+
+    fn collect_init_request(
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
+    ) -> PbInitRequest {
+        PbInitRequest {
+            graphs: initial_subscriptions
+                .map(|(database_id, info)| PbInitialPartialGraph {
+                    partial_graph_id: to_partial_graph_id(database_id, None),
+                    subscriptions: info.into_iter().collect_vec(),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -436,6 +446,27 @@ impl ControlStreamManager {
         Ok(node_need_collect)
     }
 
+    pub(super) fn add_partial_graph(
+        &mut self,
+        database_id: DatabaseId,
+        creating_job_id: Option<TableId>,
+    ) -> MetaResult<()> {
+        let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
+        self.nodes.iter().try_for_each(|(_, node)| {
+            node.handle
+                .request_sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::CreatePartialGraph(
+                            CreatePartialGraphRequest { partial_graph_id },
+                        ),
+                    ),
+                })
+                .map_err(|_| anyhow!("failed to add partial graph"))
+        })?;
+        Ok(())
+    }
+
     pub(super) fn remove_partial_graph(
         &mut self,
         database_id: DatabaseId,
@@ -472,14 +503,14 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn new_control_stream_impl(
         &self,
         node: &WorkerNode,
-        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
+        init_request: &PbInitRequest,
     ) -> MetaResult<StreamingControlHandle> {
         let handle = self
             .env
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(subscriptions)
+            .start_streaming_control(init_request.clone())
             .await?;
         Ok(handle)
     }

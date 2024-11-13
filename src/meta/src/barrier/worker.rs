@@ -560,7 +560,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             let reset_start_time = Instant::now();
             control_stream_manager
                 .reset(
-                    subscription_infos.values(),
+                    subscription_infos.iter().map(|(database_id, subscriptions)| (*database_id, subscriptions)),
                     active_streaming_nodes.current(),
                     &*self.context,
                 )
