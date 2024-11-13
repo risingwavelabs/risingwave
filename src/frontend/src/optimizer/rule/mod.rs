@@ -17,6 +17,8 @@
 use std::convert::Infallible;
 use std::ops::FromResidual;
 
+use thiserror_ext::AsReport;
+
 use super::PlanRef;
 use crate::error::RwError;
 
@@ -135,7 +137,6 @@ pub use apply_project_transpose_rule::*;
 mod apply_eliminate_rule;
 pub use apply_eliminate_rule::*;
 mod translate_apply_rule;
-use thiserror_ext::AsReport;
 pub use translate_apply_rule::*;
 mod merge_multijoin_rule;
 pub use merge_multijoin_rule::*;
