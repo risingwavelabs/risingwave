@@ -13520,7 +13520,7 @@ checksum = "d123f285a3635e423ec2ef5b67e0168dcf86c0d62fffbcea88fcd1c926e47413"
 dependencies = [
  "getrandom",
  "halfbrown",
- "lexical-core",
+ "lexical-core 0.8.5",
  "ref-cast",
  "serde",
  "serde_json",
