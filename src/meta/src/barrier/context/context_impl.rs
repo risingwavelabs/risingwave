@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
-use risingwave_common::catalog::TableId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
@@ -160,24 +159,6 @@ impl CommandContext {
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
-                    .await?;
-            }
-
-            Command::CancelStreamingJob(table_fragments) => {
-                tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
-
-                // NOTE(kwannoel): At this point, meta has already registered the table ids.
-                // We should unregister them.
-                // This is required for background ddl, for foreground ddl this is a no-op.
-                // Foreground ddl is handled entirely by stream manager, so it will unregister
-                // the table ids on failure.
-                // On the other hand background ddl could be handled by barrier manager.
-                // It won't clean the tables on failure,
-                // since the failure could be recoverable.
-                // As such it needs to be handled here.
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(table_fragments.all_table_ids().map(TableId::new))
                     .await?;
             }
 
