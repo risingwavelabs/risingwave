@@ -32,6 +32,17 @@ pub enum ApplyResult<T = PlanRef> {
     Err(RwError),
 }
 
+impl ApplyResult {
+    /// Unwrap the result, panicking if it's not `Ok`.
+    pub fn unwrap(self) -> PlanRef {
+        match self {
+            ApplyResult::Ok(plan) => plan,
+            ApplyResult::NotApplicable => panic!("unwrap ApplyResult::NotApplicable"),
+            ApplyResult::Err(e) => panic!("unwrap ApplyResult::Err, error: {:?}", e.as_report()),
+        }
+    }
+}
+
 /// Allow calling `?` on an `Option` in a function returning `ApplyResult`.
 impl<T> FromResidual<Option<Infallible>> for ApplyResult<T> {
     fn from_residual(residual: Option<Infallible>) -> Self {
@@ -55,22 +66,35 @@ where
     }
 }
 
-/// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
-/// downcast and check if the node matches the rule.
-pub trait Rule: Send + Sync + Description {
+/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode).
+pub trait InfallibleRule: Send + Sync + Description {
     /// Apply the rule to the plan node.
     ///
     /// - Returns `Some` if the apply is successful.
     /// - Returns `None` if it's not applicable. The optimizer may try other rules.
     fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+}
+use InfallibleRule as Rule;
 
+/// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode) that may return an
+/// unrecoverable error that stops further optimization.
+///
+/// An [`InfallibleRule`] is always a [`FallibleRule`].
+pub trait FallibleRule: Send + Sync + Description {
     /// Apply the rule to the plan node, which may return an unrecoverable error.
     ///
     /// - Returns `ApplyResult::Ok` if the apply is successful.
     /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
     /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
     ///   other rules and report the error to the user.
-    fn apply_fallible(&self, plan: PlanRef) -> ApplyResult {
+    fn apply(&self, plan: PlanRef) -> ApplyResult;
+}
+
+impl<T> FallibleRule for T
+where
+    T: InfallibleRule,
+{
+    fn apply(&self, plan: PlanRef) -> ApplyResult {
         match self.apply(plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,
@@ -82,7 +106,7 @@ pub trait Description {
     fn description(&self) -> &str;
 }
 
-pub(super) type BoxedRule = Box<dyn Rule>;
+pub(super) type BoxedRule = Box<dyn FallibleRule>;
 
 mod logical_filter_expression_simplify_rule;
 pub use logical_filter_expression_simplify_rule::*;
@@ -109,6 +133,7 @@ pub use apply_project_transpose_rule::*;
 mod apply_eliminate_rule;
 pub use apply_eliminate_rule::*;
 mod translate_apply_rule;
+use thiserror_ext::AsReport;
 pub use translate_apply_rule::*;
 mod merge_multijoin_rule;
 pub use merge_multijoin_rule::*;

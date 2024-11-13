@@ -52,7 +52,7 @@ impl<'a> HeuristicOptimizer<'a> {
 
     fn optimize_node(&mut self, mut plan: PlanRef) -> Result<PlanRef> {
         for rule in self.rules {
-            match rule.apply_fallible(plan.clone()) {
+            match rule.apply(plan.clone()) {
                 ApplyResult::Ok(applied) => {
                     #[cfg(debug_assertions)]
                     Self::check_equivalent_plan(rule.description(), &plan, &applied);
