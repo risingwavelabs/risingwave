@@ -110,14 +110,8 @@
             <version>3.24.2</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>com.zaxxer</groupId>
-            <artifactId>HikariCP</artifactId>
-            <version>5.0.1</version>
-            <scope>test</scope>
-        </dependency>
 
-
+        <!-- Force using jackson-databind 2.13.5, as required by spark-3.2_2.12  -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -131,46 +125,5 @@
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-connector-service</artifactId>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.risingwave</groupId>
-                    <artifactId>tracing</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-jdbc</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-es-7</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-cassandra</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-common</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 </project>
