@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model::TableParallelism;
 use risingwave_meta::stream::{RescheduleOptions, ScaleControllerRef, WorkerReschedule};
@@ -123,7 +123,6 @@ impl ScaleService for ScaleServiceImpl {
             .split_fragment_map_by_database(worker_reschedules)
             .await?
         {
-            let database_id = DatabaseId::new(database_id as _);
             let streaming_job_ids = self
                 .metadata_manager
                 .catalog_controller

@@ -40,16 +40,16 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-struct PartialGraphId(u32);
+struct PartialGraphId(u64);
 
 impl PartialGraphId {
-    fn new(id: u32) -> Self {
+    fn new(id: u64) -> Self {
         Self(id)
     }
 }
 
-impl From<PartialGraphId> for u32 {
-    fn from(val: PartialGraphId) -> u32 {
+impl From<PartialGraphId> for u64 {
+    fn from(val: PartialGraphId) -> u64 {
         val.0
     }
 }

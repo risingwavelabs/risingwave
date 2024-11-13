@@ -127,9 +127,23 @@ impl<S: StateStore> NowExecutor<S> {
                 );
             }
             for barrier in barriers {
+                let new_timestamp = Some(barrier.get_curr_epoch().as_scalar());
+                let pause_mutation =
+                    barrier
+                        .mutation
+                        .as_deref()
+                        .and_then(|mutation| match mutation {
+                            Mutation::Pause => Some(true),
+                            Mutation::Resume => Some(false),
+                            _ => None,
+                        });
+
                 if !initialized {
+                    let first_epoch = barrier.epoch;
+                    let is_pause_on_startup = barrier.is_pause_on_startup();
+                    yield Message::Barrier(barrier);
                     // Handle the initial barrier.
-                    state_table.init_epoch(barrier.epoch);
+                    state_table.init_epoch(first_epoch).await?;
                     let state_row = {
                         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                             &(Unbounded, Unbounded);
@@ -144,25 +158,20 @@ impl<S: StateStore> NowExecutor<S> {
                         }
                     };
                     last_timestamp = state_row.and_then(|row| row[0].clone());
-                    paused = barrier.is_pause_on_startup();
+                    paused = is_pause_on_startup;
                     initialized = true;
                 } else {
                     state_table.commit(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
                 }
 
                 // Extract timestamp from the current epoch.
-                curr_timestamp = Some(barrier.get_curr_epoch().as_scalar());
+                curr_timestamp = new_timestamp;
 
                 // Update paused state.
-                if let Some(mutation) = barrier.mutation.as_deref() {
-                    match mutation {
-                        Mutation::Pause => paused = true,
-                        Mutation::Resume => paused = false,
-                        _ => {}
-                    }
+                if let Some(pause_mutation) = pause_mutation {
+                    paused = pause_mutation;
                 }
-
-                yield Message::Barrier(barrier);
             }
 
             // Do not yield any messages if paused.

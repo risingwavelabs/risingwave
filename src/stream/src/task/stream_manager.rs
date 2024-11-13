@@ -28,7 +28,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::{bail, must_match};
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
@@ -249,7 +248,7 @@ impl LocalStreamManager {
 
 impl LocalBarrierWorker {
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, version_id: HummockVersionId) {
+    pub(super) async fn reset(&mut self) {
         self.state.abort_actors().await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
@@ -257,7 +256,7 @@ impl LocalBarrierWorker {
 
         if let Some(hummock) = self.actor_manager.env.state_store().as_hummock() {
             hummock
-                .clear_shared_buffer(version_id)
+                .clear_shared_buffer()
                 .verbose_instrument_await("store_clear_shared_buffer")
                 .await
         }

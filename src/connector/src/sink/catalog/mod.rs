@@ -149,6 +149,7 @@ pub enum SinkEncode {
     Template,
     Parquet,
     Text,
+    Bytes,
 }
 
 impl Display for SinkEncode {
@@ -205,6 +206,7 @@ impl SinkFormatDesc {
             SinkEncode::Template => E::Template,
             SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
+            SinkEncode::Bytes => E::Bytes,
         };
 
         let encode = mapping_encode(&self.encode);
@@ -273,10 +275,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
