@@ -75,6 +75,14 @@ pub fn mysql_datum_to_rw_datum(
 ) -> Result<Datum, anyhow::Error> {
     match rw_data_type {
         DataType::Boolean => {
+            // TinyInt(1) is used to represent boolean in MySQL
+            // This handles backwards compatibility,
+            // before https://github.com/risingwavelabs/risingwave/pull/19071
+            // we permit boolean and tinyint(1) to be equivalent to boolean in RW.
+            if let Some(Ok(val)) = mysql_row.get_opt::<Option<bool>, _>(mysql_datum_index) {
+                let _ = mysql_row.take::<bool, _>(mysql_datum_index);
+                return Ok(val.map(ScalarImpl::from));
+            }
             // Bit(1)
             match mysql_row.take_opt::<Option<Vec<u8>>, _>(mysql_datum_index) {
                 None => bail!(

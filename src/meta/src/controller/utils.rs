@@ -17,17 +17,18 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::hash;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
+use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
     actor, actor_dispatcher, connection, database, fragment, function, index, object,
     object_dependency, schema, secret, sink, source, subscription, table, user, user_privilege,
     view, ActorId, ConnectorSplits, DataTypeArray, DatabaseId, FragmentId, I32Array, ObjectId,
-    PrivilegeId, SchemaId, SourceId, StreamNode, UserId, VnodeBitmap, WorkerId,
+    PrivilegeId, SchemaId, SourceId, StreamNode, TableId, UserId, VnodeBitmap, WorkerId,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -49,12 +50,15 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DerivePartialModel, EntityTrait, FromQueryResult, JoinType,
-    Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DerivePartialModel, EntityTrait,
+    FromQueryResult, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set,
+    Statement,
 };
 use thiserror_ext::AsReport;
 
+use crate::controller::ObjectModel;
 use crate::{MetaError, MetaResult};
+
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
 ///
 /// # Examples
@@ -732,6 +736,58 @@ pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery 
         .to_owned()
 }
 
+pub async fn get_internal_tables_by_id<C>(job_id: ObjectId, db: &C) -> MetaResult<Vec<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let table_ids: Vec<TableId> = Table::find()
+        .select_only()
+        .column(table::Column::TableId)
+        .filter(
+            table::Column::TableType
+                .eq(TableType::Internal)
+                .and(table::Column::BelongsToJobId.eq(job_id)),
+        )
+        .into_tuple()
+        .all(db)
+        .await?;
+    Ok(table_ids)
+}
+
+pub async fn get_index_state_tables_by_table_id<C>(
+    table_id: TableId,
+    db: &C,
+) -> MetaResult<Vec<TableId>>
+where
+    C: ConnectionTrait,
+{
+    let mut index_table_ids: Vec<TableId> = Index::find()
+        .select_only()
+        .column(index::Column::IndexTableId)
+        .filter(index::Column::PrimaryTableId.eq(table_id))
+        .into_tuple()
+        .all(db)
+        .await?;
+
+    if !index_table_ids.is_empty() {
+        let internal_table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(
+                table::Column::TableType
+                    .eq(TableType::Internal)
+                    .and(table::Column::BelongsToJobId.is_in(index_table_ids.clone())),
+            )
+            .into_tuple()
+            .all(db)
+            .await?;
+
+        index_table_ids.extend(internal_table_ids.into_iter());
+    }
+
+    Ok(index_table_ids)
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
@@ -1175,6 +1231,170 @@ pub fn extract_external_table_name_from_definition(table_definition: &str) -> Op
     } else {
         None
     }
+}
+
+/// `rename_relation` renames the target relation and its definition,
+/// it commits the changes to the transaction and returns the updated relations and the old name.
+pub async fn rename_relation(
+    txn: &DatabaseTransaction,
+    object_type: ObjectType,
+    object_id: ObjectId,
+    object_name: &str,
+) -> MetaResult<(Vec<PbRelation>, String)> {
+    use sea_orm::ActiveModelTrait;
+
+    use crate::controller::rename::alter_relation_rename;
+
+    let mut to_update_relations = vec![];
+    // rename relation.
+    macro_rules! rename_relation {
+        ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
+            let (mut relation, obj) = $entity::find_by_id($object_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+                .unwrap();
+            let obj = obj.unwrap();
+            let old_name = relation.name.clone();
+            relation.name = object_name.into();
+            if obj.obj_type != ObjectType::View {
+                relation.definition = alter_relation_rename(&relation.definition, object_name);
+            }
+            let active_model = $table::ActiveModel {
+                $identity: Set(relation.$identity),
+                name: Set(object_name.into()),
+                definition: Set(relation.definition.clone()),
+                ..Default::default()
+            };
+            active_model.update(txn).await?;
+            to_update_relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::$entity(ObjectModel(relation, obj).into())),
+            });
+            old_name
+        }};
+    }
+    // TODO: check is there any thing to change for shared source?
+    let old_name = match object_type {
+        ObjectType::Table => rename_relation!(Table, table, table_id, object_id),
+        ObjectType::Source => rename_relation!(Source, source, source_id, object_id),
+        ObjectType::Sink => rename_relation!(Sink, sink, sink_id, object_id),
+        ObjectType::Subscription => {
+            rename_relation!(Subscription, subscription, subscription_id, object_id)
+        }
+        ObjectType::View => rename_relation!(View, view, view_id, object_id),
+        ObjectType::Index => {
+            let (mut index, obj) = Index::find_by_id(object_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+                .unwrap();
+            index.name = object_name.into();
+            let index_table_id = index.index_table_id;
+            let old_name = rename_relation!(Table, table, table_id, index_table_id);
+
+            // the name of index and its associated table is the same.
+            let active_model = index::ActiveModel {
+                index_id: sea_orm::ActiveValue::Set(index.index_id),
+                name: sea_orm::ActiveValue::Set(object_name.into()),
+                ..Default::default()
+            };
+            active_model.update(txn).await?;
+            to_update_relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::Index(
+                    ObjectModel(index, obj.unwrap()).into(),
+                )),
+            });
+            old_name
+        }
+        _ => unreachable!("only relation name can be altered."),
+    };
+
+    Ok((to_update_relations, old_name))
+}
+
+/// `rename_relation_refer` updates the definition of relations that refer to the target one,
+/// it commits the changes to the transaction and returns all the updated relations.
+pub async fn rename_relation_refer(
+    txn: &DatabaseTransaction,
+    object_type: ObjectType,
+    object_id: ObjectId,
+    object_name: &str,
+    old_name: &str,
+) -> MetaResult<Vec<PbRelation>> {
+    use sea_orm::ActiveModelTrait;
+
+    use crate::controller::rename::alter_relation_rename_refs;
+
+    let mut to_update_relations = vec![];
+    macro_rules! rename_relation_ref {
+        ($entity:ident, $table:ident, $identity:ident, $object_id:expr) => {{
+            let (mut relation, obj) = $entity::find_by_id($object_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+                .unwrap();
+            relation.definition =
+                alter_relation_rename_refs(&relation.definition, old_name, object_name);
+            let active_model = $table::ActiveModel {
+                $identity: Set(relation.$identity),
+                definition: Set(relation.definition.clone()),
+                ..Default::default()
+            };
+            active_model.update(txn).await?;
+            to_update_relations.push(PbRelation {
+                relation_info: Some(PbRelationInfo::$entity(
+                    ObjectModel(relation, obj.unwrap()).into(),
+                )),
+            });
+        }};
+    }
+    let mut objs = get_referring_objects(object_id, txn).await?;
+    if object_type == ObjectType::Table {
+        let incoming_sinks: I32Array = Table::find_by_id(object_id)
+            .select_only()
+            .column(table::Column::IncomingSinks)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+
+        objs.extend(
+            incoming_sinks
+                .into_inner()
+                .into_iter()
+                .map(|id| PartialObject {
+                    oid: id,
+                    obj_type: ObjectType::Sink,
+                    schema_id: None,
+                    database_id: None,
+                }),
+        );
+    }
+
+    for obj in objs {
+        match obj.obj_type {
+            ObjectType::Table => rename_relation_ref!(Table, table, table_id, obj.oid),
+            ObjectType::Sink => rename_relation_ref!(Sink, sink, sink_id, obj.oid),
+            ObjectType::Subscription => {
+                rename_relation_ref!(Subscription, subscription, subscription_id, obj.oid)
+            }
+            ObjectType::View => rename_relation_ref!(View, view, view_id, obj.oid),
+            ObjectType::Index => {
+                let index_table_id: Option<TableId> = Index::find_by_id(obj.oid)
+                    .select_only()
+                    .column(index::Column::IndexTableId)
+                    .into_tuple()
+                    .one(txn)
+                    .await?;
+                rename_relation_ref!(Table, table, table_id, index_table_id.unwrap());
+            }
+            _ => {
+                bail!("only table, sink, subscription, view and index depend on other objects.")
+            }
+        }
+    }
+
+    Ok(to_update_relations)
 }
 
 #[cfg(test)]

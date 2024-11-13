@@ -33,7 +33,7 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "String(None)")]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
 pub enum DistributionType {
     #[sea_orm(string_value = "SINGLE")]
     Single,

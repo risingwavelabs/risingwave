@@ -166,3 +166,9 @@
       └─BatchUpdate { table: t, exprs: [($0 + 1:Int32), $1, $2] }
         └─BatchExchange { order: [], dist: HashShard(t.a, t.b, t._row_id, t._rw_timestamp) }
           └─BatchScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
+- name: update table with subquery in the set clause
+  sql: |
+    create table t1 (v1 int primary key, v2 int);
+    create table t2 (v1 int primary key, v2 int);
+    update t1 set v1 = (select v1 from t2 where t1.v2 = t2.v2);
+  binder_error: 'Bind error: subquery on the right side of assignment is unsupported'

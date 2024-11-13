@@ -21,7 +21,7 @@ use risingwave_pb::hummock::report_compaction_task_request::{
     Event as ReportCompactionTaskEvent, HeartBeat as SharedHeartBeat,
     ReportTask as ReportSharedTask,
 };
-use risingwave_pb::hummock::{PbCompactTask, ReportFullScanTaskRequest, ReportVacuumTaskRequest};
+use risingwave_pb::hummock::PbCompactTask;
 use risingwave_rpc_client::GrpcCompactorProxyClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
@@ -86,7 +86,6 @@ use crate::compaction_catalog_manager::{
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
     validate_ssts, BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
     SstableWriterFactory, UnifiedSstableWriterFactory,
@@ -469,7 +468,6 @@ pub fn start_compactor(
                             .compaction_event_consumed_latency
                             .observe(consumed_latency_ms as _);
 
-                        let meta_client = hummock_meta_client.clone();
                         let sstable_object_id_manager = sstable_object_id_manager.clone();
                         let compaction_catalog_manager_ref = compaction_catalog_manager_ref.clone();
 
@@ -555,48 +553,11 @@ pub fn start_compactor(
                                     }
                                 });
                             }
-                            ResponseEvent::VacuumTask(vacuum_task) => {
-                                executor.spawn(async move {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            Vacuum::report_vacuum_task(vacuum_task, meta_client).await;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
-                                });
+                            ResponseEvent::VacuumTask(_) => {
+                                unreachable!("unexpected vacuum task");
                             }
-                            ResponseEvent::FullScanTask(full_scan_task) => {
-                                executor.spawn(async move {
-                                    let start_after = full_scan_task.start_after.clone();
-                                    match Vacuum::handle_full_scan_task(
-                                        full_scan_task,
-                                        context.sstable_store.clone(),
-                                    )
-                                    .await
-                                    {
-                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
-                                            Vacuum::report_full_scan_task(
-                                                object_ids,
-                                                total_object_count,
-                                                total_object_size,
-                                                start_after,
-                                                next_start_after,
-                                                meta_client,
-                                            )
-                                            .await;
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to iter object");
-                                        }
-                                    }
-                                });
+                            ResponseEvent::FullScanTask(_) => {
+                                unreachable!("unexpected scan task");
                             }
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
@@ -764,52 +725,11 @@ pub fn start_shared_compactor(
                                     }
 
                                 }
-                                dispatch_compaction_task_request::Task::VacuumTask(vacuum_task) => {
-                                    match Vacuum::handle_vacuum_task(
-                                        context.sstable_store.clone(),
-                                        &vacuum_task.sstable_object_ids,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => {
-                                            let report_vacuum_task_request = ReportVacuumTaskRequest {
-                                                vacuum_task: Some(vacuum_task),
-                                            };
-                                            match cloned_grpc_proxy_client.report_vacuum_task(report_vacuum_task_request).await {
-                                                Ok(_) => tracing::info!("Finished vacuuming SSTs"),
-                                                Err(e) => tracing::warn!(error = %e.as_report(), "Failed to report vacuum task"),
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to vacuum task")
-                                        }
-                                    }
+                                dispatch_compaction_task_request::Task::VacuumTask(_) => {
+                                    unreachable!("unexpected vacuum task");
                                 }
-                                dispatch_compaction_task_request::Task::FullScanTask(full_scan_task) => {
-                                    let start_after = full_scan_task.start_after.clone();
-                                    match Vacuum::handle_full_scan_task(full_scan_task, context.sstable_store.clone())
-                                        .await
-                                    {
-                                        Ok((object_ids, total_object_count, total_object_size, next_start_after)) => {
-                                            let report_full_scan_task_request = ReportFullScanTaskRequest {
-                                                object_ids,
-                                                total_object_count,
-                                                total_object_size,
-                                                next_start_after,
-                                                start_after,
-                                            };
-                                            match cloned_grpc_proxy_client
-                                                .report_full_scan_task(report_full_scan_task_request)
-                                                .await
-                                            {
-                                                Ok(_) => tracing::info!("Finished full scan SSTs"),
-                                                Err(e) => tracing::warn!(error = %e.as_report(), "Failed to report full scan task"),
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e.as_report(), "Failed to iter object");
-                                        }
-                                    }
+                                dispatch_compaction_task_request::Task::FullScanTask(_) => {
+                                    unreachable!("unexpected scan task");
                                 }
                                 dispatch_compaction_task_request::Task::ValidationTask(validation_task) => {
                                     let validation_task = ValidationTask::from(validation_task);

@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
@@ -54,7 +55,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
+use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
@@ -675,7 +676,7 @@ pub(crate) async fn reparse_table_for_sink(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, _) = generate_stream_graph_for_table(
+    let (graph, table, source, _) = generate_stream_graph_for_replace_table(
         session,
         table_name,
         table_catalog,
@@ -839,13 +840,15 @@ fn bind_sink_format_desc(
 
     let mut key_encode = None;
     if let Some(encode) = value.key_encode {
-        if encode == E::Text {
-            key_encode = Some(SinkEncode::Text);
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "sink key encode unsupported: {encode}, only TEXT supported"
-            ))
-            .into());
+        match encode {
+            E::Text => key_encode = Some(SinkEncode::Text),
+            E::Bytes => key_encode = Some(SinkEncode::Bytes),
+            _ => {
+                return Err(ErrorCode::BindError(format!(
+                    "sink key encode unsupported: {encode}, only TEXT and BYTES supported"
+                ))
+                .into())
+            }
         }
     }
 
@@ -874,7 +877,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::file_sink::fs::FsSink;
         use risingwave_connector::sink::file_sink::gcs::GcsSink;
         use risingwave_connector::sink::file_sink::opendal_sink::FileSink;
-        use risingwave_connector::sink::file_sink::s3::S3Sink;
+        use risingwave_connector::sink::file_sink::s3::{S3Sink, SnowflakeSink};
         use risingwave_connector::sink::file_sink::webhdfs::WebhdfsSink;
         use risingwave_connector::sink::google_pubsub::GooglePubSubSink;
         use risingwave_connector::sink::kafka::KafkaSink;
@@ -894,6 +897,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                ),
+                FileSink::<SnowflakeSink>::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Parquet, Encode::Json],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
@@ -950,6 +956,19 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
         ))
         .into());
     }
+
+    // only allow Kafka connector work with `bytes` as key encode
+    if let Some(encode) = &format_desc.key_encode
+        && connector != KAFKA_SINK
+        && matches!(encode, Encode::Bytes)
+    {
+        return Err(ErrorCode::BindError(format!(
+            "key encode bytes only works with kafka connector, but found {}",
+            connector
+        ))
+        .into());
+    }
+
     Ok(())
 }
 

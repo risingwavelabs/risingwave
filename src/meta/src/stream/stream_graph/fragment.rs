@@ -56,7 +56,7 @@ pub(super) struct BuildingFragment {
     inner: StreamFragment,
 
     /// The ID of the job if it contains the streaming job node.
-    table_id: Option<u32>,
+    job_id: Option<u32>,
 
     /// The required column IDs of each upstream table.
     /// Will be converted to indices when building the edge connected to the upstream.
@@ -82,12 +82,12 @@ impl BuildingFragment {
         // Fill the information of the internal tables in the fragment.
         Self::fill_internal_tables(&mut fragment, job, table_id_gen);
 
-        let table_id = Self::fill_job(&mut fragment, job).then(|| job.id());
+        let job_id = Self::fill_job(&mut fragment, job).then(|| job.id());
         let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
 
         Self {
             inner: fragment,
-            table_id,
+            job_id,
             upstream_table_columns,
         }
     }
@@ -126,17 +126,17 @@ impl BuildingFragment {
 
     /// Fill the information with the job in the fragment.
     fn fill_job(fragment: &mut StreamFragment, job: &StreamingJob) -> bool {
-        let table_id = job.id();
+        let job_id = job.id();
         let fragment_id = fragment.fragment_id;
-        let mut has_table = false;
+        let mut has_job = false;
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
-                materialize_node.table_id = table_id;
+                materialize_node.table_id = job_id;
 
                 // Fill the ID of the `Table`.
                 let table = materialize_node.table.as_mut().unwrap();
-                table.id = table_id;
+                table.id = job_id;
                 table.database_id = job.database_id();
                 table.schema_id = job.schema_id();
                 table.fragment_id = fragment_id;
@@ -145,27 +145,58 @@ impl BuildingFragment {
                     table.definition = job.name();
                 }
 
-                has_table = true;
+                has_job = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.sink_desc.as_mut().unwrap().id = table_id;
+                sink_node.sink_desc.as_mut().unwrap().id = job_id;
 
-                has_table = true;
+                has_job = true;
             }
             NodeBody::Dml(dml_node) => {
-                dml_node.table_id = table_id;
+                dml_node.table_id = job_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
-            NodeBody::Source(_) => {
-                // Notice: Table job has a dumb Source node, we should be careful that `has_table` should not be overwrite to `false`
-                if !has_table {
-                    has_table = job.is_source_job();
+            NodeBody::StreamFsFetch(fs_fetch_node) => {
+                if let StreamingJob::Table(table_source, _, _) = job {
+                    if let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
+                        && let Some(source) = table_source
+                    {
+                        node_inner.source_id = source.id;
+                    }
+                }
+            }
+            NodeBody::Source(source_node) => {
+                match job {
+                    // Note: For table without connector, it has a dummy Source node.
+                    // Note: For table with connector, it's source node has a source id different with the table id (job id), assigned in create_job_catalog.
+                    StreamingJob::Table(source, _table, _table_job_type) => {
+                        if let Some(source_inner) = source_node.source_inner.as_mut() {
+                            if let Some(source) = source {
+                                debug_assert_ne!(source.id, job_id);
+                                source_inner.source_id = source.id;
+                            }
+                        }
+                    }
+                    StreamingJob::Source(source) => {
+                        has_job = true;
+                        if let Some(source_inner) = source_node.source_inner.as_mut() {
+                            debug_assert_eq!(source.id, job_id);
+                            source_inner.source_id = source.id;
+                        }
+                    }
+                    // For other job types, no need to fill the source id, since it refers to an existing source.
+                    _ => {}
+                }
+            }
+            NodeBody::StreamCdcScan(node) => {
+                if let Some(table_desc) = node.cdc_table_desc.as_mut() {
+                    table_desc.table_id = job_id;
                 }
             }
             _ => {}
         });
 
-        has_table
+        has_job
     }
 
     /// Extract the required columns (in IDs) of each upstream table.
@@ -499,7 +530,7 @@ impl StreamFragmentGraph {
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
             .values()
-            .filter(|b| b.table_id.is_some())
+            .filter(|b| b.job_id.is_some())
             .map(|b| b.fragment_id)
             .exactly_one()
             .expect("require exactly 1 materialize/sink/cdc source node when creating the streaming job")
@@ -1095,7 +1126,7 @@ impl CompleteStreamFragmentGraph {
         let internal_tables = building_fragment.extract_internal_tables();
         let BuildingFragment {
             inner,
-            table_id,
+            job_id,
             upstream_table_columns: _,
         } = building_fragment;
 
@@ -1104,7 +1135,7 @@ impl CompleteStreamFragmentGraph {
 
         let materialized_fragment_id =
             if inner.fragment_type_mask & FragmentTypeFlag::Mview as u32 != 0 {
-                table_id
+                job_id
             } else {
                 None
             };

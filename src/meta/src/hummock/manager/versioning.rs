@@ -55,8 +55,6 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
-    /// Whether time travel is enabled during last commit epoch.
-    pub time_travel_toggle_check: bool,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,

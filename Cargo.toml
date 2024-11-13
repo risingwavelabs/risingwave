@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [workspace]
 members = [
     "src/batch",
@@ -175,13 +177,13 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-sea-orm = { version = "0.12.15", features = [
-    "sqlx-mysql",
-    "sqlx-postgres",
-    "sqlx-sqlite",
+sea-orm = { version = "~1.1", features = [
+    "sqlx-all",
     "runtime-tokio-native-tls",
+    "with-uuid",
 ] }
-sqlx = { version = "0.7.4", default-features = false, features = [
+sea-orm-migration = "~1.1"
+sqlx = { version = "0.8.2", default-features = false, features = [
     "bigdecimal",
     "chrono",
     "json",
@@ -295,6 +297,9 @@ redundant_explicit_links = "allow"
 # See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
 lto = "off"
+# use parallel frontend to speed up build
+# TODO: may consider applying to release/production profile as well
+rustflags = ["-Z", "threads=8"]
 
 [profile.release]
 debug = "full"
@@ -350,11 +355,9 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae
 # tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
-
-# sqlx version: v0.7.4
-# patch diffs: https://github.com/madsim-rs/sqlx/pull/3
-sqlx = { git = "https://github.com/risingwavelabs/sqlx.git", rev = "ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a" }
-
+# sqlx version: v0.8.2
+# patch diffs: https://github.com/madsim-rs/sqlx/pull/4
+sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 futures-timer = { git = "https://github.com/madsim-rs/futures-timer.git", rev = "05b33b4" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", rev = "e5175ec" }
