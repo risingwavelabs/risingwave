@@ -145,7 +145,7 @@ impl IcebergCommon {
             match &self.warehouse_path {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
-                        let url = Url::parse(&warehouse_path).with_context(|| {
+                        let url = Url::parse(warehouse_path).with_context(|| {
                             format!("Invalid warehouse path: {}", warehouse_path)
                         })?;
                         let bucket = url
