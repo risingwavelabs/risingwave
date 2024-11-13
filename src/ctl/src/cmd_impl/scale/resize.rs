@@ -29,8 +29,18 @@ macro_rules! fail {
     }};
 }
 
-pub async fn update_label(  context: &CtlContext, table_id: u32, label: String) -> anyhow::Result<()> {
+pub async fn update_label(
+    context: &CtlContext,
+    table_id: u32,
+    label: String,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
 
+    meta_client
+        .update_streaming_job_node_labels(table_id, label)
+        .await?;
+
+    Ok(())
 }
 
 pub async fn update_schedulability(

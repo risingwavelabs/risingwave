@@ -322,6 +322,11 @@ enum ScaleCommands {
         )]
         workers: Vec<String>,
     },
+
+    UpdateLabel {
+        id: u32,
+        label: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -790,6 +795,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Scale(ScaleCommands::Uncordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Schedulable)
                 .await?
+        }
+        Commands::Scale(ScaleCommands::UpdateLabel { id, label }) => {
+            cmd_impl::scale::update_label(context, id, label).await?
         }
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
