@@ -97,7 +97,7 @@ pub fn gen_create_mv_plan(
         session,
         context,
         bound,
-        binder.included_relations(),
+        binder.included_relations().clone(),
         name,
         columns,
         emit_mode,
@@ -179,7 +179,7 @@ pub async fn handle_create_mv(
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound = binder.bind_query(query)?;
-        (binder.included_relations(), bound)
+        (binder.included_relations().clone(), bound)
     };
     handle_create_mv_bound(
         handler_args,

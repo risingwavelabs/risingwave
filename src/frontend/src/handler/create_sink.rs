@@ -125,7 +125,7 @@ pub async fn gen_sink_plan(
     let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+        (binder.included_relations().clone(), bound)
     };
 
     let check_items = resolve_query_privileges(&bound);

@@ -207,7 +207,7 @@ fn gen_bound(
         bound,
         param_types: binder.export_param_types()?,
         parsed_params: None,
-        dependent_relations: binder.included_relations(),
+        dependent_relations: binder.included_relations().clone(),
     })
 }
 

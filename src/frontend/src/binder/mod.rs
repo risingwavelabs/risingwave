@@ -387,8 +387,8 @@ impl Binder {
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> HashSet<TableId> {
-        self.included_relations.clone()
+    pub fn included_relations(&self) -> &HashSet<TableId> {
+        &self.included_relations
     }
 
     fn push_context(&mut self) {
