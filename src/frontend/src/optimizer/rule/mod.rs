@@ -14,13 +14,68 @@
 
 //! Define all [`Rule`]
 
+use std::convert::Infallible;
+use std::ops::FromResidual;
+
 use super::PlanRef;
+use crate::error::RwError;
+
+/// Result when applying a [`Rule`] to a [`PlanNode`](super::plan_node::PlanNode).
+pub enum ApplyResult<T = PlanRef> {
+    /// Successfully applied the rule and returned a new plan.
+    Ok(T),
+    /// The current rule is not applicable to the input.
+    /// The optimizer may try another rule.
+    NotApplicable,
+    /// An unrecoverable error occurred while applying the rule.
+    /// The optimizer should stop applying other rules and report the error to the user.
+    Err(RwError),
+}
+
+/// Allow calling `?` on an `Option` in a function returning `ApplyResult`.
+impl<T> FromResidual<Option<Infallible>> for ApplyResult<T> {
+    fn from_residual(residual: Option<Infallible>) -> Self {
+        match residual {
+            Some(i) => match i {},
+            None => Self::NotApplicable,
+        }
+    }
+}
+
+/// Allow calling `?` on a `Result` in a function returning `ApplyResult`.
+impl<T, E> FromResidual<Result<Infallible, E>> for ApplyResult<T>
+where
+    E: Into<RwError>,
+{
+    fn from_residual(residual: Result<Infallible, E>) -> Self {
+        match residual {
+            Ok(i) => match i {},
+            Err(e) => Self::Err(e.into()),
+        }
+    }
+}
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.
 pub trait Rule: Send + Sync + Description {
-    /// return err(()) if not match
+    /// Apply the rule to the plan node.
+    ///
+    /// - Returns `Some` if the apply is successful.
+    /// - Returns `None` if it's not applicable. The optimizer may try other rules.
     fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+
+    /// Apply the rule to the plan node, which may return an unrecoverable error.
+    ///
+    /// - Returns `ApplyResult::Ok` if the apply is successful.
+    /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
+    /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
+    ///   other rules and report the error to the user.
+    fn apply_fallible(&self, plan: PlanRef) -> ApplyResult {
+        match self.apply(plan) {
+            Some(plan) => ApplyResult::Ok(plan),
+            None => ApplyResult::NotApplicable,
+        }
+    }
 }
 
 pub trait Description {
