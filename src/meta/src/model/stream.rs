@@ -412,14 +412,6 @@ impl TableFragments {
             .cloned()
     }
 
-    /// Returns actors that contains backfill executors.
-    pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
-        Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
-        })
-        .collect()
-    }
-
     pub fn snapshot_backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |mask| {
             (mask & FragmentTypeFlag::SnapshotBackfillStreamScan as u32) != 0
