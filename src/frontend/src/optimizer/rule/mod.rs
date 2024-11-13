@@ -67,7 +67,9 @@ where
 }
 
 /// An one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode).
-pub trait InfallibleRule: Send + Sync + Description {
+///
+/// It's a convenient trait to implement [`FallibleRule`], thus made available only within this module.
+trait InfallibleRule: Send + Sync + Description {
     /// Apply the rule to the plan node.
     ///
     /// - Returns `Some` if the apply is successful.
@@ -95,7 +97,7 @@ where
     T: InfallibleRule,
 {
     fn apply(&self, plan: PlanRef) -> ApplyResult {
-        match self.apply(plan) {
+        match InfallibleRule::apply(self, plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,
         }
