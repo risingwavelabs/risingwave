@@ -22,6 +22,7 @@ use risingwave_common::config::{
     AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
 };
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
@@ -92,6 +93,10 @@ pub struct CompactorOpts {
 
     #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+
+    /// Total available memory for the frontend node in bytes. Used by both computing and storage.
+    #[clap(long, env = "RW_COMPACTOR_TOTAL_MEMORY_BYTES", default_value_t = default_compactor_total_memory_bytes())]
+    pub compactor_total_memory_bytes: usize,
 }
 
 impl risingwave_common::opts::Opts for CompactorOpts {
@@ -142,4 +147,8 @@ pub fn start(
             compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
         }),
     }
+}
+
+pub fn default_compactor_total_memory_bytes() -> usize {
+    system_memory_available_bytes()
 }
