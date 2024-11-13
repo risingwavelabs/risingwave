@@ -80,7 +80,7 @@ Downloading and launching MinIO is a straightforward process. For PostgreSQL, I 
 
 ```shell
 # create postgresql in docker
-docker run --name my-postgres -e POSTGRES_PASSWORD=connector -e POSTGRES_DB=test -e POSTGRES_USER=test -d -p 5432:5432 postgres
+docker run --name my-postgres -e POSTGRES_PASSWORD=connector -e POSTGRES_DB=test -e POSTGRES_USER=test -d -p 5432:5432 postgres:16
 # connect postgresql
 psql -h localhost -p 5432 -U test -d postgres
 ```

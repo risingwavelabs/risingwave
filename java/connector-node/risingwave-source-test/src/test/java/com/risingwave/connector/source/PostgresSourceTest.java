@@ -159,27 +159,27 @@ public class PostgresSourceTest {
 
     // test whether validation catches permission errors
     @Test
-    public void testPermissionCheck() throws SQLException {
+    public void testUserPermissionCheck() throws SQLException {
         // user Postgres creates a superuser debezium
         Connection connPg = SourceTestClient.connect(pgDataSource);
-        String query = "CREATE USER debezium";
+        String query = "CREATE ROLE rds_replication";
         SourceTestClient.performQuery(connPg, query);
-        query = "ALTER USER debezium SUPERUSER REPLICATION";
+        query = "CREATE ROLE rds_superuser";
+        SourceTestClient.performQuery(connPg, query);
+        query = "CREATE USER debezium";
         SourceTestClient.performQuery(connPg, query);
         query = "ALTER USER debezium WITH PASSWORD '" + pg.getPassword() + "'";
         SourceTestClient.performQuery(connPg, query);
+        query =
+                "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connPg, query);
+
         // user debezium connects to Postgres
         DataSource dbzDataSource =
                 SourceTestClient.getDataSource(
                         pg.getJdbcUrl(), "debezium", pg.getPassword(), pg.getDriverClassName());
         Connection connDbz = SourceTestClient.connect(dbzDataSource);
-        query =
-                "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
-        SourceTestClient.performQuery(connDbz, query);
-        // create a partial publication, check whether error is reported
-        query =
-                "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key) WITH ( publish_via_partition_root = true );";
-        SourceTestClient.performQuery(connDbz, query);
+
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
@@ -213,13 +213,43 @@ public class PostgresSourceTest {
                             "test",
                             "orders");
             assertEquals(
-                    "INVALID_ARGUMENT: The publication 'rw_publication' does not cover all columns of the table 'public.orders'",
+                    "INVALID_ARGUMENT: Postgres user must be superuser or replication role to start walsender.",
                     resp.getError().getErrorMessage());
-            query = "DROP PUBLICATION dbz_publication";
-            SourceTestClient.performQuery(connDbz, query);
-            // revoke superuser and replication, check if reports error
-            query = "ALTER USER debezium nosuperuser noreplication";
-            SourceTestClient.performQuery(connDbz, query);
+            query = "ALTER USER debezium REPLICATION";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must have select privilege on table 'public.orders'",
+                    resp.getError().getErrorMessage());
+            query = "GRANT SELECT ON orders TO debezium";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must have create privilege on database 'test'",
+                    resp.getError().getErrorMessage());
+
+            query = "GRANT CREATE ON DATABASE test TO debezium";
+            SourceTestClient.performQuery(connPg, query);
 
             resp =
                     testClient.validateSource(
@@ -233,14 +263,264 @@ public class PostgresSourceTest {
                             "orders");
 
             assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must be the owner of table 'orders' to create/alter publication",
+                    resp.getError().getErrorMessage());
+
+            query = "ALTER TABLE orders OWNER TO debezium";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+
+            assertEquals("", resp.getError().getErrorMessage());
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals(
                     "INVALID_ARGUMENT: Postgres user must be superuser or replication role to start walsender.",
                     resp.getError().getErrorMessage());
+            query = "GRANT rds_replication TO debezium";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals("", resp.getError().getErrorMessage());
+
+            query = "REVOKE rds_replication FROM dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            query = "GRANT rds_superuser TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals("", resp.getError().getErrorMessage());
+
         } catch (Exception e) {
             Assert.fail("validate rpc fail: " + e.getMessage());
         } finally {
             // cleanup
             query = testClient.sqlStmts.getProperty("tpch.drop.orders");
-            SourceTestClient.performQuery(connDbz, query);
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP OWNED BY debezium";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP ROLE rds_replication";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP ROLE rds_superuser";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP USER debezium";
+            SourceTestClient.performQuery(connPg, query);
+            connDbz.close();
+            connPg.close();
+        }
+    }
+
+    @Test
+    public void testGroupPermissionCheck() throws SQLException {
+        // user Postgres creates a superuser debezium
+        Connection connPg = SourceTestClient.connect(pgDataSource);
+        String query = "CREATE ROLE rds_replication";
+        SourceTestClient.performQuery(connPg, query);
+        query = "CREATE ROLE rds_superuser";
+        SourceTestClient.performQuery(connPg, query);
+        query = "CREATE USER debezium";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium REPLICATION";
+        SourceTestClient.performQuery(connPg, query);
+        query = "ALTER USER debezium WITH PASSWORD '" + pg.getPassword() + "'";
+        SourceTestClient.performQuery(connPg, query);
+        query = "CREATE GROUP dbz_group WITH USER debezium";
+        SourceTestClient.performQuery(connPg, query);
+        query =
+                "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connPg, query);
+
+        // user debezium connects to Postgres
+        DataSource dbzDataSource =
+                SourceTestClient.getDataSource(
+                        pg.getJdbcUrl(), "debezium", pg.getPassword(), pg.getDriverClassName());
+        Connection connDbz = SourceTestClient.connect(dbzDataSource);
+
+        ConnectorServiceProto.TableSchema tableSchema =
+                ConnectorServiceProto.TableSchema.newBuilder()
+                        .addColumns(
+                                PlanCommon.ColumnDesc.newBuilder()
+                                        .setName("o_key")
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT64)
+                                                        .build())
+                                        .build())
+                        .addColumns(
+                                PlanCommon.ColumnDesc.newBuilder()
+                                        .setName("o_val")
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                                        .build())
+                                        .build())
+                        .addPkIndices(0)
+                        .build();
+
+        try {
+            var resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must have select privilege on table 'public.orders'",
+                    resp.getError().getErrorMessage());
+            query = "GRANT SELECT ON orders TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must have create privilege on database 'test'",
+                    resp.getError().getErrorMessage());
+
+            query = "GRANT CREATE ON DATABASE test TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must be the owner of table 'orders' to create/alter publication",
+                    resp.getError().getErrorMessage());
+
+            query = "ALTER TABLE orders OWNER TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders");
+
+            assertEquals("", resp.getError().getErrorMessage());
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals(
+                    "INVALID_ARGUMENT: Postgres user must be superuser or replication role to start walsender.",
+                    resp.getError().getErrorMessage());
+            query = "GRANT rds_replication TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals("", resp.getError().getErrorMessage());
+
+            query = "REVOKE rds_replication FROM dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            query = "GRANT rds_superuser TO dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            resp =
+                    testClient.validateSource(
+                            pg.getJdbcUrl(),
+                            pg.getHost(),
+                            "debezium",
+                            pg.getPassword(),
+                            ConnectorServiceProto.SourceType.POSTGRES,
+                            tableSchema,
+                            "test",
+                            "orders",
+                            true);
+            assertEquals("", resp.getError().getErrorMessage());
+
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = testClient.sqlStmts.getProperty("tpch.drop.orders");
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP OWNED BY dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP GROUP dbz_group";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP ROLE rds_replication";
+            SourceTestClient.performQuery(connPg, query);
+            query = "DROP ROLE rds_superuser";
+            SourceTestClient.performQuery(connPg, query);
             query = "DROP USER debezium";
             SourceTestClient.performQuery(connPg, query);
             connDbz.close();
