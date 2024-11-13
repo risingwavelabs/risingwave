@@ -202,7 +202,6 @@ pub struct HummockEventHandler {
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
-    table_read_versions: HashMap<TableId, HashSet<LocalInstanceId>>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
@@ -354,7 +353,6 @@ impl HummockEventHandler {
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
             local_read_version_mapping: Default::default(),
-            table_read_versions: Default::default(),
             uploader,
             refiller,
             last_instance_id: 0,
@@ -486,19 +484,7 @@ impl HummockEventHandler {
 
         self.uploader.clear(table_ids.clone());
 
-        if let Some(table_ids) = &table_ids {
-            assert!(
-                table_ids
-                    .iter()
-                    .all(|table_id| !self.table_read_versions.contains_key(table_id)),
-                "read version not empty when clearing tables: {:?}. remaining tables: {:?}",
-                table_ids,
-                table_ids
-                    .iter()
-                    .filter(|table_id| self.table_read_versions.contains_key(*table_id))
-                    .collect_vec()
-            );
-        } else {
+        if table_ids.is_none() {
             assert!(
                 self.local_read_version_mapping.is_empty(),
                 "read version mapping not empty when clear. remaining tables: {:?}",
@@ -735,11 +721,6 @@ impl HummockEventHandler {
                 {
                     self.local_read_version_mapping
                         .insert(instance_id, (table_id, basic_read_version.clone()));
-                    assert!(self
-                        .table_read_versions
-                        .entry(table_id)
-                        .or_default()
-                        .insert(instance_id));
                     let mut read_version_mapping_guard = self.read_version_mapping.write();
 
                     read_version_mapping_guard
@@ -795,14 +776,6 @@ impl HummockEventHandler {
                             instance_id
                         )
                     });
-                let table_read_versions = self
-                    .table_read_versions
-                    .get_mut(&table_id)
-                    .expect("should exist");
-                assert!(table_read_versions.remove(&instance_id));
-                if table_read_versions.is_empty() {
-                    self.table_read_versions.remove(&table_id);
-                }
                 let mut read_version_mapping_guard = self.read_version_mapping.write();
                 let entry = read_version_mapping_guard
                     .get_mut(&table_id)
