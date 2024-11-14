@@ -20,7 +20,6 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -56,7 +55,6 @@ impl HummockManager {
                 FullGc,
 
                 GroupScheduleMerge,
-                ReclaimTableWriteThroughputStatistic,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -180,23 +178,6 @@ impl HummockManager {
                     IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
                         .map(|_| HummockTimerEvent::GroupScheduleMerge);
                 triggers.push(Box::pin(group_scheduling_merge_trigger));
-            }
-
-            let periodic_table_stat_throuput_reclaim_interval_sec = hummock_manager
-                .env
-                .opts
-                .periodic_table_stat_throuput_reclaim_interval_sec;
-
-            if periodic_table_stat_throuput_reclaim_interval_sec > 0 {
-                let mut table_stat_throuput_reclaim_trigger_interval = tokio::time::interval(
-                    Duration::from_secs(periodic_table_stat_throuput_reclaim_interval_sec),
-                );
-                table_stat_throuput_reclaim_trigger_interval
-                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                let table_stat_throuput_reclaim_trigger =
-                    IntervalStream::new(table_stat_throuput_reclaim_trigger_interval)
-                        .map(|_| HummockTimerEvent::ReclaimTableWriteThroughputStatistic);
-                triggers.push(Box::pin(table_stat_throuput_reclaim_trigger));
             }
 
             let event_stream = select_all(triggers);
@@ -461,16 +442,6 @@ impl HummockManager {
                                         tracing::info!("Start full GC from meta node.");
                                     }
                                 }
-
-                                HummockTimerEvent::ReclaimTableWriteThroughputStatistic => {
-                                    hummock_manager.reclaim_table_write_throughput(
-                                        hummock_manager
-                                            .env
-                                            .opts
-                                            .table_stat_old_throuput_reclaim_interval_sec
-                                            as _,
-                                    );
-                                }
                             }
                         }
                     }
@@ -564,12 +535,6 @@ impl HummockManager {
     /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = std::cmp::max(
-            1,
-            params.checkpoint_frequency() * barrier_interval_ms / 1000,
-        );
         let table_write_throughput = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
@@ -581,7 +546,7 @@ impl HummockManager {
                 continue;
             }
 
-            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
+            self.try_split_compaction_group(&table_write_throughput, group)
                 .await;
         }
     }
@@ -629,15 +594,6 @@ impl HummockManager {
             return;
         }
 
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = {
-            std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            )
-        };
-
         let mut left = 0;
         let mut right = left + 1;
 
@@ -649,7 +605,6 @@ impl HummockManager {
                     &table_write_throughput,
                     group,
                     next_group,
-                    checkpoint_secs,
                     &created_tables,
                 )
                 .await

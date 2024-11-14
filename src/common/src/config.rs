@@ -423,9 +423,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
 
-    #[serde(default = "default::meta::periodic_table_stat_throuput_reclaim_interval_sec")]
-    pub periodic_table_stat_throuput_reclaim_interval_sec: u64,
-
     /// The interval of reclaiming old table throughput statistics. The old statistics with timestamp < now - `table_stat_old_throuput_reclaim_interval_sec` will be removed.
     #[serde(default = "default::meta::table_stat_old_throuput_reclaim_interval_sec")]
     pub table_stat_old_throuput_reclaim_interval_sec: u64,
@@ -1606,10 +1603,6 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
-        }
-
-        pub fn periodic_table_stat_throuput_reclaim_interval_sec() -> u64 {
-            60 // 1min
         }
 
         pub fn table_stat_old_throuput_reclaim_interval_sec() -> u64 {

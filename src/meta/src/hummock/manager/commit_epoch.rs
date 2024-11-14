@@ -339,34 +339,31 @@ impl HummockManager {
     async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = {
-            std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            )
-        };
-
-        let mut table_infos = self.history_table_throughput.write();
-        let max_table_stat_throuput_window_seconds = std::cmp::max(
-            self.env.opts.table_stat_throuput_window_seconds_for_split,
-            self.env.opts.table_stat_throuput_window_seconds_for_merge,
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
 
-        let max_sample_size = (max_table_stat_throuput_window_seconds as f64
-            / checkpoint_secs as f64)
-            .ceil() as usize;
+        let mut table_infos = self.history_table_throughput.write();
         let timestamp = chrono::Utc::now().timestamp();
+        let expired_timestamp = timestamp
+            - std::cmp::max(
+                self.env.opts.table_stat_throuput_window_seconds_for_split,
+                self.env.opts.table_stat_throuput_window_seconds_for_merge,
+            ) as i64;
+
         for (table_id, stat) in table_stats {
-            let throughput = (stat.total_value_size + stat.total_key_size) as u64;
+            let throughput = ((stat.total_value_size + stat.total_key_size) as f64
+                / checkpoint_secs as f64) as u64;
             let entry = table_infos.entry(table_id).or_default();
             entry.push_back(TableWriteThroughputStatistic {
                 throughput,
                 timestamp,
             });
-            if entry.len() > max_sample_size {
-                entry.pop_front();
-            }
+            entry.retain(|stat| stat.timestamp >= expired_timestamp);
         }
+
+        table_infos.retain(|_, v| !v.is_empty());
     }
 
     async fn correct_commit_ssts(
@@ -445,22 +442,6 @@ impl HummockManager {
         }
 
         Ok(commit_sstables)
-    }
-
-    pub(crate) fn reclaim_table_write_throughput(&self, reclaim_interval: i64) {
-        let mut table_infos = self.history_table_throughput.write();
-        let now = chrono::Utc::now().timestamp();
-        for (_table_id, statistics) in table_infos.iter_mut() {
-            while let Some(stat) = statistics.front() {
-                if now - stat.timestamp > reclaim_interval {
-                    statistics.pop_front();
-                } else {
-                    break;
-                }
-            }
-        }
-
-        table_infos.retain(|_, v| !v.is_empty());
     }
 }
 

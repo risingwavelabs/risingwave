@@ -398,9 +398,6 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
-                periodic_table_stat_throuput_reclaim_interval_sec: config
-                    .meta
-                    .periodic_table_stat_throuput_reclaim_interval_sec,
                 table_high_write_throughput_threshold: config
                     .meta
                     .table_high_write_throughput_threshold,
