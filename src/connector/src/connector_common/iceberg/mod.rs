@@ -195,6 +195,10 @@ impl IcebergCommon {
                 "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
             );
 
+            // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
+            java_catalog_configs
+                .insert("init-creation-stacktrace".to_string(), "false".to_string());
+
             if let Some(endpoint) = &self.endpoint {
                 java_catalog_configs
                     .insert("s3.endpoint".to_string(), endpoint.clone().to_string());

@@ -758,20 +758,26 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        if let Some(table_to_cancel) = command.as_ref().and_then(Command::table_to_cancel)
-            && self
+        for table_to_cancel in command
+            .as_ref()
+            .map(Command::tables_to_drop)
+            .into_iter()
+            .flatten()
+        {
+            if self
                 .creating_streaming_job_controls
                 .contains_key(&table_to_cancel)
-        {
-            warn!(
-                table_id = table_to_cancel.table_id,
-                "ignore cancel command on creating streaming job"
-            );
-            for notifier in notifiers {
-                notifier
-                    .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
+            {
+                warn!(
+                    table_id = table_to_cancel.table_id,
+                    "ignore cancel command on creating streaming job"
+                );
+                for notifier in notifiers {
+                    notifier
+                        .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         if let Some(Command::RescheduleFragment { .. }) = &command {
