@@ -316,10 +316,14 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
-                    if let Err(err) = result {
-                        self.notify_other_failure(err, "failed to complete epoch").await;
+                (partial_graph_id, completed_epoch, result) = self.state.next_completed_epoch() => {
+                    match result {
+                        Ok(result) => {
+                            self.on_epoch_completed(partial_graph_id, completed_epoch, result);
+                        }
+                        Err(err) => {
+                            self.notify_other_failure(err, "failed to complete epoch").await;
+                        }
                     }
                 },
                 event = self.barrier_event_rx.recv() => {
@@ -460,17 +464,8 @@ impl LocalBarrierWorker {
         &mut self,
         partial_graph_id: PartialGraphId,
         epoch: u64,
-    ) -> StreamResult<()> {
-        let state = self
-            .state
-            .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
-        let result = state
-            .pop_completed_epoch(epoch)
-            .expect("should exist")
-            .expect("should have completed")?;
-
+        result: BarrierCompleteResult,
+    ) {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
@@ -524,7 +519,6 @@ impl LocalBarrierWorker {
         };
 
         self.control_stream_handle.send_response(result);
-        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
