@@ -24,13 +24,15 @@ use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use iceberg::{Error, ErrorKind};
-use opendal::layers::RetryLayer;
+use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::file::metadata::{ParquetMetaData, ParquetMetaDataReader};
 use url::Url;
+
+use crate::error::ConnectorResult;
 
 pub struct ParquetFileReader<R: FileRead> {
     meta: FileMetadata,
@@ -89,6 +91,41 @@ pub async fn create_parquet_stream_builder(
     ParquetRecordBatchStreamBuilder::new(parquet_file_reader)
         .await
         .map_err(|e| anyhow!(e))
+}
+
+pub fn new_s3_operator(
+    s3_region: String,
+    s3_access_key: String,
+    s3_secret_key: String,
+    location: String,
+) -> ConnectorResult<Operator> {
+    // Create s3 builder.
+    let bucket = extract_bucket(&location);
+    let mut builder = S3::default().bucket(&bucket).region(&s3_region);
+    builder = builder.secret_access_key(&s3_access_key);
+    builder = builder.secret_access_key(&s3_secret_key);
+    builder = builder.endpoint(&format!(
+        "https://{}.s3.{}.amazonaws.com",
+        bucket, s3_region
+    ));
+
+    builder = builder.disable_config_load();
+
+    let op: Operator = Operator::new(builder)?
+        .layer(LoggingLayer::default())
+        .layer(RetryLayer::default())
+        .finish();
+
+    Ok(op)
+}
+
+fn extract_bucket(location: &str) -> String {
+    let prefix = "s3://";
+    let start = prefix.len();
+    let end = location[start..]
+        .find('/')
+        .unwrap_or(location.len() - start);
+    location[start..start + end].to_string()
 }
 
 pub async fn list_s3_directory(

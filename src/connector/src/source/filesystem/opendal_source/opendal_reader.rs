@@ -17,7 +17,7 @@ use std::pin::Pin;
 
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
-use futures::TryStreamExt;
+use futures::{Stream, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use opendal::Operator;
@@ -26,6 +26,7 @@ use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, P
 use parquet::file::metadata::FileMetaData;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -38,8 +39,8 @@ use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
-    SplitReader,
+    BoxChunkSourceStream, Column, SourceColumnDesc, SourceContextRef, SourceMessage, SourceMeta,
+    SplitMetaData, SplitReader,
 };
 
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -91,38 +92,15 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             let msg_stream;
 
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-                // // If the format is "parquet", use `ParquetParser` to convert `record_batch` into stream chunk.
-                let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = self
-                    .connector
-                    .op
-                    .reader_with(&object_name)
-                    .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-                    .await?
-                    .into_futures_async_read(..)
-                    .await?
-                    .compat();
-                let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
-
-                let file_metadata = parquet_metadata.file_metadata();
-                let column_indices =
-                    extract_valid_column_indices(self.columns.clone(), file_metadata)?;
-                let projection_mask =
-                    ProjectionMask::leaves(file_metadata.schema_descr(), column_indices);
-                // For the Parquet format, we directly convert from a record batch to a stream chunk.
-                // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
-                let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
-                    .await?
-                    .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
-                    .with_projection(projection_mask)
-                    .with_offset(split.offset)
-                    .build()?;
-
-                let parquet_parser = ParquetParser::new(
-                    self.parser_config.common.rw_columns.clone(),
+                msg_stream = read_parquet_file(
+                    self.connector.op.clone(),
                     object_name,
+                    self.columns.clone(),
+                    Some(self.parser_config.common.rw_columns.clone()),
+                    self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
-                )?;
-                msg_stream = parquet_parser.into_stream(record_batch_stream);
+                )
+                .await?;
             } else {
                 let data_stream = Self::stream_read_object(
                     self.connector.op.clone(),
@@ -284,4 +262,65 @@ pub fn extract_valid_column_indices(
         }
         None => Ok(vec![]),
     }
+}
+
+
+/// Reads a specified Parquet file and converts its content into a stream of chunks.
+pub async fn read_parquet_file(
+    op: Operator,
+    file_name: String,
+    rw_columns: Option<Vec<Column>>,
+    parser_columns: Option<Vec<SourceColumnDesc>>,
+    batch_size: usize,
+    offset: usize,
+) -> ConnectorResult<
+    Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
+> {
+    let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
+        .reader_with(&file_name)
+        .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+        .await?
+        .into_futures_async_read(..)
+        .await?
+        .compat();
+    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+
+    let file_metadata = parquet_metadata.file_metadata();
+    let column_indices = extract_valid_column_indices(rw_columns, file_metadata)?;
+    let projection_mask = ProjectionMask::leaves(file_metadata.schema_descr(), column_indices);
+    // For the Parquet format, we directly convert from a record batch to a stream chunk.
+    // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
+    let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
+        .await?
+        .with_batch_size(batch_size)
+        .with_projection(projection_mask)
+        .with_offset(offset)
+        .build()?;
+    let converted_arrow_schema = parquet_to_arrow_schema(
+        file_metadata.schema_descr(),
+        file_metadata.key_value_metadata(),
+    )
+    .map_err(anyhow::Error::from)?;
+    let columns = match parser_columns {
+        Some(columns) => columns,
+        None => converted_arrow_schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field_ref)| {
+                let data_type = IcebergArrowConvert.type_from_field(field_ref).unwrap();
+                SourceColumnDesc::simple(
+                    field_ref.name().clone(),
+                    data_type,
+                    ColumnId::new(index as i32),
+                )
+            })
+            .collect(),
+    };
+
+    let parquet_parser = ParquetParser::new(columns, file_name, offset)?;
+    let msg_stream: Pin<
+        Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
+    > = parquet_parser.into_stream(record_batch_stream);
+    Ok(msg_stream)
 }

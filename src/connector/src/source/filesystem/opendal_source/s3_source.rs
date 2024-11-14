@@ -22,7 +22,6 @@ use opendal::Operator;
 use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
 use crate::error::ConnectorResult;
-use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::s3::enumerator::get_prefix;
 use crate::source::filesystem::s3::S3PropertiesCommon;
 
@@ -86,46 +85,4 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             compression_format,
         })
     }
-
-    /// create opendal s3 source.
-    pub fn new_s3_reader(
-        s3_region: String,
-        s3_access_key: String,
-        s3_secret_key: String,
-        location: String,
-    ) -> ConnectorResult<Self> {
-        // Create s3 builder.
-        let bucket = extract_bucket(&location);
-        let mut builder = S3::default().bucket(&bucket).region(&s3_region);
-        builder = builder.secret_access_key(&s3_access_key);
-        builder = builder.secret_access_key(&s3_secret_key);
-        builder = builder.endpoint(&format!(
-            "https://{}.s3.{}.amazonaws.com",
-            bucket, s3_region
-        ));
-
-        builder = builder.disable_config_load();
-        let (prefix, matcher) = (None, None);
-        let op: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .layer(RetryLayer::default())
-            .finish();
-
-        Ok(Self {
-            op,
-            prefix,
-            matcher,
-            marker: PhantomData,
-            compression_format: CompressionFormat::default(),
-        })
-    }
-}
-
-fn extract_bucket(location: &str) -> String {
-    let prefix = "s3://";
-    let start = prefix.len();
-    let end = location[start..]
-        .find('/')
-        .unwrap_or(location.len() - start);
-    location[start..start + end].to_string()
 }
