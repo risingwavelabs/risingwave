@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail;
+use thiserror_ext::AsReport as _;
 
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
@@ -40,19 +41,22 @@ impl PlanRef {
         heuristic_optimizer: &mut HeuristicOptimizer<'_>,
         stage_name: &str,
     ) -> Result<PlanRef> {
-        let plan = heuristic_optimizer.optimize(self)?;
+        let ctx = self.ctx();
+
+        let result = heuristic_optimizer.optimize(self);
         let stats = heuristic_optimizer.get_stats();
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace && stats.has_applied_rule() {
+        if ctx.is_explain_trace() && stats.has_applied_rule() {
             ctx.trace(format!("{}:", stage_name));
             ctx.trace(format!("{}", stats));
-            ctx.trace(plan.explain_to_string());
+            ctx.trace(match &result {
+                Ok(plan) => plan.explain_to_string(),
+                Err(error) => format!("Optimization failed: {}", error.as_report()),
+            });
         }
         ctx.add_rule_applied(stats.total_applied());
 
-        Ok(plan)
+        result
     }
 
     pub(crate) fn optimize_by_rules(
