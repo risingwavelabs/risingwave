@@ -141,83 +141,83 @@ impl Sink for PostgresSink {
         //     check_data_type_compatibility(&f.data_type)?;
         // }
 
-        // Query table metadata from SQL Server.
-        let mut sql_server_table_metadata = HashMap::new();
-        let mut sql_client = PostgresClient::new(&self.config).await?;
-        let query_table_metadata_error = || {
-            SinkError::Postgres(anyhow!(format!(
-                "Postgres table {} metadata error",
-                self.config.table
-            )))
-        };
-
-        // Query the column information from the `information_schema.columns` table
-        let table_name = "your_table_name";
-        let rows = sqlx::query(
-            r#"
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns
-        WHERE table_name = $1
-        ORDER BY ordinal_position;
-        "#
-        )
-            .bind(table_name)
-            .fetch_all(&pool)
-            .await?;
-
-        // Print the schema details
-        for row in rows {
-            let column_name: &str = row.get("column_name");
-            let data_type: &str = row.get("data_type");
-            let is_nullable: &str = row.get("is_nullable");
-
-            println!("Column: {}, Type: {}, Nullable: {}", column_name, data_type, is_nullable);
-        }
-
-        // Validate Column name and Primary Key
-        for (idx, col) in self.schema.fields().iter().enumerate() {
-            let rw_is_pk = self.pk_indices.contains(&idx);
-            match sql_server_table_metadata.get(&col.name) {
-                None => {
-                    return Err(SinkError::Postgres(anyhow!(format!(
-                        "column {} not found in the downstream SQL Server table {}",
-                        col.name, self.config.table
-                    ))));
-                }
-                Some(sql_server_is_pk) => {
-                    if self.is_append_only {
-                        continue;
-                    }
-                    if rw_is_pk && !*sql_server_is_pk {
-                        return Err(SinkError::Postgres(anyhow!(format!(
-                            "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
-                        ))));
-                    }
-                    if !rw_is_pk && *sql_server_is_pk {
-                        return Err(SinkError::Postgres(anyhow!(format!(
-                            "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
-                            col.name, self.config.table,
-                        ))));
-                    }
-                }
-            }
-        }
-
-        if !self.is_append_only {
-            let sql_server_pk_count = sql_server_table_metadata
-                .values()
-                .filter(|is_pk| **is_pk)
-                .count();
-            if sql_server_pk_count != self.pk_indices.len() {
-                return Err(SinkError::Postgres(anyhow!(format!(
-                    "primary key does not match between RisingWave sink ({}) and SQL Server table {} ({})",
-                    self.pk_indices.len(),
-                    self.config.table,
-                    sql_server_pk_count,
-                ))));
-            }
-        }
+        // // Query table metadata from SQL Server.
+        // let mut sql_server_table_metadata = HashMap::new();
+        // let mut sql_client = PostgresClient::new(&self.config).await?;
+        // let query_table_metadata_error = || {
+        //     SinkError::Postgres(anyhow!(format!(
+        //         "Postgres table {} metadata error",
+        //         self.config.table
+        //     )))
+        // };
+        //
+        // // Query the column information from the `information_schema.columns` table
+        // let table_name = "your_table_name";
+        // let rows = sqlx::query(
+        //     r#"
+        // SELECT column_name, data_type, is_nullable
+        // FROM information_schema.columns
+        // WHERE table_name = $1
+        // ORDER BY ordinal_position;
+        // "#
+        // )
+        //     .bind(table_name)
+        //     .fetch_all(&pool)
+        //     .await?;
+        //
+        // // Print the schema details
+        // for row in rows {
+        //     let column_name: &str = row.get("column_name");
+        //     let data_type: &str = row.get("data_type");
+        //     let is_nullable: &str = row.get("is_nullable");
+        //
+        //     println!("Column: {}, Type: {}, Nullable: {}", column_name, data_type, is_nullable);
+        // }
+        //
+        // // Validate Column name and Primary Key
+        // for (idx, col) in self.schema.fields().iter().enumerate() {
+        //     let rw_is_pk = self.pk_indices.contains(&idx);
+        //     match sql_server_table_metadata.get(&col.name) {
+        //         None => {
+        //             return Err(SinkError::Postgres(anyhow!(format!(
+        //                 "column {} not found in the downstream SQL Server table {}",
+        //                 col.name, self.config.table
+        //             ))));
+        //         }
+        //         Some(sql_server_is_pk) => {
+        //             if self.is_append_only {
+        //                 continue;
+        //             }
+        //             if rw_is_pk && !*sql_server_is_pk {
+        //                 return Err(SinkError::Postgres(anyhow!(format!(
+        //                     "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
+        //                     col.name, self.config.table,
+        //                 ))));
+        //             }
+        //             if !rw_is_pk && *sql_server_is_pk {
+        //                 return Err(SinkError::Postgres(anyhow!(format!(
+        //                     "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
+        //                     col.name, self.config.table,
+        //                 ))));
+        //             }
+        //         }
+        //     }
+        // }
+        //
+        // if !self.is_append_only {
+        //     let sql_server_pk_count = sql_server_table_metadata
+        //         .values()
+        //         .filter(|is_pk| **is_pk)
+        //         .count();
+        //     if sql_server_pk_count != self.pk_indices.len() {
+        //         return Err(SinkError::Postgres(anyhow!(format!(
+        //             "primary key does not match between RisingWave sink ({}) and SQL Server table {} ({})",
+        //             self.pk_indices.len(),
+        //             self.config.table,
+        //             sql_server_pk_count,
+        //         ))));
+        //     }
+        // }
 
         Ok(())
     }
