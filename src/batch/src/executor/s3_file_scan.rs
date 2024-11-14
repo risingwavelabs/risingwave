@@ -14,7 +14,6 @@
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::filesystem::opendal_source::opendal_reader::read_parquet_file;
 use risingwave_connector::source::iceberg::new_s3_operator;

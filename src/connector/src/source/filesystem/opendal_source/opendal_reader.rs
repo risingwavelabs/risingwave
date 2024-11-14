@@ -264,7 +264,6 @@ pub fn extract_valid_column_indices(
     }
 }
 
-
 /// Reads a specified Parquet file and converts its content into a stream of chunks.
 pub async fn read_parquet_file(
     op: Operator,
@@ -323,4 +322,28 @@ pub async fn read_parquet_file(
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
     > = parquet_parser.into_stream(record_batch_stream);
     Ok(msg_stream)
+}
+
+pub async fn get_parquet_fields(
+    op: Operator,
+    file_name: String,
+) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_udf::Fields> {
+    let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
+        .reader_with(&file_name)
+        .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
+        .await?
+        .into_futures_async_read(..)
+        .await?
+        .compat();
+    let parquet_metadata = reader.get_metadata().await.map_err(anyhow::Error::from)?;
+
+    let file_metadata = parquet_metadata.file_metadata();
+    let converted_arrow_schema = parquet_to_arrow_schema(
+        file_metadata.schema_descr(),
+        file_metadata.key_value_metadata(),
+    )
+    .map_err(anyhow::Error::from)?;
+    let fields: risingwave_common::array::arrow::arrow_schema_udf::Fields =
+        converted_arrow_schema.fields;
+    Ok(fields)
 }
