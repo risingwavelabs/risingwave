@@ -299,10 +299,7 @@ impl GlobalStreamManager {
                                 .await?;
 
                             self.barrier_scheduler
-                                .run_command(
-                                    database_id,
-                                    Command::CancelStreamingJob(table_fragments),
-                                )
+                                .run_command(database_id, Command::cancel(&table_fragments))
                                 .await?;
                         } else {
                             // streaming job is already completed.
@@ -514,6 +511,10 @@ impl GlobalStreamManager {
                 .run_command(
                     database_id,
                     Command::DropStreamingJobs {
+                        table_fragments_ids: streaming_job_ids
+                            .iter()
+                            .map(|job_id| TableId::new(*job_id as _))
+                            .collect(),
                         actors: removed_actors,
                         unregistered_state_table_ids: state_table_ids
                             .into_iter()
@@ -576,7 +577,7 @@ impl GlobalStreamManager {
 
                 if let Some(database_id) = database_id {
                     self.barrier_scheduler
-                        .run_command(DatabaseId::new(database_id as _), Command::CancelStreamingJob(fragment))
+                        .run_command(DatabaseId::new(database_id as _), Command::cancel(&fragment))
                         .await?;
                 }
             };
