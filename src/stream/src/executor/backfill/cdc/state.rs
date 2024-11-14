@@ -50,8 +50,8 @@ impl<S: StateStore> CdcBackfillState<S> {
         }
     }
 
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_table.init_epoch(epoch)
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_table.init_epoch(epoch).await
     }
 
     /// Restore the backfill state from storage

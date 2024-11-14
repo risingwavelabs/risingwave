@@ -17,7 +17,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
-use crate::SubscriptionId;
+use crate::{ObjectId, SubscriptionId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "subscription")]
@@ -28,7 +28,7 @@ pub struct Model {
     pub retention_seconds: i64,
     pub definition: String,
     pub subscription_state: i32,
-    pub dependent_table_id: i32,
+    pub dependent_table_id: ObjectId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

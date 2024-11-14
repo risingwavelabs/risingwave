@@ -522,13 +522,6 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
         metadata_manager.clone(),
@@ -560,12 +553,12 @@ pub async fn start_service_as_election_leader(
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        vacuum_manager.clone(),
         metadata_manager.clone(),
+        backup_manager.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
-    let backup_srv = BackupServiceImpl::new(backup_manager);
+    let backup_srv = BackupServiceImpl::new(backup_manager.clone());
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
         env.system_params_manager_impl_ref(),
@@ -585,7 +578,6 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        vacuum_manager,
         // compaction_scheduler,
         &env.opts,
     ));
@@ -603,7 +595,10 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(SystemParamsController::start_params_notifier(
         env.system_params_manager_impl_ref(),
     ));
-    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
+    sub_tasks.push(HummockManager::hummock_timer_task(
+        hummock_manager.clone(),
+        Some(backup_manager),
+    ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
