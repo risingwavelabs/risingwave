@@ -444,7 +444,7 @@ impl FrontendEnv {
                 .map_err(|err| anyhow!(err))?;
         }
 
-        let total_memory_bytes = opts.fe_total_memory_bytes;
+        let total_memory_bytes = opts.frontend_total_memory_bytes;
         let heap_profiler =
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler

@@ -508,6 +508,7 @@ mod test {
                             metrics_level: None,
                             enable_barrier_read: None,
                             temp_secret_file_dir: "./frontend/secrets/",
+                            frontend_total_memory_bytes: 34359738368,
                         },
                     ),
                     compactor_opts: None,

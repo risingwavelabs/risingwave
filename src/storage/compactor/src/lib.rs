@@ -94,7 +94,7 @@ pub struct CompactorOpts {
     #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
 
-    /// Total available memory for the frontend node in bytes. Used by both computing and storage.
+    /// Total available memory for the frontend node in bytes. Used by compactor.
     #[clap(long, env = "RW_COMPACTOR_TOTAL_MEMORY_BYTES", default_value_t = default_compactor_total_memory_bytes())]
     pub compactor_total_memory_bytes: usize,
 }
