@@ -87,11 +87,25 @@ impl HummockManager {
             .cloned()
             .collect_vec();
 
+        if member_table_ids_1.is_empty() {
+            return Err(Error::CompactionGroup(format!(
+                "group_1 {} is empty",
+                group_1
+            )));
+        }
+
         let mut member_table_ids_2 = state_table_info
             .compaction_group_member_table_ids(group_2)
             .iter()
             .cloned()
             .collect_vec();
+
+        if member_table_ids_2.is_empty() {
+            return Err(Error::CompactionGroup(format!(
+                "group_2 {} is empty",
+                group_2
+            )));
+        }
 
         debug_assert!(!member_table_ids_1.is_empty());
         debug_assert!(!member_table_ids_2.is_empty());
