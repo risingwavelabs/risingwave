@@ -136,6 +136,9 @@ message CreateMaterializedViewRequest {
     SERVERLESS = 2;
   }
   BackfillType backfill = 3;
+
+  // The list of object IDs that this materialized view depends on.
+  repeated uint32 dependencies = 4;
 }
 
 message CreateMaterializedViewResponse {

@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, ObjectId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
@@ -78,6 +79,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -246,11 +248,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph)
+            .create_materialized_view(table, graph, dependencies)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?

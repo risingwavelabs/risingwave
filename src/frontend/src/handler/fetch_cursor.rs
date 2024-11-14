@@ -124,6 +124,7 @@ pub async fn handle_parse(
             param_types: binder.export_param_types()?,
             parsed_params: None,
             dependent_relations: binder.included_relations().clone(),
+            dependent_udfs: binder.included_udfs().clone(),
         };
         let result = PreparedResult {
             statement,
