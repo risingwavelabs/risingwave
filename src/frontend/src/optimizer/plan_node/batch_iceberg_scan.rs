@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use educe::Educe;
 use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -31,13 +31,36 @@ use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Educe, Debug, Clone, PartialEq)]
-#[educe(Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
-    #[educe(Hash(ignore))]
     pub predicate: IcebergPredicate,
+}
+
+impl PartialEq for BatchIcebergScan {
+    fn eq(&self, other: &Self) -> bool {
+        if self.predicate == IcebergPredicate::AlwaysTrue
+            && other.predicate == IcebergPredicate::AlwaysTrue
+        {
+            self.base == other.base && self.core == other.core
+        } else {
+            panic!("BatchIcebergScan::eq: comparing non-AlwaysTrue predicates is not supported")
+        }
+    }
+}
+
+impl Eq for BatchIcebergScan {}
+
+impl Hash for BatchIcebergScan {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        if self.predicate != IcebergPredicate::AlwaysTrue {
+            panic!("BatchIcebergScan::hash: hashing non-AlwaysTrue predicates is not supported")
+        } else {
+            self.base.hash(state);
+            self.core.hash(state);
+        }
+    }
 }
 
 impl BatchIcebergScan {
