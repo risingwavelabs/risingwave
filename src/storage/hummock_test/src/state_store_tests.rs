@@ -1700,7 +1700,7 @@ async fn test_get_keyed_row() {
     let anchor = gen_key_from_str(VirtualNode::ZERO, "aa");
 
     // First batch inserts the anchor and others.
-    let mut batch1 = vec![
+    let batch1 = vec![
         (anchor.clone(), StorageValue::new_put("111")),
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -1709,7 +1709,7 @@ async fn test_get_keyed_row() {
     ];
 
     // Second batch modifies the anchor.
-    let mut batch2 = vec![
+    let batch2 = vec![
         (anchor.clone(), StorageValue::new_put("111111")),
         (
             gen_key_from_str(VirtualNode::ZERO, "cc"),
@@ -1718,7 +1718,7 @@ async fn test_get_keyed_row() {
     ];
 
     // Third batch deletes the anchor
-    let mut batch3 = vec![
+    let batch3 = vec![
         (anchor.clone(), StorageValue::new_delete()),
         (
             gen_key_from_str(VirtualNode::ZERO, "dd"),
