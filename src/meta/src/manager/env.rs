@@ -227,9 +227,6 @@ pub struct MetaOpts {
     /// The window seconds of table throughput statistic history for merge compaction group.
     pub table_stat_throuput_window_seconds_for_merge: usize,
 
-    /// The interval of reclaiming old table throughput statistics. The old statistics with timestamp < now - `table_stat_old_throuput_reclaim_interval_sec` will be removed.
-    pub table_stat_old_throuput_reclaim_interval_sec: u64,
-
     /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
 
@@ -327,7 +324,6 @@ impl MetaOpts {
             table_stat_throuput_window_seconds_for_split: 60,
             table_stat_throuput_window_seconds_for_merge: 240,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
-            table_stat_old_throuput_reclaim_interval_sec: 60 * 10,
             license_key_path: None,
         }
     }

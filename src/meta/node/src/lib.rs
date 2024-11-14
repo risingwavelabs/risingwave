@@ -447,9 +447,6 @@ pub fn start(
                 table_stat_throuput_window_seconds_for_merge: config
                     .meta
                     .table_stat_throuput_window_seconds_for_merge,
-                table_stat_old_throuput_reclaim_interval_sec: config
-                    .meta
-                    .table_stat_old_throuput_reclaim_interval_sec,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
