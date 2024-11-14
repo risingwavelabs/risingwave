@@ -237,9 +237,8 @@ fn get_acl_items(
     for_dml_table: bool,
     users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
-) -> String {
-    let mut res = String::from("{");
-    let mut empty_flag = true;
+) -> Vec<String> {
+    let mut res = vec![];
     let super_privilege = available_prost_privilege(*object, for_dml_table);
     for user in users {
         let privileges = if user.is_super {
@@ -263,25 +262,21 @@ fn get_acl_items(
             })
         });
         for (granted_by, actions) in grantor_map {
-            if empty_flag {
-                empty_flag = false;
-            } else {
-                res.push(',');
-            }
-            res.push_str(&user.name);
-            res.push('=');
+            let mut aclitem = String::new();
+            aclitem.push_str(&user.name);
+            aclitem.push('=');
             for (action, option) in actions {
-                res.push_str(&AclMode::from(action).to_string());
+                aclitem.push_str(&AclMode::from(action).to_string());
                 if option {
-                    res.push('*');
+                    aclitem.push('*');
                 }
             }
-            res.push('/');
+            aclitem.push('/');
             // should be able to query grantor's name
-            res.push_str(username_map.get(&granted_by).unwrap());
+            aclitem.push_str(username_map.get(&granted_by).unwrap());
+            res.push(aclitem);
         }
     }
-    res.push('}');
     res
 }
 
