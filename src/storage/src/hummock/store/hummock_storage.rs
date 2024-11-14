@@ -513,9 +513,19 @@ impl HummockStorage {
     pub async fn clear_shared_buffer(&self) {
         let (tx, rx) = oneshot::channel();
         self.hummock_event_sender
-            .send(HummockEvent::Clear(tx))
+            .send(HummockEvent::Clear(tx, None))
             .expect("should send success");
         rx.await.expect("should wait success");
+    }
+
+    pub async fn clear_tables(&self, table_ids: HashSet<TableId>) {
+        if !table_ids.is_empty() {
+            let (tx, rx) = oneshot::channel();
+            self.hummock_event_sender
+                .send(HummockEvent::Clear(tx, Some(table_ids)))
+                .expect("should send success");
+            rx.await.expect("should wait success");
+        }
     }
 
     /// Declare the start of an epoch. This information is provided for spill so that the spill task won't
