@@ -138,6 +138,19 @@ pub struct IcebergSplit {
     pub position_delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
+impl IcebergSplit {
+    pub fn empty() -> Self {
+        Self {
+            split_id: 0,
+            snapshot_id: 0,
+            table_meta: TableMetadataJsonStr("".to_string()),
+            files: vec![],
+            equality_delete_files: vec![],
+            position_delete_files: vec![],
+        }
+    }
+}
+
 impl SplitMetaData for IcebergSplit {
     fn id(&self) -> SplitId {
         self.split_id.to_string().into()
@@ -201,14 +214,7 @@ impl IcebergSplitEnumerator {
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
-            return Ok(vec![IcebergSplit {
-                split_id: 0,
-                snapshot_id: 0,
-                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
-                files: vec![],
-                equality_delete_files: vec![],
-                position_delete_files: vec![],
-            }]);
+            return Ok(vec![IcebergSplit::empty()]);
         }
 
         let snapshot_id = match time_traval_info {
@@ -314,7 +320,7 @@ impl IcebergSplitEnumerator {
             .collect_vec();
 
         if splits.is_empty() {
-            bail!("No splits found for the iceberg table");
+            return Ok(vec![IcebergSplit::empty()]);
         }
 
         Ok(splits)

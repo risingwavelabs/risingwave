@@ -128,6 +128,11 @@ query I
 select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
 ----
 
+# Empty splits should not panic
+query I
+select i1 from iceberg_t1_source where i1 > 1001;
+----
+
 statement ok
 DROP SINK sink1;
 
