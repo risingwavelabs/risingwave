@@ -232,6 +232,7 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
     DropStreamingJobs {
+        table_fragments_ids: HashSet<TableId>,
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
@@ -253,11 +254,6 @@ pub enum Command {
     MergeSnapshotBackfillStreamingJobs(
         HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
     ),
-    /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
-    /// table fragment.
-    ///
-    /// The collecting and cleaning part works exactly the same as `DropStreamingJobs` command.
-    CancelStreamingJob(TableFragments),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
@@ -313,6 +309,18 @@ impl Command {
         Self::Resume(reason)
     }
 
+    pub fn cancel(table_fragments: &TableFragments) -> Self {
+        Self::DropStreamingJobs {
+            table_fragments_ids: HashSet::from_iter([table_fragments.table_id()]),
+            actors: table_fragments.actor_ids(),
+            unregistered_state_table_ids: table_fragments
+                .all_table_ids()
+                .map(TableId::new)
+                .collect(),
+            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
+        }
+    }
+
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
@@ -352,13 +360,6 @@ impl Command {
 
                 Some(changes)
             }
-            Command::CancelStreamingJob(table_fragments) => Some(
-                table_fragments
-                    .fragments
-                    .values()
-                    .map(|fragment| (fragment.fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .collect(),
-            ),
             Command::RescheduleFragment { reschedules, .. } => Some(
                 reschedules
                     .iter()
@@ -726,11 +727,6 @@ impl Command {
                     }))
                 }
 
-                Command::CancelStreamingJob(table_fragments) => {
-                    let actors = table_fragments.actor_ids();
-                    Some(Mutation::Stop(StopMutation { actors }))
-                }
-
                 Command::ReplaceTable(ReplaceTablePlan {
                     old_table_fragments,
                     merge_updates,
@@ -1013,10 +1009,15 @@ impl Command {
     }
 
     /// For `CancelStreamingJob`, returns the table id of the target table.
-    pub fn table_to_cancel(&self) -> Option<TableId> {
+    pub fn tables_to_drop(&self) -> impl Iterator<Item = TableId> + '_ {
         match self {
-            Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
+            Command::DropStreamingJobs {
+                table_fragments_ids,
+                ..
+            } => Some(table_fragments_ids.iter().cloned()),
             _ => None,
         }
+        .into_iter()
+        .flatten()
     }
 }

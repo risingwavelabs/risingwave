@@ -402,6 +402,14 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
+        // For iceberg scan, we do iceberg predicate pushdown
+        // BatchFilter -> BatchIcebergScan
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Predicate Pushdown",
+            vec![BatchIcebergPredicatePushDownRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }

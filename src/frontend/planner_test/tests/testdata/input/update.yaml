@@ -98,3 +98,10 @@
     update t set a = a + 1;
   expected_outputs:
     - batch_distributed_plan
+- name: update table with subquery in the set clause
+  sql: |
+    create table t1 (v1 int primary key, v2 int);
+    create table t2 (v1 int primary key, v2 int);
+    update t1 set v1 = (select v1 from t2 where t1.v2 = t2.v2);
+  expected_outputs:
+    - binder_error
