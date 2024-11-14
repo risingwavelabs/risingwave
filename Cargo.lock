@@ -5075,7 +5075,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=1570ac1afe34488dc318b68a066367760b3b8e79#1570ac1afe34488dc318b68a066367760b3b8e79"
+source = "git+https://github.com/mrcroxx/foyer?rev=a85f722#a85f72226df1f979a3727acca8cd761031a97f97"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5093,7 +5093,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=1570ac1afe34488dc318b68a066367760b3b8e79#1570ac1afe34488dc318b68a066367760b3b8e79"
+source = "git+https://github.com/mrcroxx/foyer?rev=a85f722#a85f72226df1f979a3727acca8cd761031a97f97"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5112,7 +5112,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=1570ac1afe34488dc318b68a066367760b3b8e79#1570ac1afe34488dc318b68a066367760b3b8e79"
+source = "git+https://github.com/mrcroxx/foyer?rev=a85f722#a85f72226df1f979a3727acca8cd761031a97f97"
 dependencies = [
  "foyer-common",
  "itertools 0.13.0",
@@ -5121,7 +5121,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=1570ac1afe34488dc318b68a066367760b3b8e79#1570ac1afe34488dc318b68a066367760b3b8e79"
+source = "git+https://github.com/mrcroxx/foyer?rev=a85f722#a85f72226df1f979a3727acca8cd761031a97f97"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5132,9 +5132,11 @@ dependencies = [
  "foyer-intrusive",
  "futures",
  "hashbrown 0.14.5",
+ "intrusive-collections",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "serde",
  "tracing",
@@ -5143,7 +5145,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=1570ac1afe34488dc318b68a066367760b3b8e79#1570ac1afe34488dc318b68a066367760b3b8e79"
+source = "git+https://github.com/mrcroxx/foyer?rev=a85f722#a85f72226df1f979a3727acca8cd761031a97f97"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -6562,6 +6564,14 @@ name = "integer-encoding"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
+
+[[package]]
+name = "intrusive-collections"
+version = "0.9.7"
+source = "git+https://github.com/foyer-rs/intrusive-rs?rev=94cfac4701dbc0033b7bc27e31c46bf3a12d96d7#94cfac4701dbc0033b7bc27e31c46bf3a12d96d7"
+dependencies = [
+ "memoffset",
+]
 
 [[package]]
 name = "io-extras"
