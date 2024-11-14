@@ -35,14 +35,11 @@ use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
-    pub(crate) fn optimize_by_rules(self, stage: &OptimizationStage) -> Result<PlanRef> {
-        let OptimizationStage {
-            stage_name,
-            rules,
-            apply_order,
-        } = stage;
-
-        let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
+    fn optimize_by_rules_inner(
+        self,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        stage_name: &str,
+    ) -> Result<PlanRef> {
         let plan = heuristic_optimizer.optimize(self)?;
         let stats = heuristic_optimizer.get_stats();
 
@@ -58,33 +55,30 @@ impl PlanRef {
         Ok(plan)
     }
 
-    pub(crate) fn optimize_by_rules_until_fix_point(
+    pub(crate) fn optimize_by_rules(
         self,
-        stage: &OptimizationStage,
-    ) -> Result<PlanRef> {
-        let OptimizationStage {
+        OptimizationStage {
             stage_name,
             rules,
             apply_order,
-        } = stage;
+        }: &OptimizationStage,
+    ) -> Result<PlanRef> {
+        self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
+    }
 
-        let mut output_plan = self;
+    pub(crate) fn optimize_by_rules_until_fix_point(
+        mut self,
+        OptimizationStage {
+            stage_name,
+            rules,
+            apply_order,
+        }: &OptimizationStage,
+    ) -> Result<PlanRef> {
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
-            output_plan = heuristic_optimizer.optimize(output_plan)?;
-            let stats = heuristic_optimizer.get_stats();
-
-            let ctx = output_plan.ctx();
-            let explain_trace = ctx.is_explain_trace();
-            if explain_trace && stats.has_applied_rule() {
-                ctx.trace(format!("{}:", stage_name));
-                ctx.trace(format!("{}", stats));
-                ctx.trace(output_plan.explain_to_string());
-            }
-            ctx.add_rule_applied(stats.total_applied());
-
-            if !stats.has_applied_rule() {
-                return Ok(output_plan);
+            self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
+            if !heuristic_optimizer.get_stats().has_applied_rule() {
+                return Ok(self);
             }
         }
     }
