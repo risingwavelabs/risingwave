@@ -59,7 +59,11 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),
                 state: worker.get_state().unwrap().as_str_name().into(),
-                parallelism: worker.parallelism() as i32,
+                parallelism: if is_compute {
+                    worker.parallelism() as i32
+                } else {
+                    0
+                },
                 is_streaming: if is_compute {
                     property.map(|p| p.is_streaming)
                 } else {

@@ -413,12 +413,10 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 property: Some(Property {
-                    parallelism: 0,
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
-                    internal_rpc_host_addr: "".to_string(),
-                    node_label: None,
+                    ..Default::default()
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -429,12 +427,10 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 property: Some(Property {
-                    parallelism: 0,
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
-                    internal_rpc_host_addr: "".to_string(),
-                    node_label: None,
+                    ..Default::default()
                 }),
                 transactional_id: Some(2),
                 ..Default::default()

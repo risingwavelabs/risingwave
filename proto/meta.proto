@@ -342,13 +342,13 @@ service StreamManagerService {
 }
 
 // Below for cluster service.
-
 message AddWorkerNodeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
   reserved 3;
-  common.WorkerNode.Property property = 4;
+  reserved 4;
   common.WorkerNode.Resource resource = 5;
+  common.WorkerNode.Property property = 6;
 }
 
 message AddWorkerNodeResponse {

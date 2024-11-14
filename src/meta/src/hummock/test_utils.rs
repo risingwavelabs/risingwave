@@ -350,9 +350,8 @@ pub async fn setup_compute_env_with_metric(
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
-                node_label: None,
                 parallelism: fake_parallelism as _,
+                ..Default::default()
             },
             Default::default(),
         )

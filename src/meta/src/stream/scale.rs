@@ -2576,6 +2576,7 @@ impl GlobalStreamManager {
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             match prev_worker {
+                                // todo, add label checking in further changes
                                 Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()  => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
                                     should_trigger = true;

@@ -969,8 +969,7 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
-            internal_rpc_host_addr: "".to_string(),
-            node_label: None,
+            ..Default::default()
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
         let mut worker_ids = vec![];
@@ -1060,9 +1059,8 @@ mod tests {
             is_streaming: true,
             is_serving: true,
             is_unschedulable: false,
-            internal_rpc_host_addr: "".to_string(),
-            node_label: None,
             parallelism: 4,
+            ..Default::default()
         };
         let worker_id = cluster_ctl
             .add_worker(

@@ -87,6 +87,10 @@ message WorkerNode {
   // It's populated by meta node, when the worker node is added by meta node.
   // It's not persistent in meta store.
   optional uint64 started_at = 9;
+
+  // Moved to `Property` message.
+  reserved 10;
+  reserved "parallelism";
 }
 
 message Buffer {
