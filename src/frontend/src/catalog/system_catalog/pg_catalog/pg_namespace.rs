@@ -28,5 +28,5 @@ struct PgNamespace {
     oid: i32,
     nspname: String,
     nspowner: i32,
-    nspacl: String,
+    nspacl: Vec<String>,
 }
