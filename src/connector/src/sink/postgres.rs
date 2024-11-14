@@ -256,11 +256,26 @@ impl SinkWriter for PostgresSinkWriter {
 }
 
 #[derive(Debug)]
-pub struct PostgresClient {}
+pub struct PostgresClient {
+    client: tokio_postgres::Client,
+}
 
 impl PostgresClient {
     async fn new(pg_config: &PostgresConfig) -> Result<Self> {
-        todo!()
+        let connection_string = format!(
+            "host={} port={} user={} password={} dbname={}",
+            pg_config.host, pg_config.port, pg_config.user, pg_config.password, pg_config.database
+        );
+        let (client, connection) =
+            tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
+                .await
+                .context("Failed to connect to Postgres for Sinking")?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                tracing::error!("connection error: {}", e);
+            }
+        });
+        Ok(Self { client })
     }
 }
 
