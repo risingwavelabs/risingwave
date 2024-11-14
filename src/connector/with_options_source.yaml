@@ -99,7 +99,7 @@ IcebergProperties:
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
-    required: true
+    required: false
   - name: catalog.name
     field_type: String
     comments: |-
