@@ -481,9 +481,7 @@ impl LocalStateStore for LocalHummockStorage {
 
     async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
         let epoch = options.epoch;
-        if self.is_replicated {
-            self.wait_for_epoch(epoch.prev).await?;
-        }
+        self.wait_for_epoch(epoch.prev).await?;
         assert!(
             self.epoch.replace(epoch.curr).is_none(),
             "local state store of table id {:?} is init for more than once",

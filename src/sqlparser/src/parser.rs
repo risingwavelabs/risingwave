@@ -3096,8 +3096,11 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::TO)?;
             let schema_name = self.parse_object_name()?;
             AlterSchemaOperation::RenameSchema { schema_name }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_schema = self.parse_object_name()?;
+            AlterSchemaOperation::SwapRenameSchema { target_schema }
         } else {
-            return self.expected("RENAME OR OWNER TO after ALTER SCHEMA");
+            return self.expected("RENAME, OWNER TO, OR SWAP WITH after ALTER SCHEMA");
         };
 
         Ok(Statement::AlterSchema {
@@ -3216,8 +3219,12 @@ impl Parser<'_> {
             AlterTableOperation::AlterColumn { column_name, op }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterTableOperation::RefreshSchema
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_table = self.parse_object_name()?;
+            AlterTableOperation::SwapRenameTable { target_table }
         } else {
-            return self.expected("ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE");
+            return self
+                .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -3322,6 +3329,9 @@ impl Parser<'_> {
             AlterViewOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_view = self.parse_object_name()?;
+            AlterViewOperation::SwapRenameView { target_view }
         } else if self.parse_keyword(Keyword::SET) {
             if self.parse_keyword(Keyword::SCHEMA) {
                 let schema_name = self.parse_object_name()?;
@@ -3352,7 +3362,7 @@ impl Parser<'_> {
             }
         } else {
             return self.expected(&format!(
-                "RENAME or OWNER TO or SET after ALTER {}VIEW",
+                "RENAME or OWNER TO or SET or SWAP after ALTER {}VIEW",
                 if materialized { "MATERIALIZED " } else { "" }
             ));
         };
@@ -3401,6 +3411,9 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET");
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_sink = self.parse_object_name()?;
+            AlterSinkOperation::SwapRenameSink { target_sink }
         } else {
             return self.expected("RENAME or OWNER TO or SET after ALTER SINK");
         };
@@ -3434,8 +3447,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_subscription = self.parse_object_name()?;
+            AlterSubscriptionOperation::SwapRenameSubscription {
+                target_subscription,
+            }
         } else {
-            return self.expected("RENAME or OWNER TO or SET after ALTER SUBSCRIPTION");
+            return self.expected("RENAME or OWNER TO or SET or SWAP after ALTER SUBSCRIPTION");
         };
 
         Ok(Statement::AlterSubscription {
@@ -3482,6 +3500,9 @@ impl Parser<'_> {
             AlterSourceOperation::FormatEncode { format_encode }
         } else if self.parse_keywords(&[Keyword::REFRESH, Keyword::SCHEMA]) {
             AlterSourceOperation::RefreshSchema
+        } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
+            let target_source = self.parse_object_name()?;
+            AlterSourceOperation::SwapRenameSource { target_source }
         } else {
             return self.expected(
                 "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
@@ -4978,6 +4999,7 @@ impl Parser<'_> {
                 Keyword::SCHEMA,
                 Keyword::TABLE,
                 Keyword::SOURCE,
+                Keyword::SINK,
             ]);
             let objects = self.parse_comma_separated(Parser::parse_object_name);
             match object_type {
@@ -4985,6 +5007,7 @@ impl Parser<'_> {
                 Some(Keyword::SCHEMA) => GrantObjects::Schemas(objects?),
                 Some(Keyword::SEQUENCE) => GrantObjects::Sequences(objects?),
                 Some(Keyword::SOURCE) => GrantObjects::Sources(objects?),
+                Some(Keyword::SINK) => GrantObjects::Sinks(objects?),
                 Some(Keyword::TABLE) | None => GrantObjects::Tables(objects?),
                 _ => unreachable!(),
             }

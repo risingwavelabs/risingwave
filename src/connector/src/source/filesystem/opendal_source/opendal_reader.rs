@@ -269,10 +269,12 @@ pub fn extract_valid_column_indices(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_field = IcebergArrowConvert
-                                .to_arrow_field(&column.name, &column.data_type)
+                            // We should convert Arrow field to the rw data type instead of converting the rw data type to the Arrow data type for comparison.
+                            // The reason is that for the timestamp type, the different time units in Arrow need to match with the timestamp and timestamptz in rw.
+                            let arrow_filed_to_rw_data_type = IcebergArrowConvert
+                                .type_from_field(converted_arrow_schema.field(pos))
                                 .ok()?;
-                            if &arrow_field == converted_arrow_schema.field(pos) {
+                            if arrow_filed_to_rw_data_type == column.data_type {
                                 Some(pos)
                             } else {
                                 None

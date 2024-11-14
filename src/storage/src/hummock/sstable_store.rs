@@ -24,11 +24,8 @@ use foyer::{
     CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
-use itertools::Itertools;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{
-    HummockSstableObjectId, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH, OBJECT_SUFFIX,
-};
+use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -230,27 +227,6 @@ impl SstableStore {
             .await?;
         self.meta_cache.remove(&object_id);
         // TODO(MrCroxx): support group remove in foyer.
-        Ok(())
-    }
-
-    /// Deletes all SSTs specified in the given list of IDs from storage and cache.
-    pub async fn delete_list(
-        &self,
-        object_id_list: &[HummockSstableObjectId],
-    ) -> HummockResult<()> {
-        let mut paths = Vec::with_capacity(object_id_list.len() * 2);
-
-        for &object_id in object_id_list {
-            paths.push(self.get_sst_data_path(object_id));
-        }
-        // Delete from storage.
-        self.store.delete_objects(&paths).await?;
-
-        // Delete from cache.
-        for object_id in object_id_list {
-            self.meta_cache.remove(object_id);
-        }
-
         Ok(())
     }
 
@@ -521,30 +497,11 @@ impl SstableStore {
         let obj_prefix = self
             .store
             .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        let mut path = String::with_capacity(
-            self.path.len()
-                + "/".len()
-                + obj_prefix.len()
-                + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
-                + ".".len()
-                + OBJECT_SUFFIX.len(),
-        );
-        path.push_str(&self.path);
-        path.push('/');
-        path.push_str(&obj_prefix);
-        path.push_str(&object_id.to_string());
-        path.push('.');
-        path.push_str(OBJECT_SUFFIX);
-        path
+        risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
-        let split = path.split(&['/', '.']).collect_vec();
-        assert!(split.len() > 2);
-        assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
-        split[split.len() - 2]
-            .parse::<HummockSstableObjectId>()
-            .expect("valid sst id")
+        risingwave_hummock_sdk::get_object_id_from_path(path)
     }
 
     pub fn store(&self) -> ObjectStoreRef {

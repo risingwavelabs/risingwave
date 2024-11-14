@@ -87,9 +87,9 @@ where
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.inner.init(barrier.epoch).await?;
-
+        let barrier_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        self.inner.init(barrier_epoch).await?;
 
         #[for_await]
         for msg in input {

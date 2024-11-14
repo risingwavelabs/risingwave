@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
@@ -29,7 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta_model::{DatabaseId, SourceId};
+use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -1002,6 +1002,7 @@ impl SourceManager {
 
     /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
+        tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
         if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
             let handle = create_source_worker_handle(source, self.metrics.clone())
@@ -1129,10 +1130,7 @@ impl SourceManager {
                 let command = Command::SourceSplitAssignment(split_assignment);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
-                    .run_command(
-                        risingwave_common::catalog::DatabaseId::new(database_id as _),
-                        command,
-                    )
+                    .run_command(database_id, command)
                     .await?;
             }
         }

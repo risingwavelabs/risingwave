@@ -23,9 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
-use risingwave_meta::rpc::ddl_controller::fill_table_stream_graph_info;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Comment, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
@@ -84,27 +82,28 @@ impl DdlServiceImpl {
         }
     }
 
-    fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
-        let job_type = change.get_job_type().unwrap_or_default();
-        let mut source = change.source;
-        let mut fragment_graph = change.fragment_graph.unwrap();
-        let mut table = change.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            source.as_mut().unwrap().id = source_id;
-            fill_table_stream_graph_info(&mut source, &mut table, job_type, &mut fragment_graph);
-        }
-        let table_col_index_mapping = change
-            .table_col_index_mapping
+    fn extract_replace_table_info(
+        ReplaceTablePlan {
+            table,
+            fragment_graph,
+            table_col_index_mapping,
+            source,
+            job_type,
+        }: ReplaceTablePlan,
+    ) -> ReplaceTableInfo {
+        let table = table.unwrap();
+        let col_index_mapping = table_col_index_mapping
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
-        let stream_job = StreamingJob::Table(source, table, job_type);
         ReplaceTableInfo {
-            streaming_job: stream_job,
-            fragment_graph,
-            col_index_mapping: table_col_index_mapping,
+            streaming_job: StreamingJob::Table(
+                source,
+                table,
+                TableJobType::try_from(job_type).unwrap(),
+            ),
+            fragment_graph: fragment_graph.unwrap(),
+            col_index_mapping,
         }
     }
 }
@@ -1012,6 +1011,23 @@ impl DdlService for DdlServiceImpl {
         }
 
         Ok(Response::new(AutoSchemaChangeResponse {}))
+    }
+
+    async fn alter_swap_rename(
+        &self,
+        request: Request<AlterSwapRenameRequest>,
+    ) -> Result<Response<AlterSwapRenameResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSwapRename(req.object.unwrap()))
+            .await?;
+
+        Ok(Response::new(AlterSwapRenameResponse {
+            status: None,
+            version,
+        }))
     }
 }
 

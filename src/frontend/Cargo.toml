@@ -81,7 +81,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.7"
 smallvec = { version = "1.13.1", features = ["serde"] }
-speedate = "0.14.0"
+speedate = "0.15.0"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }

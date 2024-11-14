@@ -787,6 +787,10 @@ impl Dispatcher for HashDataDispatcher {
             }
 
             if !visible {
+                assert!(
+                    last_vnode_when_update_delete.is_none(),
+                    "invisible row between U- and U+, op = {op:?}",
+                );
                 new_ops.push(op);
                 continue;
             }
@@ -797,7 +801,11 @@ impl Dispatcher for HashDataDispatcher {
             if op == Op::UpdateDelete {
                 last_vnode_when_update_delete = Some(vnode);
             } else if op == Op::UpdateInsert {
-                if vnode != last_vnode_when_update_delete.unwrap() {
+                if vnode
+                    != last_vnode_when_update_delete
+                        .take()
+                        .expect("missing U- before U+")
+                {
                     new_ops.push(Op::Delete);
                     new_ops.push(Op::Insert);
                 } else {
@@ -808,6 +816,10 @@ impl Dispatcher for HashDataDispatcher {
                 new_ops.push(op);
             }
         }
+        assert!(
+            last_vnode_when_update_delete.is_none(),
+            "missing U+ after U-"
+        );
 
         let ops = new_ops;
 

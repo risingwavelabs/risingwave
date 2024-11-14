@@ -1094,7 +1094,7 @@ dependencies = [
  "rand",
  "regex",
  "ring 0.17.5",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "serde",
@@ -2338,9 +2338,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.7.2"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
+checksum = "9ac0150caa2ae65ca5bd83f25c7de183dea78d4d366469f148435e2acfbad0da"
 dependencies = [
  "serde",
 ]
@@ -5250,6 +5250,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb60e7409f34ef959985bc9d9c5ee8f5db24ee46ed9775850548021710f807f"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "fs-set-times"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5881,9 +5890,9 @@ dependencies = [
 
 [[package]]
 name = "hashlink"
-version = "0.8.4"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
+checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown 0.14.5",
 ]
@@ -5916,9 +5925,6 @@ name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
-dependencies = [
- "unicode-segmentation",
-]
 
 [[package]]
 name = "heck"
@@ -7067,9 +7073,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.27.0"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf4e226dcd58b4be396f7bd3c20da8fdee2911400705297ba7d2d7cc2c30f716"
+checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
  "pkg-config",
@@ -8605,9 +8611,9 @@ dependencies = [
 
 [[package]]
 name = "ouroboros"
-version = "0.17.2"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2ba07320d39dfea882faa70554b4bd342a5f273ed59ba7c1c6b4c840492c954"
+checksum = "944fa20996a25aded6b4795c6d63f10014a7a83f8be9828a11860b08c5fc4a67"
 dependencies = [
  "aliasable",
  "ouroboros_macro",
@@ -8616,13 +8622,14 @@ dependencies = [
 
 [[package]]
 name = "ouroboros_macro"
-version = "0.17.2"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec4c6225c69b4ca778c0aea097321a64c421cf4577b331c61b229267edabb6f8"
+checksum = "39b0deead1528fd0e5947a8546a9642a9777c25f6e1e26f34c97b204bbb465bd"
 dependencies = [
  "heck 0.4.1",
- "proc-macro-error 1.0.4",
+ "itertools 0.12.1",
  "proc-macro2",
+ "proc-macro2-diagnostics",
  "quote",
  "syn 2.0.79",
 ]
@@ -9359,7 +9366,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af7cee1a6c8a5b9208b3cb1061f10c0cb689087b3d8ce85fb9d2dd7a29b6ba66"
 dependencies = [
  "diff",
- "yansi",
+ "yansi 0.5.1",
 ]
 
 [[package]]
@@ -9473,6 +9480,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3e4daa0dcf6feba26f985457cdf104d4b4256fc5a09547140f3631bb076b19a"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proc-macro2-diagnostics"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af066a9c399a26e020ada66a034357a868728e72cd426f3adcd35f80d88d88c8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.79",
+ "version_check",
+ "yansi 1.0.1",
 ]
 
 [[package]]
@@ -10290,7 +10310,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.22.4",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -10410,7 +10430,7 @@ dependencies = [
  "chrono",
  "clap",
  "console",
- "fs-err",
+ "fs-err 3.0.0",
  "glob",
  "google-cloud-pubsub",
  "indicatif",
@@ -10441,7 +10461,7 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
- "fs-err",
+ "fs-err 3.0.0",
  "itertools 0.13.0",
 ]
 
@@ -11008,7 +11028,7 @@ dependencies = [
  "elasticsearch",
  "enum-as-inner 0.6.0",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "futures-async-stream",
  "gcp-bigquery-client",
@@ -11066,11 +11086,11 @@ dependencies = [
  "risingwave_rpc_client",
  "rumqttc",
  "rust_decimal",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.8.0",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "rw_futures_util",
- "sea-schema 0.15.0",
+ "sea-schema",
  "serde",
  "serde_derive",
  "serde_json",
@@ -11112,7 +11132,7 @@ dependencies = [
  "chrono",
  "easy-ext",
  "expect-test",
- "fs-err",
+ "fs-err 3.0.0",
  "hex",
  "itertools 0.13.0",
  "jsonbb",
@@ -11540,7 +11560,7 @@ dependencies = [
  "chrono",
  "expect-test",
  "foyer",
- "fs-err",
+ "fs-err 3.0.0",
  "futures",
  "itertools 0.13.0",
  "jni",
@@ -11710,6 +11730,7 @@ name = "risingwave_meta_model_migration"
 version = "2.2.0-alpha"
 dependencies = [
  "async-std",
+ "easy-ext",
  "sea-orm",
  "sea-orm-migration",
  "serde",
@@ -11820,7 +11841,7 @@ name = "risingwave_pb"
 version = "2.2.0-alpha"
 dependencies = [
  "enum-as-inner 0.6.0",
- "fs-err",
+ "fs-err 3.0.0",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -12352,7 +12373,7 @@ dependencies = [
  "flume",
  "futures-util",
  "log",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "thiserror",
@@ -12550,9 +12571,22 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
+checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile 2.2.0",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcaf18a4f2be7326cd874a5fa579fae794320a0f388d365dca7e480e55f83f8a"
 dependencies = [
  "openssl-probe",
  "rustls-pemfile 2.2.0",
@@ -12669,7 +12703,7 @@ dependencies = [
 name = "rw_resource_util"
 version = "0.0.0"
 dependencies = [
- "fs-err",
+ "fs-err 3.0.0",
  "sysinfo",
  "tempfile",
  "thiserror-ext",
@@ -12796,25 +12830,25 @@ dependencies = [
 
 [[package]]
 name = "sea-orm"
-version = "0.12.15"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8814e37dc25de54398ee62228323657520b7f29713b8e238649385dbe473ee0"
+checksum = "d5680a8b686985116607ef5f5af2b1f9e1cc2c228330e93101816a0baa279afa"
 dependencies = [
  "async-stream",
  "async-trait",
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
  "futures",
  "log",
  "ouroboros",
  "rust_decimal",
  "sea-orm-macros",
- "sea-query 0.30.7",
- "sea-query-binder 0.5.0",
+ "sea-query",
+ "sea-query-binder",
  "serde",
  "serde_json",
  "sqlx",
- "strum 0.25.0",
+ "strum 0.26.3",
  "thiserror",
  "time",
  "tracing",
@@ -12824,16 +12858,16 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-cli"
-version = "0.12.15"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "620bc560062ae251b1366bde43b3f1508445cab5c2c8cbdb397034638ab1b357"
+checksum = "70a157f42d291ccbd6e913b9d9b12dbe2ccbcf0472efc60c8715dd1254083aec"
 dependencies = [
  "chrono",
  "clap",
  "dotenvy",
  "glob",
  "regex",
- "sea-schema 0.14.2",
+ "sea-schema",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -12841,9 +12875,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-macros"
-version = "0.12.15"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e115c6b078e013aa963cc2d38c196c2c40b05f03d0ac872fe06b6e0d5265603"
+checksum = "3a239e3bb1b566ad4ec2654d0d193d6ceddfd733487edc9c21a64d214c773910"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -12855,9 +12889,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-migration"
-version = "0.12.15"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee8269bc6ff71afd6b78aa4333ac237a69eebd2cdb439036291e64fb4b8db23c"
+checksum = "63ba07e9f2479cc671758fcb1edee42ff2e32c34b3e67ab41d0af1e41f73c74e"
 dependencies = [
  "async-trait",
  "clap",
@@ -12865,20 +12899,19 @@ dependencies = [
  "futures",
  "sea-orm",
  "sea-orm-cli",
- "sea-schema 0.14.2",
+ "sea-schema",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "sea-query"
-version = "0.30.7"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4166a1e072292d46dc91f31617c2a1cdaf55a8be4b5c9f4bf2ba248e3ac4999b"
+checksum = "ff504d13b5e4b52fffcf2fb203d0352a5722fa5151696db768933e41e1e591bb"
 dependencies = [
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
- "derivative",
  "inherent",
  "ordered-float 3.9.1",
  "rust_decimal",
@@ -12889,39 +12922,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "sea-query"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e5073b2cfed767511a57d18115f3b3d8bcb5690bf8c89518caec6cb22c0cd74"
-dependencies = [
- "inherent",
- "sea-query-derive",
-]
-
-[[package]]
 name = "sea-query-binder"
-version = "0.5.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36bbb68df92e820e4d5aeb17b4acd5cc8b5d18b2c36a4dd6f4626aabfa7ab1b9"
+checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
 dependencies = [
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "chrono",
  "rust_decimal",
- "sea-query 0.30.7",
+ "sea-query",
  "serde_json",
  "sqlx",
  "time",
  "uuid",
-]
-
-[[package]]
-name = "sea-query-binder"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "754965d4aee6145bec25d0898e5c931e6c22859789ce62fd85a42a15ed5a8ce3"
-dependencies = [
- "sea-query 0.31.0",
- "sqlx",
 ]
 
 [[package]]
@@ -12940,38 +12953,15 @@ dependencies = [
 
 [[package]]
 name = "sea-schema"
-version = "0.14.2"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d148608012d25222442d1ebbfafd1228dbc5221baf4ec35596494e27a2394e"
+checksum = "aab1592d17860a9a8584d9b549aebcd06f7bdc3ff615f71752486ba0b05b1e6e"
 dependencies = [
  "futures",
- "sea-query 0.30.7",
- "sea-schema-derive 0.2.0",
-]
-
-[[package]]
-name = "sea-schema"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad52149fc81836ea7424c3425d8f6ed8ad448dd16d2e4f6a3907ba46f3f2fd78"
-dependencies = [
- "futures",
- "sea-query 0.31.0",
- "sea-query-binder 0.6.0",
- "sea-schema-derive 0.3.0",
+ "sea-query",
+ "sea-query-binder",
+ "sea-schema-derive",
  "sqlx",
-]
-
-[[package]]
-name = "sea-schema-derive"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6f686050f76bffc4f635cda8aea6df5548666b830b52387e8bc7de11056d11e"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -13322,9 +13312,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "3.1.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adb86f9315df5df6a70eae0cc22395a44e544a0d8897586820770a35ede74449"
+checksum = "1b258109f244e1d6891bf1053a55d63a5cd4f8f4c30cf9a1280989f80e7a1fa9"
 dependencies = [
  "futures",
  "log",
@@ -13336,9 +13326,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test_derive"
-version = "3.1.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9bb72430492e9549b0c4596725c0f82729bff861c45aa8099c0a8e67fc3b721"
+checksum = "5d69265a08751de7844521fd15003ae0a888e035773ba05695c5c759a6f89eef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -13645,12 +13635,12 @@ dependencies = [
 
 [[package]]
 name = "speedate"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c323c4e6fece5a5a1a2a7f726d243144cce9fbcfe3ce4d9f3c6ede726a2bc780"
+checksum = "9a5e7adf4e07e7de39a64d77962ca14a09165e592d42d0c9f9acadb679f4f937"
 dependencies = [
- "strum 0.25.0",
- "strum_macros 0.25.3",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
 ]
 
 [[package]]
@@ -13726,7 +13716,7 @@ checksum = "f2b6b8f606d3c4cdcaf2031c4320b79d7584e454b79562ba3d675f49701c160e"
 dependencies = [
  "async-trait",
  "educe",
- "fs-err",
+ "fs-err 2.11.0",
  "futures",
  "glob",
  "humantime",
@@ -13774,8 +13764,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "sqlx-core",
  "sqlx-macros",
@@ -13786,24 +13776,24 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
- "ahash 0.8.11",
  "atoi",
- "bigdecimal 0.3.1",
+ "bigdecimal 0.4.5",
  "byteorder",
  "bytes",
  "chrono",
  "crc",
  "crossbeam-queue",
  "either",
- "event-listener 2.5.3",
+ "event-listener 5.3.1",
  "futures-channel",
  "futures-core",
  "futures-intrusive",
  "futures-io",
  "futures-util",
+ "hashbrown 0.14.5",
  "hashlink",
  "hex",
  "indexmap 2.6.0",
@@ -13830,24 +13820,24 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "proc-macro2",
  "quote",
  "sqlx-core",
  "sqlx-macros-core",
- "syn 1.0.109",
+ "syn 2.0.79",
 ]
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "dotenvy",
  "either",
- "heck 0.4.1",
+ "heck 0.5.0",
  "hex",
  "madsim-tokio",
  "once_cell",
@@ -13860,19 +13850,19 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
- "syn 1.0.109",
+ "syn 2.0.79",
  "tempfile",
  "url",
 ]
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.21.7",
- "bigdecimal 0.3.1",
+ "base64 0.22.0",
+ "bigdecimal 0.4.5",
  "bitflags 2.6.0",
  "byteorder",
  "bytes",
@@ -13913,12 +13903,12 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "base64 0.21.7",
- "bigdecimal 0.3.1",
+ "base64 0.22.0",
+ "bigdecimal 0.4.5",
  "bitflags 2.6.0",
  "byteorder",
  "chrono",
@@ -13956,8 +13946,8 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.7.4"
-source = "git+https://github.com/risingwavelabs/sqlx.git?rev=ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a#ff6d6d2dc0e9e8e47282fd29be006eed7ae3421a"
+version = "0.8.2"
+source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
  "chrono",
@@ -13971,11 +13961,11 @@ dependencies = [
  "madsim-tokio",
  "percent-encoding",
  "serde",
+ "serde_urlencoded",
  "sqlx-core",
  "time",
  "tracing",
  "url",
- "urlencoding",
  "uuid",
 ]
 
@@ -14061,9 +14051,6 @@ name = "strum"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
-dependencies = [
- "strum_macros 0.25.3",
-]
 
 [[package]]
 name = "strum"
@@ -16547,6 +16534,12 @@ name = "yansi"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+
+[[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "yup-oauth2"

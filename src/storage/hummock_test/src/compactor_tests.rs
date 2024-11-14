@@ -724,7 +724,11 @@ pub(crate) mod tests {
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
         let kv_count = 11;
-        // let base_epoch = Epoch(0);
+        let prev_epoch: u64 = hummock_manager_ref
+            .get_current_version()
+            .await
+            .table_committed_epoch(existing_table_id.into())
+            .unwrap();
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
@@ -741,7 +745,10 @@ pub(crate) mod tests {
             let next_epoch = epoch + millisec_interval_epoch;
             storage.start_epoch(next_epoch, table_id_set.clone());
             if i == 0 {
-                local.init_for_test(epoch).await.unwrap();
+                local
+                    .init_for_test_with_prev_epoch(epoch, prev_epoch)
+                    .await
+                    .unwrap();
             }
             epoch_set.insert(epoch);
             let mut prefix = BytesMut::default();
@@ -935,6 +942,11 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
         let kv_count = 11;
+        let prev_epoch: u64 = hummock_manager_ref
+            .get_current_version()
+            .await
+            .table_committed_epoch(existing_table_id.into())
+            .unwrap();
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
@@ -948,7 +960,10 @@ pub(crate) mod tests {
         storage.start_epoch(epoch, table_id_set.clone());
         for i in 0..kv_count {
             if i == 0 {
-                local.init_for_test(epoch).await.unwrap();
+                local
+                    .init_for_test_with_prev_epoch(epoch, prev_epoch)
+                    .await
+                    .unwrap();
             }
             let next_epoch = epoch + millisec_interval_epoch;
             storage.start_epoch(next_epoch, table_id_set.clone());
@@ -1912,11 +1927,23 @@ pub(crate) mod tests {
             let table_id_set =
                 HashSet::from_iter(vec![local_1.0.table_id(), local_2.0.table_id()].into_iter());
 
+            let version = hummock_meta_client.get_current_version().await.unwrap();
+
             storage.start_epoch(*epoch, table_id_set.clone());
             for i in 0..kv_count {
                 if i == 0 && *is_init {
-                    local_1.0.init_for_test(*epoch).await.unwrap();
-                    local_2.0.init_for_test(*epoch).await.unwrap();
+                    let prev_epoch_1 = version.table_committed_epoch(local_1.0.table_id()).unwrap();
+                    local_1
+                        .0
+                        .init_for_test_with_prev_epoch(*epoch, prev_epoch_1)
+                        .await
+                        .unwrap();
+                    let prev_epoch_2 = version.table_committed_epoch(local_2.0.table_id()).unwrap();
+                    local_2
+                        .0
+                        .init_for_test_with_prev_epoch(*epoch, prev_epoch_2)
+                        .await
+                        .unwrap();
 
                     *is_init = false;
                 }
