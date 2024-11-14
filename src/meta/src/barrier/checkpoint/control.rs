@@ -24,7 +24,6 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, warn};
 
@@ -40,7 +39,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::collect_creating_job_commit_epoch_info;
 use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    SnapshotBackfillInfo, TracedEpoch,
+    InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
 };
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -147,6 +146,7 @@ impl CheckpointControl {
                         } else {
                             new_database.state.in_flight_prev_epoch().clone()
                         };
+                        control_stream_manager.add_partial_graph(database_id, None)?;
                         (entry.insert(new_database), max_prev_epoch)
                     }
                     Command::Flush
@@ -276,10 +276,12 @@ impl CheckpointControl {
             .for_each(|database| database.create_mview_tracker.abort_all());
     }
 
-    pub(crate) fn subscriptions(&self) -> impl Iterator<Item = PbSubscriptionUpstreamInfo> + '_ {
-        self.databases
-            .values()
-            .flat_map(|database| &database.state.inflight_subscription_info)
+    pub(crate) fn subscriptions(
+        &self,
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)> + '_ {
+        self.databases.iter().map(|(database_id, database)| {
+            (*database_id, &database.state.inflight_subscription_info)
+        })
     }
 }
 
@@ -828,8 +830,10 @@ impl DatabaseCheckpointControl {
                 .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
+            let job_id = info.table_fragments.table_id();
+            control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
             self.creating_streaming_job_controls.insert(
-                info.table_fragments.table_id(),
+                job_id,
                 CreatingStreamingJobControl::new(
                     info.clone(),
                     snapshot_backfill_info.clone(),
