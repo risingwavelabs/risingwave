@@ -58,6 +58,7 @@
                     <pluginArtifact>
                         io.grpc:protoc-gen-grpc-java:1.49.0:exe:${os.detected.classifier}
                     </pluginArtifact>
+                    <checkStaleness>true</checkStaleness>
                 </configuration>
                 <executions>
                     <execution>

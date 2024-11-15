@@ -35,16 +35,16 @@ pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
-    type Iter = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
-    async fn get(
+    async fn get_keyed_row(
         &self,
         _key: TableKey<Bytes>,
         _epoch: u64,
         _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         panic!("should not read from the state store!");
     }
 
@@ -90,8 +90,8 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
     async fn get(

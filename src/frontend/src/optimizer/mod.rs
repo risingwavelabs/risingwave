@@ -80,7 +80,7 @@ use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::TemporalJoinValidator;
+use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -529,6 +529,13 @@ impl PlanRoot {
             ).into());
         }
 
+        if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "selecting `_rw_timestamp` in a streaming query is not allowed".to_string(),
+                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_string(),
+            ).into());
+        }
+
         self.plan = plan;
         self.phase = PlanPhase::Stream;
         assert_eq!(self.plan.convention(), Convention::Stream);
@@ -730,7 +737,7 @@ impl PlanRoot {
 
         let column_descs = columns
             .iter()
-            .filter(|&c| (!c.is_generated()))
+            .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
 
