@@ -36,10 +36,9 @@ use risingwave_connector::source::{
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::ObjectDependency;
 use risingwave_meta_model::{
-    object_dependency, ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId,
-    SinkId, SourceId, SubscriptionId, TableId, UserId, ViewId,
+    ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, SinkId, SourceId,
+    SubscriptionId, TableId, UserId, ViewId,
 };
 use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, PbSink, Schema, Secret, Sink, Source,
@@ -59,7 +58,6 @@ use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, MergeNode, PbStreamFragmentGraph,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
-use sea_orm::{EntityTrait, Set};
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;

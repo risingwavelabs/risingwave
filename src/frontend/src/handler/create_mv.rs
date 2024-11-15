@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 
 use either::Either;
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
