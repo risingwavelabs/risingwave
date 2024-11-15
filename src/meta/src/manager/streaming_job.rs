@@ -299,7 +299,7 @@ impl StreamingJob {
         }
     }
 
-    // TODO: record all objects instead.
+    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
     pub fn dependent_relations(&self) -> Vec<u32> {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),

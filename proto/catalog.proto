@@ -342,7 +342,7 @@ message Table {
   repeated plan_common.ColumnCatalog columns = 5;
   repeated common.ColumnOrder pk = 6;
   // For cdc table created from a cdc source, here records the source id.
-  repeated uint32 dependent_relations = 8;
+  repeated uint32 dependent_relations = 8; // TODO(rc): deprecate this by passing dependencies via `Request` message
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }

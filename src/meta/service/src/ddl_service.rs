@@ -241,6 +241,7 @@ impl DdlService for DdlServiceImpl {
                         fragment_graph,
                         CreateType::Foreground,
                         None,
+                        HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -295,6 +296,7 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
             CreateType::Foreground,
             affected_table_change.map(Self::extract_replace_table_info),
+            HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSink`
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -380,6 +382,7 @@ impl DdlService for DdlServiceImpl {
         let mview = req.get_materialized_view()?.clone();
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let dependencies = req.get_dependencies().iter().map(|id| *id as i32).collect();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -389,6 +392,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 create_type,
                 None,
+                dependencies,
             ))
             .await?;
 
@@ -442,6 +446,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 CreateType::Foreground,
                 None,
+                HashSet::new(),
             ))
             .await?;
 
@@ -528,6 +533,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 CreateType::Foreground,
                 None,
+                HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
             ))
             .await?;
 
