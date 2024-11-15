@@ -63,8 +63,8 @@ public class TracingSlf4jAdapter implements Logger {
 
     private void logIfEnabled(int level, String msg, Throwable t) {
         if (TracingSlf4jImpl.isEnabled(level)) {
-            String sStackTrace = ExceptionUtils.getStackTrace(t);
-            TracingSlf4jImpl.event(name, level, String.format("%s: %s", msg, sStackTrace));
+            String stackTrace = ExceptionUtils.getStackTrace(t);
+            TracingSlf4jImpl.event(name, level, String.format("%s: %s", msg, stackTrace));
         }
     }
 

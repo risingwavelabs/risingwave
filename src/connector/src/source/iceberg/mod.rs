@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
+use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
@@ -137,6 +138,19 @@ pub struct IcebergSplit {
     pub position_delete_files: Vec<IcebergFileScanTaskJsonStr>,
 }
 
+impl IcebergSplit {
+    pub fn empty(table_meta: TableMetadataJsonStr) -> Self {
+        Self {
+            split_id: 0,
+            snapshot_id: 0,
+            table_meta,
+            files: vec![],
+            equality_delete_files: vec![],
+            position_delete_files: vec![],
+        }
+    }
+}
+
 impl SplitMetaData for IcebergSplit {
     fn id(&self) -> SplitId {
         self.split_id.to_string().into()
@@ -189,6 +203,7 @@ impl IcebergSplitEnumerator {
         schema: Schema,
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
+        predicate: IcebergPredicate,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
@@ -199,14 +214,9 @@ impl IcebergSplitEnumerator {
         let current_snapshot = table.metadata().current_snapshot();
         if current_snapshot.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
-            return Ok(vec![IcebergSplit {
-                split_id: 0,
-                snapshot_id: 0,
-                table_meta: TableMetadataJsonStr::serialize(table.metadata()),
-                files: vec![],
-                equality_delete_files: vec![],
-                position_delete_files: vec![],
-            }]);
+            return Ok(vec![IcebergSplit::empty(TableMetadataJsonStr::serialize(
+                table.metadata(),
+            ))]);
         }
 
         let snapshot_id = match time_traval_info {
@@ -246,11 +256,15 @@ impl IcebergSplitEnumerator {
 
         let require_names = Self::get_require_field_names(&table, snapshot_id, &schema).await?;
 
+        let table_schema = table.metadata().current_schema();
+        tracing::debug!("iceberg_table_schema: {:?}", table_schema);
+
         let mut position_delete_files = vec![];
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
         let scan = table
             .scan()
+            .with_filter(predicate)
             .snapshot_id(snapshot_id)
             .select(require_names)
             .build()
@@ -302,10 +316,18 @@ impl IcebergSplitEnumerator {
                 .files
                 .push(data_files[split_num * split_size + i].clone());
         }
-        Ok(splits
+        let splits = splits
             .into_iter()
             .filter(|split| !split.files.is_empty())
-            .collect_vec())
+            .collect_vec();
+
+        if splits.is_empty() {
+            return Ok(vec![IcebergSplit::empty(TableMetadataJsonStr::serialize(
+                table.metadata(),
+            ))]);
+        }
+
+        Ok(splits)
     }
 
     /// The required field names are the intersection of the output shema and the equality delete columns.
