@@ -21,6 +21,7 @@
     <name>risingwave-sink-dynamic</name>
 
     <properties>
+        <flink.version>1.18.0</flink.version>
         <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
 

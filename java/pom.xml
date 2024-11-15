@@ -72,7 +72,6 @@
         <debezium.version>2.6.2.Final</debezium.version>
         <jackson.version>2.18.1</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
-        <flink.version>1.18.0</flink.version>
         <testcontainers.version>1.20.3</testcontainers.version>
         <aws.version>2.29.2</aws.version>
         <jetty.version>12.0.14</jetty.version>
@@ -358,6 +357,7 @@
                 <artifactId>hive-metastore</artifactId>
                 <version>4.0.1</version>
             </dependency>
+            <!-- Enforce jetty version to avoid security vulnerabilities -->
             <dependency>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-client</artifactId>
@@ -373,6 +373,7 @@
                 <artifactId>jetty-http</artifactId>
                 <version>${jetty.version}</version>
             </dependency>
+            <!-- Enforce snappy version to avoid security vulnerabilities -->
             <dependency>
                 <groupId>org.xerial.snappy</groupId>
                 <artifactId>snappy-java</artifactId>
@@ -411,7 +412,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>3.1.2</version>
+                <version>3.6.0</version>
                 <dependencies>
                     <dependency>
                         <groupId>com.puppycrawl.tools</groupId>
