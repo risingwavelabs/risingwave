@@ -303,7 +303,8 @@ message Function {
   bool always_retry_on_network_error = 16;
   // The runtime selected when multiple runtimes are available for the language. Now is not used.
   optional string runtime = 18;
-  reserved 19; reserved "function_type";
+  reserved 19;
+  reserved "function_type";
 
   oneof kind {
     ScalarFunction scalar = 11;
