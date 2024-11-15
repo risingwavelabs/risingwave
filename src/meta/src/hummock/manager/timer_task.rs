@@ -623,7 +623,7 @@ impl HummockManager {
             {
                 Ok(_) => right += 1,
                 Err(e) => {
-                    tracing::debug!(
+                    tracing::info!(
                         error = %e.as_report(),
                         "Failed to merge compaction group",
                     );
