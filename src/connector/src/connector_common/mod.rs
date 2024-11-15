@@ -25,17 +25,24 @@ pub use common::{
 };
 
 mod iceberg;
-pub use iceberg::IcebergCommon;
+pub use iceberg::{IcebergCommon, IcebergConnection};
 
-// #[derive(Debug, Clone, Deserialize)]
-// pub enum ConnectionImpl {
-//     Kafka(KafkaConnection),
-// }
+#[cfg(test)]
+mod tests {
 
-// macro_rules! impl_connection_enum {
-//     ($impl:expr, $inner_name:ident, $prop_type_name:ident, $body:expr) => {
-//         impl ConnectionImpl {
-//             pub fn get_
-//         }
-//     };
-// }
+    use super::*;
+    use crate::error::ConnectorResult;
+    use crate::{dispatch_connection_impl, ConnectionImpl};
+
+    #[test]
+    fn test_dispatch_connection() -> ConnectorResult<()> {
+        let kafka_conn = KafkaConnection::test_default();
+        let conn_impl = ConnectionImpl::from(kafka_conn);
+
+        let x = dispatch_connection_impl!(conn_impl, inner, {
+            println!("{:?}", inner);
+            Ok(())
+        });
+        Ok(())
+    }
+}

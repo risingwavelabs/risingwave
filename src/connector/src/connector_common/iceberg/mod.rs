@@ -34,6 +34,10 @@ use crate::error::ConnectorResult;
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
+pub struct IcebergConnection {}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
 pub struct IcebergCommon {
     // Catalog type supported by iceberg, such as "storage", "rest".
     // If not set, we use "storage" as default.

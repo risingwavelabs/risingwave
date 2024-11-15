@@ -241,6 +241,33 @@ pub struct KafkaConnection {
     sasl_oathbearer_config: Option<String>,
 }
 
+impl KafkaConnection {
+    #[cfg(test)]
+    pub fn test_default() -> Self {
+        Self {
+            brokers: "localhost:9092".to_string(),
+            security_protocol: None,
+            ssl_ca_location: None,
+            ssl_certificate_location: None,
+            ssl_key_location: None,
+            ssl_ca_pem: None,
+            ssl_certificate_pem: None,
+            ssl_key_pem: None,
+            ssl_key_password: None,
+            ssl_endpoint_identification_algorithm: None,
+            sasl_mechanism: None,
+            sasl_username: None,
+            sasl_password: None,
+            sasl_kerberos_service_name: None,
+            sasl_kerberos_keytab: None,
+            sasl_kerberos_principal: None,
+            sasl_kerberos_kinit_cmd: None,
+            sasl_kerberos_min_time_before_relogin: None,
+            sasl_oathbearer_config: None,
+        }
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
