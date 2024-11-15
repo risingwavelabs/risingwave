@@ -2365,15 +2365,6 @@ impl Parser<'_> {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
-            } else if self.parse_keyword(Keyword::SYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, false)?);
-            } else if self.parse_keyword(Keyword::ASYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(true, false)?);
-            } else if self.parse_keyword(Keyword::GENERATOR) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2393,25 +2384,6 @@ impl Parser<'_> {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_type(
-        &mut self,
-        is_async: bool,
-        is_generator: bool,
-    ) -> PResult<CreateFunctionType> {
-        let is_generator = if is_generator {
-            true
-        } else {
-            self.parse_keyword(Keyword::GENERATOR)
-        };
-
-        match (is_async, is_generator) {
-            (false, false) => Ok(CreateFunctionType::Sync),
-            (true, false) => Ok(CreateFunctionType::Async),
-            (false, true) => Ok(CreateFunctionType::Generator),
-            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
         }
     }
 

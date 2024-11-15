@@ -3098,8 +3098,6 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
-
-    pub function_type: Option<CreateFunctionType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -3121,9 +3119,6 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
-        }
-        if let Some(function_type) = &self.function_type {
-            write!(f, " {function_type}")?;
         }
         Ok(())
     }
@@ -3193,26 +3188,6 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CreateFunctionType {
-    Sync,
-    Async,
-    Generator,
-    AsyncGenerator,
-}
-
-impl fmt::Display for CreateFunctionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CreateFunctionType::Sync => write!(f, "SYNC"),
-            CreateFunctionType::Async => write!(f, "ASYNC"),
-            CreateFunctionType::Generator => write!(f, "SYNC GENERATOR"),
-            CreateFunctionType::AsyncGenerator => write!(f, "ASYNC GENERATOR"),
         }
     }
 }
@@ -3460,12 +3435,11 @@ mod tests {
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some(Ident::new_unchecked("python")),
+                runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: None,
-                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3483,12 +3457,11 @@ mod tests {
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some(Ident::new_unchecked("python")),
+                runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: None,
-                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
@@ -3496,30 +3469,6 @@ mod tests {
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
-            format!("{}", create_function)
-        );
-
-        let create_function = Statement::CreateFunction {
-            temporary: false,
-            or_replace: false,
-            name: ObjectName(vec![Ident::new_unchecked("foo")]),
-            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
-            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
-            params: CreateFunctionBody {
-                language: Some(Ident::new_unchecked("javascript")),
-                behavior: None,
-                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
-                return_: None,
-                using: None,
-                runtime: Some(Ident::new_unchecked("deno")),
-                function_type: Some(CreateFunctionType::AsyncGenerator),
-            },
-            with_options: CreateFunctionWithOptions {
-                always_retry_on_network_error: None,
-            },
-        };
-        assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
     }

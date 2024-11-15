@@ -42,14 +42,14 @@ pub struct Model {
     pub arg_types: DataTypeArray,
     pub return_type: DataType,
     pub language: String,
+    pub runtime: Option<String>,
     pub link: Option<String>,
     pub identifier: Option<String>,
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
     pub always_retry_on_network_error: bool,
-    pub runtime: Option<String>,
-    pub function_type: Option<String>,
+    pub function_type: Option<String>, // TODO()
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -101,14 +101,14 @@ impl From<PbFunction> for ActiveModel {
             arg_types: Set(DataTypeArray::from(function.arg_types)),
             return_type: Set(DataType::from(&function.return_type.unwrap())),
             language: Set(function.language),
+            runtime: Set(function.runtime),
             link: Set(function.link),
             identifier: Set(function.identifier),
             body: Set(function.body),
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
-            runtime: Set(function.runtime),
-            function_type: Set(function.function_type),
+            function_type: Default::default(),
         }
     }
 }
