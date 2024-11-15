@@ -79,8 +79,8 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{
-    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
-    IGNORED_NOTIFICATION_VERSION,
+    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
+    NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -1238,6 +1238,7 @@ impl CatalogController {
 
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+        let connection_ids = get_referred_connection_ids_from_source(&pb_source);
 
         let source_obj = Self::create_object(
             &txn,
@@ -1253,8 +1254,9 @@ impl CatalogController {
         Source::insert(source).exec(&txn).await?;
 
         // add secret dependency
-        if !secret_ids.is_empty() {
-            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
+        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),
                     used_by: Set(source_id as _),
