@@ -344,6 +344,7 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         _affected_table_change: Option<ReplaceTablePlan>,
+        _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }

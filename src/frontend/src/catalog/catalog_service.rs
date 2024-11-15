@@ -117,6 +117,7 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<PbReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -319,10 +320,11 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, affected_table_change)
+            .create_sink(sink, graph, affected_table_change, dependencies)
             .await?;
         self.wait_version(version).await
     }

@@ -444,11 +444,13 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             affected_table_change,
+            dependencies: dependencies.into_iter().collect(),
         };
 
         let resp = self.inner.create_sink(request).await?;
