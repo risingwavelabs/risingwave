@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::Ref;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::types::{DataType, Datum, Decimal};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use tokio::net::TcpStream;
+use tokio_postgres::types::ToSql;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
@@ -146,10 +149,29 @@ impl Sink for PostgresSink {
     }
 }
 
-enum SqlOp {
-    Insert(OwnedRow),
-    Merge(OwnedRow),
-    Delete(OwnedRow),
+struct Buffer {
+    buffer: Vec<StreamChunk>,
+    size: usize,
+}
+
+impl Buffer {
+    fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+            size: 0,
+        }
+    }
+
+    fn push(&mut self, chunk: StreamChunk) -> usize {
+        self.size += chunk.cardinality();
+        self.buffer.push(chunk);
+        self.size
+    }
+
+    fn drain(&mut self) -> Vec<StreamChunk> {
+        self.size = 0;
+        std::mem::take(&mut self.buffer)
+    }
 }
 
 pub struct PostgresSinkWriter {
@@ -157,8 +179,8 @@ pub struct PostgresSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
-    sql_client: PostgresClient,
-    ops: Vec<SqlOp>,
+    client: tokio_postgres::Client,
+    buffer: Buffer,
 }
 
 impl PostgresSinkWriter {
@@ -168,43 +190,84 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let sql_client = PostgresClient::new(&config).await?;
+        let client = {
+            let connection_string = format!(
+                "host={} port={} user={} password={} dbname={}",
+                config.host, config.port, config.user, config.password, config.database
+            );
+            let (client, connection) =
+                tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
+                    .await
+                    .context("Failed to connect to Postgres for Sinking")?;
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    tracing::error!("connection error: {}", e);
+                }
+            });
+            client
+        };
+
         let writer = Self {
             config,
             schema,
             pk_indices,
             is_append_only,
-            sql_client,
-            ops: vec![],
+            client,
+            buffer: Buffer::new(),
         };
         Ok(writer)
     }
 
-    async fn delete_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
-            self.flush().await?;
-        }
-        self.ops.push(SqlOp::Delete(row.into_owned_row()));
-        Ok(())
-    }
-
-    async fn upsert_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
-            self.flush().await?;
-        }
-        self.ops.push(SqlOp::Merge(row.into_owned_row()));
-        Ok(())
-    }
-
-    async fn insert_one(&mut self, row: RowRef<'_>) -> Result<()> {
-        if self.ops.len() + 1 >= self.config.max_batch_rows {
-            self.flush().await?;
-        }
-        self.ops.push(SqlOp::Insert(row.into_owned_row()));
-        Ok(())
-    }
-
     async fn flush(&mut self) -> Result<()> {
+        // let mut delete_sql = format!("DELETE FROM {} WHERE ", self.config.table);
+        // NOTE(kwannoel): Use merge rather than update.
+        // Downstream DB may just clean old record, so it can't be updated.
+        // let mut update_sql = format!("MERGE {} SET ", self.config.table);
+
+        let table_name = &self.config.table;
+        let parameters: String = {
+            let param_len = self.schema.fields().len();
+            (0..param_len)
+                .map(|i| {
+                    // let data_type = field.data_type();
+                    // check_data_type_compatibility(data_type)?;
+                    format!("${}", i + 1)
+                })
+                .collect_vec()
+                .join(",")
+        };
+        let insert_sql = format!("INSERT INTO {table_name} VALUES ({parameters})");
+        let insert_statement = self
+            .client
+            .prepare(&insert_sql) // TODO(kwannoel): use prepare_typed instead
+            .await
+            .context("Failed to prepare insert statement")?;
+        for chunk in self.buffer.drain() {
+            for (op, row) in chunk.rows() {
+                match op {
+                    Op::Insert => self.flush_row(row, &insert_statement).await?,
+                    Op::UpdateInsert => {}
+                    Op::Delete => {}
+                    Op::UpdateDelete => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn flush_row(
+        &self,
+        row: RowRef<'_>,
+        statement: &tokio_postgres::Statement,
+    ) -> Result<()> {
+        let owned = row.into_owned_row();
+        let params = owned
+            .as_inner()
+            .iter()
+            .map(|s| s as &(dyn ToSql + Sync))
+            .collect_vec();
+        let params_ref = &params[..];
+        self.client.execute(statement, params_ref).await?;
         Ok(())
     }
 }
@@ -216,25 +279,9 @@ impl SinkWriter for PostgresSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        for (op, row) in chunk.rows() {
-            match op {
-                Op::Insert => {
-                    if self.is_append_only {
-                        self.insert_one(row).await?;
-                    } else {
-                        self.upsert_one(row).await?;
-                    }
-                }
-                Op::UpdateInsert => {
-                    debug_assert!(!self.is_append_only);
-                    self.upsert_one(row).await?;
-                }
-                Op::Delete => {
-                    debug_assert!(!self.is_append_only);
-                    self.delete_one(row).await?;
-                }
-                Op::UpdateDelete => {}
-            }
+        let cardinality = self.buffer.push(chunk);
+        if cardinality >= self.config.max_batch_rows {
+            self.flush().await?;
         }
         Ok(())
     }
@@ -252,30 +299,6 @@ impl SinkWriter for PostgresSinkWriter {
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct PostgresClient {
-    client: tokio_postgres::Client,
-}
-
-impl PostgresClient {
-    async fn new(pg_config: &PostgresConfig) -> Result<Self> {
-        let connection_string = format!(
-            "host={} port={} user={} password={} dbname={}",
-            pg_config.host, pg_config.port, pg_config.user, pg_config.password, pg_config.database
-        );
-        let (client, connection) =
-            tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
-                .await
-                .context("Failed to connect to Postgres for Sinking")?;
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::error!("connection error: {}", e);
-            }
-        });
-        Ok(Self { client })
     }
 }
 

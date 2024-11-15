@@ -960,3 +960,9 @@ impl From<::opensearch::Error> for SinkError {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))
     }
 }
+
+impl From<tokio_postgres::Error> for SinkError {
+    fn from(err: tokio_postgres::Error) -> Self {
+        SinkError::Postgres(anyhow!(err))
+    }
+}
