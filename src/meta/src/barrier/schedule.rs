@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,7 +21,7 @@ use anyhow::{anyhow, Context};
 use assert_matches::assert_matches;
 use parking_lot::Mutex;
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::meta::PausedReason;
 use tokio::select;
@@ -29,11 +29,17 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
 use super::notifier::Notifier;
-use super::{Command, GlobalBarrierWorkerContext, Scheduled};
+use super::{Command, Scheduled};
+use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
+
+pub(super) struct NewBarrier {
+    pub command: Option<(DatabaseId, Command, Vec<Notifier>)>,
+    pub span: tracing::Span,
+    pub checkpoint: bool,
+}
 
 /// A queue for scheduling barriers.
 ///
@@ -58,8 +64,8 @@ enum QueueStatus {
 }
 
 struct ScheduledQueueItem {
+    database_id: DatabaseId,
     command: Command,
-    checkpoint: bool,
     notifiers: Vec<Notifier>,
     send_latency_timer: HistogramTimer,
     span: tracing::Span,
@@ -99,7 +105,7 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs { .. } | Command::CancelStreamingJob(_)
+                Command::DropStreamingJobs { .. } | Command::DropSubscription { .. }
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -125,7 +131,7 @@ impl Inner {
     /// Create a new scheduled barrier with the given `checkpoint`, `command` and `notifiers`.
     fn new_scheduled(
         &self,
-        checkpoint: bool,
+        database_id: DatabaseId,
         command: Command,
         notifiers: impl IntoIterator<Item = Notifier>,
     ) -> ScheduledQueueItem {
@@ -133,11 +139,11 @@ impl Inner {
         let span = tracing_span();
 
         ScheduledQueueItem {
+            database_id,
             command,
             notifiers: notifiers.into_iter().collect(),
             send_latency_timer: self.metrics.barrier_send_latency.start_timer(),
             span,
-            checkpoint,
         }
     }
 }
@@ -206,58 +212,17 @@ impl BarrierScheduler {
         }
     }
 
-    /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
-    /// default barrier will be created. If `new_checkpoint` is true, the barrier will become a
-    /// checkpoint.
-    fn attach_notifiers(
-        &self,
-        new_notifiers: Vec<Notifier>,
-        new_checkpoint: bool,
-    ) -> MetaResult<()> {
-        let mut queue = self.inner.queue.lock();
-        match queue.queue.front_mut() {
-            Some(ScheduledQueueItem {
-                notifiers,
-                checkpoint,
-                ..
-            }) => {
-                notifiers.extend(new_notifiers);
-                *checkpoint = *checkpoint || new_checkpoint;
-            }
-            None => {
-                // If no command scheduled, create a periodic barrier by default.
-                queue.push_back(self.inner.new_scheduled(
-                    new_checkpoint,
-                    Command::barrier(),
-                    new_notifiers,
-                ))?;
-                self.inner.changed_tx.send(()).ok();
-            }
-        }
-        Ok(())
-    }
-
-    /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
-    /// ignored, if exists.
-    pub async fn wait_for_next_barrier_to_collect(&self, checkpoint: bool) -> MetaResult<()> {
-        let (tx, rx) = oneshot::channel();
-        let notifier = Notifier {
-            collected: Some(tx),
-            ..Default::default()
-        };
-        self.attach_notifiers(vec![notifier], checkpoint)?;
-        rx.await
-            .ok()
-            .context("failed to wait for barrier collect")?
-    }
-
     /// Run multiple commands and return when they're all completely finished. It's ensured that
     /// multiple commands are executed continuously.
     ///
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
+    async fn run_multiple_commands(
+        &self,
+        database_id: DatabaseId,
+        commands: Vec<Command>,
+    ) -> MetaResult<()> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -267,7 +232,7 @@ impl BarrierScheduler {
 
             contexts.push((started_rx, collect_rx));
             scheduleds.push(self.inner.new_scheduled(
-                command.need_checkpoint(),
+                database_id,
                 command,
                 once(Notifier {
                     started: Some(started_tx),
@@ -301,31 +266,39 @@ impl BarrierScheduler {
     /// configuration change.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_config_change_command_with_pause(&self, command: Command) -> MetaResult<()> {
-        self.run_multiple_commands(vec![
-            Command::pause(PausedReason::ConfigChange),
-            command,
-            Command::resume(PausedReason::ConfigChange),
-        ])
+    pub async fn run_config_change_command_with_pause(
+        &self,
+        database_id: DatabaseId,
+        command: Command,
+    ) -> MetaResult<()> {
+        self.run_multiple_commands(
+            database_id,
+            vec![
+                Command::pause(PausedReason::ConfigChange),
+                command,
+                Command::resume(PausedReason::ConfigChange),
+            ],
+        )
         .await
     }
 
     /// Run a command and return when it's completely finished.
     ///
     /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, command: Command) -> MetaResult<()> {
+    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
         tracing::trace!("run_command: {:?}", command);
-        let ret = self.run_multiple_commands(vec![command]).await;
+        let ret = self.run_multiple_commands(database_id, vec![command]).await;
         tracing::trace!("run_command finished");
         ret
     }
 
     /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self, checkpoint: bool) -> MetaResult<HummockVersionId> {
+    pub async fn flush(&self, database_id: DatabaseId) -> MetaResult<HummockVersionId> {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.wait_for_next_barrier_to_collect(checkpoint).await?;
+        self.run_multiple_commands(database_id, vec![Command::Flush])
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -340,7 +313,7 @@ pub struct ScheduledBarriers {
     inner: Arc<Inner>,
 }
 
-/// Held by the [`super::GlobalBarrierWorker`] to execute these commands.
+/// Held by the [`crate::barrier::worker::GlobalBarrierWorker`] to execute these commands.
 pub(super) struct PeriodicBarriers {
     min_interval: Interval,
 
@@ -374,19 +347,22 @@ impl PeriodicBarriers {
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
-    ) -> Scheduled {
+    ) -> NewBarrier {
         let checkpoint = self.try_get_checkpoint();
         let scheduled = select! {
             biased;
-            mut scheduled = context.next_scheduled() => {
+            scheduled = context.next_scheduled() => {
                 self.min_interval.reset();
-                scheduled.checkpoint = scheduled.checkpoint || checkpoint;
-                scheduled
+                let checkpoint = scheduled.command.need_checkpoint() || checkpoint;
+                NewBarrier {
+                    command: Some((scheduled.database_id, scheduled.command, scheduled.notifiers)),
+                    span: scheduled.span,
+                    checkpoint,
+                }
             },
             _ = self.min_interval.tick() => {
-                Scheduled {
-                    command: Command::barrier(),
-                    notifiers: vec![],
+                NewBarrier {
+                    command: None,
                     span: tracing_span(),
                     checkpoint,
                 }
@@ -406,10 +382,10 @@ impl ScheduledBarriers {
                 if let Some(item) = queue.queue.pop_front() {
                     item.send_latency_timer.observe_duration();
                     break Scheduled {
+                        database_id: item.database_id,
                         command: item.command,
                         notifiers: item.notifiers,
                         span: item.span,
-                        checkpoint: item.checkpoint,
                     };
                 }
             }
@@ -419,6 +395,11 @@ impl ScheduledBarriers {
 }
 
 impl ScheduledBarriers {
+    /// Pre buffered drop and cancel command, return true if any.
+    pub(super) fn pre_apply_drop_cancel(&self) -> bool {
+        self.pre_apply_drop_cancel_scheduled()
+    }
+
     /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
     /// specific reason.
     pub(super) fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {
@@ -439,23 +420,20 @@ impl ScheduledBarriers {
 
     /// Try to pre apply drop and cancel scheduled command and return them if any.
     /// It should only be called in recovery.
-    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
+    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> bool {
         let mut queue = self.inner.queue.lock();
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
+        let mut applied = false;
 
         while let Some(ScheduledQueueItem {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs { actors, .. } => {
-                    dropped_actors.extend(actors);
+                Command::DropStreamingJobs { .. } => {
+                    applied = true;
                 }
-                Command::CancelStreamingJob(table_fragments) => {
-                    let table_id = table_fragments.table_id();
-                    cancel_table_ids.insert(table_id);
-                }
+                Command::DropSubscription { .. } => {}
                 _ => {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
@@ -464,7 +442,7 @@ impl ScheduledBarriers {
                 notify.notify_collected();
             });
         }
-        (dropped_actors, cancel_table_ids)
+        applied
     }
 }
 

@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::*;
 
+use crate::utils::ColumnDefExt;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -10,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Index::Table)
-                    .add_column(ColumnDef::new(Index::IndexColumnProperties).binary())
+                    .add_column(ColumnDef::new(Index::IndexColumnProperties).rw_binary(manager))
                     .to_owned(),
             )
             .await

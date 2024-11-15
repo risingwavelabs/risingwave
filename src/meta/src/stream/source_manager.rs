@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
@@ -138,7 +138,6 @@ pub async fn create_source_worker_handle(
 
         tokio::spawn(async move { worker.run(sync_call_rx).await })
     });
-
     Ok(ConnectorSourceWorkerHandle {
         handle,
         sync_call_tx,
@@ -315,7 +314,7 @@ impl SourceManagerCore {
     ///
     /// `self.actor_splits` will not be updated. It will be updated by `Self::apply_source_change`,
     /// after the mutation barrier has been collected.
-    async fn reassign_splits(&self) -> MetaResult<SplitAssignment> {
+    async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
         for (source_id, handle) in &self.managed_sources {
@@ -421,7 +420,9 @@ impl SourceManagerCore {
             }
         }
 
-        Ok(split_assignment)
+        self.metadata_manager
+            .split_fragment_map_by_database(split_assignment)
+            .await
     }
 
     fn apply_source_change(
@@ -1001,6 +1002,7 @@ impl SourceManager {
 
     /// create and register connector worker for source.
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
+        tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
         if let Entry::Vacant(e) = core.managed_sources.entry(source.get_id() as _) {
             let handle = create_source_worker_handle(source, self.metrics.clone())
@@ -1050,6 +1052,7 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
+
         let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
@@ -1122,10 +1125,14 @@ impl SourceManager {
             core_guard.reassign_splits().await?
         };
 
-        if !split_assignment.is_empty() {
-            let command = Command::SourceSplitAssignment(split_assignment);
-            tracing::info!(command = ?command, "pushing down split assignment command");
-            self.barrier_scheduler.run_command(command).await?;
+        for (database_id, split_assignment) in split_assignment {
+            if !split_assignment.is_empty() {
+                let command = Command::SourceSplitAssignment(split_assignment);
+                tracing::info!(command = ?command, "pushing down split assignment command");
+                self.barrier_scheduler
+                    .run_command(database_id, command)
+                    .await?;
+            }
         }
 
         Ok(())

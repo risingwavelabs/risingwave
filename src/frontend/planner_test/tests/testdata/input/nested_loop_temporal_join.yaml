@@ -1,0 +1,68 @@
+- name: Left join type for temporal join
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int);
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 < a2 and b1 > b2
+  expected_outputs:
+  - batch_error
+  - stream_error
+- name: Inner join type for temporal join
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int);
+    select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 > a2 where a2 < 10;
+  expected_outputs:
+  - stream_plan
+- name: Cross join for temporal join
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int);
+    select id1, a1, id2, a2 from stream cross join version FOR SYSTEM_TIME AS OF PROCTIME();
+  expected_outputs:
+  - stream_plan
+- name: implicit join with temporal tables
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream, version FOR SYSTEM_TIME AS OF PROCTIME() where a1 > a2 and a2 < 10;
+  expected_outputs:
+  - stream_plan
+- name: Temporal join with Aggregation
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select count(*) from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 > a2 where a2 < 10;
+  expected_outputs:
+  - stream_plan
+- name: Temporal join type test
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream right join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 < a2;
+  expected_outputs:
+  - stream_error
+- name: Temporal join append only test
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 < a2;
+  expected_outputs:
+  - stream_error
+- name: multi-way temporal join
+  sql: |
+    create table stream(k int, a1 int, b1 int) APPEND ONLY;
+    create table version1(k int, x1 int, y2 int, primary key (k));
+    create table version2(k int, x2 int, y2 int, primary key (k));
+    select stream.k, x1, x2, a1, b1
+    from stream
+    join version1 FOR SYSTEM_TIME AS OF PROCTIME() on stream.a1 < version1.x1
+    join version2 FOR SYSTEM_TIME AS OF PROCTIME() on stream.b1 > version2.y2 where a1 < 10;
+  expected_outputs:
+  - stream_plan
+- name: use CTE as temporal join right table. https://github.com/risingwavelabs/risingwave/issues/18703
+  sql: |
+    create table stream(id1 int, a1 int, b1 int, c1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, c2 int, primary key (id2));
+    with version as (select * from version) select id1, a1, id2, a2 from stream join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 > id2;
+  expected_outputs:
+    - binder_error

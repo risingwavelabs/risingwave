@@ -983,6 +983,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         description: None,
         additional_column: AdditionalColumn { column_type: None },
         version: ColumnDescVersion::Pr13707,
+        system_column: None,
     })
 }
 

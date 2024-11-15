@@ -278,17 +278,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
-
         let epoch_pair = barrier.epoch;
-
-        log_writer
-            .init(epoch_pair, barrier.is_pause_on_startup())
-            .await?;
-
-        let mut is_paused = false;
-
+        let is_pause_on_startup = barrier.is_pause_on_startup();
         // Propagate the first barrier
         yield Message::Barrier(barrier);
+
+        log_writer.init(epoch_pair, is_pause_on_startup).await?;
+
+        let mut is_paused = false;
 
         #[for_await]
         for msg in input {
@@ -508,6 +505,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         log_reader.init().await?;
 
+        #[expect(irrefutable_let_patterns)] // false positive
         while let Err(e) = sink
             .new_log_sinker(sink_writer_param.clone())
             .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))

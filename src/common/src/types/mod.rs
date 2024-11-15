@@ -951,7 +951,7 @@ impl ScalarImpl {
     }
 }
 
-impl<'a> ScalarRefImpl<'a> {
+impl ScalarRefImpl<'_> {
     /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
     pub fn into_scalar_impl(self) -> ScalarImpl {
         dispatch_scalar_ref_variants!(self, inner, { inner.to_owned_scalar().into() })

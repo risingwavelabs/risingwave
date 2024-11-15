@@ -74,7 +74,7 @@ impl StorageCatalog {
     /// `table_path`: relative path of table dir under warehouse root.
     async fn is_version_hint_exist(&self, table_path: &str) -> Result<bool> {
         self.file_io
-            .is_exist(format!("{table_path}/metadata/version-hint.text").as_str())
+            .exists(format!("{table_path}/metadata/version-hint.text").as_str())
             .await
             .map_err(|err| {
                 Error::new(
@@ -308,7 +308,7 @@ impl Catalog for StorageCatalog {
             }
         };
         let metadata_path = format!("{table_path}/metadata/version-hint.text");
-        self.file_io.is_exist(&metadata_path).await.map_err(|err| {
+        self.file_io.exists(&metadata_path).await.map_err(|err| {
             Error::new(
                 ErrorKind::Unexpected,
                 format!("Failed to check if table exists: {}", err.as_report()),

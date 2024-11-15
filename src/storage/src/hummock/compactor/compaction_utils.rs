@@ -33,7 +33,7 @@ use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
-use crate::filter_key_extractor::FilterKeyExtractorImpl;
+use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::compactor::{
     ConcatSstableIterator, MultiCompactionFilter, StateCleanUpCompactionFilter, TaskProgress,
     TtlCompactionFilter,
@@ -55,7 +55,7 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
     pub remote_rpc_cost: Arc<AtomicU64>,
-    pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+    pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
 }
@@ -87,7 +87,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
                 self.options.capacity / DEFAULT_ENTRY_SIZE + 1,
             ),
             self.options.clone(),
-            self.filter_key_extractor.clone(),
+            self.compaction_catalog_agent_ref.clone(),
             Some(self.limiter.clone()),
         );
         Ok(builder)
@@ -232,10 +232,9 @@ pub async fn generate_splits(
     context: &CompactorContext,
     max_sub_compaction: u32,
 ) -> HummockResult<Vec<KeyRange>> {
-    const MAX_FILE_COUNT: usize = 32;
     let parallel_compact_size = (context.storage_opts.parallel_compact_size_mb as u64) << 20;
     if compaction_size > parallel_compact_size {
-        if sstable_infos.len() > MAX_FILE_COUNT {
+        if sstable_infos.len() > context.storage_opts.compactor_max_preload_meta_file_count {
             return Ok(generate_splits_fast(
                 sstable_infos,
                 compaction_size,
@@ -674,6 +673,6 @@ pub fn calculate_task_parallelism_impl(
     compaction_size: u64,
     max_sub_compaction: u32,
 ) -> usize {
-    let parallelism = (compaction_size + parallel_compact_size - 1) / parallel_compact_size;
+    let parallelism = compaction_size.div_ceil(parallel_compact_size);
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
 }

@@ -99,7 +99,7 @@ IcebergProperties:
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
-    required: true
+    required: false
   - name: catalog.name
     field_type: String
     comments: |-
@@ -182,11 +182,6 @@ KafkaProperties:
       combine both key and value fields of the Kafka message.
       TODO: Currently, `Option<bool>` can not be parsed here.
     required: false
-  - name: properties.bootstrap.server
-    field_type: String
-    required: true
-    alias:
-    - kafka.brokers
   - name: topic
     field_type: String
     required: true
@@ -196,6 +191,11 @@ KafkaProperties:
     field_type: Duration
     required: false
     default: 'Duration :: from_secs (5)'
+  - name: properties.bootstrap.server
+    field_type: String
+    required: true
+    alias:
+    - kafka.brokers
   - name: properties.security.protocol
     field_type: String
     comments: |-
@@ -275,7 +275,7 @@ KafkaProperties:
       Maximum Kafka protocol request message size. Due to differing framing overhead between
       protocol versions the producer is unable to reliably enforce a strict max message limit at
       produce time and may exceed the maximum size by one message in protocol ProduceRequests,
-      the broker will enforce the the topic's max.message.bytes limit
+      the broker will enforce the topic's max.message.bytes limit
     required: false
   - name: properties.receive.message.max.bytes
     field_type: usize

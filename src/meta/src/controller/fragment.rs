@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::util::worker_util::WorkerNodeId;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
@@ -70,8 +69,8 @@ use crate::{MetaError, MetaResult};
 
 #[derive(Clone, Debug)]
 pub struct InflightFragmentInfo {
-    pub actors: HashMap<ActorId, WorkerNodeId>,
-    pub state_table_ids: HashSet<TableId>,
+    pub actors: HashMap<crate::model::ActorId, WorkerId>,
+    pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
 }
 
 #[derive(Clone, Debug)]
@@ -662,6 +661,24 @@ impl CatalogController {
         Ok(object_ids)
     }
 
+    pub async fn list_fragment_database_ids(
+        &self,
+        select_fragment_ids: Option<Vec<FragmentId>>,
+    ) -> MetaResult<Vec<(FragmentId, DatabaseId)>> {
+        let inner = self.inner.read().await;
+        let select = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .column(object::Column::DatabaseId)
+            .join(JoinType::InnerJoin, fragment::Relation::Object.def());
+        let select = if let Some(select_fragment_ids) = select_fragment_ids {
+            select.filter(fragment::Column::FragmentId.is_in(select_fragment_ids))
+        } else {
+            select
+        };
+        Ok(select.into_tuple().all(&inner.db).await?)
+    }
+
     pub async fn get_job_fragments_by_id(&self, job_id: ObjectId) -> MetaResult<PbTableFragments> {
         let inner = self.inner.read().await;
         let fragment_actors = Fragment::find()
@@ -1001,14 +1018,17 @@ impl CatalogController {
                 .entry(risingwave_common::catalog::TableId::new(job_id as _))
                 .or_default();
             let state_table_ids = state_table_ids.into_inner();
+            let state_table_ids = state_table_ids
+                .into_iter()
+                .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
+                .collect();
             match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
-                    debug_assert_eq!(info.state_table_ids, state_table_ids.into_iter().collect());
+                    assert_eq!(info.state_table_ids, state_table_ids);
                     assert!(info.actors.insert(actor_id as _, worker_id as _).is_none());
                 }
                 Entry::Vacant(entry) => {
-                    let state_table_ids = state_table_ids.into_iter().collect();
                     entry.insert(InflightFragmentInfo {
                         actors: HashMap::from_iter([(actor_id as _, worker_id as _)]),
                         state_table_ids,

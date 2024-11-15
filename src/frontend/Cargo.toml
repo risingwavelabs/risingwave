@@ -45,6 +45,9 @@ linkme = { version = "0.3", features = ["used_linker"] }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"
+mysql_async = { version = "0.34", default-features = false, features = [
+    "default",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
@@ -78,7 +81,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.7"
 smallvec = { version = "1.13.1", features = ["serde"] }
-speedate = "0.14.0"
+speedate = "0.15.0"
 tempfile = "3"
 thiserror = "1"
 thiserror-ext = { workspace = true }

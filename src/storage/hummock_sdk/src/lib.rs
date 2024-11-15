@@ -18,7 +18,6 @@
 #![feature(map_many_mut)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(is_sorted)]
 #![feature(let_chains)]
 #![feature(btree_cursors)]
 #![feature(strict_overflow_ops)]
@@ -405,6 +404,38 @@ impl EpochWithGap {
     pub fn offset(&self) -> u64 {
         self.0 & EPOCH_SPILL_TIME_MASK
     }
+}
+
+pub fn get_sst_data_path(
+    obj_prefix: &str,
+    path_prefix: &str,
+    object_id: HummockSstableObjectId,
+) -> String {
+    let mut path = String::with_capacity(
+        path_prefix.len()
+            + "/".len()
+            + obj_prefix.len()
+            + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
+            + ".".len()
+            + OBJECT_SUFFIX.len(),
+    );
+    path.push_str(path_prefix);
+    path.push('/');
+    path.push_str(obj_prefix);
+    path.push_str(&object_id.to_string());
+    path.push('.');
+    path.push_str(OBJECT_SUFFIX);
+    path
+}
+
+pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
+    use itertools::Itertools;
+    let split = path.split(&['/', '.']).collect_vec();
+    assert!(split.len() > 2);
+    assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
+    split[split.len() - 2]
+        .parse::<HummockSstableObjectId>()
+        .expect("valid sst id")
 }
 
 #[cfg(test)]

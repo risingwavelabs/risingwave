@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
@@ -75,7 +76,20 @@ impl<'a> Spiller<'a> {
         if let Some(unsync_epoch_id) = self
             .epoch_info
             .iter()
-            .max_by_key(|(_, info)| info.payload_size)
+            .max_by(
+                |(UnsyncEpochId(_, table1), info1), (UnsyncEpochId(_, table2), info2)| {
+                    info1.payload_size.cmp(&info2.payload_size).then_with(|| {
+                        if !cfg!(test) {
+                            Ordering::Equal
+                        } else {
+                            assert_ne!(table1, table2);
+                            // enforce deterministic spill order in test
+                            // smaller table id will be spilled first.
+                            table2.cmp(table1)
+                        }
+                    })
+                },
+            )
             .map(|(unsync_epoch_id, _)| *unsync_epoch_id)
         {
             let spill_epoch = unsync_epoch_id.epoch();

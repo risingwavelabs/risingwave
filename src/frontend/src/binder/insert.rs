@@ -305,7 +305,6 @@ impl Binder {
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
-
     pub(super) fn cast_on_insert(
         expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,

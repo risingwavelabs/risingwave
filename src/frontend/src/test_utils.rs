@@ -44,8 +44,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
-    alter_name_request, alter_set_schema_request, create_connection_request, DdlProgress,
-    PbTableJobType, ReplaceTablePlan, TableJobType,
+    alter_name_request, alter_set_schema_request, alter_swap_rename_request,
+    create_connection_request, DdlProgress, PbTableJobType, ReplaceTablePlan, TableJobType,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -645,6 +645,10 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {
@@ -922,7 +926,7 @@ pub struct MockFrontendMetaClient {}
 impl FrontendMetaClient for MockFrontendMetaClient {
     async fn try_unregister(&self) {}
 
-    async fn flush(&self, _checkpoint: bool) -> RpcResult<HummockVersionId> {
+    async fn flush(&self, _database_id: DatabaseId) -> RpcResult<HummockVersionId> {
         Ok(INVALID_VERSION_ID)
     }
 

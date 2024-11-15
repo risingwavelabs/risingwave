@@ -731,10 +731,10 @@ mod test_util {
     use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {
-        return hashers
+        hashers
             .iter()
             .map(|hasher| hasher.finish())
-            .collect::<Vec<u64>>();
+            .collect::<Vec<u64>>()
     }
 
     pub fn test_hash<H: BuildHasher, A: Array>(arrs: Vec<A>, expects: Vec<u64>, hasher_builder: H) {

@@ -23,9 +23,11 @@ use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
+use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
-    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, EpochNode, ReplaceTablePlan,
+    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
 };
 use crate::manager::{DdlType, MetadataManager};
 use crate::model::{ActorId, BackfillUpstreamType, TableFragments};
@@ -375,16 +377,56 @@ impl CreateMviewProgressTracker {
             .collect()
     }
 
+    pub(super) fn update_tracking_jobs<'a>(
+        &mut self,
+        info: Option<(&CreateStreamingJobCommandInfo, Option<&ReplaceTablePlan>)>,
+        create_mview_progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
+        version_stats: &HummockVersionStats,
+    ) {
+        {
+            {
+                // Save `finished_commands` for Create MVs.
+                let finished_commands = {
+                    let mut commands = vec![];
+                    // Add the command to tracker.
+                    if let Some((create_job_info, replace_table)) = info
+                        && let Some(command) =
+                            self.add(create_job_info, replace_table, version_stats)
+                    {
+                        // Those with no actors to track can be finished immediately.
+                        commands.push(command);
+                    }
+                    // Update the progress of all commands.
+                    for progress in create_mview_progress {
+                        // Those with actors complete can be finished immediately.
+                        if let Some(command) = self.update(progress, version_stats) {
+                            tracing::trace!(?progress, "finish progress");
+                            commands.push(command);
+                        } else {
+                            tracing::trace!(?progress, "update progress");
+                        }
+                    }
+                    commands
+                };
+
+                for command in finished_commands {
+                    self.stash_command_to_finish(command);
+                }
+            }
+        }
+    }
+
     /// Apply a collected epoch node command to the tracker
     /// Return the finished jobs when the barrier kind is `Checkpoint`
     pub(super) fn apply_collected_command(
         &mut self,
-        epoch_node: &EpochNode,
+        command: Option<&Command>,
+        barrier_info: &BarrierInfo,
+        resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
-        let command_ctx = &epoch_node.command_ctx;
         let new_tracking_job_info =
-            if let Command::CreateStreamingJob { info, job_type } = &command_ctx.command {
+            if let Some(Command::CreateStreamingJob { info, job_type }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
@@ -398,22 +440,19 @@ impl CreateMviewProgressTracker {
             } else {
                 None
             };
-        assert!(epoch_node.state.node_to_collect.is_empty());
         self.update_tracking_jobs(
             new_tracking_job_info,
-            epoch_node
-                .state
-                .resps
-                .iter()
+            resps
+                .into_iter()
                 .flat_map(|resp| resp.create_mview_progress.iter()),
             version_stats,
         );
-        if let Some(table_id) = command_ctx.command.table_to_cancel() {
+        for table_id in command.map(Command::tables_to_drop).into_iter().flatten() {
             // the cancelled command is possibly stashed in `finished_commands` and waiting
             // for checkpoint, we should also clear it.
             self.cancel_command(table_id);
         }
-        if command_ctx.barrier_info.kind.is_checkpoint() {
+        if barrier_info.kind.is_checkpoint() {
             self.take_finished_jobs()
         } else {
             vec![]

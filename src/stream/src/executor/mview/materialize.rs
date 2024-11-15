@@ -170,10 +170,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -702,11 +702,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::Overwrite
                         | ConflictBehavior::IgnoreConflict
                         | ConflictBehavior::DoUpdateIfNotNull => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    fixed_changes().delete(key.clone(), old_row.row.clone());
-                                }
-                                None => (), // delete a nonexistent value
+                            // delete a nonexistent value
+                            if let Some(old_row) = self.force_get(&key) {
+                                fixed_changes().delete(key.clone(), old_row.row.clone());
                             };
                         }
                         _ => unreachable!(),

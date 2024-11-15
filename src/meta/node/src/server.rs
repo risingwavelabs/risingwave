@@ -87,7 +87,6 @@ use crate::controller::SqlMetaStore;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
@@ -523,24 +522,8 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
-    let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id
-        && let Some(security_group_id) = &env.opts.security_group_id
-    {
-        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
-        aws_cli = Some(cli);
-    }
-
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
-        aws_cli.clone(),
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
@@ -570,12 +553,12 @@ pub async fn start_service_as_election_leader(
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        vacuum_manager.clone(),
         metadata_manager.clone(),
+        backup_manager.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
-    let backup_srv = BackupServiceImpl::new(backup_manager);
+    let backup_srv = BackupServiceImpl::new(backup_manager.clone());
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
         env.system_params_manager_impl_ref(),
@@ -584,7 +567,7 @@ pub async fn start_service_as_election_leader(
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
-    let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
+    let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
 
@@ -595,7 +578,6 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        vacuum_manager,
         // compaction_scheduler,
         &env.opts,
     ));
@@ -613,7 +595,10 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(SystemParamsController::start_params_notifier(
         env.system_params_manager_impl_ref(),
     ));
-    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
+    sub_tasks.push(HummockManager::hummock_timer_task(
+        hummock_manager.clone(),
+        Some(backup_manager),
+    ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
         hummock_manager,
         compactor_streams_change_rx,
@@ -702,6 +687,7 @@ pub async fn start_service_as_election_leader(
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
+        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
@@ -709,7 +695,6 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
         .add_service(EventLogServiceServer::new(event_log_srv))
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));

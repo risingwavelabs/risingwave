@@ -30,7 +30,7 @@ impl IntGauge {
             }
         }
 
-        impl<'a> Drop for Guard<'a> {
+        impl Drop for Guard<'_> {
             fn drop(&mut self) {
                 self.gauge.dec();
             }

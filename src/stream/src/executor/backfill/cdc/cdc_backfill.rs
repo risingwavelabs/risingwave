@@ -159,6 +159,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier = expect_first_barrier(&mut upstream).await?;
 
         let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let first_barrier_epoch = first_barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
         let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
@@ -169,16 +172,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .boxed()
             .peekable();
 
-        state_impl.init_epoch(first_barrier.epoch);
+        state_impl.init_epoch(first_barrier_epoch).await?;
 
         // restore backfill state
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
         let to_backfill = !self.options.disable_backfill && !state.is_finished;
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;

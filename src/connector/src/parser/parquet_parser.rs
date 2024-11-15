@@ -17,7 +17,7 @@ use std::sync::Arc;
 use deltalake::parquet::arrow::async_reader::AsyncFileReader;
 use futures_async_stream::try_stream;
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
-use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::types::{Datum, ScalarImpl};
@@ -87,11 +87,10 @@ impl ParquetParser {
     /// # Returns
     ///
     /// A `StreamChunk` containing the converted data from the `RecordBatch`.
-
-    // The hidden columns that must be included here are _rw_file and _rw_offset.
-    // Depending on whether the user specifies a primary key (pk), there may be an additional hidden column row_id.
-    // Therefore, the maximum number of hidden columns is three.
-
+    ///
+    /// The hidden columns that must be included here are `_rw_file` and `_rw_offset`.
+    /// Depending on whether the user specifies a primary key (pk), there may be an additional hidden column `row_id`.
+    /// Therefore, the maximum number of hidden columns is three.
     fn convert_record_batch_to_stream_chunk(
         &mut self,
         record_batch: RecordBatch,
@@ -104,32 +103,19 @@ impl ParquetParser {
                 crate::source::SourceColumnType::Normal => {
                     match source_column.is_hidden_addition_col {
                         false => {
-                            let rw_data_type = &source_column.data_type;
+                            let rw_data_type: &risingwave_common::types::DataType =
+                                &source_column.data_type;
                             let rw_column_name = &source_column.name;
+
                             if let Some(parquet_column) =
                                 record_batch.column_by_name(rw_column_name)
                             {
                                 let arrow_field = IcebergArrowConvert
                                     .to_arrow_field(rw_column_name, rw_data_type)?;
-                                let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
-                                    arrow_field.data_type();
-                                if converted_arrow_data_type == parquet_column.data_type() {
-                                    let array_impl = IcebergArrowConvert
-                                        .array_from_arrow_array(&arrow_field, parquet_column)?;
-                                    let column = Arc::new(array_impl);
-                                    chunk_columns.push(column);
-                                } else {
-                                    // data type mismatch, this column is set to null.
-                                    let mut array_builder = ArrayBuilderImpl::with_type(
-                                        column_size,
-                                        rw_data_type.clone(),
-                                    );
-
-                                    array_builder.append_n_null(record_batch.num_rows());
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                }
+                                let array_impl = IcebergArrowConvert
+                                    .array_from_arrow_array(&arrow_field, parquet_column)?;
+                                let column = Arc::new(array_impl);
+                                chunk_columns.push(column);
                             } else {
                                 // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
                                 let mut array_builder =

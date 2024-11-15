@@ -59,7 +59,6 @@ use crate::utils::{Condition, IndexSet};
 ///                 |
 ///               Filter
 /// ```
-
 pub struct PullUpCorrelatedPredicateAggRule {}
 impl Rule for PullUpCorrelatedPredicateAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

@@ -35,6 +35,7 @@ use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
+use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -216,6 +217,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
+                system_column: None,
             },
             is_hidden: false,
         });
@@ -359,25 +361,33 @@ pub fn bind_sql_column_constraints(
     Ok(())
 }
 
-pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+/// Currently we only support Primary key table constraint, so just return pk names if it exists
+pub fn bind_table_constraints(table_constraints: &[TableConstraint]) -> Result<Vec<String>> {
+    let mut pk_column_names = vec![];
+
     for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
                 name: _,
-                columns: _,
+                columns,
                 is_primary: true,
-            } => {}
+            } => {
+                if !pk_column_names.is_empty() {
+                    return Err(multiple_pk_definition_err());
+                }
+                pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
+            }
             _ => bail_not_implemented!("table constraint \"{}\"", constraint),
         }
     }
-    Ok(())
+    Ok(pk_column_names)
 }
 
 pub fn bind_sql_pk_names(
     columns_defs: &[ColumnDef],
-    table_constraints: &[TableConstraint],
+    pk_names_from_table_constraints: Vec<String>,
 ) -> Result<Vec<String>> {
-    let mut pk_column_names = vec![];
+    let mut pk_column_names = pk_names_from_table_constraints;
 
     for column in columns_defs {
         for option_def in &column.options {
@@ -390,19 +400,6 @@ pub fn bind_sql_pk_names(
         }
     }
 
-    for constraint in table_constraints {
-        if let TableConstraint::Unique {
-            name: _,
-            columns,
-            is_primary: true,
-        } = constraint
-        {
-            if !pk_column_names.is_empty() {
-                return Err(multiple_pk_definition_err());
-            }
-            pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
-        }
-    }
     Ok(pk_column_names)
 }
 
@@ -584,8 +581,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     with_version_column: Option<String>,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, PbTable)> {
-    ensure_table_constraints_supported(&constraints)?;
-    let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+    let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
@@ -1030,19 +1026,15 @@ pub(super) async fn handle_create_table_plan(
                     )?;
                     source.clone()
                 };
-                let cdc_with_options = derive_with_options_for_cdc_table(
+                let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
                     &source.with_properties,
                     cdc_table.external_table_name.clone(),
                 )?;
 
-                let (columns, pk_names) = derive_schema_for_cdc_table(
-                    &column_defs,
-                    &constraints,
-                    cdc_with_options.clone(),
-                    wildcard_idx.is_some(),
-                    None,
-                )
-                .await?;
+                let (columns, pk_names) = match wildcard_idx {
+                    Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                    None => bind_cdc_table_schema(&column_defs, &constraints, None)?,
+                };
 
                 let context: OptimizerContextRef =
                     OptimizerContext::new(handler_args, explain_options).into();
@@ -1147,84 +1139,64 @@ fn sanity_check_for_cdc_table(
     Ok(())
 }
 
-struct CdcSchemaChangeArgs {
-    /// original table catalog
-    original_catalog: Arc<TableCatalog>,
-    /// new version table columns, only provided in auto schema change
-    new_version_columns: Option<Vec<ColumnCatalog>>,
+/// Derive schema for cdc table when create a new Table or alter an existing Table
+async fn bind_cdc_table_schema_externally(
+    cdc_with_options: WithOptionsSecResolved,
+) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+    // read cdc table schema from external db or parsing the schema from SQL definitions
+    Feature::CdcTableSchemaMap.check_available().map_err(
+        |err: risingwave_common::license::FeatureNotAvailable| {
+            ErrorCode::NotSupported(
+                err.to_report_string(),
+                "Please define the schema manually".to_owned(),
+            )
+        },
+    )?;
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+        .context("failed to extract external table config")?;
+
+    let table = ExternalTableImpl::connect(config)
+        .await
+        .context("failed to auto derive table schema")?;
+    Ok((
+        table
+            .column_descs()
+            .iter()
+            .cloned()
+            .map(|column_desc| ColumnCatalog {
+                column_desc,
+                is_hidden: false,
+            })
+            .collect(),
+        table.pk_names().clone(),
+    ))
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
-async fn derive_schema_for_cdc_table(
+fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
-    cdc_with_options: WithOptionsSecResolved,
-    need_auto_schema_map: bool,
-    schema_change_args: Option<CdcSchemaChangeArgs>,
+    new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    // read cdc table schema from external db or parsing the schema from SQL definitions
-    if need_auto_schema_map {
-        Feature::CdcTableSchemaMap
-            .check_available()
-            .map_err(|err| {
-                ErrorCode::NotSupported(
-                    err.to_report_string(),
-                    "Please define the schema manually".to_owned(),
-                )
-            })?;
-        let (options, secret_refs) = cdc_with_options.into_parts();
-        let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-            .context("failed to extract external table config")?;
-
-        let table = ExternalTableImpl::connect(config)
-            .await
-            .context("failed to auto derive table schema")?;
-        Ok((
-            table
-                .column_descs()
-                .iter()
-                .cloned()
-                .map(|column_desc| ColumnCatalog {
-                    column_desc,
-                    is_hidden: false,
-                })
-                .collect(),
-            table.pk_names().clone(),
-        ))
-    } else {
-        let mut columns = bind_sql_columns(column_defs)?;
-        let pk_names = if let Some(args) = schema_change_args {
-            // If new_version_columns is provided, we are in the process of auto schema change.
-            // update the default value column since the default value column is not set in the
-            // column sql definition.
-            if let Some(new_version_columns) = args.new_version_columns {
-                for (col, new_version_col) in columns
-                    .iter_mut()
-                    .zip_eq_fast(new_version_columns.into_iter())
-                {
-                    assert_eq!(col.name(), new_version_col.name());
-                    col.column_desc.generated_or_default_column =
-                        new_version_col.column_desc.generated_or_default_column;
-                }
-            }
-
-            // For table created by `create table t (*)` the constraint is empty, we need to
-            // retrieve primary key names from original table catalog if available
-            args.original_catalog
-                .pk
-                .iter()
-                .map(|x| {
-                    args.original_catalog.columns[x.column_index]
-                        .name()
-                        .to_string()
-                })
-                .collect()
-        } else {
-            bind_sql_pk_names(column_defs, constraints)?
-        };
-
-        Ok((columns, pk_names))
+    let mut columns = bind_sql_columns(column_defs)?;
+    // If new_version_columns is provided, we are in the process of auto schema change.
+    // update the default value column since the default value column is not set in the
+    // column sql definition.
+    if let Some(new_version_columns) = new_version_columns {
+        for (col, new_version_col) in columns
+            .iter_mut()
+            .zip_eq_fast(new_version_columns.into_iter())
+        {
+            assert_eq!(col.name(), new_version_col.name());
+            col.column_desc.generated_or_default_column =
+                new_version_col.column_desc.generated_or_default_column;
+        }
     }
+
+    let pk_names = bind_sql_pk_names(column_defs, bind_table_constraints(constraints)?)?;
+
+    Ok((columns, pk_names))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1322,7 +1294,7 @@ pub fn check_create_table_with_source(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn generate_stream_graph_for_table(
+pub async fn generate_stream_graph_for_replace_table(
     _session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,
@@ -1341,7 +1313,7 @@ pub async fn generate_stream_graph_for_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
-    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+    let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
         (Some(format_encode), None) => (
             gen_create_table_plan_with_source(
                 handler_args,
@@ -1386,17 +1358,8 @@ pub async fn generate_stream_graph_for_table(
                 cdc_table.external_table_name.clone(),
             )?;
 
-            let (columns, pk_names) = derive_schema_for_cdc_table(
-                &column_defs,
-                &constraints,
-                cdc_with_options.clone(),
-                false,
-                Some(CdcSchemaChangeArgs {
-                    original_catalog: original_catalog.clone(),
-                    new_version_columns,
-                }),
-            )
-            .await?;
+            let (columns, pk_names) =
+                bind_cdc_table_schema(&column_defs, &constraints, new_version_columns)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
@@ -1441,13 +1404,18 @@ pub async fn generate_stream_graph_for_table(
     let graph = build_graph(plan)?;
 
     // Fill the original table ID.
-    let table = Table {
+    let mut table = Table {
         id: original_catalog.id().table_id(),
-        optional_associated_source_id: original_catalog
-            .associated_source_id()
-            .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
         ..table
     };
+    if let Some(source_id) = original_catalog.associated_source_id() {
+        table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
+            source_id.table_id,
+        ));
+        source.as_mut().unwrap().id = source_id.table_id;
+        source.as_mut().unwrap().optional_associated_table_id =
+            Some(OptionalAssociatedTableId::AssociatedTableId(table.id))
+    }
 
     Ok((graph, table, source, job_type))
 }
@@ -1482,7 +1450,9 @@ fn get_source_and_resolved_table_name(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -1552,6 +1522,7 @@ mod tests {
                 vec![DataType::Int64,DataType::Float64,DataType::Float64],
                 vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
             ),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
         assert_eq!(columns, expected_columns);
@@ -1613,8 +1584,9 @@ mod tests {
                 for c in &mut columns {
                     c.column_desc.column_id = col_id_gen.generate(c.name())
                 }
-                ensure_table_constraints_supported(&constraints)?;
-                let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+
+                let pk_names =
+                    bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
                 let (_, pk_column_ids, _) =
                     bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
                 Ok(pk_column_ids)

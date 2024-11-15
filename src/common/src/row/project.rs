@@ -24,12 +24,12 @@ pub struct Project<'i, R> {
     indices: &'i [usize],
 }
 
-impl<'i, R: Row> PartialEq for Project<'i, R> {
+impl<R: Row> PartialEq for Project<'_, R> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<'i, R: Row> Eq for Project<'i, R> {}
+impl<R: Row> Eq for Project<'_, R> {}
 
 impl<'i, R: Row> Row for Project<'i, R> {
     #[inline]

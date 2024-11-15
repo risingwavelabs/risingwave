@@ -37,7 +37,6 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
-pub mod snowflake;
 pub mod sqlserver;
 pub mod starrocks;
 pub mod test_sink;
@@ -128,7 +127,7 @@ macro_rules! for_all_sinks {
                 { Webhdfs, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::webhdfs::WebhdfsSink>},
 
                 { Fs, $crate::sink::file_sink::opendal_sink::FileSink<FsSink>  },
-                { Snowflake, $crate::sink::snowflake::SnowflakeSink },
+                { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>},
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
@@ -693,12 +692,10 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
 
 impl SinkImpl {
     pub fn new(mut param: SinkParam) -> Result<Self> {
-        const CONNECTION_NAME_KEY: &str = "connection.name";
         const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
 
         // remove privatelink related properties if any
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
-        param.properties.remove(CONNECTION_NAME_KEY);
 
         let sink_type = param
             .properties
@@ -839,12 +836,6 @@ pub enum SinkError {
     Starrocks(String),
     #[error("File error: {0}")]
     File(String),
-    #[error("Snowflake error: {0}")]
-    Snowflake(
-        #[source]
-        #[backtrace]
-        anyhow::Error,
-    ),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]
