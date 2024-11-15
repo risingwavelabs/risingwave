@@ -20,7 +20,9 @@
     </description>
 
     <properties>
-        <iceberg.version>1.0.0</iceberg.version>
+        <!-- The versions of Spark and Delta must be compatible. See https://docs.delta.io/latest/releases.html -->
+        <spark.version>3.5.3</spark.version>
+        <delta.version>3.2.1</delta.version>
     </properties>
 
     <dependencies>
@@ -41,14 +43,14 @@
         </dependency>
         <dependency>
             <groupId>io.delta</groupId>
-            <artifactId>delta-core_2.12</artifactId>
-            <version>2.4.0</version>
+            <artifactId>delta-spark_2.12</artifactId>
+            <version>${delta.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.delta</groupId>
             <artifactId>delta-standalone_2.12</artifactId>
-            <version>3.2.1</version>
+            <version>${delta.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -72,17 +74,15 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j2-impl</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client</artifactId>
             <scope>test</scope>
+            <version>3.3.4</version>
             <exclusions>
                 <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
@@ -93,18 +93,7 @@
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-sql_2.12</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-spark-3.2_2.12</artifactId>
-            <version>${iceberg.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-arrow</artifactId>
-            <version>${iceberg.version}</version>
+            <version>${spark.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -118,17 +107,17 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Force using jackson-databind 2.13.5, as required by spark-3.2_2.12  -->
+        <!-- Force using jackson 2.15.x to escape from dependencyManagement as required by Spark -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>2.13.5</version>
+            <version>2.15.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
-            <version>2.13.5</version>
+            <version>2.15.4</version>
             <scope>test</scope>
         </dependency>
 
