@@ -288,7 +288,9 @@ impl IcebergSink {
                         if url.is_err() {
                             // For rest catalog, the warehouse_path could be a warehouse name.
                             // In this case, we should specify the location when creating a table.
-                            if self.config.common.catalog_type() == "rest" {
+                            if self.config.common.catalog_type() == "rest"
+                                || self.config.common.catalog_type() == "rest_rust"
+                            {
                                 None
                             } else {
                                 bail!(format!("Invalid warehouse path: {}", warehouse_path))
