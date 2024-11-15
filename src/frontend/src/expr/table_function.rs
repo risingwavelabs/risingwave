@@ -20,8 +20,9 @@ use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::source::filesystem::opendal_source::opendal_reader::get_parquet_fields;
-use risingwave_connector::source::iceberg::{list_s3_directory, new_s3_operator};
+use risingwave_connector::source::iceberg::{
+    get_parquet_fields, list_s3_directory, new_s3_operator,
+};
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::PbTableFunction;
 use thiserror_ext::AsReport;
