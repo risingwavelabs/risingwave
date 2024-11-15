@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
 use std::rc::Rc;
@@ -22,13 +22,14 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::error::Result;
 use crate::expr::{
     collect_input_refs, column_self_eq_eliminate, factorization_expr, fold_boolean_constant,
     push_down_not, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef, Literal,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -382,11 +383,126 @@ impl Condition {
             }
         }
 
+        let (mut row_conjunctions, mut row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
+            self.conjunctions.clone().into_iter().partition(|expr| {
+                if let Some(f) = expr.as_function_call() {
+                    if let Some(f_input) = f.inputs().get(0)
+                        && let Some(f_input) = f_input.as_function_call()
+                        && matches!(f_input.func_type(), ExprType::Row)
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
         let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
+        let mut other_conds = groups.pop().unwrap();
+
+        // optimize for single row conjunctions
+        if row_conjunctions.len() == 1 {
+            let row_conjunction = row_conjunctions.pop().unwrap();
+            let row_left_inputs = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(0)
+                .unwrap()
+                .as_function_call()
+                .unwrap()
+                .inputs();
+            let row_right_literal_data = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(1)
+                .unwrap()
+                .as_literal()
+                .unwrap()
+                .get_data()
+                .clone()
+                .unwrap();
+            let row_right_literal_type = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(1)
+                .unwrap()
+                .as_literal()
+                .unwrap()
+                .get_data_type()
+                .clone()
+                .unwrap();
+            let right_iter = row_right_literal_data
+                .as_struct()
+                .fields()
+                .iter()
+                .zip_eq_fast(row_right_literal_type.as_struct().types());
+            let func_type = row_conjunction.as_function_call().unwrap().func_type();
+            if row_left_inputs.len() > 1
+                && (matches!(func_type, ExprType::LessThan)
+                    || matches!(func_type, ExprType::GreaterThan))
+            {
+                let mut row_inputs_map = row_left_inputs
+                    .iter()
+                    .zip_eq_fast(right_iter)
+                    .map(|(left_expr, right_expr)| {
+                        (
+                            left_expr.as_input_ref().unwrap().index,
+                            (left_expr, right_expr),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>();
+                let mut pk_struct = vec![];
+                for i in table_desc.order_column_indices() {
+                    if let Some(ex) = row_inputs_map.remove(&i) {
+                        pk_struct.push(ex);
+                    } else {
+                        break;
+                    }
+                }
+                let mut scan_range = ScanRange::full_table_scan_end_unbounded();
+                if let Some(pk_struct_index) = pk_struct.pop() {
+                    let value = match pk_struct_index.1 .0 {
+                        Some(v) => Bound::Excluded(v.clone()),
+                        None => Bound::Unbounded,
+                    };
+                    match func_type {
+                        ExprType::GreaterThan => scan_range.range = (value, Bound::Unbounded),
+                        ExprType::LessThan => scan_range.range = (Bound::Unbounded, value),
+                        _ => unreachable!(),
+                    }
+                    pk_struct.iter().for_each(|expr| {
+                        scan_range.eq_conds.push(expr.1 .0.clone());
+                    });
+                    let other_conds = row_inputs_map
+                        .into_values()
+                        .map(|(left_expr, right_expr)| {
+                            Ok(FunctionCall::new(
+                                ExprType::GreaterThan,
+                                vec![
+                                    left_expr.clone(),
+                                    Literal::new(right_expr.0.clone(), right_expr.1.clone()).into(),
+                                ],
+                            )?
+                            .into())
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    row_conjunctions_without_struct.extend(other_conds);
+                    return Ok((
+                        vec![scan_range],
+                        Condition {
+                            conjunctions: row_conjunctions_without_struct,
+                        },
+                    ));
+                }
+            }
+        }
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
-        let mut other_conds = groups.pop().unwrap();
         for i in 0..table_desc.order_column_indices().len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {

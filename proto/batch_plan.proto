@@ -55,6 +55,8 @@ message ScanRange {
   Bound lower_bound = 2;
   //  The upper bound of the next PK column subsequent to those in `eq_conds`.
   Bound upper_bound = 3;
+
+  bool is_real_unbounded = 4;
 }
 
 message SourceNode {

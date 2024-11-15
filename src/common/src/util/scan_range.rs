@@ -29,6 +29,7 @@ use crate::util::value_encoding::serialize_datum_into;
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
+    pub is_real_unbounded: bool,
 }
 
 fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<PbBound> {
@@ -59,6 +60,7 @@ impl ScanRange {
                 .collect(),
             lower_bound: bound_to_proto(&self.range.0),
             upper_bound: bound_to_proto(&self.range.1),
+            is_real_unbounded: self.is_real_unbounded,
         }
     }
 
@@ -80,6 +82,15 @@ impl ScanRange {
         Self {
             eq_conds: vec![],
             range: full_range(),
+            is_real_unbounded: false,
+        }
+    }
+
+    pub const fn full_table_scan_end_unbounded() -> Self {
+        Self {
+            eq_conds: vec![],
+            range: full_range(),
+            is_real_unbounded: true,
         }
     }
 
@@ -128,6 +139,7 @@ macro_rules! impl_split_small_range {
                                                 .map(|i| ScanRange {
                                                     eq_conds: vec![Some(ScalarImpl::$type_name(i))],
                                                     range: full_range(),
+                                                    is_real_unbounded: false,
                                                 })
                                                 .collect(),
                                         );

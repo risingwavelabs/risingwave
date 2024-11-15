@@ -60,12 +60,15 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 /// Range for batch scan.
+#[derive(Debug)]
 pub struct ScanRange {
     /// The prefix of the primary key.
     pub pk_prefix: OwnedRow,
 
     /// The range bounds of the next column.
     pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
+
+    pub is_real_unbounded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -144,6 +147,7 @@ impl ScanRange {
         Ok(Self {
             pk_prefix,
             next_col_bounds,
+            is_real_unbounded: scan_range.is_real_unbounded,
         })
     }
 
@@ -152,6 +156,7 @@ impl ScanRange {
         Self {
             pk_prefix: OwnedRow::default(),
             next_col_bounds: (Bound::Unbounded, Bound::Unbounded),
+            is_real_unbounded: false,
         }
     }
 }
@@ -420,8 +425,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         histogram: Option<impl Deref<Target = Histogram>>,
     ) {
         let ScanRange {
-            pk_prefix,
+            mut pk_prefix,
             next_col_bounds,
+            is_real_unbounded,
         } = scan_range;
 
         let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
@@ -434,40 +440,50 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
         let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
 
+        let build_bound = |other_bound_is_bounded: bool, bound| {
+            match bound {
+                Bound::Unbounded => {
+                    if other_bound_is_bounded && order_type.nulls_are_first() {
+                        // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
+                        Bound::Excluded(OwnedRow::new(vec![None]))
+                    } else {
+                        // Both start and end are unbounded, so we need to select all rows.
+                        Bound::Unbounded
+                    }
+                }
+                Bound::Included(x) => {
+                    if is_real_unbounded {
+                        let mut rows = pk_prefix.clone().into_inner().to_vec();
+                        rows.push(x);
+                        Bound::Included(OwnedRow::new(rows))
+                    } else {
+                        Bound::Included(OwnedRow::new(vec![x]))
+                    }
+                }
+                Bound::Excluded(x) => {
+                    if is_real_unbounded {
+                        let mut rows = pk_prefix.clone().into_inner().to_vec();
+                        rows.push(x);
+                        Bound::Included(OwnedRow::new(rows))
+                    } else {
+                        Bound::Excluded(OwnedRow::new(vec![x]))
+                    }
+                }
+            }
+        };
+        let start_bound = build_bound(end_bound_is_bounded, start_bound);
+        let end_bound = build_bound(start_bound_is_bounded, end_bound);
+        if is_real_unbounded {
+            pk_prefix = OwnedRow::empty();
+        }
+
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_chunk_iter_with_pk_bounds(
                 epoch.into(),
                 &pk_prefix,
-                (
-                    match start_bound {
-                        Bound::Unbounded => {
-                            if end_bound_is_bounded && order_type.nulls_are_first() {
-                                // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-                    },
-                    match end_bound {
-                        Bound::Unbounded => {
-                            if start_bound_is_bounded && order_type.nulls_are_last() {
-                                // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                                Bound::Excluded(OwnedRow::new(vec![None]))
-                            } else {
-                                // Both start and end are unbounded, so we need to select all rows.
-                                Bound::Unbounded
-                            }
-                        }
-                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-                    },
-                ),
+                (start_bound, end_bound),
                 ordered,
                 chunk_size,
                 PrefetchOptions::new(limit.is_none(), true),

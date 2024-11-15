@@ -93,6 +93,10 @@ impl Literal {
         &self.data
     }
 
+    pub fn get_data_type(&self) -> &Option<DataType> {
+        &self.data_type
+    }
+
     pub fn is_untyped(&self) -> bool {
         self.data_type.is_none()
     }
