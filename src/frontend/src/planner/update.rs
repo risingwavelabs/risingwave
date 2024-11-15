@@ -17,7 +17,7 @@ use risingwave_common::types::{DataType, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 
 use super::Planner;
-use crate::binder::{BoundUpdateV2, UpdateProject};
+use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
 use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -26,7 +26,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
-    pub(super) fn plan_update_v2(&mut self, update: BoundUpdateV2) -> Result<PlanRoot> {
+    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
         let scan = self.plan_base_table(&update.table)?;
         let input = if let Some(expr) = update.selection {
             self.plan_where(scan, expr)?
@@ -35,14 +35,6 @@ impl Planner {
         };
 
         let returning = !update.returning_list.is_empty();
-        // let update_column_indices = update
-        //     .table
-        //     .table_catalog
-        //     .columns()
-        //     .iter()
-        //     .enumerate()
-        //     .filter_map(|(i, c)| (!c.is_generated()).then_some(i))
-        //     .collect_vec();
 
         let schema_len = input.schema().len();
 

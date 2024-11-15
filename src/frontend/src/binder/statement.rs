@@ -18,7 +18,7 @@ use risingwave_sqlparser::ast::Statement;
 
 use super::delete::BoundDelete;
 use super::fetch_cursor::BoundFetchCursor;
-use super::update::BoundUpdateV2;
+use super::update::BoundUpdate;
 use crate::binder::create_view::BoundCreateView;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
 use crate::error::Result;
@@ -28,7 +28,7 @@ use crate::expr::ExprRewriter;
 pub enum BoundStatement {
     Insert(Box<BoundInsert>),
     Delete(Box<BoundDelete>),
-    Update(Box<BoundUpdateV2>),
+    Update(Box<BoundUpdate>),
     Query(Box<BoundQuery>),
     FetchCursor(Box<BoundFetchCursor>),
     CreateView(Box<BoundCreateView>),
@@ -86,7 +86,7 @@ impl Binder {
                 selection,
                 returning,
             } => Ok(BoundStatement::Update(
-                self.bind_update_v2(table_name, assignments, selection, returning)?
+                self.bind_update(table_name, assignments, selection, returning)?
                     .into(),
             )),
 
