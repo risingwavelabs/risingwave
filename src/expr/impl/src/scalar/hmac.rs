@@ -12,83 +12,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use hex::encode;
 use hmac::{Hmac, Mac};
-use risingwave_expr::function;
+use risingwave_expr::{function, ExprError, Result};
 use sha1::Sha1;
 use sha2::Sha256;
 
-#[function("hmac(bytea, bytea, varchar) -> bytea")]
-pub fn hmac(secret: &[u8], payload: &[u8], sha_type: &str) -> Box<[u8]> {
-    hmac_with_prefix(secret, payload, sha_type, "")
-}
-
-#[function("hmac(bytea, bytea, varchar, varchar) -> bytea")]
-pub fn hmac_with_prefix(secret: &[u8], payload: &[u8], sha_type: &str, prefix: &str) -> Box<[u8]> {
+#[function("hmac(varchar, bytea, varchar) -> bytea")]
+pub fn hmac(secret: &str, payload: &[u8], sha_type: &str) -> Result<Box<[u8]>> {
     if sha_type == "sha1" {
-        sha1_hmac(secret, payload, prefix)
+        Ok(hmac_sha1(secret, payload))
     } else if sha_type == "sha256" {
-        sha256_hmac(secret, payload, prefix)
+        Ok(hmac_sha256(secret, payload))
     } else {
-        panic!("Unsupported SHA type: {}", sha_type)
+        return Err(ExprError::InvalidParam {
+            name: "sha_type",
+            reason: format!("Unsupported SHA type: {}", sha_type).into(),
+        });
     }
 }
 
-fn sha256_hmac(secret: &[u8], payload: &[u8], prefix: &str) -> Box<[u8]> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret).expect("HMAC can take key of any size");
-
+fn hmac_sha256(secret: &str, payload: &[u8]) -> Box<[u8]> {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(payload);
 
-    let result = mac.finalize();
-    let code_bytes = result.into_bytes();
-    if prefix.is_empty() {
-        code_bytes.as_slice().into()
-    } else {
-        let computed_signature = format!("{}{}", prefix, encode(code_bytes));
-        computed_signature.as_bytes().into()
-    }
+    let code_bytes = mac.finalize().into_bytes();
+    code_bytes.as_slice().into()
 }
 
-fn sha1_hmac(secret: &[u8], payload: &[u8], prefix: &str) -> Box<[u8]> {
-    let mut mac = Hmac::<Sha1>::new_from_slice(secret).expect("HMAC can take key of any size");
-
+fn hmac_sha1(secret: &str, payload: &[u8]) -> Box<[u8]> {
+    let mut mac =
+        Hmac::<Sha1>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(payload);
 
-    let result = mac.finalize();
-    let code_bytes = result.into_bytes();
-    if prefix.is_empty() {
-        code_bytes.as_slice().into()
-    } else {
-        let computed_signature = format!("{}{}", prefix, encode(code_bytes));
-        computed_signature.as_bytes().into()
-    }
+    let code_bytes = mac.finalize().into_bytes();
+    code_bytes.as_slice().into()
 }
 
-#[function("secure_compare(bytea, bytea) -> boolean")]
-pub fn secure_compare(left: &[u8], right: &[u8]) -> bool {
+#[function("secure_compare(varchar, varchar) -> boolean")]
+pub fn secure_compare(left: &str, right: &str) -> bool {
     left == right
 }
 
 #[cfg(test)]
 mod tests {
+    use hex::encode;
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_verify_signature_hmac_sha256() -> anyhow::Result<()> {
+    #[test]
+    fn test_verify_signature_hmac_sha256() {
         let secret = "your_secret_key";
         let payload = b"your_webhook_payload";
-        let signature = b"sha256=cef8b98a91902c492b85d97f049aa4bfc5e7e3f9b8b7bf7cb49c5f829d2dac85"; // 替换为
-        assert!(*sha256_hmac(secret, payload) == *signature);
-        Ok(())
+        let signature = "cef8b98a91902c492b85d97f049aa4bfc5e7e3f9b8b7bf7cb49c5f829d2dac85";
+        assert!(encode(hmac_sha256(secret, payload)) == signature);
     }
 
-    #[tokio::test]
-    async fn test_verify_signature_hmac_sha1() -> anyhow::Result<()> {
+    #[test]
+    fn test_verify_signature_hmac_sha1() {
         let secret = "your_secret_key";
         let payload = b"your_webhook_payload";
-        let signature = b"sha1=65cb920a4b8c6ab8e2eab861a096a7bc2c05d8ba"; // 替换为
-        assert!(*sha1_hmac(secret, payload) == *signature);
-        Ok(())
+        let signature = "65cb920a4b8c6ab8e2eab861a096a7bc2c05d8ba";
+        assert!(encode(hmac_sha1(secret, payload)) == signature);
     }
 }

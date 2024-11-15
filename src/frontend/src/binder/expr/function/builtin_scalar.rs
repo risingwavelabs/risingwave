@@ -295,16 +295,7 @@ impl Binder {
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("hmac", raw_call(ExprType::Hmac)),
-                ("secure_compare",guard_by_len(2, raw(|_binder, mut inputs| {
-                    // Similar to `cast` from string, return type is set explicitly rather than inferred.
-                    if !inputs[0].is_untyped() && inputs[0].return_type() == DataType::Varchar {
-                        FunctionCall::cast_mut(&mut inputs[0], DataType::Bytea, CastContext::Explicit)?;
-                    };
-                    if !inputs[1].is_untyped() && inputs[1].return_type() == DataType::Varchar {
-                        FunctionCall::cast_mut(&mut inputs[1], DataType::Bytea, CastContext::Explicit)?;
-                    };
-                    Ok(FunctionCall::new_unchecked(ExprType::SecureCompare , inputs, DataType::Boolean).into())
-                }))),
+                ("secure_compare",raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("inet_aton", raw_call(ExprType::InetAton)),

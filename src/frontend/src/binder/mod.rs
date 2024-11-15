@@ -133,13 +133,17 @@ pub struct Binder {
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
 
-    /// information for `secure_compare` function
+    /// Information for `secure_compare` function. It's ONLY available when binding the
+    /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
     secure_compare_context: Option<SecureCompareContext>,
 }
 
+// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
 #[derive(Default, Clone, Debug)]
 pub struct SecureCompareContext {
+    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
     pub column_name: String,
+    /// The secret (usually a token provided by the webhook source user) to validate the calls
     pub secret_name: String,
 }
 

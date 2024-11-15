@@ -1509,11 +1509,13 @@ fn get_source_and_resolved_table_name(
     Ok((source, resolved_table_name, database_id, schema_id))
 }
 
+// validate the webhook_info and also bind the webhook_info to protobuf
 fn bind_webhook_info(
     session: &Arc<SessionImpl>,
     columns_defs: &[ColumnDef],
     webhook_info: WebhookSourceInfo,
 ) -> Result<PbWebhookSourceInfo> {
+    // validate columns
     if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &DataType::Jsonb {
         return Err(ErrorCode::InvalidInputSyntax(
             "Table with webhook source should have exactly one JSONB column".to_owned(),
@@ -1526,6 +1528,7 @@ fn bind_webhook_info(
         signature_expr,
     } = webhook_info;
 
+    // validate secret_ref
     let db_name = session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
@@ -1542,10 +1545,21 @@ fn bind_webhook_info(
     // TODO(kexiang): use real column name
     let secure_compare_context = SecureCompareContext {
         column_name: columns_defs[0].name.real_value(),
-        secret_name: secret_name.clone(),
+        secret_name,
     };
     let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
     let expr = binder.bind_expr(signature_expr.clone())?;
+
+    // validate expr, ensuring it is SECURE_COMPARE()
+    if expr.as_function_call().is_none()
+        || expr.as_function_call().unwrap().func_type()
+            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The signature verification function must be SECURE_COMPARE()".to_owned(),
+        )
+        .into());
+    }
 
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: Some(pb_secret_ref),

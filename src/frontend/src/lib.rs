@@ -171,6 +171,11 @@ pub struct FrontendOpts {
     /// Total available memory for the frontend node in bytes. Used for batch computing.
     #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
     pub frontend_total_memory_bytes: usize,
+
+    /// The address that the webhook service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
+    pub webhook_listen_addr: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -190,7 +195,6 @@ impl Default for FrontendOpts {
 }
 
 use std::future::Future;
-use std::net::SocketAddr;
 use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
@@ -206,6 +210,7 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let webhook_liston_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
 
@@ -221,8 +226,7 @@ pub fn start(
                 .collect::<HashSet<_>>(),
         );
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-        let webhook_service = crate::webhook::WebhookService { webhook_addr: addr };
+        let webhook_service = crate::webhook::WebhookService::new(webhook_liston_addr);
         let _task = tokio::spawn(webhook_service.serve());
 
         pg_serve(

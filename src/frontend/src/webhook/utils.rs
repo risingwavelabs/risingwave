@@ -75,10 +75,9 @@ pub(crate) fn header_map_to_json(headers: &HeaderMap) -> JsonbVal {
 
 pub(crate) async fn verify_signature(
     headers_jsonb: JsonbVal,
-    secret: &[u8],
+    secret: &str,
     payload: &[u8],
     signature_expr: ExprNode,
-    // signature: &[u8],
 ) -> Result<bool> {
     let row = OwnedRow::new(vec![
         Some(headers_jsonb.into()),
@@ -92,14 +91,15 @@ pub(crate) async fn verify_signature(
     let result = signature_expr_impl
         .eval_row(&row)
         .await
-        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
+        .map_err(|e| {
+            tracing::error!(error = %e.as_report(), "Fail to validate for webhook events.");
+            err(e, StatusCode::INTERNAL_SERVER_ERROR)
+        })?
         .ok_or_else(|| {
             err(
                 anyhow!("`SECURE_COMPARE()` failed"),
                 StatusCode::BAD_REQUEST,
             )
         })?;
-    // let computed_signature = result.as_bytea();
-    // Ok(**computed_signature == *signature)
     Ok(*result.as_bool())
 }

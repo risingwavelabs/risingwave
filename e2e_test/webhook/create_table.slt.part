@@ -9,31 +9,47 @@ create table rudderstack (
 );
 
 statement ok
-create table github_sha1 (
+create table github_hmac_sha1 (
   data JSONB
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
   headers->>'x-hub-signature',
-  hmac(test_secret, data, 'sha1', 'sha1=')
+  'sha1=' || encode(hmac(test_secret, data, 'sha1'), 'hex')
 );
 
 statement ok
-create table github_sha256 (
+create table github_hmac_sha256 (
   data JSONB
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
   headers->>'x-hub-signature-256',
-  hmac(test_secret, data, 'sha256', 'sha256=')
+  'sha256=' || encode(hmac(test_secret, data, 'sha256'), 'hex')
 );
 
 statement ok
-create table segment_sha1 (
+create table segment_hmac_sha1 (
   data JSONB
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
   headers->>'x-signature',
-  hmac(test_secret, data, 'sha1')
+  encode(hmac(test_secret, data, 'sha1'), 'hex')
+);
+
+# https://developers.hubspot.com/beta-docs/guides/apps/authentication/validating-requests#validate-requests-using-the-v2-request-signature
+statement ok
+create table hubspot_sha256_v2 (
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'x-hubspot-signature',
+  encode(
+    sha256(
+      convert_to(
+        (test_secret || 'POST' || 'http://127.0.0.1:4560/message/dev/public/' || convert_from(data, 'utf8'))
+      , 'UTF8')
+    ), 'hex')
 );

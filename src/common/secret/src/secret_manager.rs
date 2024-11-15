@@ -18,6 +18,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context};
+use parking_lot::lock_api::RwLockReadGuard;
 use parking_lot::RwLock;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
@@ -134,32 +135,23 @@ impl LocalSecretManager {
     ) -> SecretResult<BTreeMap<String, String>> {
         let secret_guard = self.secrets.read();
         for (option_key, secret_ref) in secret_refs {
-            let secret_id = secret_ref.secret_id;
-            let pb_secret_bytes = secret_guard
-                .get(&secret_id)
-                .ok_or(SecretError::ItemNotFound(secret_id))?;
-            let secret_value_bytes = Self::get_secret_value(pb_secret_bytes)?;
-            match secret_ref.ref_as() {
-                RefAsType::Text => {
-                    // We converted the secret string from sql to bytes using `as_bytes` in frontend.
-                    // So use `from_utf8` here to convert it back to string.
-                    options.insert(option_key, String::from_utf8(secret_value_bytes.clone())?);
-                }
-                RefAsType::File => {
-                    let path_str =
-                        self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
-                    options.insert(option_key, path_str);
-                }
-                RefAsType::Unspecified => {
-                    return Err(SecretError::UnspecifiedRefType(secret_id));
-                }
-            }
+            let path_str = self.fill_secret_inner(secret_ref, &secret_guard)?;
+            options.insert(option_key, path_str);
         }
         Ok(options)
     }
 
     pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
-        let secret_guard = self.secrets.read();
+        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>> =
+            self.secrets.read();
+        self.fill_secret_inner(secret_ref, &secret_guard)
+    }
+
+    fn fill_secret_inner(
+        &self,
+        secret_ref: PbSecretRef,
+        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<u32, Vec<u8>>>,
+    ) -> SecretResult<String> {
         let secret_id = secret_ref.secret_id;
         let pb_secret_bytes = secret_guard
             .get(&secret_id)

@@ -35,11 +35,15 @@ use crate::handler::handle;
 use crate::webhook::utils::{err, Result};
 mod utils;
 
+pub type Service = Arc<WebhookService>;
+
+// We always use the `root` user to connect to the database to allow the webhook service to access all tables.
+const USER: &str = "root";
+
 #[derive(Clone)]
 pub struct WebhookService {
-    pub webhook_addr: SocketAddr,
+    webhook_addr: SocketAddr,
 }
-pub type Service = Arc<WebhookService>;
 
 pub(super) mod handlers {
     use std::net::Ipv4Addr;
@@ -55,27 +59,25 @@ pub(super) mod handlers {
     pub async fn handle_post_request(
         Extension(_srv): Extension<Service>,
         headers: HeaderMap,
-        Path((user, database, schema, table)): Path<(String, String, String, String)>,
+        Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
         let session_mgr = SESSION_MANAGER
             .get()
             .expect("session manager has been initialized");
 
-        let dummy_addr = Address::Tcp(SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-            5691, // port of meta
-        ));
+        // Can be any address, we use the port of meta to indicate that it's a internal request.
+        let dummy_addr = Address::Tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 5691));
 
         // TODO(kexiang): optimize this
-        // get a session object for the corresponding user and database
+        // get a session object for the corresponding database
         let session = session_mgr
-            .connect(database.as_str(), user.as_str(), Arc::new(dummy_addr))
+            .connect(database.as_str(), USER, Arc::new(dummy_addr))
             .map_err(|e| {
                 err(
                     anyhow!(e).context(format!(
-                        "Failed to create session for database: {}, user: {}",
-                        database, user
+                        "Failed to create session for database `{}` with user `{}`",
+                        database, USER
                     )),
                     StatusCode::UNAUTHORIZED,
                 )
@@ -86,20 +88,19 @@ pub(super) mod handlers {
             signature_expr,
         } = {
             let search_path = session.config().search_path();
-            let user_name = user.as_str();
-            let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, user_name);
+            let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
 
             let reader = session.env().catalog_reader().read_guard();
-            let (table, _schema) = reader
+            let (table_catalog, _schema) = reader
                 .get_any_table_by_name(database.as_str(), schema_path, &table)
                 .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
 
-            table
+            table_catalog
                 .webhook_info
                 .as_ref()
                 .ok_or_else(|| {
                     err(
-                        anyhow!("Table {:?} is not connected to wehbook source", table),
+                        anyhow!("Table `{}` is not with webhook source", table),
                         StatusCode::METHOD_NOT_ALLOWED,
                     )
                 })?
@@ -115,10 +116,9 @@ pub(super) mod handlers {
 
         let is_valid = verify_signature(
             headers_jsonb,
-            secret_string.as_bytes(),
+            secret_string.as_str(),
             body.as_ref(),
             signature_expr.unwrap(),
-            // signature,
         )
         .await?;
 
@@ -161,6 +161,10 @@ pub(super) mod handlers {
 }
 
 impl WebhookService {
+    pub fn new(webhook_addr: SocketAddr) -> Self {
+        Self { webhook_addr }
+    }
+
     pub async fn serve(self) -> anyhow::Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
@@ -170,7 +174,7 @@ impl WebhookService {
             .allow_methods(vec![Method::POST]);
 
         let api_router = Router::new()
-            .route("/:user/:database/:schema/:table", post(handle_post_request))
+            .route("/:database/:schema/:table", post(handle_post_request))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
@@ -199,9 +203,9 @@ mod tests {
 
     #[tokio::test]
     #[ignore]
-    async fn test_exchange_client() -> anyhow::Result<()> {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-        let service = crate::webhook::WebhookService { webhook_addr: addr };
+    async fn test_webhook_server() -> anyhow::Result<()> {
+        let addr = SocketAddr::from(([127, 0, 0, 1], 4560));
+        let service = crate::webhook::WebhookService::new(addr);
         service.serve().await?;
         Ok(())
     }

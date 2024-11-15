@@ -90,10 +90,15 @@ impl Binder {
                         )
                     }
                 } else if let Some(ctx) = self.secure_compare_context.as_ref() {
+                    // Currently, the generated columns are not supported yet. So the ident here should only be one of the following
+                    // - `headers`
+                    // - secret name
+                    // - the name of the payload column
+                    // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
                     if ident.real_value() == "headers".to_string() {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
                     } else if ident.real_value() == ctx.secret_name {
-                        Ok(InputRef::new(1, DataType::Bytea).into())
+                        Ok(InputRef::new(1, DataType::Varchar).into())
                     } else if ident.real_value() == ctx.column_name {
                         Ok(InputRef::new(2, DataType::Bytea).into())
                     } else {
