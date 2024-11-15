@@ -53,7 +53,7 @@ pub struct IcebergCommon {
     pub secret_key: String,
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
-    pub warehouse_path: String,
+    pub warehouse_path: Option<String>,
     /// Catalog name, can be omitted for storage catalog, but
     /// must be set for other catalogs.
     #[serde(rename = "catalog.name")]
@@ -146,23 +146,31 @@ impl IcebergCommon {
                 self.secret_key.clone().to_string(),
             );
 
-            let (bucket, _) = {
-                let url = Url::parse(&self.warehouse_path)
-                    .with_context(|| format!("Invalid warehouse path: {}", self.warehouse_path))?;
-                let bucket = url
-                    .host_str()
-                    .with_context(|| {
-                        format!(
-                            "Invalid s3 path: {}, bucket is missing",
-                            self.warehouse_path
-                        )
-                    })?
-                    .to_string();
-                let root = url.path().trim_start_matches('/').to_string();
-                (bucket, root)
-            };
+            match &self.warehouse_path {
+                Some(warehouse_path) => {
+                    let (bucket, _) = {
+                        let url = Url::parse(warehouse_path).with_context(|| {
+                            format!("Invalid warehouse path: {}", warehouse_path)
+                        })?;
+                        let bucket = url
+                            .host_str()
+                            .with_context(|| {
+                                format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
+                            })?
+                            .to_string();
+                        let root = url.path().trim_start_matches('/').to_string();
+                        (bucket, root)
+                    };
 
-            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                    iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                }
+                None => {
+                    if catalog_type != "rest" {
+                        bail!("`warehouse.path` must be set in {} catalog", &catalog_type);
+                    }
+                }
+            }
+
             // #TODO
             // Support load config file
             iceberg_configs.insert(
@@ -180,7 +188,9 @@ impl IcebergCommon {
                 java_catalog_configs.insert("uri".to_string(), uri.to_string());
             }
 
-            java_catalog_configs.insert("warehouse".to_string(), self.warehouse_path.clone());
+            if let Some(warehouse_path) = &self.warehouse_path {
+                java_catalog_configs.insert("warehouse".to_string(), warehouse_path.clone());
+            }
             java_catalog_configs.extend(java_catalog_props.clone());
 
             // Currently we only support s3, so let's set it to s3
@@ -188,6 +198,10 @@ impl IcebergCommon {
                 "io-impl".to_string(),
                 "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
             );
+
+            // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
+            java_catalog_configs
+                .insert("init-creation-stacktrace".to_string(), "false".to_string());
 
             if let Some(endpoint) = &self.endpoint {
                 java_catalog_configs
@@ -241,6 +255,7 @@ impl IcebergCommon {
 
 /// icelake
 mod v1 {
+    use anyhow::anyhow;
     use icelake::catalog::{load_catalog, CatalogRef};
     use icelake::{Table, TableIdentifier};
 
@@ -262,23 +277,26 @@ mod v1 {
 
             let catalog_type = self.catalog_type().to_string();
 
-            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
             iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
 
             match catalog_type.as_str() {
                 "storage" => {
                     iceberg_configs.insert(
                         format!("iceberg.catalog.{}.warehouse", self.catalog_name()),
-                        self.warehouse_path.clone(),
+                        self.warehouse_path.clone().ok_or_else(|| {
+                            anyhow!("`warehouse.path` must be set in storage catalog")
+                        })?,
                     );
+                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "storage".into());
                 }
-                "rest" => {
+                "rest_rust" => {
                     let uri = self
                         .catalog_uri
                         .clone()
                         .with_context(|| "`catalog.uri` must be set in rest catalog".to_string())?;
                     iceberg_configs
                         .insert(format!("iceberg.catalog.{}.uri", self.catalog_name()), uri);
+                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "rest".into());
                 }
                 _ => {
                     bail!(
@@ -317,28 +335,36 @@ mod v1 {
                 );
             }
 
-            let (bucket, root) = {
-                let url = Url::parse(&self.warehouse_path)
-                    .with_context(|| format!("Invalid warehouse path: {}", self.warehouse_path))?;
-                let bucket = url
-                    .host_str()
-                    .with_context(|| {
-                        format!(
-                            "Invalid s3 path: {}, bucket is missing",
-                            self.warehouse_path
-                        )
-                    })?
-                    .to_string();
-                let root = url.path().trim_start_matches('/').to_string();
-                (bucket, root)
-            };
+            match &self.warehouse_path {
+                Some(warehouse_path) => {
+                    let (bucket, root) = {
+                        let url = Url::parse(warehouse_path).with_context(|| {
+                            format!("Invalid warehouse path: {}", warehouse_path)
+                        })?;
+                        let bucket = url
+                            .host_str()
+                            .with_context(|| {
+                                format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
+                            })?
+                            .to_string();
+                        let root = url.path().trim_start_matches('/').to_string();
+                        (bucket, root)
+                    };
 
-            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                    iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
 
-            // Only storage catalog should set this.
-            if catalog_type == "storage" {
-                iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
+                    // Only storage catalog should set this.
+                    if catalog_type == "storage" {
+                        iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
+                    }
+                }
+                None => {
+                    if catalog_type == "storage" {
+                        bail!("`warehouse.path` must be set in storage catalog");
+                    }
+                }
             }
+
             // #TODO
             // Support load config file
             iceberg_configs.insert(
@@ -355,7 +381,7 @@ mod v1 {
             java_catalog_props: &HashMap<String, String>,
         ) -> ConnectorResult<CatalogRef> {
             match self.catalog_type() {
-                "storage" | "rest" => {
+                "storage" | "rest_rust" => {
                     let iceberg_configs = self.build_iceberg_configs()?;
                     let catalog = load_catalog(&iceberg_configs).await?;
                     Ok(catalog)
@@ -363,7 +389,8 @@ mod v1 {
                 catalog_type
                     if catalog_type == "hive"
                         || catalog_type == "jdbc"
-                        || catalog_type == "glue" =>
+                        || catalog_type == "glue"
+                        || catalog_type == "rest" =>
                 {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
@@ -372,6 +399,7 @@ mod v1 {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
                         "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
                         _ => unreachable!(),
                     };
 
@@ -413,6 +441,7 @@ mod v1 {
 
 /// iceberg-rust
 mod v2 {
+    use anyhow::anyhow;
     use iceberg::spec::TableMetadata;
     use iceberg::table::Table as TableV2;
     use iceberg::{Catalog as CatalogV2, TableIdent};
@@ -439,7 +468,9 @@ mod v2 {
             match self.catalog_type() {
                 "storage" => {
                     let config = storage_catalog::StorageCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone())
+                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
+                            anyhow!("`warehouse.path` must be set in storage catalog")
+                        })?)
                         .access_key(self.access_key.clone())
                         .secret_key(self.secret_key.clone())
                         .region(self.region.clone())
@@ -448,7 +479,7 @@ mod v2 {
                     let catalog = storage_catalog::StorageCatalog::new(config)?;
                     Ok(Arc::new(catalog))
                 }
-                "rest" => {
+                "rest_rust" => {
                     let mut iceberg_configs = HashMap::new();
                     if let Some(region) = &self.region {
                         iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
@@ -465,12 +496,18 @@ mod v2 {
                         S3_SECRET_ACCESS_KEY.to_string(),
                         self.secret_key.clone().to_string(),
                     );
-                    let config = iceberg_catalog_rest::RestCatalogConfig::builder()
+                    let config_builder = iceberg_catalog_rest::RestCatalogConfig::builder()
                         .uri(self.catalog_uri.clone().with_context(|| {
                             "`catalog.uri` must be set in rest catalog".to_string()
                         })?)
-                        .props(iceberg_configs)
-                        .build();
+                        .props(iceberg_configs);
+
+                    let config = match &self.warehouse_path {
+                        Some(warehouse_path) => {
+                            config_builder.warehouse(warehouse_path.clone()).build()
+                        }
+                        None => config_builder.build(),
+                    };
                     let catalog = iceberg_catalog_rest::RestCatalog::new(config);
                     Ok(Arc::new(catalog))
                 }
@@ -506,7 +543,9 @@ mod v2 {
                         self.secret_key.clone().to_string(),
                     );
                     let config_builder = iceberg_catalog_glue::GlueCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone())
+                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
+                            anyhow!("`warehouse.path` must be set in glue catalog")
+                        })?)
                         .props(iceberg_configs);
                     let config = if let Some(uri) = self.catalog_uri.as_deref() {
                         config_builder.uri(uri.to_string()).build()
@@ -516,13 +555,18 @@ mod v2 {
                     let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
                     Ok(Arc::new(catalog))
                 }
-                catalog_type if catalog_type == "hive" || catalog_type == "jdbc" => {
+                catalog_type
+                    if catalog_type == "hive"
+                        || catalog_type == "jdbc"
+                        || catalog_type == "rest" =>
+                {
                     // Create java catalog
                     let (base_catalog_config, java_catalog_props) =
                         self.build_jni_catalog_configs(java_catalog_props)?;
                     let catalog_impl = match catalog_type {
                         "hive" => "org.apache.iceberg.hive.HiveCatalog",
                         "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                        "rest" => "org.apache.iceberg.rest.RESTCatalog",
                         _ => unreachable!(),
                     };
 
@@ -567,7 +611,9 @@ mod v2 {
             match self.catalog_type() {
                 "storage" => {
                     let config = storage_catalog::StorageCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone())
+                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
+                            anyhow!("`warehouse.path` must be set in storage catalog")
+                        })?)
                         .access_key(self.access_key.clone())
                         .secret_key(self.secret_key.clone())
                         .region(self.region.clone())

@@ -63,9 +63,17 @@ message WaitEpochCommitResponse {
 }
 
 message StreamingControlStreamRequest {
-  message InitRequest {
-    uint64 version_id = 1;
+  message InitialPartialGraph {
+    uint64 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+  }
+
+  message InitRequest {
+    repeated InitialPartialGraph graphs = 1;
+  }
+
+  message CreatePartialGraphRequest {
+    uint64 partial_graph_id = 1;
   }
 
   message RemovePartialGraphRequest {
@@ -76,6 +84,7 @@ message StreamingControlStreamRequest {
     InitRequest init = 1;
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
+    CreatePartialGraphRequest create_partial_graph = 4;
   }
 }
 

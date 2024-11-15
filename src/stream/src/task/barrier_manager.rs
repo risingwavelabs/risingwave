@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::future::pending;
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,9 +50,11 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    InitRequest, InitialPartialGraph, Request,
+};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
@@ -63,7 +66,9 @@ use risingwave_pb::stream_service::{
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
-use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
+use crate::task::barrier_manager::managed_state::{
+    ManagedBarrierStateDebugInfo, PartialGraphManagedBarrierState,
+};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -260,9 +265,6 @@ pub(super) struct LocalBarrierWorker {
     /// Current barrier collection state.
     pub(super) state: ManagedBarrierState,
 
-    /// Record all unexpected exited actors.
-    failure_actors: HashMap<ActorId, StreamError>,
-
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
@@ -272,13 +274,13 @@ pub(super) struct LocalBarrierWorker {
     barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
 
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
-
-    /// Cached result of [`Self::try_find_root_failure`].
-    cached_root_failure: Option<ScoredStreamError>,
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        initial_partial_graphs: Vec<InitialPartialGraph>,
+    ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -289,14 +291,16 @@ impl LocalBarrierWorker {
             },
         ));
         Self {
-            failure_actors: HashMap::default(),
-            state: ManagedBarrierState::new(actor_manager.clone(), shared_context.clone()),
+            state: ManagedBarrierState::new(
+                actor_manager.clone(),
+                shared_context.clone(),
+                initial_partial_graphs,
+            ),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
-            cached_root_failure: None,
         }
     }
 
@@ -334,8 +338,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(HummockVersionId::new(init_request.version_id)).await;
-                                self.state.add_subscriptions(init_request.subscriptions);
+                                self.reset(init_request.graphs).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -384,6 +387,10 @@ impl LocalBarrierWorker {
                 self.remove_partial_graphs(
                     req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
+                Ok(())
+            }
+            Request::CreatePartialGraph(req) => {
+                self.add_partial_graph(PartialGraphId::new(req.partial_graph_id));
                 Ok(())
             }
             Request::Init(_) => {
@@ -543,19 +550,6 @@ impl LocalBarrierWorker {
             request.actor_ids_to_collect
         );
 
-        for actor_id in &request.actor_ids_to_collect {
-            if self.failure_actors.contains_key(actor_id) {
-                // The failure actors could exit before the barrier is issued, while their
-                // up-downstream actors could be stuck somehow. Return error directly to trigger the
-                // recovery.
-                return Err(StreamError::barrier_send(
-                    barrier.clone(),
-                    *actor_id,
-                    "actor has already failed",
-                ));
-            }
-        }
-
         self.state.transform_to_issued(barrier, request)?;
         Ok(())
     }
@@ -577,9 +571,20 @@ impl LocalBarrierWorker {
         }
     }
 
+    pub(super) fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
+        assert!(self
+            .state
+            .graph_states
+            .insert(
+                partial_graph_id,
+                PartialGraphManagedBarrierState::new(&self.actor_manager)
+            )
+            .is_none());
+    }
+
     /// Reset all internal states.
-    pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+    pub(super) fn reset_state(&mut self, initial_partial_graphs: Vec<InitialPartialGraph>) {
+        *self = Self::new(self.actor_manager.clone(), initial_partial_graphs);
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -596,8 +601,7 @@ impl LocalBarrierWorker {
         err: StreamError,
         err_context: &'static str,
     ) {
-        self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
+        let root_err = self.try_find_root_failure(err).await;
 
         if let Some(actor_state) = self.state.actor_states.get(&actor_id)
             && (!actor_state.inflight_barriers.is_empty() || actor_state.is_running())
@@ -616,10 +620,7 @@ impl LocalBarrierWorker {
     /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
     /// the given `err` will be used if there's no root failure found.
     async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
-        let root_err = self
-            .try_find_root_failure()
-            .await
-            .unwrap_or_else(|| ScoredStreamError::new(err));
+        let root_err = self.try_find_root_failure(err).await;
 
         self.control_stream_handle.reset_stream_with_err(
             anyhow!(root_err)
@@ -628,40 +629,24 @@ impl LocalBarrierWorker {
         );
     }
 
-    fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
-        if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
-            warn!(
-                actor_id,
-                prev_err = %prev_err.as_report(),
-                "actor error overwritten"
-            );
-        }
-    }
-
     /// Collect actor errors for a while and find the one that might be the root cause.
     ///
     /// Returns `None` if there's no actor error received.
-    async fn try_find_root_failure(&mut self) -> Option<ScoredStreamError> {
-        if self.cached_root_failure.is_some() {
-            return self.cached_root_failure.clone();
-        }
-
+    async fn try_find_root_failure(&mut self, first_err: StreamError) -> ScoredStreamError {
+        let mut later_errs = vec![];
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
-            while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
-                self.add_failure(actor_id, error);
+            while let Some((_, error)) = self.actor_failure_rx.recv().await {
+                later_errs.push(error);
             }
         })
         .await;
 
-        // Find the error with highest score.
-        self.cached_root_failure = self
-            .failure_actors
-            .values()
+        once(first_err)
+            .chain(later_errs.into_iter())
             .map(|e| ScoredStreamError::new(e.clone()))
-            .max_by_key(|e| e.score);
-
-        self.cached_root_failure.clone()
+            .max_by_key(|e| e.score)
+            .expect("non-empty")
     }
 }
 
@@ -699,7 +684,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -882,7 +867,9 @@ pub(crate) mod barrier_test_utils {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+    use risingwave_pb::stream_service::streaming_control_stream_request::{
+        InitRequest, PbInitialPartialGraph,
+    };
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
         StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -916,8 +903,10 @@ pub(crate) mod barrier_test_utils {
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
                 init_request: InitRequest {
-                    version_id: 0,
-                    subscriptions: vec![],
+                    graphs: vec![PbInitialPartialGraph {
+                        partial_graph_id: u64::MAX,
+                        subscriptions: vec![],
+                    }],
                 },
             });
 

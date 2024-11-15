@@ -21,6 +21,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
@@ -1281,6 +1282,7 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        let is_fs_source = source.with_properties.inner_ref().is_new_fs_connector();
         let streaming_job_ids: Vec<ObjectId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
@@ -1327,6 +1329,20 @@ impl CatalogController {
                 visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
+                            && node_inner.source_id == source_id as u32
+                        {
+                            node_inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                });
+            }
+            if is_fs_source && *fragment_type_mask == PbFragmentTypeFlag::FragmentUnspecified as i32
+            {
+                // when create table with fs connector, the fragment type is unspecified
+                visit_stream_node(stream_node, |node| {
+                    if let PbNodeBody::StreamFsFetch(node) = node {
+                        if let Some(node_inner) = &mut node.node_inner
                             && node_inner.source_id == source_id as u32
                         {
                             node_inner.rate_limit = rate_limit;

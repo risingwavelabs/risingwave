@@ -113,6 +113,8 @@ impl GlobalBarrierManager {
         scale_controller: ScaleControllerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
+        let hummock_manager_clone = hummock_manager.clone();
+        let metadata_manager_clone = metadata_manager.clone();
         let barrier_worker = GlobalBarrierWorker::new(
             scheduled_barriers,
             env,
@@ -125,10 +127,10 @@ impl GlobalBarrierManager {
         )
         .await;
         let manager = Self {
-            status: barrier_worker.context.status.clone(),
-            hummock_manager: barrier_worker.context.hummock_manager.clone(),
+            status: barrier_worker.context.status(),
+            hummock_manager: hummock_manager_clone,
             request_tx,
-            metadata_manager: barrier_worker.context.metadata_manager.clone(),
+            metadata_manager: metadata_manager_clone,
         };
         let (join_handle, shutdown_tx) = barrier_worker.start();
         (Arc::new(manager), join_handle, shutdown_tx)

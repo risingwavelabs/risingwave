@@ -58,5 +58,5 @@ struct PgDatabase {
     datallowconn: bool,
     datconnlimit: i32,
     dattablespace: i32,
-    datacl: String,
+    datacl: Vec<String>,
 }

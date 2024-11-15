@@ -27,7 +27,7 @@ struct RwConnection {
     owner: i32,
     type_: String,
     provider: String,
-    acl: String,
+    acl: Vec<String>,
     connection_params: String,
 }
 

@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::must_match;
-use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
 use risingwave_hummock_sdk::table_watermark::{
@@ -27,8 +24,6 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 
-use crate::barrier::command::CommandContext;
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 
 #[expect(clippy::type_complexity)]
@@ -78,86 +73,6 @@ pub(super) fn collect_resp_info(
         ),
         old_value_ssts,
     )
-}
-
-pub(super) fn collect_commit_epoch_info(
-    info: &mut CommitEpochInfo,
-    resps: Vec<BarrierCompleteResponse>,
-    command_ctx: &CommandContext,
-    backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
-) {
-    let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
-        collect_resp_info(resps);
-
-    let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
-        &command_ctx.command
-        && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
-    {
-        let table_fragments = &info.table_fragments;
-        let mut table_ids: HashSet<_> = table_fragments
-            .internal_table_ids()
-            .into_iter()
-            .map(TableId::new)
-            .collect();
-        if let Some(mv_table_id) = table_fragments.mv_table_id() {
-            table_ids.insert(TableId::new(mv_table_id));
-        }
-
-        vec![NewTableFragmentInfo { table_ids }]
-    } else {
-        vec![]
-    };
-
-    let mut mv_log_store_truncate_epoch = HashMap::new();
-    let mut update_truncate_epoch =
-        |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
-            .entry(table_id.table_id)
-        {
-            Entry::Occupied(mut entry) => {
-                let prev_truncate_epoch = entry.get_mut();
-                if truncate_epoch < *prev_truncate_epoch {
-                    *prev_truncate_epoch = truncate_epoch;
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(truncate_epoch);
-            }
-        };
-    for (mv_table_id, subscriptions) in &command_ctx.subscription_info.mv_depended_subscriptions {
-        if let Some(truncate_epoch) = subscriptions
-            .values()
-            .max()
-            .map(|max_retention| command_ctx.get_truncate_epoch(*max_retention).0)
-        {
-            update_truncate_epoch(*mv_table_id, truncate_epoch);
-        }
-    }
-    for (_, (backfill_epoch, upstream_mv_table_ids)) in backfill_pinned_log_epoch {
-        for mv_table_id in upstream_mv_table_ids {
-            update_truncate_epoch(mv_table_id, backfill_epoch);
-        }
-    }
-
-    let table_new_change_log = build_table_change_log_delta(
-        old_value_ssts.into_iter(),
-        synced_ssts.iter().map(|sst| &sst.sst_info),
-        must_match!(&command_ctx.barrier_info.kind, BarrierKind::Checkpoint(epochs) => epochs),
-        mv_log_store_truncate_epoch.into_iter(),
-    );
-
-    let epoch = command_ctx.barrier_info.prev_epoch();
-    for table_id in &command_ctx.table_ids_to_commit {
-        info.tables_to_commit
-            .try_insert(*table_id, epoch)
-            .expect("non duplicate");
-    }
-
-    info.sstables.extend(synced_ssts);
-    info.new_table_watermarks.extend(new_table_watermarks);
-    info.sst_to_context.extend(sst_to_context);
-    info.new_table_fragment_infos
-        .extend(new_table_fragment_infos);
-    info.change_log_delta.extend(table_new_change_log);
 }
 
 pub(super) fn collect_creating_job_commit_epoch_info(
