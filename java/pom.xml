@@ -65,7 +65,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- dependency versions -->
-        <protobuf.version>3.25.5</protobuf.version>
+        <protobuf.version>3.25.5</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.68.1</grpc.version>
         <log4j.version>2.24.1</log4j.version>
         <slf4j.version>2.0.16</slf4j.version>
