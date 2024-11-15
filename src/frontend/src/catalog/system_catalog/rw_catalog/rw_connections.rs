@@ -47,7 +47,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     owner: conn.owner as i32,
                     type_: conn.connection_type().into(),
                     provider: "".to_string(),
-                    acl: "".into(),
+                    acl: vec![],
                     connection_params: "".to_string(),
                 };
                 match &conn.info {
