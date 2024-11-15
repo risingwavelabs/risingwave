@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -747,11 +748,13 @@ impl HummockManager {
         }
 
         let mut table_throughput = table_write_throughputs.get(table_id).unwrap().clone();
-        let last_timestamp = table_throughput.back().unwrap().timestamp;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_secs();
         table_throughput.retain(|stat| {
             stat.timestamp
-                >= last_timestamp
-                    - self.env.opts.table_stat_throuput_window_seconds_for_split as i64
+                >= (now - self.env.opts.table_stat_throuput_window_seconds_for_split as u64) as i64
         });
 
         let is_high_write_throughput = is_table_high_write_throughput(
@@ -998,6 +1001,10 @@ fn check_is_low_write_throughput_compaction_group(
     group: &CompactionGroupStatistic,
     opts: &Arc<MetaOpts>,
 ) -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time went backwards")
+        .as_secs();
     let table_with_statistic: Vec<VecDeque<TableWriteThroughputStatistic>> = group
         .table_statistic
         .keys()
@@ -1005,10 +1012,9 @@ fn check_is_low_write_throughput_compaction_group(
         .cloned()
         .map(|table_id| {
             let mut table_throughput = table_write_throughputs.get(&table_id).unwrap().clone();
-            let last_timestamp = table_throughput.back().unwrap().timestamp;
             table_throughput.retain(|stat| {
                 stat.timestamp
-                    >= last_timestamp - opts.table_stat_throuput_window_seconds_for_merge as i64
+                    >= (now - opts.table_stat_throuput_window_seconds_for_merge as u64) as i64
             });
 
             table_throughput
