@@ -9,9 +9,15 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    <name>risingwave-connector-test</name>
+    <name>risingwave-sink-deltalake-test</name>
     <packaging>jar</packaging>
-    <artifactId>risingwave-connector-test</artifactId>
+    <artifactId>risingwave-sink-deltalake-test</artifactId>
+    <description>
+        This module contains the unit test of Delta Lake Sink. Usually we just put the unit test alongside
+        the main code, but Delta Lake's test relies on Apache Spark, which contains numerous dependencies and
+        can easily conflict with ours. By splitting it as a dedicated module, these Spark's dependencies
+        (especially the stale ones) only affect the test itself.
+    </description>
 
     <properties>
         <iceberg.version>1.0.0</iceberg.version>
@@ -26,11 +32,6 @@
         <dependency>
             <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-iceberg</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -53,14 +54,22 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-protobuf</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-api</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
@@ -101,30 +110,8 @@
             <version>3.24.2</version>
             <scope>test</scope>
         </dependency>
-        <dependency>
-            <groupId>com.zaxxer</groupId>
-            <artifactId>HikariCP</artifactId>
-            <version>5.0.1</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>mysql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>elasticsearch</artifactId>
-            <version>${testcontainers.version}</version>
-            <scope>test</scope>
-        </dependency>
+
+        <!-- Force using jackson-databind 2.13.5, as required by spark-3.2_2.12  -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -138,46 +125,5 @@
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-connector-service</artifactId>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.risingwave</groupId>
-                    <artifactId>tracing</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-jdbc</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-es-7</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-cassandra</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-common</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 </project>

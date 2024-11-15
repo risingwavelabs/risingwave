@@ -11,7 +11,12 @@
     <modelVersion>4.0.0</modelVersion>
     <name>risingwave-source-test</name>
     <packaging>jar</packaging>
-    <artifactId>risingwave-source-test</artifactId>
+    <artifactId>risingwave-source-cdc-test</artifactId>
+    <description>
+        This module contains the unit test of CDC sources. Usually we just put the unit test alongside
+        the main code, but these test cases relies on risingwave-connector-service, which will create a cyclic
+        dependency. Thus, we create a dedicated module here.
+    </description>
 
     <dependencies>
         <dependency>
