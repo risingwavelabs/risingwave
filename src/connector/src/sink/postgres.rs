@@ -44,14 +44,17 @@ fn default_max_batch_rows() -> usize {
     1024
 }
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PostgresConfig {
     pub host: String,
+    #[serde_as(as = "DisplayFromStr")]
     pub port: u16,
     pub user: String,
     pub password: String,
     pub database: String,
     pub table: String,
+    #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
 }
