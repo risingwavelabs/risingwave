@@ -59,6 +59,7 @@ use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
 pub async fn prepare_start_parameters(
+    compactor_opts: &CompactorOpts,
     config: RwConfig,
     system_params_reader: SystemParamsReader,
 ) -> (
@@ -81,7 +82,7 @@ pub async fn prepare_start_parameters(
         &system_params_reader,
         &storage_memory_config,
     )));
-    let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
+    let non_reserved_memory_bytes = (compactor_opts.compactor_total_memory_bytes as f64
         * config.storage.compactor_memory_available_proportion)
         as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
@@ -186,7 +187,7 @@ pub async fn compactor_serve(
 
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
-        opts.meta_address,
+        opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
         Default::default(),
@@ -210,7 +211,7 @@ pub async fn compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params_reader.clone()).await;
+    ) = prepare_start_parameters(&opts, config.clone(), system_params_reader.clone()).await;
 
     let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -338,7 +339,7 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(config.clone(), system_params.into()).await;
+    ) = prepare_start_parameters(&opts, config.clone(), system_params.into()).await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
