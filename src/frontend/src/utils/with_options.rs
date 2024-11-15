@@ -186,10 +186,11 @@ impl WithOptions {
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
-) -> RwResult<(WithOptionsSecResolved, PbConnectionType)> {
+) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let db_name: &str = session.database();
     let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
 
+    let mut connection_id = None;
     let mut connection_params = None;
     for connection_ref in connection_refs.values() {
         // at most one connection ref in the map
@@ -202,6 +203,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             let connection_catalog =
                 session.get_connection_by_name(schema_name, &connection_name)?;
             if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
+                connection_id = Some(connection_catalog.id);
                 Some(params.clone())
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
@@ -232,6 +234,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     };
 
     let mut connection_type = PbConnectionType::Unspecified;
+    let connection_params_none_flag = connection_params.is_none();
     if let Some(connection_params) = connection_params {
         connection_type = connection_params.connection_type();
         for (k, v) in connection_params.properties {
@@ -252,10 +255,14 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             }
         }
     }
+    debug_assert!(
+        matches!(connection_type, PbConnectionType::Unspecified) && connection_params_none_flag
+    );
 
     Ok((
         WithOptionsSecResolved::new(options, inner_secret_refs),
         connection_type,
+        connection_id,
     ))
 }
 

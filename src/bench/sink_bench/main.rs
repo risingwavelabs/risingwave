@@ -487,6 +487,7 @@ fn mock_from_legacy_type(
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)

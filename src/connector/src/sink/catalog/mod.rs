@@ -124,6 +124,7 @@ pub struct SinkFormatDesc {
     pub options: BTreeMap<String, String>,
     pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
+    pub connection_id: Option<u32>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -188,6 +189,7 @@ impl SinkFormatDesc {
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }))
     }
 
@@ -223,7 +225,7 @@ impl SinkFormatDesc {
             options,
             key_encode,
             secret_refs: self.secret_refs.clone(),
-            connection_id: None,
+            connection_id: self.connection_id,
         }
     }
 
@@ -236,6 +238,7 @@ impl SinkFormatDesc {
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }
     }
 }
@@ -300,6 +303,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             options: value.options,
             key_encode,
             secret_refs: value.secret_refs,
+            connection_id: value.connection_id,
         })
     }
 }

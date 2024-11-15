@@ -81,7 +81,9 @@ use crate::handler::create_table::{
     bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
     bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
 };
-use crate::handler::util::SourceSchemaCompatExt;
+use crate::handler::util::{
+    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -311,7 +313,7 @@ pub(crate) async fn bind_columns_from_source(
 
     let options_with_secret = match with_properties {
         Either::Left(options) => {
-            let (sec_resolve_props, connection_type) =
+            let (sec_resolve_props, connection_type, _) =
                 resolve_connection_ref_and_secret_ref(options.clone(), session)?;
             if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
@@ -328,16 +330,12 @@ pub(crate) async fn bind_columns_from_source(
     let is_kafka: bool = options_with_secret.is_kafka_connector();
 
     // todo: need to resolve connection ref for schema registry
-    let (sec_resolve_props, connection_type) = resolve_connection_ref_and_secret_ref(
-        WithOptions::try_from(format_encode.row_options())?,
-        session,
-    )?;
-    if !ALLOWED_CONNECTION_SCHEMA_REGISTRY.contains(&connection_type) {
-        return Err(RwError::from(ProtocolError(format!(
-            "connection type {:?} is not allowed, allowed types: {:?}",
-            connection_type, ALLOWED_CONNECTION_SCHEMA_REGISTRY
-        ))));
-    }
+    let (sec_resolve_props, connection_type, schema_registry_conn_ref) =
+        resolve_connection_ref_and_secret_ref(
+            WithOptions::try_from(format_encode.row_options())?,
+            session,
+        )?;
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 
     let (format_encode_options, format_encode_secret_refs) = sec_resolve_props.into_parts();
     // Need real secret to access the schema registry
@@ -372,6 +370,7 @@ pub(crate) async fn bind_columns_from_source(
         row_encode: row_encode_to_prost(&format_encode.row_encode) as i32,
         format_encode_options,
         format_encode_secret_refs,
+        connection_id: schema_registry_conn_ref,
         ..Default::default()
     };
 
@@ -1601,20 +1600,14 @@ pub async fn bind_create_source_or_table_with_connector(
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    let connector = with_properties.get_connector().unwrap();
-    let (with_properties, connection_type) =
+    let (with_properties, connection_type, connector_conn_ref) =
         resolve_connection_ref_and_secret_ref(with_properties, session)?;
-    if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
-        return Err(RwError::from(ProtocolError(format!(
-            "connection type {:?} is not allowed, allowed types: {:?}",
-            connection_type, ALLOWED_CONNECTION_CONNECTOR
-        ))));
-    }
-    if !connector.eq(connection_type_to_connector(&connection_type)) {
-        return Err(RwError::from(ProtocolError(format!(
-            "connector {} and connection type {:?} are not compatible",
-            connector, connection_type
-        ))));
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+
+    // if not using connection, we don't need to check connector match connection type
+    if !matches!(connection_type, PbConnectionType::Unspecified) {
+        let connector = with_properties.get_connector().unwrap();
+        check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
     let pk_names = bind_source_pk(
@@ -1689,7 +1682,7 @@ pub async fn bind_create_source_or_table_with_connector(
         watermark_descs,
         associated_table_id,
         definition,
-        connection_id: None, // deprecated: private link connection id
+        connection_id: connector_conn_ref,
         created_at_epoch: None,
         initialized_at_epoch: None,
         version: INITIAL_SOURCE_VERSION_ID,
@@ -1823,14 +1816,6 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Parquet => EncodeType::Parquet,
         Encode::None => EncodeType::None,
         Encode::Text => EncodeType::Text,
-    }
-}
-
-fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
-    match connection_type {
-        PbConnectionType::Kafka => KAFKA_CONNECTOR,
-        PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
-        _ => unreachable!(),
     }
 }
 
