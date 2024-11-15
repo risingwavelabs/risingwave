@@ -86,7 +86,7 @@ impl Planner {
                     vec![
                         InputRef::new(
                             index + schema_len,
-                            with_new.schema().data_types()[i + schema_len].clone(),
+                            with_new.schema().data_types()[index + schema_len].clone(),
                         )
                         .into(),
                         Literal::new(Some((sub as i32).to_scalar_value()), DataType::Int32).into(),

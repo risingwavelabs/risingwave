@@ -34,7 +34,7 @@ use tokio::task::JoinError;
 // - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
 //   It's not necessary anymore as the error type is now defined at the top-level.
 #[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Macro)]
-#[thiserror_ext(newtype(name = RwError, backtrace))]
+#[thiserror_ext(newtype(name = RwError, backtrace), macro(path = "crate::error"))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
