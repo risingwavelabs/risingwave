@@ -286,6 +286,8 @@ impl IcebergSink {
                     Some(warehouse_path) => {
                         let url = Url::parse(warehouse_path);
                         if url.is_err() {
+                            // For rest catalog, the warehouse_path could be a warehouse name.
+                            // In this case, we should specify the location when creating a table.
                             if self.config.common.catalog_type() == "rest" {
                                 None
                             } else {
