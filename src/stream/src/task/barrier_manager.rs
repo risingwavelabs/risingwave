@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
+use futures::stream::{BoxStream, FuturesOrdered};
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
@@ -67,7 +67,7 @@ use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
 use crate::task::barrier_manager::managed_state::{
-    ManagedBarrierStateDebugInfo, PartialGraphManagedBarrierState,
+    AwaitEpochCompletedFuture, ManagedBarrierStateDebugInfo, PartialGraphManagedBarrierState,
 };
 use crate::task::barrier_manager::progress::BackfillState;
 
@@ -265,6 +265,9 @@ pub(super) struct LocalBarrierWorker {
     /// Current barrier collection state.
     pub(super) state: ManagedBarrierState,
 
+    /// Futures will be finished in the order of epoch in ascending order.
+    await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
+
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
@@ -296,6 +299,7 @@ impl LocalBarrierWorker {
                 shared_context.clone(),
                 initial_partial_graphs,
             ),
+            await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             current_shared_context: shared_context,
@@ -316,10 +320,13 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, completed_epoch, result) = self.state.next_completed_epoch() => {
+                (partial_graph_id, barrier, create_mview_progress, table_ids) = self.state.next_collected_epoch() => {
+                    self.complete_barrier(partial_graph_id, barrier, create_mview_progress, table_ids);
+                }
+                (partial_graph_id, barrier, result) = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
                     match result {
                         Ok(result) => {
-                            self.on_epoch_completed(partial_graph_id, completed_epoch, result);
+                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
                         }
                         Err(err) => {
                             self.notify_other_failure(err, "failed to complete epoch").await;
