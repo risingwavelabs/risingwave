@@ -69,7 +69,7 @@ impl ScaleService for ScaleServiceImpl {
             .table_fragments()
             .await?
             .values()
-            .cloned()
+            .map(|tf| tf.to_protobuf())
             .collect();
 
         let worker_nodes = self

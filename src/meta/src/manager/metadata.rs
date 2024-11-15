@@ -543,11 +543,9 @@ impl MetadataManager {
         &self,
         job_id: &TableId,
     ) -> MetaResult<StreamJobFragments> {
-        let pb_table_fragments = self
-            .catalog_controller
+        self.catalog_controller
             .get_job_fragments_by_id(job_id.table_id as _)
-            .await?;
-        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
+            .await
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -581,11 +579,11 @@ impl MetadataManager {
     ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
-            let pb_table_fragments = self
-                .catalog_controller
-                .get_job_fragments_by_id(id.table_id as _)
-                .await?;
-            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(
+                self.catalog_controller
+                    .get_job_fragments_by_id(id.table_id as _)
+                    .await?,
+            );
         }
         Ok(table_fragments)
     }
@@ -593,8 +591,7 @@ impl MetadataManager {
     pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
-        for (_, fragments) in table_fragments {
-            let tf = StreamJobFragments::from_protobuf(fragments);
+        for (_, tf) in table_fragments {
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)
