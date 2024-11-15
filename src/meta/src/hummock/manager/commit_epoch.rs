@@ -32,7 +32,6 @@ use risingwave_pb::hummock::compact_task::{self};
 use risingwave_pb::hummock::CompactionConfig;
 use sea_orm::TransactionTrait;
 
-use super::TableWriteThroughputStatistic;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::transaction::{
@@ -300,26 +299,18 @@ impl HummockManager {
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
 
-        let mut table_infos = self.history_table_throughput.write();
+        let mut table_throughput_statistic_manager = self.history_table_throughput.write();
         let timestamp = chrono::Utc::now().timestamp();
-        let expired_timestamp = timestamp
-            - std::cmp::max(
-                self.env.opts.table_stat_throuput_window_seconds_for_split,
-                self.env.opts.table_stat_throuput_window_seconds_for_merge,
-            ) as i64;
 
         for (table_id, stat) in table_stats {
             let throughput = ((stat.total_value_size + stat.total_key_size) as f64
                 / checkpoint_secs as f64) as u64;
-            let entry = table_infos.entry(table_id).or_default();
-            entry.push_back(TableWriteThroughputStatistic {
-                throughput,
-                timestamp,
-            });
-            entry.retain(|stat| stat.timestamp >= expired_timestamp);
+            table_throughput_statistic_manager
+                .add_table_throughput_with_ts(table_id, throughput, timestamp);
         }
 
-        table_infos.retain(|_, v| !v.is_empty());
+        // retain the empty table
+        table_throughput_statistic_manager.retain();
     }
 
     async fn correct_commit_ssts(

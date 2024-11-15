@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -95,8 +95,7 @@ pub struct HummockManager {
     version_checkpoint_path: String,
     version_archive_dir: String,
     pause_version_checkpoint: AtomicBool,
-    history_table_throughput:
-        parking_lot::RwLock<HashMap<u32, VecDeque<TableWriteThroughputStatistic>>>,
+    history_table_throughput: parking_lot::RwLock<TableWriteThroughputStatisticManager>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -246,6 +245,12 @@ impl HummockManager {
             state_store_dir,
             use_new_object_prefix_strategy,
         );
+
+        let max_table_statistic_expired_time = std::cmp::max(
+            env.opts.table_stat_throuput_window_seconds_for_split,
+            env.opts.table_stat_throuput_window_seconds_for_merge,
+        ) as i64;
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -277,7 +282,9 @@ impl HummockManager {
             version_checkpoint_path,
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
-            history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
+            history_table_throughput: parking_lot::RwLock::new(
+                TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+            ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new().into(),
@@ -499,4 +506,63 @@ async fn write_exclusive_cluster_id(
 pub struct TableWriteThroughputStatistic {
     pub throughput: u64,
     pub timestamp: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableWriteThroughputStatisticManager {
+    table_throughput: HashMap<u32, Vec<TableWriteThroughputStatistic>>,
+    max_statistic_expired_time: i64,
+}
+
+impl TableWriteThroughputStatisticManager {
+    pub fn new(max_statistic_expired_time: i64) -> Self {
+        Self {
+            table_throughput: HashMap::new(),
+            max_statistic_expired_time,
+        }
+    }
+
+    pub fn add_table_throughput_with_ts(&mut self, table_id: u32, throughput: u64, timestamp: i64) {
+        let table_throughput = self
+            .table_throughput
+            .entry(table_id)
+            .or_insert_with(Vec::new);
+        table_throughput.push(TableWriteThroughputStatistic {
+            throughput,
+            timestamp,
+        });
+
+        table_throughput
+            .retain(|statistic| timestamp - statistic.timestamp <= self.max_statistic_expired_time);
+    }
+
+    pub fn get_table_throughput(
+        &self,
+        table_id: u32,
+        expired_time: i64,
+    ) -> Option<Vec<&TableWriteThroughputStatistic>> {
+        let timestamp = chrono::Utc::now().timestamp();
+        if let Some(statistics) = self.table_throughput.get(&table_id) {
+            let table_throughput_statistics = statistics
+                .iter()
+                .filter(|statistic| timestamp - statistic.timestamp <= expired_time)
+                .collect_vec();
+
+            if !table_throughput_statistics.is_empty() {
+                Some(table_throughput_statistics)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn retain(&mut self) {
+        self.table_throughput.retain(|_, v| !v.is_empty());
+    }
+
+    pub fn contains(&self, table_id: u32) -> bool {
+        self.table_throughput.contains_key(&table_id)
+    }
 }

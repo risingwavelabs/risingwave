@@ -161,6 +161,7 @@ impl HummockManager {
                 );
                 scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                scheduling_compaction_group_trigger_interval.reset();
                 let group_scheduling_split_trigger =
                     IntervalStream::new(scheduling_compaction_group_trigger_interval)
                         .map(|_| HummockTimerEvent::GroupScheduleSplit);
@@ -178,6 +179,7 @@ impl HummockManager {
                 );
                 scheduling_compaction_group_merge_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                scheduling_compaction_group_merge_trigger_interval.reset();
                 let group_scheduling_merge_trigger =
                     IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
                         .map(|_| HummockTimerEvent::GroupScheduleMerge);
@@ -303,9 +305,22 @@ impl HummockManager {
                                                 .set(group_info.group_size as _);
                                             // accumulate the throughput of all tables in the group
                                             let mut avg_throuput = 0;
+                                            let max_statistic_expired_time = std::cmp::max(
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_split,
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_merge,
+                                            );
                                             for table_id in group_info.table_statistic.keys() {
-                                                if let Some(statistic_vec) =
-                                                    tables_throughput.get(table_id)
+                                                if let Some(statistic_vec) = tables_throughput
+                                                    .get_table_throughput(
+                                                        *table_id,
+                                                        max_statistic_expired_time as i64,
+                                                    )
                                                 {
                                                     let table_avg_throughput = statistic_vec
                                                         .iter()
@@ -589,7 +604,7 @@ impl HummockManager {
                 return;
             }
         };
-        let table_write_throughput = self.history_table_throughput.read().clone();
+        let table_write_throughput_statistic_manager = self.history_table_throughput.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
         group_infos.sort_by_key(|group| {
@@ -614,7 +629,7 @@ impl HummockManager {
             let next_group = &group_infos[right];
             match self
                 .try_merge_compaction_group(
-                    &table_write_throughput,
+                    &table_write_throughput_statistic_manager,
                     group,
                     next_group,
                     &created_tables,

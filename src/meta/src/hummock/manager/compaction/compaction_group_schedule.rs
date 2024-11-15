@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
-use crate::hummock::TableWriteThroughputStatistic;
+use crate::hummock::{TableWriteThroughputStatistic, TableWriteThroughputStatisticManager};
 use crate::manager::MetaOpts;
 
 impl HummockManager {
@@ -708,7 +708,7 @@ impl HummockManager {
     /// Split the compaction group if the group is too large or contains high throughput tables.
     pub async fn try_split_compaction_group(
         &self,
-        table_write_throughput: &HashMap<u32, VecDeque<TableWriteThroughputStatistic>>,
+        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         group: CompactionGroupStatistic,
     ) {
         if group
@@ -722,8 +722,8 @@ impl HummockManager {
         // split high throughput table to dedicated compaction group
         for (table_id, table_size) in &group.table_statistic {
             self.try_move_high_throughput_table_to_dedicated_cg(
-                table_write_throughput,
-                table_id,
+                table_write_throughput_statistic_manager,
+                *table_id,
                 table_size,
                 group.group_id,
             )
@@ -737,54 +737,49 @@ impl HummockManager {
     /// Try to move the high throughput table to a dedicated compaction group.
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
-        table_write_throughputs: &HashMap<u32, VecDeque<TableWriteThroughputStatistic>>,
-        table_id: &u32,
+        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
+        table_id: u32,
         _table_size: &u64,
         parent_group_id: u64,
     ) {
-        if !table_write_throughputs.contains_key(table_id) {
-            return;
-        }
-
-        let mut table_throughput = table_write_throughputs.get(table_id).unwrap().clone();
-        let last_timestamp = table_throughput.back().unwrap().timestamp;
-        table_throughput.retain(|stat| {
-            stat.timestamp
-                >= last_timestamp
-                    - self.env.opts.table_stat_throuput_window_seconds_for_split as i64
-        });
-
-        let is_high_write_throughput = is_table_high_write_throughput(
-            &table_throughput,
-            self.env.opts.table_high_write_throughput_threshold,
-            self.env
-                .opts
-                .table_stat_high_write_throughput_ratio_for_split,
-        );
-
-        // do not split a table to dedicated compaction group if it is not high write throughput
-        if !is_high_write_throughput {
-            return;
-        }
-
-        let ret = self
-            .move_state_tables_to_dedicated_compaction_group(
-                parent_group_id,
-                &[*table_id],
-                Some(self.env.opts.partition_vnode_count),
+        if let Some(table_throughput) = table_write_throughput_statistic_manager
+            .get_table_throughput(
+                table_id,
+                self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
             )
-            .await;
-        match ret {
-            Ok(split_result) => {
-                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
+        {
+            let is_high_write_throughput = is_table_high_write_throughput(
+                table_throughput,
+                self.env.opts.table_high_write_throughput_threshold,
+                self.env
+                    .opts
+                    .table_stat_high_write_throughput_ratio_for_split,
+            );
+
+            // do not split a table to dedicated compaction group if it is not high write throughput
+            if !is_high_write_throughput {
+                return;
             }
-            Err(e) => {
-                tracing::info!(
-                    error = %e.as_report(),
-                    "failed to split state table [{}] from group-{}",
-                    table_id,
+
+            let ret = self
+                .move_state_tables_to_dedicated_compaction_group(
                     parent_group_id,
+                    &[table_id],
+                    Some(self.env.opts.partition_vnode_count),
                 )
+                .await;
+            match ret {
+                Ok(split_result) => {
+                    tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
+                }
+                Err(e) => {
+                    tracing::info!(
+                        error = %e.as_report(),
+                        "failed to split state table [{}] from group-{}",
+                        table_id,
+                        parent_group_id,
+                    )
+                }
             }
         }
     }
@@ -841,7 +836,7 @@ impl HummockManager {
 
     pub async fn try_merge_compaction_group(
         &self,
-        table_write_throughput: &HashMap<u32, VecDeque<TableWriteThroughputStatistic>>,
+        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
         created_tables: &HashSet<u32>,
@@ -892,7 +887,7 @@ impl HummockManager {
 
         // do not merge high throughput group
         if !check_is_low_write_throughput_compaction_group(
-            table_write_throughput,
+            table_write_throughput_statistic_manager,
             group,
             &self.env.opts,
         ) {
@@ -920,7 +915,7 @@ impl HummockManager {
         }
 
         if !check_is_low_write_throughput_compaction_group(
-            table_write_throughput,
+            table_write_throughput_statistic_manager,
             next_group,
             &self.env.opts,
         ) {
@@ -962,7 +957,7 @@ impl HummockManager {
 
 /// Check if the table is high write throughput with the given threshold and ratio.
 pub fn is_table_high_write_throughput(
-    table_throughput: &VecDeque<TableWriteThroughputStatistic>,
+    table_throughput: Vec<&TableWriteThroughputStatistic>,
     threshold: u64,
     high_write_throughput_ratio: f64,
 ) -> bool {
@@ -978,7 +973,7 @@ pub fn is_table_high_write_throughput(
 }
 
 pub fn is_table_low_write_throughput(
-    table_throughput: &VecDeque<TableWriteThroughputStatistic>,
+    table_throughput: Vec<&TableWriteThroughputStatistic>,
     threshold: u64,
     low_write_throughput_ratio: f64,
 ) -> bool {
@@ -994,26 +989,21 @@ pub fn is_table_low_write_throughput(
 }
 
 fn check_is_low_write_throughput_compaction_group(
-    table_write_throughputs: &HashMap<u32, VecDeque<TableWriteThroughputStatistic>>,
+    table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
     group: &CompactionGroupStatistic,
     opts: &Arc<MetaOpts>,
 ) -> bool {
-    let table_with_statistic: Vec<VecDeque<TableWriteThroughputStatistic>> = group
+    let table_with_statistic: Vec<_> = group
         .table_statistic
         .keys()
-        .filter(|table_id| table_write_throughputs.contains_key(table_id))
+        .filter(|table_id| table_write_throughput_statistic_manager.contains(**table_id))
         .cloned()
-        .map(|table_id| {
-            let mut table_throughput = table_write_throughputs.get(&table_id).unwrap().clone();
-            let last_timestamp = table_throughput.back().unwrap().timestamp;
-            table_throughput.retain(|stat| {
-                stat.timestamp
-                    >= last_timestamp - opts.table_stat_throuput_window_seconds_for_merge as i64
-            });
-
-            table_throughput
+        .filter_map(|table_id| {
+            table_write_throughput_statistic_manager.get_table_throughput(
+                table_id,
+                opts.table_stat_throuput_window_seconds_for_merge as i64,
+            )
         })
-        .filter(|table_throughput| !table_throughput.is_empty())
         .collect();
 
     // if all tables in the group do not have enough statistics, return true
@@ -1024,7 +1014,7 @@ fn check_is_low_write_throughput_compaction_group(
     // check if all tables in the group are low write throughput with enough statistics
     table_with_statistic.into_iter().all(|table_throughput| {
         is_table_low_write_throughput(
-            &table_throughput,
+            table_throughput,
             opts.table_low_write_throughput_threshold,
             opts.table_stat_low_write_throughput_ratio_for_merge,
         )

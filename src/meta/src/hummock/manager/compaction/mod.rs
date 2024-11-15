@@ -827,8 +827,7 @@ impl HummockManager {
                     self.calculate_vnode_partition(
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
-                    )
-                    .await;
+                    );
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
@@ -1419,7 +1418,7 @@ impl HummockManager {
         }
     }
 
-    pub(crate) async fn calculate_vnode_partition(
+    pub(crate) fn calculate_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
@@ -1463,23 +1462,14 @@ impl HummockManager {
                 .env
                 .opts
                 .compact_task_table_size_partition_threshold_high;
-            use risingwave_common::system_param::reader::SystemParamsRead;
-            let params = self.env.system_params_reader().await;
-            let barrier_interval_ms = params.barrier_interval_ms() as u64;
-            let checkpoint_secs = std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            );
             // check latest write throughput
             let history_table_throughput_guard = self.history_table_throughput.read();
+            let timestamp = chrono::Utc::now().timestamp();
             for (table_id, compact_table_size) in table_size_info {
                 let write_throughput = history_table_throughput_guard
-                    .get(&table_id)
-                    .and_then(|que| que.back())
-                    .map(|item| item.throughput)
-                    .unwrap_or(0)
-                    / checkpoint_secs;
-
+                    .get_table_throughput(table_id, timestamp)
+                    .and_then(|vec| vec.last().map(|item| item.throughput))
+                    .unwrap_or(0);
                 if compact_table_size > compact_task_table_size_partition_threshold_high
                     && default_partition_count > 0
                 {
