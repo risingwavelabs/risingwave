@@ -320,7 +320,7 @@ impl Planner {
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
-    fn substitute_subqueries(
+    pub(super) fn substitute_subqueries(
         &mut self,
         mut root: PlanRef,
         mut exprs: Vec<ExprImpl>,
@@ -369,7 +369,7 @@ impl Planner {
             let subroot = self.plan_query(subquery.query)?;
 
             let right = match subquery.kind {
-                SubqueryKind::Scalar => subroot.into_unordered_subplan(),
+                SubqueryKind::Scalar | SubqueryKind::UpdateSet => subroot.into_unordered_subplan(),
                 SubqueryKind::Existential => {
                     self.create_exists(subroot.into_unordered_subplan())?
                 }

@@ -46,25 +46,6 @@ impl From<generic::Update<PlanRef>> for LogicalUpdate {
     }
 }
 
-impl LogicalUpdate {
-    #[must_use]
-    pub fn table_id(&self) -> TableId {
-        self.core.table_id
-    }
-
-    pub fn exprs(&self) -> &[ExprImpl] {
-        self.core.exprs.as_ref()
-    }
-
-    pub fn has_returning(&self) -> bool {
-        self.core.returning
-    }
-
-    pub fn table_version_id(&self) -> TableVersionId {
-        self.core.table_version_id
-    }
-}
-
 impl PlanTreeNodeUnary for LogicalUpdate {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
@@ -86,15 +67,15 @@ impl ExprRewritable for LogicalUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.core.clone();
-        new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
-        Self::from(new).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::from(core).into()
     }
 }
 
 impl ExprVisitable for LogicalUpdate {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
+        self.core.visit_exprs(v);
     }
 }
 

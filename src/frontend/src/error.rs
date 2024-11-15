@@ -33,7 +33,7 @@ use tokio::task::JoinError;
 // - Some variants are never constructed.
 // - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
 //   It's not necessary anymore as the error type is now defined at the top-level.
-#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Macro)]
 #[thiserror_ext(newtype(name = RwError, backtrace))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
@@ -105,7 +105,7 @@ pub enum ErrorCode {
     // TODO: use a new type for bind error
     // TODO(error-handling): should prefer use error types than strings.
     #[error("Bind error: {0}")]
-    BindError(String),
+    BindError(#[message] String),
     // TODO: only keep this one
     #[error("Failed to bind expression: {expr}: {error}")]
     BindErrorRoot {

@@ -19,7 +19,7 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, Subquery, SubqueryKind};
 
 impl Binder {
-    pub(super) fn bind_subquery_expr(
+    pub fn bind_subquery_expr(
         &mut self,
         query: Query,
         kind: SubqueryKind,

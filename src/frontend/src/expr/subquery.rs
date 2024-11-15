@@ -24,6 +24,7 @@ use crate::expr::{CorrelatedId, Depth};
 pub enum SubqueryKind {
     /// Returns a scalar value (single column single row).
     Scalar,
+    UpdateSet,
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
     /// `IN` subquery.
@@ -88,6 +89,7 @@ impl Expr for Subquery {
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
             }
+            SubqueryKind::UpdateSet => DataType::new_unnamed_struct(self.query.data_types()),
             SubqueryKind::Array => {
                 let types = self.query.data_types();
                 assert_eq!(types.len(), 1, "Subquery with more than one column");

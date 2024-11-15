@@ -13,41 +13,103 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use risingwave_common::types::{DataType, Scalar};
+use risingwave_pb::expr::expr_node::Type;
 
 use super::Planner;
-use crate::binder::BoundUpdate;
+use crate::binder::{BoundUpdateV2, UpdateProject};
 use crate::error::Result;
+use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
-    pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
+    pub(super) fn plan_update_v2(&mut self, update: BoundUpdateV2) -> Result<PlanRoot> {
         let scan = self.plan_base_table(&update.table)?;
         let input = if let Some(expr) = update.selection {
             self.plan_where(scan, expr)?
         } else {
             scan
         };
+
         let returning = !update.returning_list.is_empty();
-        let update_column_indices = update
-            .table
-            .table_catalog
-            .columns()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| c.can_dml().then_some(i))
-            .collect_vec();
+        // let update_column_indices = update
+        //     .table
+        //     .table_catalog
+        //     .columns()
+        //     .iter()
+        //     .enumerate()
+        //     .filter_map(|(i, c)| (!c.is_generated()).then_some(i))
+        //     .collect_vec();
+
+        let schema_len = input.schema().len();
+
+        let with_new: PlanRef = {
+            let mut plan = input;
+
+            let mut exprs: Vec<ExprImpl> = plan
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .map(|(index, data_type)| InputRef::new(index, data_type).into())
+                .collect();
+
+            exprs.extend(update.exprs);
+
+            if exprs.iter().any(|e| e.has_subquery()) {
+                (plan, exprs) = self.substitute_subqueries(plan, exprs)?;
+            }
+
+            LogicalProject::new(plan, exprs).into()
+        };
+
+        let mut olds = Vec::new();
+        let mut news = Vec::new();
+
+        for (i, col) in update.table.table_catalog.columns().iter().enumerate() {
+            if col.is_generated() {
+                continue;
+            }
+            let data_type = col.data_type();
+
+            let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
+
+            let new: ExprImpl = match update.projects.get(&i).copied() {
+                Some(UpdateProject::Expr(index)) => {
+                    InputRef::new(index + schema_len, data_type.clone()).into()
+                }
+                Some(UpdateProject::Composite(index, sub)) => FunctionCall::new_unchecked(
+                    Type::Field,
+                    vec![
+                        InputRef::new(
+                            index + schema_len,
+                            with_new.schema().data_types()[i + schema_len].clone(),
+                        )
+                        .into(),
+                        Literal::new(Some((sub as i32).to_scalar_value()), DataType::Int32).into(),
+                    ],
+                    data_type.clone(),
+                )
+                .into(),
+
+                None => old.clone(),
+            };
+
+            olds.push(old);
+            news.push(new);
+        }
 
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
-            input,
+            with_new,
             update.table_name.clone(),
             update.table_id,
             update.table_version_id,
-            update.exprs,
+            olds,
+            news,
             returning,
-            update_column_indices,
         ))
         .into();
 

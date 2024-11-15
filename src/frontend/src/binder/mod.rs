@@ -57,7 +57,7 @@ pub use relation::{
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
-pub use update::BoundUpdate;
+pub use update::{BoundUpdate, BoundUpdateV2, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
