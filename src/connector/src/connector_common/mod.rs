@@ -39,7 +39,7 @@ mod tests {
         let kafka_conn = KafkaConnection::test_default();
         let conn_impl = ConnectionImpl::from(kafka_conn);
 
-        let x = dispatch_connection_impl!(conn_impl, inner, {
+        let x: Result<(), ()> = dispatch_connection_impl!(conn_impl, inner, {
             println!("{:?}", inner);
             Ok(())
         });

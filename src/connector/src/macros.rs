@@ -183,14 +183,14 @@ macro_rules! dispatch_connection_impl {
 
 #[macro_export]
 macro_rules! dispatch_connection_enum {
-    ($impl:expr, $inner_name:ident, $body:expr) => {
+    ($impl:expr, $inner_name:ident, $body:expr) => {{
         $crate::for_all_connections! {
             $crate::dispatch_connection_impl_inner,
             $impl,
             $inner_name,
             $body
         }
-    };
+    }};
 }
 
 #[macro_export]
