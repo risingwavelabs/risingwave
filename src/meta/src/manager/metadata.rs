@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -719,6 +720,11 @@ impl MetadataManager {
 
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
+    }
+
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let rate_limits = self.catalog_controller.list_rate_limits().await?;
+        Ok(rate_limits)
     }
 }
 

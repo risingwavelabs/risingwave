@@ -80,15 +80,37 @@ select * from rl_mv3;
 ----
 0
 
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+rl_mv1 SOURCE {SOURCE} 0
+rl_mv2 SOURCE {SOURCE} 0
+rl_mv3 SOURCE {SOURCE} 0
+
 ############## Alter Source (rate_limit = 0 --> rate_limit = 1000)
 
 skipif in-memory
-query I
+statement count 0
 alter source kafka_source set source_rate_limit to 1000;
 
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+rl_mv1 SOURCE {SOURCE} 1000
+rl_mv2 SOURCE {SOURCE} 1000
+rl_mv3 SOURCE {SOURCE} 1000
+
 skipif in-memory
-query I
+statement count 0
 alter source kafka_source set source_rate_limit to default;
+
+# rate limit becomes None
+query T
+select count(*) from rw_rate_limit;
+----
+0
 
 skipif in-memory
 sleep 3s
