@@ -653,7 +653,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
 
     private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName) {
         int val = typeName.getNumber();
-        System.out.println("WKXLOG val: " + typeName + " type: " + pgDataType);
         switch (pgDataType) {
             case "smallint":
                 return Data.DataType.TypeName.INT16_VALUE <= val
