@@ -414,4 +414,16 @@ impl StreamManagerService for StreamServiceImpl {
 
         Ok(Response::new(ListActorSplitsResponse { actor_splits }))
     }
+
+    async fn list_rate_limits(
+        &self,
+        _request: Request<ListRateLimitsRequest>,
+    ) -> Result<Response<ListRateLimitsResponse>, Status> {
+        let rate_limits = self
+            .metadata_manager
+            .catalog_controller
+            .list_rate_limits()
+            .await?;
+        Ok(Response::new(ListRateLimitsResponse { rate_limits }))
+    }
 }

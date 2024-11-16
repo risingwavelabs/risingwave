@@ -983,6 +983,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
   FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
+  // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
+  FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
 }
 
 // The streaming context associated with a stream plan
