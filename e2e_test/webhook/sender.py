@@ -83,7 +83,7 @@ def send_rudderstack(secret):
     payload = message
     payload['source'] = "rudderstack"
     payload['auth_algo'] = "plain"
-    url = SERVER_URL + "rudderstack" 
+    url = SERVER_URL + "rudderstack"
 
     payload_json = json.dumps(payload)
     signature = secret
@@ -125,7 +125,7 @@ def send_hubspot_sha256_v2(secret):
         "Content-Type": "application/json",
         "x-hubspot-signature": signature  # Custom signature header
     }
-    send_webhook(url, headers, payload_json) 
+    send_webhook(url, headers, payload_json)
 
 
 if __name__ == "__main__":
