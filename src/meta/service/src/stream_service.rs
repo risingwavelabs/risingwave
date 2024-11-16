@@ -109,12 +109,12 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
