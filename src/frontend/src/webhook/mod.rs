@@ -154,7 +154,12 @@ pub(super) mod handlers {
 
         let _rsp = handle(session, insert_stmt, Arc::from(""), vec![])
             .await
-            .map_err(|e| anyhow!("failed to insert: {:?}", e))?;
+            .map_err(|e| {
+                err(
+                    anyhow!(e).context("Failed to insert into target table"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            })?;
 
         Ok(())
     }
