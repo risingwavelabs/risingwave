@@ -693,6 +693,12 @@ impl LogicalOptimizer {
                 ExplainFormat::Json => {
                     ctx.store_logical(plan.explain_to_json());
                 }
+                ExplainFormat::Xml => {
+                    ctx.store_logical(plan.explain_to_xml());
+                }
+                ExplainFormat::Yaml => {
+                    ctx.store_logical(plan.explain_to_yaml());
+                }
             }
         }
 
@@ -805,6 +811,12 @@ impl LogicalOptimizer {
                 }
                 ExplainFormat::Json => {
                     ctx.store_logical(plan.explain_to_json());
+                }
+                ExplainFormat::Xml => {
+                    ctx.store_logical(plan.explain_to_xml());
+                }
+                ExplainFormat::Yaml => {
+                    ctx.store_logical(plan.explain_to_yaml());
                 }
             }
         }

@@ -582,7 +582,9 @@ define_keywords!(
     WITHOUT,
     WORK,
     WRITE,
+    XML,
     XOR,
+    YAML,
     YEAR,
     ZONE
 );
