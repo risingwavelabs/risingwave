@@ -304,8 +304,9 @@ impl StreamingJob {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
             StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
             StreamingJob::Index(index, index_table) => {
+                // TODO(rc): record index dependencies via `dependencies` field
                 assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
                 vec![]
             }
