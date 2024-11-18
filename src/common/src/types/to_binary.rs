@@ -39,20 +39,19 @@ pub type Result<T> = std::result::Result<T, ToBinaryError>;
 /// [`postgres_types::ToSql`] has similar functionality, and most of our types implement
 /// that trait and forward `ToBinary` to it directly.
 pub trait ToBinary {
-    // TODO(eric): remove the `Option`?
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes>;
 }
 macro_rules! implement_using_to_sql {
     ($({ $scalar_type:ty, $data_type:ident, $accessor:expr } ),* $(,)?) => {
         $(
             impl ToBinary for $scalar_type {
-                fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+                fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
                             #[allow(clippy::redundant_closure_call)]
                             $accessor(self).to_sql(&Type::ANY, &mut output).map_err(ToBinaryError::ToSql)?;
-                            Ok(Some(output.freeze()))
+                            Ok(output.freeze())
                         },
                         _ => unreachable!(),
                     }
@@ -81,7 +80,7 @@ implement_using_to_sql! {
 }
 
 impl ToBinary for ListRef<'_> {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
         use crate::row::Row;
         let element_ty = match ty {
             DataType::List(ty) => ty.as_ref(),
@@ -105,20 +104,18 @@ impl ToBinary for ListRef<'_> {
                     buf.put_i32(-1); // -1 length means a NULL
                 }
                 Some(value) => {
-                    let data = value
-                        .to_binary_with_type(element_ty)?
-                        .expect("must be non-null");
+                    let data = value.to_binary_with_type(element_ty)?;
                     buf.put_i32(data.len() as i32); // Length of element
                     buf.put(data);
                 }
             }
         }
-        Ok(Some(buf.into()))
+        Ok(buf.into())
     }
 }
 
 impl ToBinary for ScalarRefImpl<'_> {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
         match self {
             ScalarRefImpl::Int16(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int32(v) => v.to_binary_with_type(ty),
