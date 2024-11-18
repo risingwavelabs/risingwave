@@ -27,15 +27,15 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
-use risingwave_pb::secret::SecretRef;
 use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
 
 use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
-use crate::catalog::{CatalogError, IndexCatalog, SecretId};
+use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
+use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
 use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
@@ -443,16 +443,8 @@ pub async fn handle_show_object(
                             )
                         }
                         connection::Info::ConnectionParams(params) => {
-                            // todo: check secrets are not exposed
                             // todo: show dep relations
-                            let print_secret_ref = |secret_ref: &SecretRef| -> String {
-                                let secret_name = schema.get_secret_by_id(&SecretId::from(secret_ref.secret_id)).map(|s| s.name.as_str()).unwrap();
-                                format!("SECRET {} AS {}", secret_name, secret_ref.get_ref_as().unwrap().as_str_name())
-                            };
-                            let deref_secrets = params.get_secret_refs().iter().map(|(k, v)| (k.clone(), print_secret_ref(v)));
-                            let mut props = params.get_properties().clone();
-                            props.extend(deref_secrets);
-                            serde_json::to_string(&props).unwrap()
+                            print_connection_params(params, schema)
                         }
                     };
                     ShowConnectionRow {

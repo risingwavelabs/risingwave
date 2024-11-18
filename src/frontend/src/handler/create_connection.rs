@@ -18,12 +18,15 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
-use risingwave_pb::catalog::ConnectionParams;
+use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::secret::SecretRef;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::SecretId;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
@@ -119,4 +122,28 @@ pub async fn handle_create_connection(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
+}
+
+pub fn print_connection_params(
+    params: &PbConnectionParams,
+    schema: &SchemaCatalog,
+) -> String {
+    let print_secret_ref = |secret_ref: &SecretRef| -> String {
+        let secret_name = schema
+            .get_secret_by_id(&SecretId::from(secret_ref.secret_id))
+            .map(|s| s.name.as_str())
+            .unwrap();
+        format!(
+            "SECRET {} AS {}",
+            secret_name,
+            secret_ref.get_ref_as().unwrap().as_str_name()
+        )
+    };
+    let deref_secrets = params
+        .get_secret_refs()
+        .iter()
+        .map(|(k, v)| (k.clone(), print_secret_ref(v)));
+    let mut props = params.get_properties().clone();
+    props.extend(deref_secrets);
+    serde_json::to_string(&props).unwrap()
 }

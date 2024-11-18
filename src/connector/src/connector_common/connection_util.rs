@@ -35,6 +35,7 @@ pub trait ConnectionValidate {
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConnection {
     #[serde(flatten)]
     pub inner: KafkaConnectionInner,
@@ -104,6 +105,7 @@ impl KafkaConnection {
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
+#[serde(deny_unknown_fields)]
 pub struct IcebergConnection {}
 
 #[async_trait]
@@ -115,6 +117,7 @@ impl ConnectionValidate for IcebergConnection {
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct SchemaRegistryConnection {}
 
 #[async_trait]

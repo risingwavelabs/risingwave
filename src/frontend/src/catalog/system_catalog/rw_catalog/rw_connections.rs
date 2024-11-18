@@ -17,6 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
+use crate::handler::create_connection::print_connection_params;
 
 #[derive(Fields)]
 struct RwConnection {
@@ -55,8 +56,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                         rw_connection.provider = conn.provider().into();
                     }
                     risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
-                        rw_connection.connection_params =
-                            serde_json::to_string(&params.get_properties()).unwrap();
+                        rw_connection.connection_params = print_connection_params(params, schema);
                     }
                 };
 

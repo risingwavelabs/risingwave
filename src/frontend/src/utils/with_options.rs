@@ -265,7 +265,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         for (k, v) in connection_params.properties {
             if options.insert(k.clone(), v).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Duplicated key: {}",
+                    "Duplicated key in both WITH clause and Connection catalog: {}",
                     k
                 ))));
             }
@@ -274,16 +274,17 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         for (k, v) in connection_params.secret_refs {
             if inner_secret_refs.insert(k.clone(), v).is_some() {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Duplicated key: {}",
+                    "Duplicated key in both WITH clause and Connection catalog: {}",
                     k
                 ))));
             }
         }
     }
-    debug_assert!(
-        matches!(connection_type, PbConnectionType::Unspecified) && connection_params_is_none_flag
-    );
 
+    // connection_params is None means the connection is not retrieved, so the connection type should be unspecified
+    if connection_params_is_none_flag {
+        debug_assert!(matches!(connection_type, PbConnectionType::Unspecified));
+    }
     Ok((
         WithOptionsSecResolved::new(options, inner_secret_refs),
         connection_type,
