@@ -535,11 +535,11 @@ pub fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>
             format!("{} {} {:?}", name, op, v)
         }
         (lb, ub) => {
-            let (u_op, u_v) = ub_to_op_value(ub);
             let (l_op, l_v) = lb_to_op_value(lb);
+            let (u_op, u_v) = ub_to_op_value(ub);
             format!(
                 "{} {} {:?} AND {} {} {:?}",
-                name, u_op, u_v, name, l_op, l_v
+                name, l_op, l_v, name, u_op, u_v
             )
         }
     }
