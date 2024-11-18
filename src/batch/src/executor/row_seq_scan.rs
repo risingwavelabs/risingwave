@@ -464,7 +464,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     if is_real_unbounded {
                         let mut rows = pk_prefix.clone().into_inner().to_vec();
                         rows.push(x);
-                        Bound::Included(OwnedRow::new(rows))
+                        Bound::Excluded(OwnedRow::new(rows))
                     } else {
                         Bound::Excluded(OwnedRow::new(vec![x]))
                     }
