@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, Decimal};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -218,49 +218,74 @@ impl PostgresSinkWriter {
         // let mut update_sql = format!("MERGE {} SET ", self.config.table);
 
         let table_name = &self.config.table;
-        let parameters: String = {
-            let param_len = self.schema.fields().len();
-            (0..param_len)
+        let pk_fields: Vec<_> = self
+            .pk_indices
+            .iter()
+            .map(|i| self.schema.fields()[*i].clone())
+            .collect();
+
+        let insert_statement = {
+            let parameters: String = (0..self.schema.fields().len())
                 .map(|i| {
                     // let data_type = field.data_type();
                     // check_data_type_compatibility(data_type)?;
                     format!("${}", i + 1)
                 })
                 .collect_vec()
-                .join(",")
+                .join(",");
+            let insert_sql = format!("INSERT INTO {table_name} VALUES ({parameters})");
+            self.client
+                .prepare(&insert_sql) // TODO(kwannoel): use prepare_typed instead
+                .await
+                .context("Failed to prepare insert statement")?
         };
-        let insert_sql = format!("INSERT INTO {table_name} VALUES ({parameters})");
-        let insert_statement = self
-            .client
-            .prepare(&insert_sql) // TODO(kwannoel): use prepare_typed instead
-            .await
-            .context("Failed to prepare insert statement")?;
+
+        let delete_statement = {
+            let parameters: String = pk_fields
+                .iter()
+                .enumerate()
+                .map(|(i, field)| {
+                    let data_type = field.data_type();
+                    // check_data_type_compatibility(&data_type)?;
+                    format!("{} = ${}", &field.name, i + 1)
+                })
+                .collect_vec()
+                .join(" AND ");
+            let delete_sql = format!("DELETE FROM {table_name} WHERE {parameters}");
+            self.client
+                .prepare(&delete_sql) // TODO: use prepare_typed instead
+                .await
+                .context("Failed to prepare delete statement")?
+        };
+
         for chunk in self.buffer.drain() {
             for (op, row) in chunk.rows() {
                 match op {
-                    Op::Insert => self.flush_row(row, &insert_statement).await?,
+                    Op::Insert => {
+                        let owned = row.into_owned_row();
+                        let params = owned
+                            .as_inner()
+                            .iter()
+                            .map(|s| s as &(dyn ToSql + Sync))
+                            .collect_vec();
+                        let params_ref = &params[..];
+                        self.client.execute(&insert_statement, params_ref).await?;
+                    }
                     Op::UpdateInsert => {}
                     Op::Delete => {}
-                    Op::UpdateDelete => {}
+                    Op::UpdateDelete => {
+                        let owned = row.project(&self.pk_indices).into_owned_row();
+                        let params = owned
+                            .as_inner()
+                            .iter()
+                            .map(|s| s as &(dyn ToSql + Sync))
+                            .collect_vec();
+                        let params_ref = &params[..];
+                        self.client.execute(&delete_statement, params_ref).await?;
+                    }
                 }
             }
         }
-        Ok(())
-    }
-
-    async fn flush_row(
-        &self,
-        row: RowRef<'_>,
-        statement: &tokio_postgres::Statement,
-    ) -> Result<()> {
-        let owned = row.into_owned_row();
-        let params = owned
-            .as_inner()
-            .iter()
-            .map(|s| s as &(dyn ToSql + Sync))
-            .collect_vec();
-        let params_ref = &params[..];
-        self.client.execute(statement, params_ref).await?;
         Ok(())
     }
 }
