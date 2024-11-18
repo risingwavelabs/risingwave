@@ -77,6 +77,7 @@ use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved}
 
 static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
     hashset! {
+        PbConnectionType::Unspecified,
         PbConnectionType::Kafka,
         PbConnectionType::Iceberg,
     }

@@ -1076,6 +1076,7 @@ pub(super) fn bind_source_watermark(
 
 static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
     hashset! {
+        PbConnectionType::Unspecified,
         PbConnectionType::Kafka,
         PbConnectionType::Iceberg,
     }
