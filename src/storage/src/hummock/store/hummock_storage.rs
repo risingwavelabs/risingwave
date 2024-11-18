@@ -38,9 +38,9 @@ use tokio::sync::oneshot;
 
 use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{read_filter_for_version, CommittedVersion, HummockVersionReader};
-use crate::compaction_catalog_manager::{
-    CompactionCatalogManager, CompactionCatalogManagerRef, FakeRemoteTableAccessor,
-};
+use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
+#[cfg(any(test, feature = "test"))]
+use crate::compaction_catalog_manager::{CompactionCatalogManager, FakeRemoteTableAccessor};
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::{
@@ -258,7 +258,7 @@ impl HummockStorage {
         key: TableKey<Bytes>,
         epoch: HummockEpoch,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
         let (key_range, read_version_tuple) = self
@@ -579,12 +579,12 @@ impl StateStoreRead for HummockStorage {
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
+    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         self.get_inner(key, epoch, read_options)
     }
 
@@ -734,7 +734,6 @@ impl HummockStorage {
     }
 
     /// Used in the compaction test tool
-    #[cfg(any(test, feature = "test"))]
     pub async fn update_version_and_wait(&self, version: HummockVersion) {
         use tokio::task::yield_now;
         let version_id = version.id;
