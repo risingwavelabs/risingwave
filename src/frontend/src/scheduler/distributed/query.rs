@@ -296,7 +296,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: ReadSnapshot) {
+    async fn run(mut self, _pinned_snapshot: ReadSnapshot) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -308,8 +308,6 @@ impl QueryRunner {
                 stage_id
             );
         }
-        // To convince the compiler that `pinned_snapshot` will only be dropped once.
-        let pinned_snapshot_to_drop = Some(pinned_snapshot);
 
         let mut finished_stage_cnt = 0usize;
         while let Some(msg_inner) = self.msg_receiver.recv().await {
