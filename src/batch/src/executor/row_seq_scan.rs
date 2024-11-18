@@ -430,7 +430,11 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             is_real_unbounded,
         } = scan_range;
 
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
+        let order_type = if !is_real_unbounded {
+            table.pk_serializer().get_order_types()[pk_prefix.len()]
+        } else {
+            table.pk_serializer().get_order_types()[0]
+        };
         let (start_bound, end_bound) = if order_type.is_ascending() {
             (next_col_bounds.0, next_col_bounds.1)
         } else {
