@@ -86,7 +86,7 @@ impl ScanRange {
         }
     }
 
-    pub const fn full_table_scan_end_unbounded() -> Self {
+    pub const fn full_table_scan_real_unbounded() -> Self {
         Self {
             eq_conds: vec![],
             range: full_range(),

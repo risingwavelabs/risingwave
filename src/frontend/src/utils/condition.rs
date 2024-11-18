@@ -29,7 +29,7 @@ use crate::error::Result;
 use crate::expr::{
     collect_input_refs, column_self_eq_eliminate, factorization_expr, fold_boolean_constant,
     push_down_not, to_conjunctions, try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef, Literal,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
 };
 use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
@@ -383,7 +383,7 @@ impl Condition {
             }
         }
 
-        let (mut row_conjunctions, mut row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
+        let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
             self.conjunctions.clone().into_iter().partition(|expr| {
                 if let Some(f) = expr.as_function_call() {
                     if let Some(f_input) = f.inputs().get(0)
@@ -398,10 +398,11 @@ impl Condition {
                     false
                 }
             });
-        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
-        let mut other_conds = groups.pop().unwrap();
 
-        // optimize for single row conjunctions
+        // optimize for single row conjunctions. More optimisations may come later
+        // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
+        // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
+        // Suppose v1 v2 are both pk, we can push (v1,v2）> (1,2) down to scan and add (v1,v2,v3) > (1,2,3) in filter, it is still possible to reduce the value of scan
         if row_conjunctions.len() == 1 {
             let row_conjunction = row_conjunctions.pop().unwrap();
             let row_left_inputs = row_conjunction
@@ -413,28 +414,16 @@ impl Condition {
                 .as_function_call()
                 .unwrap()
                 .inputs();
-            let row_right_literal_data = row_conjunction
+            let row_right_literal = row_conjunction
                 .as_function_call()
                 .unwrap()
                 .inputs()
                 .get(1)
                 .unwrap()
                 .as_literal()
-                .unwrap()
-                .get_data()
-                .clone()
                 .unwrap();
-            let row_right_literal_type = row_conjunction
-                .as_function_call()
-                .unwrap()
-                .inputs()
-                .get(1)
-                .unwrap()
-                .as_literal()
-                .unwrap()
-                .get_data_type()
-                .clone()
-                .unwrap();
+            let row_right_literal_data = row_right_literal.get_data().clone().unwrap();
+            let row_right_literal_type = row_right_literal.get_data_type().clone().unwrap();
             let right_iter = row_right_literal_data
                 .as_struct()
                 .fields()
@@ -445,7 +434,7 @@ impl Condition {
                 && (matches!(func_type, ExprType::LessThan)
                     || matches!(func_type, ExprType::GreaterThan))
             {
-                let mut row_inputs_map = row_left_inputs
+                let mut row_inner_element_map = row_left_inputs
                     .iter()
                     .zip_eq_fast(right_iter)
                     .map(|(left_expr, right_expr)| {
@@ -457,16 +446,16 @@ impl Condition {
                     .collect::<HashMap<_, _>>();
                 let mut pk_struct = vec![];
                 for i in table_desc.order_column_indices() {
-                    if let Some(ex) = row_inputs_map.remove(&i) {
-                        pk_struct.push(ex);
+                    if let Some((_, (data, _))) = row_inner_element_map.remove(&i) {
+                        pk_struct.push(data.clone());
                     } else {
                         break;
                     }
                 }
-                let mut scan_range = ScanRange::full_table_scan_end_unbounded();
-                if let Some(pk_struct_index) = pk_struct.pop() {
-                    let value = match pk_struct_index.1 .0 {
-                        Some(v) => Bound::Excluded(v.clone()),
+                let mut scan_range = ScanRange::full_table_scan_real_unbounded();
+                if let Some(element_data) = pk_struct.pop() {
+                    let value = match element_data {
+                        Some(v) => Bound::Excluded(v),
                         None => Bound::Unbounded,
                     };
                     match func_type {
@@ -474,32 +463,30 @@ impl Condition {
                         ExprType::LessThan => scan_range.range = (Bound::Unbounded, value),
                         _ => unreachable!(),
                     }
-                    pk_struct.iter().for_each(|expr| {
-                        scan_range.eq_conds.push(expr.1 .0.clone());
+                    pk_struct.into_iter().for_each(|element_data| {
+                        scan_range.eq_conds.push(element_data);
                     });
-                    let other_conds = row_inputs_map
-                        .into_values()
-                        .map(|(left_expr, right_expr)| {
-                            Ok(FunctionCall::new(
-                                ExprType::GreaterThan,
-                                vec![
-                                    left_expr.clone(),
-                                    Literal::new(right_expr.0.clone(), right_expr.1.clone()).into(),
-                                ],
-                            )?
-                            .into())
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    row_conjunctions_without_struct.extend(other_conds);
-                    return Ok((
-                        vec![scan_range],
-                        Condition {
-                            conjunctions: row_conjunctions_without_struct,
-                        },
-                    ));
+                    if !row_inner_element_map.is_empty() {
+                        return Ok((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: self.conjunctions,
+                            },
+                        ));
+                    } else {
+                        return Ok((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: row_conjunctions_without_struct,
+                            },
+                        ));
+                    }
                 }
             }
         }
+
+        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
+        let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();

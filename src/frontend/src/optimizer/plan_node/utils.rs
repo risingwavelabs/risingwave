@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::ops::Bound;
 use std::vec;
 
 use anyhow::anyhow;
@@ -28,6 +29,8 @@ use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
 use risingwave_common::hash::VnodeCount;
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
@@ -461,4 +464,100 @@ pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
     Ok(Some(PbAsOf {
         as_of_type: Some(as_of_type),
     }))
+}
+
+pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {
+    let mut range_strs = vec![];
+
+    let explain_max_range = 20;
+    for scan_range in scan_ranges.iter().take(explain_max_range) {
+        #[expect(clippy::disallowed_methods)]
+        if scan_range.is_real_unbounded {
+            let mut names = vec![];
+            let mut values = vec![];
+            for (name, value) in order_names.iter().zip(scan_range.eq_conds.iter()) {
+                names.push(name);
+                match value {
+                    Some(v) => values.push(format!("{:?}", v)),
+                    None => values.push("null".to_string()),
+                }
+            }
+            let i = scan_range.eq_conds.len();
+            names.push(&order_names[i]);
+            let (op, v) = range_to_op_value(&scan_range.range);
+            values.push(format!("{:?}", v));
+            let name_str = format!("({})", names.iter().join(", "));
+            let value_str = format!("({})", values.iter().join(", "));
+            range_strs.push(format!("{} {} {}", name_str, op, value_str));
+        } else {
+            let mut range_str = scan_range
+                .eq_conds
+                .iter()
+                .zip(order_names.iter())
+                .map(|(v, name)| match v {
+                    Some(v) => format!("{} = {:?}", name, v),
+                    None => format!("{} IS NULL", name),
+                })
+                .collect_vec();
+            if !is_full_range(&scan_range.range) {
+                let i = scan_range.eq_conds.len();
+                range_str.push(range_to_string(&order_names[i], &scan_range.range))
+            }
+            range_strs.push(range_str.join(" AND "));
+        }
+    }
+    if scan_ranges.len() > explain_max_range {
+        range_strs.push("...".to_string());
+    }
+    range_strs
+}
+
+pub fn range_to_op_value(range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> (&str, &ScalarImpl) {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => ub_to_op_value(ub),
+        (lb, Bound::Unbounded) => lb_to_op_value(lb),
+        (_lb, _ub) => {
+            unreachable!()
+        }
+    }
+}
+
+pub fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => {
+            let (op, v) = ub_to_op_value(ub);
+            format!("{} {} {:?}", name, op, v)
+        }
+        (lb, Bound::Unbounded) => {
+            let (op, v) = lb_to_op_value(lb);
+            format!("{} {} {:?}", name, op, v)
+        }
+        (lb, ub) => {
+            let (u_op, u_v) = ub_to_op_value(ub);
+            let (l_op, l_v) = lb_to_op_value(lb);
+            format!(
+                "{} {} {:?} AND {} {} {:?}",
+                name, u_op, u_v, name, l_op, l_v
+            )
+        }
+    }
+}
+
+fn lb_to_op_value(lb: &Bound<ScalarImpl>) -> (&str, &ScalarImpl) {
+    let (op, v) = match lb {
+        Bound::Included(v) => (">=", v),
+        Bound::Excluded(v) => (">", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    (op, v)
+}
+fn ub_to_op_value(ub: &Bound<ScalarImpl>) -> (&str, &ScalarImpl) {
+    let (op, v) = match ub {
+        Bound::Included(v) => ("<=", v),
+        Bound::Excluded(v) => ("<", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    (op, v)
 }
