@@ -18,9 +18,13 @@ statement ok
 create connection conn with (type = 'kafka', properties.bootstrap.server = secret sec_broker, properties.security.protocol = 'plaintext');
 
 query TTT
-select "name", "type_", "connection_params" from rw_catalog.rw_connections;
+select "name", "type_" from rw_catalog.rw_connections;
 ----
-conn CONNECTION_TYPE_KAFKA {"properties.bootstrap.server":"SECRET sec_broker AS TEXT","properties.security.protocol":"plaintext"}
+conn CONNECTION_TYPE_KAFKA
+
+# unstable test serialization due to iter on hashmap
+# the "connectiond_params" looks like:
+# {"properties.bootstrap.server":"SECRET sec_broker AS TEXT","properties.security.protocol":"plaintext"}
 
 statement error Permission denied: PermissionDenied: secret used by 1 other objects.
 drop secret sec_broker;
