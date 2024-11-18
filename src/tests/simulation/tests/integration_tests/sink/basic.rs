@@ -46,7 +46,7 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     session.run(CREATE_SINK).await?;
 
     if test_sink.parallelism_counter.load(Relaxed) != 6 {
-        return Err(anyhow!(
+        return Err(anyhow::anyhow!(
             "incorrect initial parallelism: {} ",
             test_sink.parallelism_counter.load(Relaxed)
         ));

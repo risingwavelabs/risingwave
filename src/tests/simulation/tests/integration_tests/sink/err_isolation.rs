@@ -42,7 +42,7 @@ async fn test_sink_decouple_err_isolation() -> Result<()> {
     session.run(CREATE_SINK).await?;
 
     if test_sink.parallelism_counter.load(Relaxed) != 6 {
-        return Err(anyhow!(
+        return Err(anyhow::anyhow!(
             "incorrect initial parallelism: {} ",
             test_sink.parallelism_counter.load(Relaxed)
         ));
@@ -89,7 +89,7 @@ async fn test_sink_error_event_logs() -> Result<()> {
     session.run(CREATE_SINK).await?;
 
     if test_sink.parallelism_counter.load(Relaxed) != 6 {
-        return Err(anyhow!(
+        return Err(anyhow::anyhow!(
             "incorrect initial parallelism: {} ",
             test_sink.parallelism_counter.load(Relaxed)
         ));
