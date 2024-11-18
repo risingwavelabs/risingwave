@@ -247,6 +247,11 @@ impl Binder {
                 )
                 .into());
             }
+
+            let col = &table.table_catalog.columns()[id_index];
+            if !col.can_dml() {
+                bail_bind_error!("update modifying column `{}` is unsupported", col.name());
+            }
         }
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;

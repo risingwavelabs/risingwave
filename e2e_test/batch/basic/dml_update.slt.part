@@ -108,5 +108,11 @@ statement error source for a multiple-column UPDATE item must be a sub-SELECT or
 update t set (v1, v2) = v1 + 1;
 
 
+# Assignment to system columns.
+statement error update modifying column `_rw_timestamp` is unsupported
+update t set _rw_timestamp = _rw_timestamp + interval '1 second';
+
+
+
 statement ok
 drop table t;
