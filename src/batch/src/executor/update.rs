@@ -109,7 +109,7 @@ impl Executor for UpdateExecutor {
 
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
@@ -161,7 +161,7 @@ impl UpdateExecutor {
 
             let old_data_chunk = {
                 let mut columns = Vec::with_capacity(self.old_exprs.len());
-                for expr in &mut self.old_exprs {
+                for expr in &self.old_exprs {
                     let column = expr.eval(&input).await?;
                     columns.push(column);
                 }
@@ -171,7 +171,7 @@ impl UpdateExecutor {
 
             let updated_data_chunk = {
                 let mut columns = Vec::with_capacity(self.new_exprs.len());
-                for expr in &mut self.new_exprs {
+                for expr in &self.new_exprs {
                     let column = expr.eval(&input).await?;
                     columns.push(column);
                 }

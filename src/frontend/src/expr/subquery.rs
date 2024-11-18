@@ -24,6 +24,8 @@ use crate::expr::{CorrelatedId, Depth};
 pub enum SubqueryKind {
     /// Returns a scalar value (single column single row).
     Scalar,
+    /// Returns a scalar struct value composed of multiple columns.
+    /// Used in `UPDATE SET (col1, col2) = (SELECT ...)`.
     UpdateSet,
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,

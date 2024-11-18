@@ -36,8 +36,7 @@ impl Planner {
 
         let returning = !update.returning_list.is_empty();
 
-        let schema_len = input.schema().len();
-
+        // Extend table scan with updated columns.
         let with_new: PlanRef = {
             let mut plan = input;
 
@@ -62,33 +61,29 @@ impl Planner {
         let mut news = Vec::new();
 
         for (i, col) in update.table.table_catalog.columns().iter().enumerate() {
-            if col.is_generated() {
+            if !col.can_dml() {
                 continue;
             }
             let data_type = col.data_type();
 
             let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
 
-            let new: ExprImpl = match update.projects.get(&i).copied() {
-                Some(UpdateProject::Expr(index)) => {
-                    InputRef::new(index + schema_len, data_type.clone()).into()
-                }
-                Some(UpdateProject::Composite(index, sub)) => FunctionCall::new_unchecked(
-                    Type::Field,
-                    vec![
-                        InputRef::new(
-                            index + schema_len,
-                            with_new.schema().data_types()[index + schema_len].clone(),
-                        )
-                        .into(),
-                        Literal::new(Some((sub as i32).to_scalar_value()), DataType::Int32).into(),
-                    ],
-                    data_type.clone(),
-                )
-                .into(),
+            let new: ExprImpl =
+                match (update.projects.get(&i)).map(|p| p.offset(with_new.schema().len())) {
+                    Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
+                    Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
+                        Type::Field,
+                        vec![
+                            InputRef::new(j, with_new.schema().data_types()[j].clone()).into(),
+                            Literal::new(Some((field as i32).to_scalar_value()), DataType::Int32)
+                                .into(),
+                        ],
+                        data_type.clone(),
+                    )
+                    .into(),
 
-                None => old.clone(),
-            };
+                    None => old.clone(),
+                };
 
             olds.push(old);
             news.push(new);

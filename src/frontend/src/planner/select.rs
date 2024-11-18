@@ -374,6 +374,7 @@ impl Planner {
                 SubqueryKind::UpdateSet => {
                     let plan = subroot.into_unordered_subplan();
 
+                    // Compose all input columns into a struct with `ROW` function.
                     let all_input_refs = plan
                         .schema()
                         .data_types()
@@ -381,9 +382,9 @@ impl Planner {
                         .enumerate()
                         .map(|(i, data_type)| InputRef::new(i, data_type).into())
                         .collect::<Vec<_>>();
-
                     let call =
                         FunctionCall::new_unchecked(ExprType::Row, all_input_refs, return_type);
+
                     LogicalProject::create(plan, vec![call.into()])
                 }
                 SubqueryKind::Existential => {

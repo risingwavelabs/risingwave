@@ -174,7 +174,9 @@ message UpdateNode {
   uint32 table_id = 1;
   // Version of the table.
   uint64 table_version_id = 2;
+  // Expressions to generate `U-` records.
   repeated expr.ExprNode old_exprs = 3;
+  // Expressions to generate `U+` records.
   repeated expr.ExprNode new_exprs = 4;
   bool returning = 5;
 
