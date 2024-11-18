@@ -562,7 +562,7 @@ impl HummockVersionReader {
                         (
                             FullKey::new_with_gap_epoch(
                                 read_options.table_id,
-                                table_key.clone(),
+                                table_key,
                                 data_epoch,
                             ),
                             v,
@@ -603,7 +603,7 @@ impl HummockVersionReader {
                         (
                             FullKey::new_with_gap_epoch(
                                 read_options.table_id,
-                                table_key.clone(),
+                                table_key,
                                 data_epoch,
                             ),
                             v,
@@ -648,7 +648,7 @@ impl HummockVersionReader {
                                     (
                                         FullKey::new_with_gap_epoch(
                                             read_options.table_id,
-                                            table_key.clone(),
+                                            table_key,
                                             data_epoch,
                                         ),
                                         v,
@@ -692,7 +692,7 @@ impl HummockVersionReader {
                                 (
                                     FullKey::new_with_gap_epoch(
                                         read_options.table_id,
-                                        table_key.clone(),
+                                        table_key,
                                         data_epoch,
                                     ),
                                     v,
