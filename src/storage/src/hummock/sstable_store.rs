@@ -66,7 +66,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
