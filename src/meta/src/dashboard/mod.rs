@@ -574,6 +574,10 @@ pub(super) mod handlers {
 
         Ok(all.into())
     }
+
+    pub async fn get_version(Extension(_srv): Extension<Service>) -> Result<Json<String>> {
+        Ok(Json(risingwave_common::current_cluster_version()))
+    }
 }
 
 impl DashboardService {
@@ -586,6 +590,7 @@ impl DashboardService {
             .allow_methods(vec![Method::GET]);
 
         let api_router = Router::new()
+            .route("/version", get(get_version))
             .route("/clusters/:ty", get(list_clusters))
             .route("/fragments2", get(list_fragments))
             .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
