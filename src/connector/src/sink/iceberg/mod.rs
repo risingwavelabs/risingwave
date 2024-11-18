@@ -295,12 +295,10 @@ impl IcebergSink {
                             } else {
                                 bail!(format!("Invalid warehouse path: {}", warehouse_path))
                             }
+                        } else if warehouse_path.ends_with('/') {
+                            Some(format!("{}{}", warehouse_path, names.join("/")))
                         } else {
-                            if warehouse_path.ends_with('/') {
-                                Some(format!("{}{}", warehouse_path, names.join("/")))
-                            } else {
-                                Some(format!("{}/{}", warehouse_path, names.join("/")))
-                            }
+                            Some(format!("{}/{}", warehouse_path, names.join("/")))
                         }
                     }
                     None => None,
