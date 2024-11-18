@@ -97,6 +97,12 @@ select a, b from t1;
 3 c
 
 statement ok
+drop sink sink_kafka
+
+statement ok
+drop table data_table;
+
+statement ok
 drop table t1;
 
 statement ok
@@ -104,12 +110,6 @@ drop connection conn;
 
 statement ok
 drop secret sec_broker;
-
-statement ok
-drop sink sink_kafka
-
-statement ok
-drop table data_table;
 
 statement ok
 set streaming_use_shared_source to true;
