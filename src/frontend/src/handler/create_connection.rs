@@ -124,10 +124,7 @@ pub async fn handle_create_connection(
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
 }
 
-pub fn print_connection_params(
-    params: &PbConnectionParams,
-    schema: &SchemaCatalog,
-) -> String {
+pub fn print_connection_params(params: &PbConnectionParams, schema: &SchemaCatalog) -> String {
     let print_secret_ref = |secret_ref: &SecretRef| -> String {
         let secret_name = schema
             .get_secret_by_id(&SecretId::from(secret_ref.secret_id))
