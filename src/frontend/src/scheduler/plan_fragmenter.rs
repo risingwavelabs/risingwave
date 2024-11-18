@@ -247,20 +247,6 @@ impl Query {
         &self.query_id
     }
 
-    pub fn stages_with_table_scan(&self) -> HashSet<StageId> {
-        self.stage_graph
-            .stages
-            .iter()
-            .filter_map(|(stage_id, stage_query)| {
-                if stage_query.has_table_scan() {
-                    Some(*stage_id)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
     pub fn has_lookup_join_stage(&self) -> bool {
         self.stage_graph
             .stages
