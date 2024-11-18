@@ -105,6 +105,29 @@ impl<S> TracedStateStore<S> {
         )));
         res
     }
+
+    async fn traced_get_keyed_row(
+        &self,
+        key: TableKey<Bytes>,
+        epoch: Option<u64>,
+        read_options: ReadOptions,
+        get_future: impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>>,
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        let span = TraceSpan::new_get_span(
+            key.0.clone(),
+            epoch,
+            read_options.clone().into(),
+            self.storage_type,
+        );
+
+        let res = get_future.await;
+
+        span.may_send_result(OperationResult::Get(TraceResult::from(
+            res.as_ref()
+                .map(|o| o.as_ref().map(|(_, v)| TracedBytes::from(v.clone()))),
+        )));
+        res
+    }
 }
 
 impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
@@ -279,17 +302,17 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-        self.traced_get(
+    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
+        self.traced_get_keyed_row(
             key.clone(),
             Some(epoch),
             read_options.clone(),
-            self.inner.get(key, epoch, read_options),
+            self.inner.get_keyed_row(key, epoch, read_options),
         )
     }
 
@@ -373,7 +396,7 @@ impl<S> TracedStateStoreIter<S> {
 }
 
 impl<S: StateStoreIter> StateStoreIter for TracedStateStoreIter<S> {
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         if let Some((key, value)) = self
             .inner
             .try_next()

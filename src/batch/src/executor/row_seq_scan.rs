@@ -396,17 +396,40 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());
-
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
-        // Point Get.
-        let row = table.get_row(&pk_prefix, epoch.into()).await?;
+        let res = if table.has_epoch_idx() {
+            // has epoch_idx means we need to select `_rw_timestamp` column which is unsupported by `get_row` interface, so use iterator interface instead.
+            let range_bounds = (Bound::<OwnedRow>::Unbounded, Bound::Unbounded);
+            let iter = table
+                .batch_chunk_iter_with_pk_bounds(
+                    epoch.into(),
+                    &pk_prefix,
+                    range_bounds,
+                    false,
+                    1,
+                    PrefetchOptions::new(false, false),
+                )
+                .await?;
+            pin_mut!(iter);
+            let chunk = iter.next().await.transpose().map_err(BatchError::from)?;
+            if let Some(chunk) = chunk {
+                let row = chunk.row_at(0).0.to_owned_row();
+                Ok(Some(row))
+            } else {
+                Ok(None)
+            }
+        } else {
+            // Point Get.
+            let row = table.get_row(&pk_prefix, epoch.into()).await?;
+            Ok(row)
+        };
 
         if let Some(timer) = timer {
             timer.observe_duration()
         }
 
-        Ok(row)
+        res
     }
 
     #[try_stream(ok = DataChunk, error = BatchError)]

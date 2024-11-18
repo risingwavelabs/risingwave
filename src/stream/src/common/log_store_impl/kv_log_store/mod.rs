@@ -696,10 +696,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env
-            .storage
-            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
-            .await;
+        test_env.storage.clear_shared_buffer().await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -915,10 +912,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env
-            .storage
-            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
-            .await;
+        test_env.storage.clear_shared_buffer().await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1155,10 +1149,7 @@ mod tests {
         drop(writer2);
 
         // Recovery
-        test_env
-            .storage
-            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
-            .await;
+        test_env.storage.clear_shared_buffer().await;
 
         let vnodes = build_bitmap(0..VirtualNode::COUNT_FOR_TEST);
         let factory = KvLogStoreFactory::new(
@@ -1779,10 +1770,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env
-            .storage
-            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
-            .await;
+        test_env.storage.clear_shared_buffer().await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(
@@ -1846,10 +1834,7 @@ mod tests {
         drop(writer);
 
         // Recovery
-        test_env
-            .storage
-            .clear_shared_buffer(test_env.manager.get_current_version().await.id)
-            .await;
+        test_env.storage.clear_shared_buffer().await;
 
         // Rebuild log reader and writer in recovery
         let factory = KvLogStoreFactory::new(

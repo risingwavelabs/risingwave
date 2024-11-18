@@ -41,7 +41,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 expect-test = "1"
-fs-err = "2"
+fs-err = "3"
 hex = "0.4"
 tokio = { version = "0.2", package = "madsim-tokio" }
 

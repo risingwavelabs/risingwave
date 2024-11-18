@@ -2891,24 +2891,29 @@ impl CatalogController {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
         let inner = self.inner.read().await;
-        let subscription_objs = Subscription::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        let mut map = HashMap::new();
+        let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
+            Subscription::find()
+                .select_only()
+                .select_column(subscription::Column::SubscriptionId)
+                .select_column(subscription::Column::DependentTableId)
+                .select_column(subscription::Column::RetentionSeconds)
+                .select_column(object::Column::DatabaseId)
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+        let mut map: HashMap<_, HashMap<_, HashMap<_, _>>> = HashMap::new();
         // Write object at the same time we write subscription, so we must be able to get obj
-        for subscription in subscription_objs
-            .into_iter()
-            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+        for (subscription_id, dependent_table_id, retention_seconds, database_id) in
+            subscription_objs
         {
-            let subscription: PbSubscription = subscription;
-            map.entry(risingwave_common::catalog::TableId::from(
-                subscription.dependent_table_id,
-            ))
-            .or_insert(HashMap::new())
-            .insert(subscription.id, subscription.retention_seconds);
+            map.entry(database_id)
+                .or_default()
+                .entry(dependent_table_id)
+                .or_default()
+                .insert(subscription_id, retention_seconds as _);
         }
         Ok(map)
     }

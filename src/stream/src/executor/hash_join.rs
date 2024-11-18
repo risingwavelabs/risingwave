@@ -115,8 +115,8 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.ht.init(epoch);
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.ht.init(epoch).await
     }
 }
 
@@ -465,11 +465,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.side_l.init(barrier.epoch);
-        self.side_r.init(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.side_l.init(first_epoch).await?;
+        self.side_r.init(first_epoch).await?;
+
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
 

@@ -817,9 +817,9 @@ def section_streaming(outer_panels):
                     "The number of barriers that have been ingested but not completely processed. This metric reflects the "
                     "current level of congestion within the system.",
                     [
-                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier"),
+                        panels.target(f"{metric('all_barrier_nums')}", "all_barrier {{database_id}}"),
                         panels.target(
-                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier"
+                            f"{metric('in_flight_barrier_nums')}", "in_flight_barrier {{database_id}}"
                         ),
                         panels.target(
                             f"{metric('meta_snapshot_backfill_inflight_barrier_num')}",

@@ -80,7 +80,7 @@ use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::TemporalJoinValidator;
+use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
 
@@ -402,6 +402,14 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
+        // For iceberg scan, we do iceberg predicate pushdown
+        // BatchFilter -> BatchIcebergScan
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Predicate Pushdown",
+            vec![BatchIcebergPredicatePushDownRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
@@ -518,6 +526,13 @@ impl PlanRoot {
             return Err(ErrorCode::NotSupported(
                 "exist dangling temporal scan".to_string(),
                 "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
+
+        if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "selecting `_rw_timestamp` in a streaming query is not allowed".to_string(),
+                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_string(),
             ).into());
         }
 
@@ -722,7 +737,7 @@ impl PlanRoot {
 
         let column_descs = columns
             .iter()
-            .filter(|&c| (!c.is_generated()))
+            .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
 

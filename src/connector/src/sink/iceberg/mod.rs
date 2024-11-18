@@ -281,18 +281,26 @@ impl IcebergSink {
             let location = {
                 let mut names = namespace.clone().inner();
                 names.push(self.config.common.table_name.to_string());
-                if self.config.common.warehouse_path.ends_with('/') {
-                    format!("{}{}", self.config.common.warehouse_path, names.join("/"))
-                } else {
-                    format!("{}/{}", self.config.common.warehouse_path, names.join("/"))
+                match &self.config.common.warehouse_path {
+                    Some(warehouse_path) => {
+                        if warehouse_path.ends_with('/') {
+                            Some(format!("{}{}", warehouse_path, names.join("/")))
+                        } else {
+                            Some(format!("{}/{}", warehouse_path, names.join("/")))
+                        }
+                    }
+                    None => None,
                 }
             };
 
-            let table_creation = TableCreation::builder()
+            let table_creation_builder = TableCreation::builder()
                 .name(self.config.common.table_name.clone())
-                .schema(iceberg_schema)
-                .location(location)
-                .build();
+                .schema(iceberg_schema);
+
+            let table_creation = match location {
+                Some(location) => table_creation_builder.location(location).build(),
+                None => table_creation_builder.build(),
+            };
 
             catalog
                 .create_table(&namespace, table_creation)
@@ -998,7 +1006,7 @@ mod test {
 
         let expected_iceberg_config = IcebergConfig {
             common: IcebergCommon {
-                warehouse_path: "s3://iceberg".to_string(),
+                warehouse_path: Some("s3://iceberg".to_string()),
                 catalog_uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_string()),
                 region: Some("us-east-1".to_string()),
                 endpoint: Some("http://127.0.0.1:9301".to_string()),

@@ -45,6 +45,12 @@ impl BatchFilter {
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
     }
+
+    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
+        let mut core = self.core.clone();
+        core.predicate = predicate;
+        Self::new(core)
+    }
 }
 impl_distill_by_unit!(BatchFilter, core, "BatchFilter");
 

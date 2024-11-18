@@ -10,7 +10,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.c1] }
     └─LogicalFilter { predicate: Not((t1.c1 > 1:Int32)) AND (t1.c1 > 1:Int32) }
-      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   batch_plan: 'BatchValues { rows: [] }'
 - id: non_trivial_optimizable_case
   before:
@@ -29,7 +29,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.c1, t1.c2, t1.c3] }
     └─LogicalFilter { predicate: (t1.c1 > 1:Int32) AND (t1.c2 > 2:Int32) AND (t1.c3 > 3:Int32) AND Not((t1.c1 < 1:Int32)) AND Not((t1.c2 < 2:Int32)) AND Not((t1.c3 < 3:Int32)) AND Not((t1.c1 > 1:Int32)) AND Not((t1.c2 > 2:Int32)) AND Not((t1.c3 > 3:Int32)) }
-      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   batch_plan: 'BatchValues { rows: [] }'
 - id: corner_case
   before:
@@ -46,7 +46,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.c1, t1.c2, t1.c3] }
     └─LogicalFilter { predicate: Not((t1.c1 > 1:Int32)) AND Not((t1.c2 > 2:Int32)) AND Not((t1.c3 > 3:Int32)) AND ((t1.c1 > 1:Int32) OR (t1.c2 > 2:Int32)) AND ((t1.c2 > 2:Int32) OR (t1.c3 > 3:Int32)) AND ((t1.c3 > 3:Int32) OR (t1.c1 > 1:Int32)) AND (((t1.c1 > 1:Int32) OR (t1.c2 > 2:Int32)) OR (t1.c3 > 3:Int32)) }
-      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+      └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: Not((t1.c1 > 1:Int32)) AND Not((t1.c2 > 2:Int32)) AND Not((t1.c3 > 3:Int32)) AND ((t1.c1 > 1:Int32) OR (t1.c2 > 2:Int32)) AND ((t1.c2 > 2:Int32) OR (t1.c3 > 3:Int32)) AND ((t1.c3 > 3:Int32) OR (t1.c1 > 1:Int32)) AND (((t1.c1 > 1:Int32) OR (t1.c2 > 2:Int32)) OR (t1.c3 > 3:Int32)) }
