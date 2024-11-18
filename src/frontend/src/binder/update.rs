@@ -43,7 +43,7 @@ impl UpdateProject {
     pub fn offset(self, i: usize) -> Self {
         match self {
             UpdateProject::Simple(index) => UpdateProject::Simple(index + i),
-            UpdateProject::Composite(index, j) => UpdateProject::Composite(index, j),
+            UpdateProject::Composite(index, j) => UpdateProject::Composite(index + i, j),
         }
     }
 }

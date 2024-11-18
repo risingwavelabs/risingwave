@@ -27,14 +27,15 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
+        let returning = !update.returning_list.is_empty();
+
         let scan = self.plan_base_table(&update.table)?;
         let input = if let Some(expr) = update.selection {
             self.plan_where(scan, expr)?
         } else {
             scan
         };
-
-        let returning = !update.returning_list.is_empty();
+        let old_schema_len = input.schema().len();
 
         // Extend table scan with updated columns.
         let with_new: PlanRef = {
@@ -50,6 +51,7 @@ impl Planner {
 
             exprs.extend(update.exprs);
 
+            // Substitute subqueries into `LogicalApply`s.
             if exprs.iter().any(|e| e.has_subquery()) {
                 (plan, exprs) = self.substitute_subqueries(plan, exprs)?;
             }
@@ -61,6 +63,7 @@ impl Planner {
         let mut news = Vec::new();
 
         for (i, col) in update.table.table_catalog.columns().iter().enumerate() {
+            // Skip generated columns and system columns.
             if !col.can_dml() {
                 continue;
             }
@@ -68,22 +71,21 @@ impl Planner {
 
             let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
 
-            let new: ExprImpl =
-                match (update.projects.get(&i)).map(|p| p.offset(with_new.schema().len())) {
-                    Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
-                    Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
-                        Type::Field,
-                        vec![
-                            InputRef::new(j, with_new.schema().data_types()[j].clone()).into(),
-                            Literal::new(Some((field as i32).to_scalar_value()), DataType::Int32)
-                                .into(),
-                        ],
-                        data_type.clone(),
-                    )
-                    .into(),
+            let new: ExprImpl = match (update.projects.get(&i)).map(|p| p.offset(old_schema_len)) {
+                Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
+                Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
+                    Type::Field,
+                    vec![
+                        InputRef::new(j, with_new.schema().data_types()[j].clone()).into(), // struct
+                        Literal::new(Some((field as i32).to_scalar_value()), DataType::Int32)
+                            .into(),
+                    ],
+                    data_type.clone(),
+                )
+                .into(),
 
-                    None => old.clone(),
-                };
+                None => old.clone(),
+            };
 
             olds.push(old);
             news.push(new);
