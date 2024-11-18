@@ -81,6 +81,8 @@ implement_using_to_sql! {
 
 impl ToBinary for ListRef<'_> {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+        // Reference: Postgres code `src/backend/utils/adt/arrayfuncs.c`
+        // https://github.com/postgres/postgres/blob/c1c09007e219ae68d1f8428a54baf68ccc1f8683/src/backend/utils/adt/arrayfuncs.c#L1548
         use crate::row::Row;
         let element_ty = match ty {
             DataType::List(ty) => ty.as_ref(),
