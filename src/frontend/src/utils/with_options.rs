@@ -16,6 +16,9 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use risingwave_common::catalog::ConnectionId;
+use risingwave_connector::connector_common::{
+    PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+};
 use risingwave_connector::source::kafka::private_link::{
     insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
@@ -234,8 +237,30 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     };
 
     let mut connection_type = PbConnectionType::Unspecified;
-    let connection_params_none_flag = connection_params.is_none();
+    let connection_params_is_none_flag = connection_params.is_none();
+
     if let Some(connection_params) = connection_params {
+        // Do key checks on `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY`, `PRIVATE_LINK_TARGETS_KEY` and `PRIVATELINK_ENDPOINT_KEY`
+        // `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY` is generated from `private_link_targets` and `private_link_endpoint`, instead of given by users.
+        //
+        // We resolve private link via `resolve_privatelink_in_with_option` when creating Connection,
+        // so here we need to check `PRIVATE_LINK_TARGETS_KEY` and `PRIVATELINK_ENDPOINT_KEY` are not given
+        // if `PRIVATE_LINK_BROKER_REWRITE_MAP_KEY` is in Connection catalog.
+
+        if let Some(broker_rewrite_map) = connection_params
+            .get_properties()
+            .get(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY)
+        {
+            if options.contains_key(PRIVATE_LINK_TARGETS_KEY)
+                || options.contains_key(PRIVATELINK_ENDPOINT_KEY)
+            {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "PrivateLink related options already defined in Connection (rewrite map: {}), please remove {} and {} from WITH clause",
+                    broker_rewrite_map, PRIVATE_LINK_TARGETS_KEY, PRIVATELINK_ENDPOINT_KEY
+                ))));
+            }
+        }
+
         connection_type = connection_params.connection_type();
         for (k, v) in connection_params.properties {
             if options.insert(k.clone(), v).is_some() {
@@ -256,7 +281,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         }
     }
     debug_assert!(
-        matches!(connection_type, PbConnectionType::Unspecified) && connection_params_none_flag
+        matches!(connection_type, PbConnectionType::Unspecified) && connection_params_is_none_flag
     );
 
     Ok((

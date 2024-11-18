@@ -28,7 +28,7 @@ use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
-use crate::utils::resolve_secret_ref_in_with_options;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
 use crate::WithOptions;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -103,7 +103,8 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args.with_options.clone().into_connector_props();
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    resolve_privatelink_in_with_option(&mut with_properties)?;
     let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;

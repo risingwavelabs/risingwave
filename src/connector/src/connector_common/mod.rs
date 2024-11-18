@@ -19,30 +19,15 @@ pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
 mod common;
 pub use common::{
-    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnection, KafkaPrivateLinkCommon,
+    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnectionInner, KafkaPrivateLinkCommon,
     KinesisCommon, MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon,
     RdKafkaPropertiesCommon, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
 };
+mod connection_util;
+pub use connection_util::{
+    validate_connection, ConnectionValidate, IcebergConnection, KafkaConnection,
+    SchemaRegistryConnection,
+};
 
 mod iceberg;
-pub use iceberg::{IcebergCommon, IcebergConnection};
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::error::ConnectorResult;
-    use crate::{dispatch_connection_impl, ConnectionImpl};
-
-    #[test]
-    fn test_dispatch_connection() -> ConnectorResult<()> {
-        let kafka_conn = KafkaConnection::test_default();
-        let conn_impl = ConnectionImpl::from(kafka_conn);
-
-        let x: Result<(), ()> = dispatch_connection_impl!(conn_impl, inner, {
-            println!("{:?}", inner);
-            Ok(())
-        });
-        Ok(())
-    }
-}
+pub use iceberg::IcebergCommon;
