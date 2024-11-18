@@ -419,7 +419,7 @@ impl KafkaSplitEnumerator {
 
     pub async fn check_reachability(&self) -> bool {
         self.client
-            .fetch_metadata(None, self.sync_call_timeout)
+            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
             .await
             .is_ok()
     }
