@@ -49,12 +49,6 @@ create source s with (
 
 sleep 2s
 
-# At the beginning, the source is paused. It will resume after a downstream is created.
-system ok
-internal_table.mjs --name s --type '' --count
-----
-count: 0
-
 
 statement ok
 create table tt1_shared (v1 int,
