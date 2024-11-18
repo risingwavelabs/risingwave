@@ -1,4 +1,4 @@
-# Extension to `dml.slt.part` for testing advanced `UPDATE` statements.
+# Extension to `dml_basic.slt.part` for testing advanced `UPDATE` statements.
 
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
@@ -102,6 +102,10 @@ update t set (v1, v2) = (select '888.88', 999);
 # Multiple assignments, to subquery with mismatched column count.
 statement error number of columns does not match number of values
 update t set (v1, v2) = (select 666);
+
+# Multiple assignments, to scalar expression.
+statement error source for a multiple-column UPDATE item must be a sub-SELECT or ROW\(\) expression
+update t set (v1, v2) = v1 + 1;
 
 
 statement ok
