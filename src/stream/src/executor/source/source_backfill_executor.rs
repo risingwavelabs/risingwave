@@ -589,7 +589,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    tracing::debug!("progress finish");
                                     self.progress.finish(
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),
