@@ -320,8 +320,8 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, barrier, create_mview_progress, table_ids) = self.state.next_collected_epoch() => {
-                    self.complete_barrier(partial_graph_id, barrier, create_mview_progress, table_ids);
+                (partial_graph_id, barrier) = self.state.next_collected_epoch() => {
+                    self.complete_barrier(partial_graph_id, barrier.epoch.prev);
                 }
                 (partial_graph_id, barrier, result) = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
                     match result {
