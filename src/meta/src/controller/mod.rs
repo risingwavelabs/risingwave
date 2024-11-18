@@ -360,14 +360,13 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             arg_types: value.0.arg_types.to_protobuf(),
             return_type: Some(value.0.return_type.to_protobuf()),
             language: value.0.language,
+            runtime: value.0.runtime,
             link: value.0.link,
             identifier: value.0.identifier,
             body: value.0.body,
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
-            runtime: value.0.runtime,
-            function_type: value.0.function_type,
         }
     }
 }

@@ -325,10 +325,10 @@ message Function {
   // The zstd-compressed binary of the function.
   optional bytes compressed_binary = 17;
   bool always_retry_on_network_error = 16;
-  // The runtime used when javascript is used as the language. Could be "quickjs" or "deno".
+  // The runtime selected when multiple runtimes are available for the language. Now is not used.
   optional string runtime = 18;
-  // The function type, which is used to execute the function. Could be "sync", "async", "generator" or "async_generator"
-  optional string function_type = 19;
+  reserved 19;
+  reserved "function_type";
 
   oneof kind {
     ScalarFunction scalar = 11;
