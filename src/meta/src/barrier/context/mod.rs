@@ -21,7 +21,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
+use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::command::CommandContext;
@@ -60,7 +60,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     async fn new_control_stream(
         &self,
         node: &WorkerNode,
-        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
+        init_request: &PbInitRequest,
     ) -> MetaResult<StreamingControlHandle>;
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;

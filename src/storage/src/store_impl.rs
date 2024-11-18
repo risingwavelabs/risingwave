@@ -279,18 +279,18 @@ pub mod verify {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
+        ) -> StorageResult<Option<StateStoreKeyedRow>> {
             let actual = self
                 .actual
-                .get(key.clone(), epoch, read_options.clone())
+                .get_keyed_row(key.clone(), epoch, read_options.clone())
                 .await;
             if let Some(expected) = &self.expected {
-                let expected = expected.get(key, epoch, read_options).await;
+                let expected = expected.get_keyed_row(key, epoch, read_options).await;
                 assert_result_eq(&actual, &expected);
             }
             actual
@@ -316,7 +316,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -338,7 +338,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -455,7 +455,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -476,7 +476,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -871,17 +871,17 @@ pub mod boxed_state_store {
 
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreIterItem>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreKeyedRow>;
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
+        ) -> StorageResult<Option<StateStoreKeyedRow>>;
 
         async fn iter(
             &self,
@@ -907,13 +907,13 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            self.get(key, epoch, read_options).await
+        ) -> StorageResult<Option<StateStoreKeyedRow>> {
+            self.get_keyed_row(key, epoch, read_options).await
         }
 
         async fn iter(
@@ -949,7 +949,7 @@ pub mod boxed_state_store {
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn get(
@@ -1200,13 +1200,13 @@ pub mod boxed_state_store {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
 
-        fn get(
+        fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-            self.deref().get(key, epoch, read_options)
+        ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
+            self.deref().get_keyed_row(key, epoch, read_options)
         }
 
         fn iter(

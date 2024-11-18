@@ -6,7 +6,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [0:Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = true;
@@ -18,7 +18,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [($1 + 1:Int32), $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 real);
     update t set v1 = v2;
@@ -26,7 +26,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [$1::Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 real);
     update t set v1 = DEFAULT;
@@ -34,7 +34,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [null:Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1 where v2 > 0;
@@ -43,7 +43,7 @@
     └─BatchUpdate { table: t, exprs: [($1 + 1:Int32), $1, $2] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchFilter { predicate: (t.v2 > 0:Int32) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2;
@@ -52,7 +52,7 @@
     └─BatchUpdate { table: t, exprs: [($1 + 1:Int32), ($0 - 1:Int32), $2] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchFilter { predicate: (t.v1 <> t.v2) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int, v2 int);
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2 returning *, v2+1, v1-1;
@@ -60,14 +60,14 @@
     LogicalProject { exprs: [t.v1, t.v2, (t.v2 + 1:Int32) as $expr1, (t.v1 - 1:Int32) as $expr2] }
     └─LogicalUpdate { table: t, exprs: [($1 + 1:Int32), ($0 - 1:Int32), $2], returning: true }
       └─LogicalFilter { predicate: (t.v1 <> t.v2) }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.v1, t.v2, (t.v2 + 1:Int32) as $expr1, (t.v1 - 1:Int32) as $expr2] }
       └─BatchUpdate { table: t, exprs: [($1 + 1:Int32), ($0 - 1:Int32), $2], returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchFilter { predicate: (t.v1 <> t.v2) }
-            └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - name: update with returning statement, should keep `Update`
   sql: |
     create table t (v int);
@@ -75,13 +75,13 @@
   logical_plan: |-
     LogicalProject { exprs: [514:Int32] }
     └─LogicalUpdate { table: t, exprs: [114:Int32, $1], returning: true }
-      └─LogicalScan { table: t, columns: [t.v, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [514:Int32] }
       └─BatchUpdate { table: t, exprs: [114:Int32, $1], returning: true }
         └─BatchExchange { order: [], dist: Single }
-          └─BatchScan { table: t, columns: [t.v, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          └─BatchScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int primary key, v2 int);
     update t set (v2, v1) = (v1, v2);
@@ -91,12 +91,12 @@
     update t set v1 = default;
   logical_plan: |-
     LogicalUpdate { table: t, exprs: [(1:Int32 + 1:Int32), $1, $2] }
-    └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [2:Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - name: update table with generated columns
   sql: |
     create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
@@ -105,7 +105,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [3:Int32, $3] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - name: update generated column
   sql: |
     create table t(v1 int as v2-1, v2 int, v3 int as v2+1);
@@ -123,16 +123,16 @@
   logical_plan: |-
     LogicalUpdate { table: t, exprs: [777:Int32, $1, $2] }
     └─LogicalApply { type: LeftAnti, on: (t.b = t.a), correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+      ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
       └─LogicalProject { exprs: [t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchUpdate { table: t, exprs: [777:Int32, $1, $2] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchHashJoin { type: LeftAnti, predicate: t.b = t.a, output: all }
           ├─BatchExchange { order: [], dist: HashShard(t.b) }
-          │ └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+          │ └─BatchScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
           └─BatchExchange { order: [], dist: HashShard(t.a) }
             └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
 - name: delete subquery
@@ -141,10 +141,11 @@
     delete from t where a not in (select b from t);
   logical_plan: |-
     LogicalDelete { table: t }
-    └─LogicalApply { type: LeftAnti, on: (t.a = t.b), correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-      └─LogicalProject { exprs: [t.b] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+    └─LogicalProject { exprs: [t.a, t.b, t._row_id] }
+      └─LogicalApply { type: LeftAnti, on: (t.a = t.b), correlated_id: 1 }
+        ├─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
+        └─LogicalProject { exprs: [t.b] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchDelete { table: t }
@@ -163,8 +164,8 @@
     BatchSimpleAgg { aggs: [sum()] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchUpdate { table: t, exprs: [($0 + 1:Int32), $1, $2] }
-        └─BatchExchange { order: [], dist: HashShard(t.a, t.b, t._row_id) }
-          └─BatchScan { table: t, columns: [t.a, t.b, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+        └─BatchExchange { order: [], dist: HashShard(t.a, t.b, t._row_id, t._rw_timestamp) }
+          └─BatchScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
 - name: update table with subquery in the set clause
   sql: |
     create table t1 (v1 int primary key, v2 int);
