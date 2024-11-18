@@ -19,7 +19,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::FutureExt;
 use mysql_async::prelude::Queryable;
 use mysql_async::Opts;
 use risingwave_common::array::{Op, StreamChunk};
@@ -898,14 +897,11 @@ impl SinkCommitCoordinator for StarrocksSinkCommitter {
         tracing::debug!(?epoch, ?txn_labels, "commit transaction");
 
         if !txn_labels.is_empty() {
-            futures::future::try_join_all(txn_labels.into_iter().map(|txn_label| {
-                let client = self.client.clone();
-                tokio::spawn(async move { client.commit(txn_label).await }).map(|join_result| {
-                    join_result
-                        .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))
-                        .and_then(|commit_result| commit_result)
-                })
-            }))
+            futures::future::try_join_all(
+                txn_labels
+                    .into_iter()
+                    .map(|txn_label| self.client.commit(txn_label)),
+            )
             .await?;
         }
         Ok(())
