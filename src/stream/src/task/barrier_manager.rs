@@ -52,9 +52,7 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, InitialPartialGraph, Request,
-};
+use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
@@ -66,9 +64,7 @@ use risingwave_pb::stream_service::{
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
-use crate::task::barrier_manager::managed_state::{
-    ManagedBarrierStateDebugInfo, PartialGraphManagedBarrierState,
-};
+use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -277,10 +273,7 @@ pub(super) struct LocalBarrierWorker {
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(
-        actor_manager: Arc<StreamActorManager>,
-        initial_partial_graphs: Vec<InitialPartialGraph>,
-    ) -> Self {
+    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -291,11 +284,7 @@ impl LocalBarrierWorker {
             },
         ));
         Self {
-            state: ManagedBarrierState::new(
-                actor_manager.clone(),
-                shared_context.clone(),
-                initial_partial_graphs,
-            ),
+            state: ManagedBarrierState::new(actor_manager.clone(), shared_context.clone()),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             current_shared_context: shared_context,
@@ -338,7 +327,8 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(init_request.graphs).await;
+                                self.reset().await;
+                                self.state.add_subscriptions(init_request.subscriptions);
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -387,10 +377,6 @@ impl LocalBarrierWorker {
                 self.remove_partial_graphs(
                     req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
-                Ok(())
-            }
-            Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(PartialGraphId::new(req.partial_graph_id));
                 Ok(())
             }
             Request::Init(_) => {
@@ -571,20 +557,9 @@ impl LocalBarrierWorker {
         }
     }
 
-    pub(super) fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
-        assert!(self
-            .state
-            .graph_states
-            .insert(
-                partial_graph_id,
-                PartialGraphManagedBarrierState::new(&self.actor_manager)
-            )
-            .is_none());
-    }
-
     /// Reset all internal states.
-    pub(super) fn reset_state(&mut self, initial_partial_graphs: Vec<InitialPartialGraph>) {
-        *self = Self::new(self.actor_manager.clone(), initial_partial_graphs);
+    pub(super) fn reset_state(&mut self) {
+        *self = Self::new(self.actor_manager.clone());
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -684,7 +659,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
+        let worker = LocalBarrierWorker::new(actor_manager);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -867,9 +842,7 @@ pub(crate) mod barrier_test_utils {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use risingwave_pb::stream_service::streaming_control_stream_request::{
-        InitRequest, PbInitialPartialGraph,
-    };
+    use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
         StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -903,10 +876,7 @@ pub(crate) mod barrier_test_utils {
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
                 init_request: InitRequest {
-                    graphs: vec![PbInitialPartialGraph {
-                        partial_graph_id: u64::MAX,
-                        subscriptions: vec![],
-                    }],
+                    subscriptions: vec![],
                 },
             });
 

@@ -18,7 +18,7 @@ use futures::future::try_join_all;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
+use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::WaitEpochCommitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -70,9 +70,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     async fn new_control_stream(
         &self,
         node: &WorkerNode,
-        init_request: &PbInitRequest,
+        subscriptions: impl Iterator<Item = SubscriptionUpstreamInfo>,
     ) -> MetaResult<StreamingControlHandle> {
-        self.new_control_stream_impl(node, init_request).await
+        self.new_control_stream_impl(node, subscriptions).await
     }
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {

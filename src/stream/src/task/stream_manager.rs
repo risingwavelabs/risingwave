@@ -33,9 +33,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
-use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, InitialPartialGraph,
-};
+use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
@@ -250,7 +248,7 @@ impl LocalStreamManager {
 
 impl LocalBarrierWorker {
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, initial_partial_graphs: Vec<InitialPartialGraph>) {
+    pub(super) async fn reset(&mut self) {
         self.state.abort_actors().await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
@@ -262,8 +260,8 @@ impl LocalBarrierWorker {
                 .verbose_instrument_await("store_clear_shared_buffer")
                 .await
         }
+        self.reset_state();
         self.actor_manager.env.dml_manager_ref().clear();
-        self.reset_state(initial_partial_graphs);
     }
 }
 

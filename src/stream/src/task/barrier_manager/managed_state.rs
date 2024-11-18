@@ -142,7 +142,6 @@ mod await_epoch_completed_future {
 
 use await_epoch_completed_future::*;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
-use risingwave_pb::stream_service::streaming_control_stream_request::InitialPartialGraph;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 fn sync_epoch<S: StateStore>(
@@ -373,8 +372,6 @@ pub(super) struct PartialGraphManagedBarrierState {
 
     prev_barrier_table_ids: Option<(EpochPair, HashSet<TableId>)>,
 
-    mv_depended_subscriptions: HashMap<TableId, HashSet<u32>>,
-
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     ///
     /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
@@ -393,15 +390,7 @@ pub(super) struct PartialGraphManagedBarrierState {
 }
 
 impl PartialGraphManagedBarrierState {
-    pub(super) fn new(actor_manager: &StreamActorManager) -> Self {
-        Self::new_inner(
-            actor_manager.env.state_store(),
-            actor_manager.streaming_metrics.clone(),
-            actor_manager.await_tree_reg.clone(),
-        )
-    }
-
-    fn new_inner(
+    fn new(
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         barrier_await_tree_reg: Option<await_tree::Registry>,
@@ -409,7 +398,6 @@ impl PartialGraphManagedBarrierState {
         Self {
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
-            mv_depended_subscriptions: Default::default(),
             create_mview_progress: Default::default(),
             await_epoch_completed_futures: Default::default(),
             state_store,
@@ -420,7 +408,7 @@ impl PartialGraphManagedBarrierState {
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::new_inner(
+        Self::new(
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
             None,
@@ -437,6 +425,8 @@ pub(crate) struct ManagedBarrierState {
 
     pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
+    mv_depended_subscriptions: HashMap<TableId, HashSet<u32>>,
+
     actor_manager: Arc<StreamActorManager>,
 
     current_shared_context: Arc<SharedContext>,
@@ -447,18 +437,11 @@ impl ManagedBarrierState {
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         current_shared_context: Arc<SharedContext>,
-        initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
         Self {
             actor_states: Default::default(),
-            graph_states: initial_partial_graphs
-                .into_iter()
-                .map(|graph| {
-                    let mut state = PartialGraphManagedBarrierState::new(&actor_manager);
-                    state.add_subscriptions(graph.subscriptions);
-                    (PartialGraphId::new(graph.partial_graph_id), state)
-                })
-                .collect(),
+            graph_states: Default::default(),
+            mv_depended_subscriptions: Default::default(),
             actor_manager,
             current_shared_context,
         }
@@ -523,9 +506,7 @@ impl ManagedBarrierState {
             .expect("should exist")
             .register_barrier_sender(tx)
     }
-}
 
-impl PartialGraphManagedBarrierState {
     pub(super) fn add_subscriptions(&mut self, subscriptions: Vec<SubscriptionUpstreamInfo>) {
         for subscription_to_add in subscriptions {
             if !self
@@ -576,14 +557,14 @@ impl PartialGraphManagedBarrierState {
             }
         }
     }
-}
 
-impl ManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
+        self.add_subscriptions(request.subscriptions_to_add);
+        self.remove_subscriptions(request.subscriptions_to_remove);
         let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {
@@ -593,11 +574,14 @@ impl ManagedBarrierState {
         };
         let graph_state = self
             .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
-
-        graph_state.add_subscriptions(request.subscriptions_to_add);
-        graph_state.remove_subscriptions(request.subscriptions_to_remove);
+            .entry(partial_graph_id)
+            .or_insert_with(|| {
+                PartialGraphManagedBarrierState::new(
+                    self.actor_manager.env.state_store(),
+                    self.actor_manager.streaming_metrics.clone(),
+                    self.actor_manager.await_tree_reg.clone(),
+                )
+            });
 
         graph_state.transform_to_issued(
             barrier,
@@ -606,8 +590,7 @@ impl ManagedBarrierState {
         );
 
         let mut new_actors = HashSet::new();
-        let subscriptions =
-            LazyCell::new(|| Arc::new(graph_state.mv_depended_subscriptions.clone()));
+        let subscriptions = LazyCell::new(|| Arc::new(self.mv_depended_subscriptions.clone()));
         for actor in request.actors_to_build {
             let actor_id = actor.actor_id;
             assert!(!is_stop_actor(actor_id));
