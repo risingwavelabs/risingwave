@@ -263,43 +263,25 @@ impl PostgresSinkWriter {
             for (op, row) in chunk.rows() {
                 match op {
                     Op::Insert => {
-                        let owned = row.into_owned_row();
-                        let params = owned
-                            .as_inner()
-                            .iter()
-                            .map(|s| s as &(dyn ToSql + Sync))
-                            .collect_vec();
-                        let params_ref = &params[..];
                         self.client
-                            .execute(&self.insert_statement, params_ref)
+                            .execute_raw(&self.insert_statement, row.iter())
                             .await?;
                     }
                     Op::UpdateInsert => {
-                        let owned = row.into_owned_row();
-                        let params = owned
-                            .as_inner()
-                            .iter()
-                            .map(|s| s as &(dyn ToSql + Sync))
-                            .collect_vec();
-                        let params_ref = &params[..];
                         // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
                         // This is because the downstream db could have cleaned the old record,
                         // in that case it needs to be `INSERTED` rather than UPDATED.
                         // On the other hand, if the record is there, it should be `UPDATED`.
                         self.client
-                            .execute(&self.merge_statement, params_ref)
+                            .execute_raw(&self.merge_statement, row.iter())
                             .await?;
                     }
                     Op::Delete => {
-                        let owned = row.project(&self.pk_indices).into_owned_row();
-                        let params = owned
-                            .as_inner()
-                            .iter()
-                            .map(|s| s as &(dyn ToSql + Sync))
-                            .collect_vec();
-                        let params_ref = &params[..];
                         self.client
-                            .execute(&self.delete_statement, params_ref)
+                            .execute_raw(
+                                &self.delete_statement,
+                                row.project(&self.pk_indices).iter(),
+                            )
                             .await?;
                     }
                     Op::UpdateDelete => {}
