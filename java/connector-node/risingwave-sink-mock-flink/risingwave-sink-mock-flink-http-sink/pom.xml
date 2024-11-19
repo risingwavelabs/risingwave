@@ -26,7 +26,7 @@
         <dependency>
             <groupId>com.getindata</groupId>
             <artifactId>flink-http-connector</artifactId>
-            <version>0.10.0</version>
+            <version>0.16.0</version>
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>

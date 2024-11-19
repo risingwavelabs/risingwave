@@ -334,7 +334,7 @@ impl PlanRoot {
             "Merge BatchProject",
             vec![BatchProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
@@ -400,7 +400,7 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         // For iceberg scan, we do iceberg predicate pushdown
         // BatchFilter -> BatchIcebergScan
@@ -408,7 +408,7 @@ impl PlanRoot {
             "Iceberg Predicate Pushdown",
             vec![BatchIcebergPredicatePushDownRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
@@ -451,7 +451,7 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
@@ -491,7 +491,7 @@ impl PlanRoot {
             "Merge StreamProject",
             vec![StreamProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
@@ -500,7 +500,7 @@ impl PlanRoot {
                 "To IndexDeltaJoin",
                 vec![IndexDeltaJoinRule::create()],
                 ApplyOrder::BottomUp,
-            ));
+            ))?;
         }
 
         // Inline session timezone

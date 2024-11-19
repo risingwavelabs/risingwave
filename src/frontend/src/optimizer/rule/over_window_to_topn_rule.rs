@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
@@ -45,7 +45,7 @@ use crate::PlanRef;
 pub struct OverWindowToTopNRule;
 
 impl OverWindowToTopNRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowToTopNRule)
     }
 }

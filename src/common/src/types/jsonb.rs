@@ -133,8 +133,8 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
-        Ok(Some(self.value_serialize().into()))
+    ) -> super::to_binary::Result<bytes::Bytes> {
+        Ok(self.value_serialize().into())
     }
 }
 

@@ -643,6 +643,11 @@ impl HummockManager {
             self.env.notification_manager(),
             &self.metrics,
         );
+        // Apply stats changes.
+        let mut version_stats = HummockVersionStatsTransaction::new(
+            &mut versioning.version_stats,
+            self.env.notification_manager(),
+        );
 
         if deterministic_mode {
             version.disable_apply_to_txn();
@@ -808,6 +813,10 @@ impl HummockManager {
                             .sorted_output_ssts
                             .clone_from(&compact_task.input_ssts[0].table_infos);
                     }
+                    update_table_stats_for_vnode_watermark_trivial_reclaim(
+                        &mut version_stats.table_stats,
+                        &compact_task,
+                    );
                     self.metrics
                         .compact_frequency
                         .with_label_values(&[
@@ -877,7 +886,8 @@ impl HummockManager {
                 self.meta_store_ref(),
                 compaction_statuses,
                 compact_task_assignment,
-                version
+                version,
+                version_stats
             )?;
             self.metrics
                 .compact_task_batch_count
@@ -1666,4 +1676,35 @@ pub struct CompactionGroupStatistic {
     pub group_size: u64,
     pub table_statistic: BTreeMap<StateTableId, u64>,
     pub compaction_group_config: CompactionGroup,
+}
+
+/// Updates table stats caused by vnode watermark trivial reclaim compaction.
+fn update_table_stats_for_vnode_watermark_trivial_reclaim(
+    table_stats: &mut PbTableStatsMap,
+    task: &CompactTask,
+) {
+    if task.task_type != TaskType::VnodeWatermark {
+        return;
+    }
+    let mut deleted_table_keys: HashMap<u32, u64> = HashMap::default();
+    for s in task.input_ssts.iter().flat_map(|l| l.table_infos.iter()) {
+        assert_eq!(s.table_ids.len(), 1);
+        let e = deleted_table_keys.entry(s.table_ids[0]).or_insert(0);
+        *e += s.total_key_count;
+    }
+    for (table_id, delete_count) in deleted_table_keys {
+        let Some(stats) = table_stats.get_mut(&table_id) else {
+            continue;
+        };
+        if stats.total_key_count == 0 {
+            continue;
+        }
+        let new_total_key_count = stats.total_key_count.saturating_sub(delete_count as i64);
+        let ratio = new_total_key_count as f64 / stats.total_key_count as f64;
+        // total_key_count is updated accurately.
+        stats.total_key_count = new_total_key_count;
+        // others are updated approximately.
+        stats.total_key_size = (stats.total_key_size as f64 * ratio).ceil() as i64;
+        stats.total_value_size = (stats.total_value_size as f64 * ratio).ceil() as i64;
+    }
 }
