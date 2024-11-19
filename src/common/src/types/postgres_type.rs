@@ -116,7 +116,7 @@ impl DataType {
                         )*
                         DataType::Int256 => 1302,
                         DataType::Serial => 1016,
-                        DataType::Struct(_) => -1,
+                        DataType::Struct(_) => 2287, // pseudo-type of struct (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
                         DataType::Map(_) => 1304,
                     }
@@ -125,8 +125,7 @@ impl DataType {
                     DataType::Int256 => 1301,
                     DataType::Map(_) => 1303,
                     // TODO: Support to give a new oid for custom struct type. #9434
-                    // 1043 is varchar
-                    DataType::Struct(_) => 1043,
+                    DataType::Struct(_) => 2249,  // pseudo-type of array[struct] (see `pg_type.dat`)
                 }
             }
         }
