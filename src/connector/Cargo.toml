@@ -60,6 +60,11 @@ google-cloud-bigquery = { version = "0.13.0", features = ["auth"] }
 google-cloud-gax = "0.19.0"
 google-cloud-googleapis = { version = "0.15", features = ["pubsub", "bigquery"] }
 google-cloud-pubsub = "0.29"
+governor = { version = "0.6", default-features = false, features = [
+  "std",
+  "dashmap",
+  "jitter",
+] }
 http = "0.2"
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }

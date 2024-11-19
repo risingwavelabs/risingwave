@@ -11003,6 +11003,7 @@ dependencies = [
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-pubsub",
+ "governor",
  "http 0.2.9",
  "iceberg",
  "iceberg-catalog-glue",

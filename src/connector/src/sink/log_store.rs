@@ -19,6 +19,10 @@ use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
+use governor::clock::MonotonicClock;
+use governor::middleware::NoOpMiddleware;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{Quota, RateLimiter};
 
 use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
@@ -27,6 +31,7 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -316,6 +321,61 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
+    }
+}
+
+pub struct RateLimitedLogReader<R: LogReader> {
+    inner: R,
+    rate_limiter:
+        Option<RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>>,
+    control_rx: UnboundedReceiver<usize>,
+}
+
+
+impl<R: LogReader> RateLimitedLogReader<R> {
+    fn update_rate_limit(&mut self, rate_limit: usize) {
+        if rate_limit == 0 {
+            return None;
+        }
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
+        let clock = MonotonicClock;
+        Some(RateLimiter::direct_with_clock(quota, &clock))
+    }
+}
+
+impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        self.inner.init().await
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        select! {
+            biased;
+            new_rate_limit = control_rx.recv() => {
+                if let Some(rate_limit) = new_rate_limit {
+                    self.rate_limiter = Some(RateLimiter::direct(Quota::per_second(rate_limit as u64)));
+                }
+            },
+            item = self.inner.next_item() => {
+                if let Some(rate_limiter) = self.rate_limiter.as_mut() {
+                    rate_limiter.check_keyed(()).await?;
+                }
+                item
+            }
+        }
+        self.inner
+            .next_item()
+            .await
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        self.inner.truncate(offset)
+    }
+
+    fn rewind(
+        &mut self,
+    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+        self.inner.rewind()
     }
 }
 
