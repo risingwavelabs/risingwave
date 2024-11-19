@@ -29,6 +29,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use tokio::net::TcpStream;
 use tokio_postgres::types::ToSql;
+use tokio_postgres::Statement;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
@@ -176,6 +177,9 @@ pub struct PostgresSinkWriter {
     is_append_only: bool,
     client: tokio_postgres::Client,
     buffer: Buffer,
+    insert_statement: Statement,
+    delete_statement: Statement,
+    merge_statement: Statement,
 }
 
 impl PostgresSinkWriter {
@@ -202,6 +206,44 @@ impl PostgresSinkWriter {
             client
         };
 
+        let insert_statement = {
+            let insert_types = schema
+                .fields()
+                .iter()
+                .map(|field| field.data_type().to_pg_type())
+                .collect_vec();
+            let insert_sql = create_insert_sql(&schema, &config.table);
+            client
+                .prepare_typed(&insert_sql, &insert_types)
+                .await
+                .context("Failed to prepare insert statement")?
+        };
+
+        let delete_statement = {
+            let delete_types = pk_indices
+                .iter()
+                .map(|i| schema.fields()[*i].data_type().to_pg_type())
+                .collect_vec();
+            let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
+            client
+                .prepare_typed(&delete_sql, &delete_types)
+                .await
+                .context("Failed to prepare delete statement")?
+        };
+
+        let merge_statement = {
+            let merge_types = schema
+                .fields
+                .iter()
+                .map(|field| field.data_type().to_pg_type())
+                .collect_vec();
+            let merge_sql = create_merge_sql(&schema, &config.table, &pk_indices);
+            client
+                .prepare_typed(&merge_sql, &merge_types)
+                .await
+                .context("Failed to prepare merge statement")?
+        };
+
         let writer = Self {
             config,
             schema,
@@ -209,137 +251,14 @@ impl PostgresSinkWriter {
             is_append_only,
             client,
             buffer: Buffer::new(),
+            insert_statement,
+            delete_statement,
+            merge_statement,
         };
         Ok(writer)
     }
 
     async fn flush(&mut self) -> Result<()> {
-        // let mut delete_sql = format!("DELETE FROM {} WHERE ", self.config.table);
-        // NOTE(kwannoel): Use merge rather than update.
-        // Downstream DB may just clean old record, so it can't be updated.
-        // let mut update_sql = format!("MERGE {} SET ", self.config.table);
-
-        let table_name = &self.config.table;
-        let pk_fields: Vec<_> = self
-            .pk_indices
-            .iter()
-            .map(|i| self.schema.fields()[*i].clone())
-            .collect();
-
-        let insert_statement = {
-            let insert_types = self
-                .schema
-                .fields()
-                .iter()
-                .map(|field| field.data_type().to_pg_type())
-                .collect_vec();
-
-            let parameters: String = (0..self.schema.fields().len())
-                .map(|i| {
-                    // let data_type = field.data_type();
-                    // check_data_type_compatibility(data_type)?;
-                    format!("${}", i + 1)
-                })
-                .collect_vec()
-                .join(",");
-            let insert_sql = format!("INSERT INTO {table_name} VALUES ({parameters})");
-            let insert_statement = self
-                .client
-                .prepare_typed(&insert_sql, &insert_types) // TODO(kwannoel): use prepare_typed instead
-                .await
-                .context("Failed to prepare insert statement")?;
-            insert_statement
-        };
-
-        let delete_statement = {
-            let delete_types = self
-                .pk_indices
-                .iter()
-                .map(|i| self.schema.fields()[*i].data_type().to_pg_type())
-                .collect_vec();
-            let parameters: String = pk_fields
-                .iter()
-                .enumerate()
-                .map(|(i, field)| {
-                    let data_type = field.data_type();
-                    // check_data_type_compatibility(&data_type)?;
-                    format!("{} = ${}", &field.name, i + 1)
-                })
-                .collect_vec()
-                .join(" AND ");
-            let delete_sql = format!("DELETE FROM {table_name} WHERE {parameters}");
-            let delete_statement = self
-                .client
-                .prepare_typed(&delete_sql, &delete_types) // TODO: use prepare_typed instead
-                .await
-                .context("Failed to prepare delete statement")?;
-            delete_statement
-        };
-
-        let merge_statement = {
-            let merge_types = self
-                .schema
-                .fields
-                .iter()
-                .map(|field| field.data_type().to_pg_type())
-                .collect_vec();
-
-            let named_parameters: String = self
-                .schema
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, field)| {
-                    // let data_type = field.data_type();
-                    // check_data_type_compatibility(&data_type)?;
-                    format!("${} as {}", i + 1, &field.name)
-                })
-                .collect_vec()
-                .join(",");
-            let conditions: String = pk_fields
-                .iter()
-                .map(|pk_field| format!("source.{} = target.{}", pk_field.name, pk_field.name))
-                .collect_vec()
-                .join(" AND ");
-            let update_vars: String = self
-                .schema
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, field)| format!("{} = source.{}", field.name, field.name))
-                .collect_vec()
-                .join(",");
-            let insert_columns: String = self
-                .schema
-                .fields
-                .iter()
-                .map(|field| field.name.clone())
-                .collect_vec()
-                .join(",");
-            let insert_vars: String = self
-                .schema
-                .fields
-                .iter()
-                .map(|field| format!("source.{}", field.name))
-                .collect_vec()
-                .join(",");
-            let merge_sql = format!(
-                "
-            MERGE INTO {table_name} target
-            USING (SELECT {named_parameters}) AS source
-            ON ({conditions})
-            WHEN MATCHED
-              THEN UPDATE SET {update_vars}
-            WHEN NOT MATCHED
-              THEN INSERT ({insert_columns}) VALUES ({insert_vars})
-            "
-            );
-            self.client
-                .prepare_typed(&merge_sql, &merge_types) // TODO: use prepare_typed instead
-                .await
-                .context("Failed to prepare merge statement")?
-        };
-
         for chunk in self.buffer.drain() {
             for (op, row) in chunk.rows() {
                 match op {
@@ -351,7 +270,9 @@ impl PostgresSinkWriter {
                             .map(|s| s as &(dyn ToSql + Sync))
                             .collect_vec();
                         let params_ref = &params[..];
-                        self.client.execute(&insert_statement, params_ref).await?;
+                        self.client
+                            .execute(&self.insert_statement, params_ref)
+                            .await?;
                     }
                     Op::UpdateInsert => {
                         let owned = row.into_owned_row();
@@ -361,7 +282,13 @@ impl PostgresSinkWriter {
                             .map(|s| s as &(dyn ToSql + Sync))
                             .collect_vec();
                         let params_ref = &params[..];
-                        self.client.execute(&merge_statement, params_ref).await?;
+                        // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
+                        // This is because the downstream db could have cleaned the old record,
+                        // in that case it needs to be `INSERTED` rather than UPDATED.
+                        // On the other hand, if the record is there, it should be `UPDATED`.
+                        self.client
+                            .execute(&self.merge_statement, params_ref)
+                            .await?;
                     }
                     Op::Delete => {
                         let owned = row.project(&self.pk_indices).into_owned_row();
@@ -371,7 +298,9 @@ impl PostgresSinkWriter {
                             .map(|s| s as &(dyn ToSql + Sync))
                             .collect_vec();
                         let params_ref = &params[..];
-                        self.client.execute(&delete_statement, params_ref).await?;
+                        self.client
+                            .execute(&self.delete_statement, params_ref)
+                            .await?;
                     }
                     Op::UpdateDelete => {}
                 }
@@ -520,9 +449,11 @@ fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) ->
 #[cfg(test)]
 mod tests {
     use std::fmt::Display;
-    use super::*;
+
     use expect_test::{expect, Expect};
     use risingwave_common::catalog::Field;
+
+    use super::*;
 
     fn check(actual: impl Display, expect: Expect) {
         let actual = format!("{}", actual);
@@ -532,22 +463,25 @@ mod tests {
     #[test]
     fn test_create_insert_sql() {
         let schema = Schema::new(vec![
-           Field {
+            Field {
                 data_type: DataType::Int32,
                 name: "a".to_string(),
                 sub_fields: vec![],
                 type_name: "".to_string(),
-           },
-           Field {
-               data_type: DataType::Int32,
-               name: "b".to_string(),
-               sub_fields: vec![],
-               type_name: "".to_string(),
-           }
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "b".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            },
         ]);
         let table_name = "test_table";
         let sql = create_insert_sql(&schema, table_name);
-        check(sql, expect!["INSERT INTO test_table (a, b) VALUES ($1, $2)"]);
+        check(
+            sql,
+            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2)"],
+        );
     }
 
     #[test]
@@ -564,7 +498,7 @@ mod tests {
                 name: "b".to_string(),
                 sub_fields: vec![],
                 type_name: "".to_string(),
-            }
+            },
         ]);
         let table_name = "test_table";
         let sql = create_delete_sql(&schema, table_name, &[1]);
@@ -585,11 +519,13 @@ mod tests {
                 name: "b".to_string(),
                 sub_fields: vec![],
                 type_name: "".to_string(),
-            }
+            },
         ]);
         let table_name = "test_table";
         let sql = create_merge_sql(&schema, table_name, &[1]);
-        check(sql, expect![[r#"
+        check(
+            sql,
+            expect![[r#"
 
                     MERGE INTO test_table target
                     USING (SELECT $1 as a,$2 as b) AS source
@@ -598,6 +534,7 @@ mod tests {
                       THEN UPDATE SET a = source.a
                     WHEN NOT MATCHED
                       THEN INSERT (a, b) VALUES (source.a, source.b)
-        "#]]);
+        "#]],
+        );
     }
 }
