@@ -254,35 +254,53 @@ impl PostgresSinkWriter {
     }
 
     async fn flush(&mut self) -> Result<()> {
-        for chunk in self.buffer.drain() {
-            for (op, row) in chunk.rows() {
-                match op {
-                    Op::Insert => {
-                        self.client
-                            .execute_raw(&self.insert_statement, row.iter())
-                            .await?;
+        if self.is_append_only {
+            for chunk in self.buffer.drain() {
+                for (op, row) in chunk.rows() {
+                    match op {
+                        Op::Insert => {
+                            self.client
+                                .execute_raw(&self.insert_statement, row.iter())
+                                .await?;
+                        }
+                        Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
+                            debug_assert!(!self.is_append_only);
+                        }
                     }
-                    Op::UpdateInsert => {
-                        // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
-                        // This is because the downstream db could have cleaned the old record,
-                        // in that case it needs to be `INSERTED` rather than UPDATED.
-                        // On the other hand, if the record is there, it should be `UPDATED`.
-                        self.client
-                            .execute_raw(&self.merge_statement, row.iter())
-                            .await?;
+                }
+            }
+        } else {
+            for chunk in self.buffer.drain() {
+                for (op, row) in chunk.rows() {
+                    match op {
+                        Op::Insert => {
+                            self.client
+                                .execute_raw(&self.insert_statement, row.iter())
+                                .await?;
+                        }
+                        Op::UpdateInsert => {
+                            // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
+                            // This is because the downstream db could have cleaned the old record,
+                            // in that case it needs to be `INSERTED` rather than UPDATED.
+                            // On the other hand, if the record is there, it should be `UPDATED`.
+                            self.client
+                                .execute_raw(&self.merge_statement, row.iter())
+                                .await?;
+                        }
+                        Op::Delete => {
+                            self.client
+                                .execute_raw(
+                                    &self.delete_statement,
+                                    row.project(&self.pk_indices).iter(),
+                                )
+                                .await?;
+                        }
+                        Op::UpdateDelete => {}
                     }
-                    Op::Delete => {
-                        self.client
-                            .execute_raw(
-                                &self.delete_statement,
-                                row.project(&self.pk_indices).iter(),
-                            )
-                            .await?;
-                    }
-                    Op::UpdateDelete => {}
                 }
             }
         }
+
         Ok(())
     }
 }
