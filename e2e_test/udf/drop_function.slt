@@ -12,14 +12,8 @@ $$;
 statement ok
 create materialized view mv as select add(a, b) as c from t;
 
-statement error
+statement error function used by 1 other objects
 drop function add;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Permission denied: PermissionDenied: function used by 1 other objects.
-
 
 statement ok
 drop materialized view mv;
@@ -37,13 +31,8 @@ $$;
 statement ok
 create sink s as select add(a, b) as c from t with (connector = 'blackhole');
 
-statement error
+statement error function used by 1 other objects
 drop function add;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Permission denied: PermissionDenied: function used by 1 other objects.
 
 statement ok
 drop sink s;
