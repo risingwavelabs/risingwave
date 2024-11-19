@@ -225,6 +225,13 @@ impl PostgresSinkWriter {
             .collect();
 
         let insert_statement = {
+            let insert_types = self
+                .schema
+                .fields()
+                .iter()
+                .map(|field| field.data_type().to_pg_type())
+                .collect_vec();
+
             let parameters: String = (0..self.schema.fields().len())
                 .map(|i| {
                     // let data_type = field.data_type();
@@ -234,13 +241,20 @@ impl PostgresSinkWriter {
                 .collect_vec()
                 .join(",");
             let insert_sql = format!("INSERT INTO {table_name} VALUES ({parameters})");
-            self.client
-                .prepare(&insert_sql) // TODO(kwannoel): use prepare_typed instead
+            let insert_statement = self
+                .client
+                .prepare_typed(&insert_sql, &insert_types) // TODO(kwannoel): use prepare_typed instead
                 .await
-                .context("Failed to prepare insert statement")?
+                .context("Failed to prepare insert statement")?;
+            insert_statement
         };
 
         let delete_statement = {
+            let delete_types = self
+                .pk_indices
+                .iter()
+                .map(|i| self.schema.fields()[*i].data_type().to_pg_type())
+                .collect_vec();
             let parameters: String = pk_fields
                 .iter()
                 .enumerate()
@@ -252,13 +266,22 @@ impl PostgresSinkWriter {
                 .collect_vec()
                 .join(" AND ");
             let delete_sql = format!("DELETE FROM {table_name} WHERE {parameters}");
-            self.client
-                .prepare(&delete_sql) // TODO: use prepare_typed instead
+            let delete_statement = self
+                .client
+                .prepare_typed(&delete_sql, &delete_types) // TODO: use prepare_typed instead
                 .await
-                .context("Failed to prepare delete statement")?
+                .context("Failed to prepare delete statement")?;
+            delete_statement
         };
 
         let merge_statement = {
+            let merge_types = self
+                .schema
+                .fields
+                .iter()
+                .map(|field| field.data_type().to_pg_type())
+                .collect_vec();
+
             let named_parameters: String = self
                 .schema
                 .fields
@@ -281,7 +304,14 @@ impl PostgresSinkWriter {
                 .fields
                 .iter()
                 .enumerate()
-                .map(|(i, field)| format!("target.{} = source.{}", field.name, field.name))
+                .map(|(i, field)| format!("{} = source.{}", field.name, field.name))
+                .collect_vec()
+                .join(",");
+            let insert_columns: String = self
+                .schema
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
                 .collect_vec()
                 .join(",");
             let insert_vars: String = self
@@ -294,14 +324,16 @@ impl PostgresSinkWriter {
             let merge_sql = format!(
                 "
             MERGE INTO {table_name} target
-            USING (SELECT {named_parameters} FROM {table_name}) AS source
+            USING (SELECT {named_parameters}) AS source
             ON ({conditions})
-            WHEN MATCHED THEN UPDATE SET ({update_vars})
-            WHEN NOT MATCHED THEN INSERT VALUES ({insert_vars})
+            WHEN MATCHED
+              THEN UPDATE SET {update_vars}
+            WHEN NOT MATCHED
+              THEN INSERT ({insert_columns}) VALUES ({insert_vars})
             "
             );
             self.client
-                .prepare(&merge_sql) // TODO: use prepare_typed instead
+                .prepare_typed(&merge_sql, &merge_types) // TODO: use prepare_typed instead
                 .await
                 .context("Failed to prepare merge statement")?
         };
