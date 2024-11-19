@@ -6,7 +6,7 @@
   logical_plan: |-
     LogicalTopN { order: [t1.id ASC], limit: 2, offset: 0 }
     └─LogicalProject { exprs: [t1.id, t1.i] }
-      └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
+      └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
@@ -27,7 +27,7 @@
   logical_plan: |-
     LogicalTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
     └─LogicalProject { exprs: [t1.id, t1.i] }
-      └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
+      └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
@@ -48,7 +48,7 @@
     select cnt from v order by cnt;
   logical_plan: |-
     LogicalProject { exprs: [v.cnt] }
-    └─LogicalScan { table: v, columns: [v.cnt], cardinality: 0..=1 }
+    └─LogicalScan { table: v, columns: [v.cnt, v._rw_timestamp], cardinality: 0..=1 }
   batch_plan: |-
     BatchExchange { order: [v.cnt ASC], dist: Single }
     └─BatchSort { order: [v.cnt ASC] }

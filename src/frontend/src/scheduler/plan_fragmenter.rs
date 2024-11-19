@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
+use iceberg::expr::Predicate as IcebergPredicate;
 use itertools::Itertools;
 use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
@@ -270,10 +271,24 @@ impl Query {
 }
 
 #[derive(Debug, Clone)]
+pub enum SourceFetchParameters {
+    IcebergPredicate(IcebergPredicate),
+    KafkaTimebound {
+        lower: Option<i64>,
+        upper: Option<i64>,
+    },
+    Empty,
+}
+
+#[derive(Debug, Clone)]
 pub struct SourceFetchInfo {
     pub schema: Schema,
+    /// These are user-configured connector properties.
+    /// e.g. host, username, etc...
     pub connector: ConnectorProperties,
-    pub timebound: (Option<i64>, Option<i64>),
+    /// These parameters are internally derived by the plan node.
+    /// e.g. predicate pushdown for iceberg, timebound for kafka.
+    pub fetch_parameters: SourceFetchParameters,
     pub as_of: Option<AsOf>,
     pub iceberg_specific_info: Option<IcebergSpecificInfo>,
 }
@@ -302,13 +317,16 @@ impl SourceScanInfo {
                 unreachable!("Never call complete when SourceScanInfo is already complete")
             }
         };
-        match fetch_info.connector {
-            ConnectorProperties::Kafka(prop) => {
+        match (fetch_info.connector, fetch_info.fetch_parameters) {
+            (
+                ConnectorProperties::Kafka(prop),
+                SourceFetchParameters::KafkaTimebound { lower, upper },
+            ) => {
                 let mut kafka_enumerator =
                     KafkaSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
                 let split_info = kafka_enumerator
-                    .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+                    .list_splits_batch(lower, upper)
                     .await?
                     .into_iter()
                     .map(SplitImpl::Kafka)
@@ -316,7 +334,7 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(split_info))
             }
-            ConnectorProperties::OpendalS3(prop) => {
+            (ConnectorProperties::OpendalS3(prop), SourceFetchParameters::Empty) => {
                 let lister: OpendalEnumerator<OpendalS3> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
                 let stream = build_opendal_fs_list_for_batch(lister);
@@ -329,7 +347,7 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(res))
             }
-            ConnectorProperties::Gcs(prop) => {
+            (ConnectorProperties::Gcs(prop), SourceFetchParameters::Empty) => {
                 let lister: OpendalEnumerator<OpendalGcs> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
                 let stream = build_opendal_fs_list_for_batch(lister);
@@ -338,7 +356,7 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(res))
             }
-            ConnectorProperties::Azblob(prop) => {
+            (ConnectorProperties::Azblob(prop), SourceFetchParameters::Empty) => {
                 let lister: OpendalEnumerator<OpendalAzblob> =
                     OpendalEnumerator::new_azblob_source(*prop)?;
                 let stream = build_opendal_fs_list_for_batch(lister);
@@ -347,7 +365,10 @@ impl SourceScanInfo {
 
                 Ok(SourceScanInfo::Complete(res))
             }
-            ConnectorProperties::Iceberg(prop) => {
+            (
+                ConnectorProperties::Iceberg(prop),
+                SourceFetchParameters::IcebergPredicate(predicate),
+            ) => {
                 let iceberg_enumerator =
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
@@ -385,6 +406,7 @@ impl SourceScanInfo {
                         time_travel_info,
                         batch_parallelism,
                         iceberg_scan_type,
+                        predicate,
                     )
                     .await?
                     .into_iter()
@@ -1084,7 +1106,10 @@ impl BatchPlanFragmenter {
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: batch_kafka_scan.base.schema().clone(),
                     connector: property,
-                    timebound: timestamp_bound,
+                    fetch_parameters: SourceFetchParameters::KafkaTimebound {
+                        lower: timestamp_bound.0,
+                        upper: timestamp_bound.1,
+                    },
                     as_of: None,
                     iceberg_specific_info: None,
                 })));
@@ -1099,7 +1124,9 @@ impl BatchPlanFragmenter {
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
-                    timebound: (None, None),
+                    fetch_parameters: SourceFetchParameters::IcebergPredicate(
+                        batch_iceberg_scan.predicate.clone(),
+                    ),
                     as_of,
                     iceberg_specific_info: Some(IcebergSpecificInfo {
                         iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
@@ -1117,7 +1144,7 @@ impl BatchPlanFragmenter {
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: source_node.base.schema().clone(),
                     connector: property,
-                    timebound: (None, None),
+                    fetch_parameters: SourceFetchParameters::Empty,
                     as_of,
                     iceberg_specific_info: None,
                 })));

@@ -4062,9 +4062,16 @@ impl Parser<'_> {
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                 Keyword::FORMAT => {
                     options.explain_format = {
-                        match parser.expect_one_of_keywords(&[Keyword::TEXT, Keyword::JSON])? {
+                        match parser.expect_one_of_keywords(&[
+                            Keyword::TEXT,
+                            Keyword::JSON,
+                            Keyword::XML,
+                            Keyword::YAML,
+                        ])? {
                             Keyword::TEXT => ExplainFormat::Text,
                             Keyword::JSON => ExplainFormat::Json,
+                            Keyword::XML => ExplainFormat::Xml,
+                            Keyword::YAML => ExplainFormat::Yaml,
                             _ => unreachable!("{}", keyword),
                         }
                     }

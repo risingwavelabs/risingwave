@@ -1139,6 +1139,8 @@ impl fmt::Display for ExplainType {
 pub enum ExplainFormat {
     Text,
     Json,
+    Xml,
+    Yaml,
 }
 
 impl fmt::Display for ExplainFormat {
@@ -1146,6 +1148,8 @@ impl fmt::Display for ExplainFormat {
         match self {
             ExplainFormat::Text => f.write_str("TEXT"),
             ExplainFormat::Json => f.write_str("JSON"),
+            ExplainFormat::Xml => f.write_str("XML"),
+            ExplainFormat::Yaml => f.write_str("YAML"),
         }
     }
 }

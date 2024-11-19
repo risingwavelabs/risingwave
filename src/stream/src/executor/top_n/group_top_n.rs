@@ -233,8 +233,7 @@ where
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
-        self.managed_state.init_epoch(epoch);
-        Ok(())
+        self.managed_state.init_epoch(epoch).await
     }
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {

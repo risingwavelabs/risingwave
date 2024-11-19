@@ -76,8 +76,9 @@ impl<S: StateStore> SortExecutor<S> {
         let mut input = input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        this.buffer_table.init_epoch(barrier.epoch);
+        let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        this.buffer_table.init_epoch(first_epoch).await?;
 
         let mut vars = ExecutionVars {
             buffer: SortBuffer::new(this.sort_column_index, &this.buffer_table),

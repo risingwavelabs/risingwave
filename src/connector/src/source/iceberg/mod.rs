@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
+use iceberg::expr::Predicate as IcebergPredicate;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
@@ -191,6 +192,22 @@ pub struct IcebergSplit {
     pub files: IcebergFileScanTaskJsonStrEnum,
 }
 
+impl IcebergSplit {
+    pub fn empty(table_meta: TableMetadataJsonStr, iceberg_scan_type: IcebergScanType) -> Self {
+        Self {
+            split_id: 0,
+            snapshot_id: 0,
+            table_meta,
+            files: IcebergFileScanTaskJsonStrEnum::new_with_scan_type(
+                iceberg_scan_type,
+                vec![],
+                vec![],
+                vec![],
+            ),
+        }
+    }
+}
+
 impl SplitMetaData for IcebergSplit {
     fn id(&self) -> SplitId {
         self.split_id.to_string().into()
@@ -295,6 +312,7 @@ impl IcebergSplitEnumerator {
         time_traval_info: Option<IcebergTimeTravelInfo>,
         batch_parallelism: usize,
         iceberg_scan_type: IcebergScanType,
+        predicate: IcebergPredicate,
     ) -> ConnectorResult<Vec<IcebergSplit>> {
         if batch_parallelism == 0 {
             bail!("Batch parallelism is 0. Cannot split the iceberg files.");
@@ -304,17 +322,10 @@ impl IcebergSplitEnumerator {
         let table_meta = TableMetadataJsonStr::serialize(table.metadata());
         if snapshot_id.is_none() {
             // If there is no snapshot, we will return a mock `IcebergSplit` with empty files.
-            return Ok(vec![IcebergSplit {
-                split_id: 0,
-                snapshot_id: 0,
-                table_meta,
-                files: IcebergFileScanTaskJsonStrEnum::new_with_scan_type(
-                    iceberg_scan_type,
-                    vec![],
-                    vec![],
-                    vec![],
-                ),
-            }]);
+            return Ok(vec![IcebergSplit::empty(
+                TableMetadataJsonStr::serialize(table.metadata()),
+                iceberg_scan_type,
+            )]);
         }
         let snapshot_id = snapshot_id.unwrap();
 
@@ -325,11 +336,15 @@ impl IcebergSplitEnumerator {
             .cloned()
             .collect_vec();
 
+        let table_schema = table.metadata().current_schema();
+        tracing::debug!("iceberg_table_schema: {:?}", table_schema);
+
         let mut position_delete_files = vec![];
         let mut data_files = vec![];
         let mut equality_delete_files = vec![];
         let scan = table
             .scan()
+            .with_filter(predicate)
             .snapshot_id(snapshot_id)
             .select(require_names)
             .build()
@@ -374,6 +389,12 @@ impl IcebergSplitEnumerator {
             .filter(|split| !split.files.is_empty())
             .collect_vec();
 
+        if splits.is_empty() {
+            return Ok(vec![IcebergSplit::empty(
+                TableMetadataJsonStr::serialize(table.metadata()),
+                iceberg_scan_type,
+            )]);
+        }
         Ok(splits)
     }
 

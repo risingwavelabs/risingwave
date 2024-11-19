@@ -347,9 +347,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.state_table.init_epoch(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        this.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
