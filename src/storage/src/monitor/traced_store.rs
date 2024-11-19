@@ -21,7 +21,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use risingwave_hummock_trace::{
     init_collector, should_use_trace, ConcurrentId, MayTraceSpan, OperationResult, StorageType,
     TraceResult, TraceSpan, TracedBytes, TracedSealCurrentEpochOptions, LOCAL_ID,
@@ -279,19 +279,6 @@ impl<S: StateStore> StateStore for TracedStateStore<S> {
         res
     }
 
-    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let span: MayTraceSpan = TraceSpan::new_sync_span(epoch, &table_ids, self.storage_type);
-
-        let future = self.inner.sync(epoch, table_ids);
-
-        future.map(move |sync_result| {
-            span.may_send_result(OperationResult::Sync(
-                sync_result.as_ref().map(|res| res.sync_size).into(),
-            ));
-            sync_result
-        })
-    }
-
     async fn new_local(&self, options: NewLocalOptions) -> Self::Local {
         TracedStateStore::new_local(self.inner.new_local(options.clone()).await, options)
     }
@@ -367,6 +354,24 @@ impl TracedStateStore<HummockStorage> {
 
     pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager()
+    }
+
+    pub async fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> StorageResult<SyncResult> {
+        let span: MayTraceSpan = TraceSpan::new_sync_span(&sync_table_epochs, self.storage_type);
+
+        let future = self.inner.sync(sync_table_epochs);
+
+        future
+            .map(move |sync_result| {
+                span.may_send_result(OperationResult::Sync(
+                    sync_result.as_ref().map(|res| res.sync_size).into(),
+                ));
+                sync_result
+            })
+            .await
     }
 }
 
