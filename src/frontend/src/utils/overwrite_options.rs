@@ -19,12 +19,14 @@ pub struct OverwriteOptions {
     pub source_rate_limit: Option<u32>,
     pub backfill_rate_limit: Option<u32>,
     pub dml_rate_limit: Option<u32>,
+    pub sink_rate_limit: Option<u32>,
 }
 
 impl OverwriteOptions {
     pub(crate) const BACKFILL_RATE_LIMIT_KEY: &'static str = "backfill_rate_limit";
     pub(crate) const DML_RATE_LIMIT_KEY: &'static str = "dml_rate_limit";
     pub(crate) const SOURCE_RATE_LIMIT_KEY: &'static str = "source_rate_limit";
+    pub(crate) const SINK_RATE_LIMIT_KEY: &'static str = "sink_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
         let source_rate_limit = {
@@ -59,6 +61,14 @@ impl OverwriteOptions {
                 Some(x.parse::<u32>().unwrap())
             } else {
                 let rate_limit = args.session.config().dml_rate_limit();
+            }
+        };
+        let sink_rate_limit = {
+            if let Some(x) = args.with_options.remove(Self::SINK_RATE_LIMIT_KEY) {
+                // FIXME(tabVersion): validate the value
+                Some(x.parse::<u32>().unwrap())
+            } else {
+                let rate_limit = args.session.config().sink_rate_limit();
                 if rate_limit < 0 {
                     None
                 } else {
@@ -70,6 +80,7 @@ impl OverwriteOptions {
             source_rate_limit,
             backfill_rate_limit,
             dml_rate_limit,
+            sink_rate_limit,
         }
     }
 }
