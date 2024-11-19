@@ -223,6 +223,8 @@ It only indicates the physical clustering of the data, which may improve the per
         let (plan, table) =
             gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
 
+        // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+        // during binding instead of visiting the optimized plan.
         let dependencies =
             RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
                 .into_iter()

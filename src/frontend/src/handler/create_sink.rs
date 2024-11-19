@@ -255,6 +255,8 @@ pub async fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string());
     }
 
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
     let dependencies =
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
