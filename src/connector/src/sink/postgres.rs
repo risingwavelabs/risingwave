@@ -169,7 +169,6 @@ impl Buffer {
 
 pub struct PostgresSinkWriter {
     config: PostgresConfig,
-    schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
@@ -243,7 +242,6 @@ impl PostgresSinkWriter {
 
         let writer = Self {
             config,
-            schema,
             pk_indices,
             is_append_only,
             client,
