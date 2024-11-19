@@ -2231,7 +2231,7 @@ pub mod default {
             false
         }
 
-        pub fn max_overlapping_level_size_ratio() -> u32 {
+        pub fn max_overlapping_level_size() -> u32 {
             4
         }
     }

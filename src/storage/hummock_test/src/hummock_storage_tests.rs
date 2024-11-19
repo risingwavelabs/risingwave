@@ -2950,9 +2950,9 @@ async fn test_commit_with_large_size() {
     commit_epoch(
         epoch1,
         vec![
-            sst1_epoch1.clone(),
-            sst1_epoch2.clone(),
             sst1_epoch3.clone(),
+            sst1_epoch2.clone(),
+            sst1_epoch1.clone(),
         ],
         vec![NewTableFragmentInfo {
             table_ids: HashSet::from_iter([existing_table_id]),
@@ -2975,6 +2975,7 @@ async fn test_commit_with_large_size() {
         .l0
         .clone();
 
+    println!("l0_sub_levels {:?}", l0_sub_levels.sub_levels);
     assert_eq!(3, l0_sub_levels.sub_levels.len());
     assert_eq!(1, l0_sub_levels.sub_levels[0].table_infos.len());
     assert_eq!(

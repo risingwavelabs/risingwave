@@ -85,6 +85,7 @@ enum ComputeCommands {
     ShowConfig { host: String },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
@@ -192,7 +193,7 @@ enum HummockCommands {
         #[clap(long)]
         disable_auto_group_scheduling: Option<bool>,
         #[clap(long)]
-        max_overlapping_level_size_ratio: Option<u32>,
+        max_overlapping_level_size: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -580,7 +581,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
             disable_auto_group_scheduling,
-            max_overlapping_level_size_ratio,
+            max_overlapping_level_size,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -613,7 +614,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
                     disable_auto_group_scheduling,
-                    max_overlapping_level_size_ratio,
+                    max_overlapping_level_size,
                 ),
             )
             .await?
