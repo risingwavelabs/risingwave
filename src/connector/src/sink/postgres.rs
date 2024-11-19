@@ -439,3 +439,77 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Map(_) => Err(data_type_not_supported("Map")),
     }
 }
+
+fn create_insert_sql(schema: &Schema, table_name: &str) -> String {
+    let columns: String = schema
+        .fields()
+        .iter()
+        .map(|field| field.name.clone())
+        .collect_vec()
+        .join(",");
+    let parameters: String = (0..schema.fields().len())
+        .map(|i| format!("${}", i + 1))
+        .collect_vec()
+        .join(",");
+    format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters})")
+}
+
+fn create_merge_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
+    let named_parameters: String = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| format!("${} as {}", i + 1, &field.name))
+        .collect_vec()
+        .join(",");
+    let conditions: String = pk_indices
+        .iter()
+        .map(|i| {
+            format!(
+                "source.{} = target.{}",
+                schema.fields()[*i].name,
+                schema.fields()[*i].name
+            )
+        })
+        .collect_vec()
+        .join(" AND ");
+    let update_vars: String = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| format!("{} = source.{}", field.name, field.name))
+        .collect_vec()
+        .join(",");
+    let insert_columns: String = schema
+        .fields()
+        .iter()
+        .map(|field| field.name.clone())
+        .collect_vec()
+        .join(",");
+    let insert_vars: String = schema
+        .fields()
+        .iter()
+        .map(|field| format!("source.{}", field.name))
+        .collect_vec()
+        .join(",");
+    format!(
+        "
+        MERGE INTO {table_name} target
+        USING (SELECT {named_parameters}) AS source
+        ON ({conditions})
+        WHEN MATCHED
+          THEN UPDATE SET {update_vars}
+        WHEN NOT MATCHED
+          THEN INSERT ({insert_columns}) VALUES ({insert_vars})
+        "
+    )
+}
+
+fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
+    let parameters: String = pk_indices
+        .iter()
+        .map(|i| format!("{} = ${}", schema.fields()[*i].name, i + 1))
+        .collect_vec()
+        .join(" AND ");
+    format!("DELETE FROM {table_name} WHERE {parameters}")
+}
