@@ -1037,8 +1037,8 @@ pub(super) async fn handle_create_table_plan(
                         for option_def in &column_def.options {
                             if let ColumnOption::DefaultColumns(_) = option_def.option {
                                 return Err(ErrorCode::NotSupported(
-                                            "Default column are not allowed to be defined on the table created from a CDC source".into(),
-                                            "Remove the default column expression in the column list".into(),
+                                            "Default value for columns defined on the table created from a CDC source".into(),
+                                            "Remove the default value expression in the column definitions".into(),
                                         )
                                             .into());
                             }
