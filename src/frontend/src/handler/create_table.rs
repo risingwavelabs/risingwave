@@ -1206,6 +1206,18 @@ fn bind_cdc_table_schema(
     constraints: &Vec<TableConstraint>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+    for column_def in column_defs {
+        for option_def in &column_def.options {
+            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                return Err(ErrorCode::NotSupported(
+                    "Default column defined on the table created from a CDC source".into(),
+                    "Remove the default column expression in the column list".into(),
+                )
+                .into());
+            }
+        }
+    }
+
     let mut columns = bind_sql_columns(column_defs)?;
     // If new_version_columns is provided, we are in the process of auto schema change.
     // update the default value column since the default value column is not set in the
