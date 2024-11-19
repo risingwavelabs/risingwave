@@ -296,7 +296,7 @@ impl Debug for QueryRunner {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: ReadSnapshot) {
+    async fn run(mut self, _pinned_snapshot: ReadSnapshot) {
         self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
@@ -308,10 +308,6 @@ impl QueryRunner {
                 stage_id
             );
         }
-        let mut stages_with_table_scan = self.query.stages_with_table_scan();
-        let has_lookup_join_stage = self.query.has_lookup_join_stage();
-        // To convince the compiler that `pinned_snapshot` will only be dropped once.
-        let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
 
         let mut finished_stage_cnt = 0usize;
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -323,16 +319,6 @@ impl QueryRunner {
                         stage_id
                     );
                     self.scheduled_stages_count += 1;
-                    stages_with_table_scan.remove(&stage_id);
-                    // If query contains lookup join we need to delay epoch unpin util the end of
-                    // the query.
-                    if !has_lookup_join_stage && stages_with_table_scan.is_empty() {
-                        // We can be sure here that all the Hummock iterators have been created,
-                        // thus they all successfully pinned a HummockVersion.
-                        // So we can now unpin their epoch.
-                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        pinned_snapshot_to_drop.take();
-                    }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
                     // to QueryResultFetcher and execute to get a Chunk stream.
