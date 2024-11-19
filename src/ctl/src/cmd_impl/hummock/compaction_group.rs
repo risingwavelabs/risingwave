@@ -68,7 +68,7 @@ pub fn build_compaction_config_vec(
     max_l0_compact_level: Option<u32>,
     sst_allowed_trivial_move_min_size: Option<u64>,
     disable_auto_group_scheduling: Option<bool>,
-    max_overlapping_level_size: Option<u32>,
+    max_overlapping_level_size: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {

@@ -460,8 +460,7 @@ fn rewrite_commit_sstables_to_sub_level(
         let mut ssts = vec![];
         let sub_level_size_limit = config
             .max_overlapping_level_size
-            .unwrap_or(compaction_config::max_overlapping_level_size())
-            as u64;
+            .unwrap_or(compaction_config::max_overlapping_level_size());
 
         let level = overlapping_sstables.entry(group_id).or_default();
 

@@ -193,7 +193,7 @@ enum HummockCommands {
         #[clap(long)]
         disable_auto_group_scheduling: Option<bool>,
         #[clap(long)]
-        max_overlapping_level_size: Option<u32>,
+        max_overlapping_level_size: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {

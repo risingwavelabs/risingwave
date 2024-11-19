@@ -2231,8 +2231,8 @@ pub mod default {
             false
         }
 
-        pub fn max_overlapping_level_size() -> u32 {
-            4
+        pub fn max_overlapping_level_size() -> u64 {
+            DEFAULT_MIN_COMPACTION_BYTES
         }
     }
 
