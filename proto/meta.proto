@@ -753,8 +753,8 @@ message EventLog {
     string error = 3;
   }
   message EventCollectBarrierFail {
-    uint64 prev_epoch = 1;
-    uint64 cur_epoch = 2;
+    reserved 1, 2;
+    reserved "prev_epoch", "cur_epoch";
     string error = 3;
   }
   message EventWorkerNodePanic {

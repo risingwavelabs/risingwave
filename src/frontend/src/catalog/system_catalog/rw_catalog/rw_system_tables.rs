@@ -28,7 +28,7 @@ struct SystemTable {
     schema_id: i32,
     owner: i32,
     definition: Option<String>,
-    acl: String,
+    acl: Vec<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_system_tables")]

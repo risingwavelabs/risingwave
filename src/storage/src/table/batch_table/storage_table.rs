@@ -31,6 +31,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOpt
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -85,6 +86,9 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
 
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
+
+    /// The index of system column `_rw_timestamp` in the output columns.
+    epoch_idx: Option<usize>,
 
     /// Row deserializer to deserialize the value in storage to a row.
     /// The row can be either complete or partial, depending on whether the row encoding is versioned.
@@ -243,12 +247,17 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
 
         let mut value_output_indices = vec![];
         let mut key_output_indices = vec![];
+        // system column currently only contains `_rw_timestamp`
+        let mut epoch_idx = None;
 
         for idx in &output_indices {
             if value_indices.contains(idx) {
                 value_output_indices.push(*idx);
-            } else {
+            } else if pk_indices.contains(idx) {
                 key_output_indices.push(*idx);
+            } else {
+                assert!(epoch_idx.is_none());
+                epoch_idx = Some(*idx);
             }
         }
 
@@ -308,6 +317,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             value_output_indices,
             output_row_in_key_indices,
             mapping: Arc::new(mapping),
+            epoch_idx,
             row_serde: Arc::new(row_serde),
             pk_indices,
             distribution,
@@ -394,7 +404,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
-        if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
+        if let Some((full_key, value)) = self
+            .store
+            .get_keyed_row(serialized_pk, epoch, read_options)
+            .await?
+        {
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -404,7 +418,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                         pk.project(&self.output_row_in_key_indices).into_owned_row();
                     let mut result_row_vec = vec![];
                     for idx in &self.output_indices {
-                        if self.value_output_indices.contains(idx) {
+                        if let Some(epoch_idx) = self.epoch_idx
+                            && *idx == epoch_idx
+                        {
+                            let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                            result_row_vec
+                                .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                        } else if self.value_output_indices.contains(idx) {
                             let item_position_in_value_indices = &self
                                 .value_output_indices
                                 .iter()
@@ -428,7 +448,32 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     let result_row = OwnedRow::new(result_row_vec);
                     Ok(Some(result_row))
                 }
-                None => Ok(Some(result_row_in_value.into_owned_row())),
+                None => match &self.epoch_idx {
+                    Some(epoch_idx) => {
+                        let mut result_row_vec = vec![];
+                        for idx in &self.output_indices {
+                            if idx == epoch_idx {
+                                let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                                result_row_vec
+                                    .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                            } else {
+                                let item_position_in_value_indices = &self
+                                    .value_output_indices
+                                    .iter()
+                                    .position(|p| idx == p)
+                                    .unwrap();
+                                result_row_vec.push(
+                                    result_row_in_value
+                                        .datum_at(*item_position_in_value_indices)
+                                        .to_owned_datum(),
+                                );
+                            }
+                        }
+                        let result_row = OwnedRow::new(result_row_vec);
+                        Ok(Some(result_row))
+                    }
+                    None => Ok(Some(result_row_in_value.into_owned_row())),
+                },
             }
         } else {
             Ok(None)
@@ -513,6 +558,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 let iter = StorageTableInnerIterInner::<S, SD>::new(
                     &self.store,
                     self.mapping.clone(),
+                    self.epoch_idx,
                     pk_serializer,
                     self.output_indices.clone(),
                     self.key_output_indices.clone(),
@@ -846,6 +892,9 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 
     mapping: Arc<ColumnMapping>,
 
+    /// The index of system column `_rw_timestamp` in the output columns.
+    epoch_idx: Option<usize>,
+
     row_deserializer: Arc<SD>,
 
     /// Used for serializing and deserializing the primary key.
@@ -869,6 +918,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,
+        epoch_idx: Option<usize>,
         pk_serializer: Option<Arc<OrderedRowSerde>>,
         output_indices: Vec<usize>,
         key_output_indices: Option<Vec<usize>>,
@@ -892,6 +942,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         let iter = Self {
             iter,
             mapping,
+            epoch_idx,
             row_deserializer,
             pk_serializer,
             output_indices,
@@ -911,7 +962,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
-            let (table_key, value) = (k.user_key.table_key, v);
+            let (table_key, value, epoch_with_gap) = (k.user_key.table_key, v, k.epoch_with_gap);
             let row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
             match &self.key_output_indices {
@@ -927,7 +978,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
 
                     let mut result_row_vec = vec![];
                     for idx in &self.output_indices {
-                        if self.value_output_indices.contains(idx) {
+                        if let Some(epoch_idx) = self.epoch_idx
+                            && *idx == epoch_idx
+                        {
+                            let epoch = Epoch::from(epoch_with_gap.pure_epoch());
+                            result_row_vec
+                                .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                        } else if self.value_output_indices.contains(idx) {
                             let item_position_in_value_indices = &self
                                 .value_output_indices
                                 .iter()
@@ -956,12 +1013,40 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                         row,
                     }
                 }
-                None => {
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key.copy_into(),
-                        row: result_row_in_value.into_owned_row(),
+                None => match &self.epoch_idx {
+                    Some(epoch_idx) => {
+                        let mut result_row_vec = vec![];
+                        for idx in &self.output_indices {
+                            if idx == epoch_idx {
+                                let epoch = Epoch::from(epoch_with_gap.pure_epoch());
+                                result_row_vec
+                                    .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                            } else {
+                                let item_position_in_value_indices = &self
+                                    .value_output_indices
+                                    .iter()
+                                    .position(|p| idx == p)
+                                    .unwrap();
+                                result_row_vec.push(
+                                    result_row_in_value
+                                        .datum_at(*item_position_in_value_indices)
+                                        .to_owned_datum(),
+                                );
+                            }
+                        }
+                        let row = OwnedRow::new(result_row_vec);
+                        yield KeyedRow {
+                            vnode_prefixed_key: table_key.copy_into(),
+                            row,
+                        }
                     }
-                }
+                    None => {
+                        yield KeyedRow {
+                            vnode_prefixed_key: table_key.copy_into(),
+                            row: result_row_in_value.into_owned_row(),
+                        }
+                    }
+                },
             }
         }
     }

@@ -647,6 +647,12 @@ pub trait Explain {
 
     /// Explain the plan node and return a json string.
     fn explain_to_json(&self) -> String;
+
+    /// Explain the plan node and return a xml string.
+    fn explain_to_xml(&self) -> String;
+
+    /// Explain the plan node and return a yaml string.
+    fn explain_to_yaml(&self) -> String;
 }
 
 impl Explain for PlanRef {
@@ -676,6 +682,20 @@ impl Explain for PlanRef {
         let explain_ir = plan.explain();
         serde_json::to_string_pretty(&PrettySerde(explain_ir))
             .expect("failed to serialize plan to json")
+    }
+
+    /// Explain the plan node and return a xml string.
+    fn explain_to_xml(&self) -> String {
+        let plan = reorganize_elements_id(self.clone());
+        let explain_ir = plan.explain();
+        quick_xml::se::to_string(&PrettySerde(explain_ir)).expect("failed to serialize plan to xml")
+    }
+
+    /// Explain the plan node and return a yaml string.
+    fn explain_to_yaml(&self) -> String {
+        let plan = reorganize_elements_id(self.clone());
+        let explain_ir = plan.explain();
+        serde_yaml::to_string(&PrettySerde(explain_ir)).expect("failed to serialize plan to yaml")
     }
 }
 

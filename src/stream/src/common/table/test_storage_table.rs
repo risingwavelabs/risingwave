@@ -82,7 +82,7 @@ async fn test_storage_table_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -208,7 +208,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     let table = StorageTable::for_test(
         test_env.storage.clone(),
@@ -327,7 +327,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
     state.insert(OwnedRow::new(vec![
@@ -438,7 +438,7 @@ async fn test_batch_scan_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -542,7 +542,7 @@ async fn test_batch_scan_chunk_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await.unwrap();
 
     let gen_row = |i: i32, is_update: bool| {
         let scale = if is_update { 10 } else { 1 };

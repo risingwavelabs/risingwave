@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
@@ -129,14 +128,16 @@ impl Binder {
         for Assignment { id, value } in assignments {
             // FIXME: Parsing of `id` is not strict. It will even treat `a.b` as `(a, b)`.
             let assignments = match (id.as_slice(), value) {
+                // _ = (subquery)
+                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
+                    return Err(ErrorCode::BindError(
+                        "subquery on the right side of assignment is unsupported".to_owned(),
+                    )
+                    .into())
+                }
                 // col = expr
                 ([id], value) => {
                     vec![(id.clone(), value)]
-                }
-
-                // (col1, col2) = (subquery)
-                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
-                    bail_not_implemented!("subquery on the right side of multi-assignment");
                 }
                 // (col1, col2) = (expr1, expr2)
                 // TODO: support `DEFAULT` in multiple assignments
@@ -219,7 +220,8 @@ impl Binder {
             .iter()
             .enumerate()
             .filter_map(|(i, c)| {
-                (!c.is_generated()).then_some(InputRef::new(i, c.data_type().clone()).into())
+                c.can_dml()
+                    .then_some(InputRef::new(i, c.data_type().clone()).into())
             })
             .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
             .collect_vec();

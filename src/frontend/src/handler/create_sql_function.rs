@@ -336,14 +336,13 @@ pub async fn handle_create_sql_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
+        runtime: None,
         identifier: None,
         body: Some(body),
         compressed_binary: None,
         link: None,
         owner: session.user_id(),
         always_retry_on_network_error: false,
-        runtime: None,
-        function_type: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

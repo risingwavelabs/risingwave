@@ -136,6 +136,20 @@ fn make_prost_privilege(
                 grant_objs.push(PbObject::SourceId(source.id));
             }
         }
+        GrantObjects::Sinks(sinks) => {
+            let db_name = session.database();
+            let search_path = session.config().search_path();
+            let user_name = &session.auth_context().user_name;
+
+            for name in sinks {
+                let (schema_name, sink_name) =
+                    Binder::resolve_schema_qualified_name(db_name, name)?;
+                let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+                let (sink, _) = reader.get_sink_by_name(db_name, schema_path, &sink_name)?;
+                grant_objs.push(PbObject::SinkId(sink.id.sink_id));
+            }
+        }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;

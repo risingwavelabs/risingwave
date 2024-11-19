@@ -476,7 +476,7 @@ async fn test_state_store_sync() {
         .committed()
         .table_committed_epoch(TEST_TABLE_ID)
         .unwrap();
-    let epoch1 = test_epoch(base_epoch.next_epoch());
+    let epoch1 = base_epoch.next_epoch();
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
@@ -1133,6 +1133,13 @@ async fn test_iter_with_min_epoch() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
 
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+
     let epoch1 = (31 * 1000) << 16;
     test_env
         .storage
@@ -1149,7 +1156,10 @@ async fn test_iter_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage.init_for_test(epoch1).await.unwrap();
+    hummock_storage
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
 
     hummock_storage
         .ingest_batch(
@@ -1422,7 +1432,16 @@ async fn test_hummock_version_reader() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
     {
-        hummock_storage.init_for_test(epoch1).await.unwrap();
+        let prev_epoch = test_env
+            .manager
+            .get_current_version()
+            .await
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap();
+        hummock_storage
+            .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+            .await
+            .unwrap();
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
@@ -1852,7 +1871,16 @@ async fn test_get_with_min_epoch() {
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
-    hummock_storage.init_for_test(epoch1).await.unwrap();
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    hummock_storage
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
 
     let gen_key = |index: usize| -> TableKey<Bytes> {
         gen_key_from_str(VirtualNode::ZERO, format!("key_{}", index).as_str())
@@ -2125,9 +2153,21 @@ async fn test_table_watermark() {
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
-    local1.init_for_test(epoch1).await.unwrap();
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    local1
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
     local1.update_vnode_bitmap(vnode_bitmap1.clone());
-    local2.init_for_test(epoch1).await.unwrap();
+    local2
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
     local2.update_vnode_bitmap(vnode_bitmap2.clone());
 
     fn gen_inner_key(index: usize) -> Bytes {

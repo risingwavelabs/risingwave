@@ -18,7 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
@@ -97,6 +97,11 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                 )?)
                 .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
+            let committed_epoch = hummock
+                .inner()
+                .get_pinned_version()
+                .table_committed_epoch(table.id)
+                .ok_or_else(|| anyhow!("table id {} not exist", table.id))?;
             let mut handlers = vec![];
             for i in 0..threads {
                 let table = table.clone();
@@ -107,7 +112,8 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                     tracing::info!(thread = i, "starting scan");
                     let state_table = {
                         let mut tb = make_state_table(hummock, &table).await;
-                        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
+                        tb.init_epoch(EpochPair::new(u64::MAX, committed_epoch))
+                            .await?;
                         tb
                     };
                     loop {
