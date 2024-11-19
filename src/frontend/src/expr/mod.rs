@@ -300,7 +300,7 @@ impl ExprImpl {
             ))),
             DataType::Int32 => Ok(self),
             dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
-            _ => Err(CastError("Unsupported input type".to_string())),
+            _ => bail!("unsupported input type"),
         }
     }
 

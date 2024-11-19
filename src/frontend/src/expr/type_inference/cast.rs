@@ -15,12 +15,15 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use anyhow::Context;
 use itertools::Itertools as _;
 use parse_display::Display;
+use risingwave_common::error::bail;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::ErrorCode;
+use crate::expr::function_call::{CastError, CastResult};
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -114,12 +117,45 @@ pub fn align_array_and_element(
     Ok(array_type)
 }
 
+fn canmeh(ok: bool) -> CastResult {
+    if ok {
+        Ok(())
+    } else {
+        bail!("")
+    }
+}
+fn cannot() -> CastResult {
+    canmeh(false)
+}
+
+pub fn cast(source: &DataType, target: &DataType, allows: CastContext) -> Result<(), CastError> {
+    macro_rules! any {
+        ($f:ident) => {
+            source.$f() || target.$f()
+        };
+    }
+
+    if any!(is_struct) {
+        cast_ok_struct(source, target, allows)
+    } else if any!(is_array) {
+        cast_ok_array(source, target, allows)
+    } else if any!(is_map) {
+        cast_ok_map(source, target, allows)
+    } else {
+        canmeh(cast_ok_base(source, target, allows))
+    }
+    .with_context(|| {
+        format!(
+            "cannot cast type \"{}\" to \"{}\" in {:?} context",
+            source, target, allows
+        )
+    })
+    .map_err(Into::into)
+}
+
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: CastContext) -> bool {
-    cast_ok_struct(source, target, allows)
-        || cast_ok_array(source, target, allows)
-        || cast_ok_map(source, target, allows)
-        || cast_ok_base(source, target, allows)
+    cast(source, target, allows).is_ok()
 }
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
@@ -128,52 +164,57 @@ pub fn cast_ok_base(source: &DataType, target: &DataType, allows: CastContext) -
     matches!(CAST_MAP.get(&(source.into(), target.into())), Some(context) if *context <= allows)
 }
 
-fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
         (DataType::Struct(lty), DataType::Struct(rty)) => {
             if lty.is_empty() || rty.is_empty() {
                 unreachable!("record type should be already processed at this point");
             }
             if lty.len() != rty.len() {
-                // only cast structs of the same length
-                return false;
+                bail!("cannot cast structs of different lengths");
             }
             // ... and all fields are castable
             lty.types()
                 .zip_eq_fast(rty.types())
-                .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
+                .try_for_each(|(src, dst)| {
+                    if src == dst {
+                        Ok(())
+                    } else {
+                        cast(src, dst, allows)
+                    }
+                })
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::Struct(_)) => CastContext::Explicit <= allows,
-        (DataType::Struct(_), DataType::Varchar) => CastContext::Assign <= allows,
-        _ => false,
+        (DataType::Varchar, DataType::Struct(_)) => canmeh(CastContext::Explicit <= allows),
+        (DataType::Struct(_), DataType::Varchar) => canmeh(CastContext::Assign <= allows),
+        _ => cannot(),
     }
 }
 
-fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
         (DataType::List(source_elem), DataType::List(target_elem)) => {
-            cast_ok(source_elem, target_elem, allows)
+            cast(source_elem, target_elem, allows)
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::List(_)) => CastContext::Explicit <= allows,
-        (DataType::List(_), DataType::Varchar) => CastContext::Assign <= allows,
-        _ => false,
+        (DataType::Varchar, DataType::List(_)) => canmeh(CastContext::Explicit <= allows),
+        (DataType::List(_), DataType::Varchar) => canmeh(CastContext::Assign <= allows),
+        _ => cannot(),
     }
 }
 
-fn cast_ok_map(source: &DataType, target: &DataType, allows: CastContext) -> bool {
+fn cast_ok_map(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
-        (DataType::Map(source_elem), DataType::Map(target_elem)) => cast_ok(
+        (DataType::Map(source_elem), DataType::Map(target_elem)) => cast(
             &source_elem.clone().into_list(),
             &target_elem.clone().into_list(),
             allows,
         ),
-        _ => false,
+        _ => cannot(),
     }
 }
 
