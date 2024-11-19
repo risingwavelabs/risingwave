@@ -266,7 +266,6 @@ where
 mod tests {
     use std::sync::atomic::AtomicU64;
 
-    use assert_matches::assert_matches;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::hash::SerializedKey;
@@ -373,7 +372,7 @@ mod tests {
         )
         .await;
         let schema = source.schema().clone();
-        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+        let top_n = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
             source,
             ActorContext::for_test(0),
             schema,
@@ -385,14 +384,13 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
-        let mut top_n_executor = top_n_executor.boxed().execute();
+        let mut top_n = top_n.boxed().execute();
 
         // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 + 10 9 1
                 +  8 8 2
@@ -400,58 +398,50 @@ mod tests {
                 +  9 1 1
                 + 10 1 1
                 ",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 - 10 9 1
                 -  8 8 2
                 - 10 1 1
                 +  8 1 3
                 ",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 " I I I
                 - 7 8 2
                 - 8 1 3
                 - 9 1 1
                 ",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 " I I I
                 + 5 1 1
                 + 2 1 1
                 ",
-            ),
+            )
+            .sort_rows(),
         );
     }
 
@@ -469,7 +459,7 @@ mod tests {
         )
         .await;
         let schema = source.schema().clone();
-        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+        let top_n = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
             source,
             ActorContext::for_test(0),
             schema,
@@ -481,66 +471,57 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
-        let mut top_n_executor = top_n_executor.boxed().execute();
+        let mut top_n = top_n.boxed().execute();
 
         // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 +  8 8 2
                 + 10 1 1
                 +  8 1 3
                 ",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 -  8 8 2
                 - 10 1 1
                 ",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 " I I I
                 - 8 1 3",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 " I I I
                 + 5 1 1
                 + 3 1 2
                 ",
-            ),
+            )
+            .sort_rows(),
         );
     }
 
@@ -558,7 +539,7 @@ mod tests {
         )
         .await;
         let schema = source.schema().clone();
-        let top_n_executor = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+        let top_n = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
             source,
             ActorContext::for_test(0),
             schema,
@@ -570,14 +551,13 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
-        let mut top_n_executor = top_n_executor.boxed().execute();
+        let mut top_n = top_n.boxed().execute();
 
         // consume the init barrier
-        top_n_executor.next().await.unwrap().unwrap();
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 + 10 9 1
                 +  8 8 2
@@ -585,56 +565,48 @@ mod tests {
                 +  9 1 1
                 + 10 1 1
                 +  8 1 3",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 - 10 9 1
                 -  8 8 2
                 - 10 1 1",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 - 7 8 2
                 - 8 1 3
                 - 9 1 1",
-            ),
+            )
+            .sort_rows(),
         );
 
         // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-        let res = top_n_executor.next().await.unwrap().unwrap();
+        top_n.expect_barrier().await;
         assert_eq!(
-            res.as_chunk().unwrap(),
-            &StreamChunk::from_pretty(
+            top_n.expect_chunk().await.sort_rows(),
+            StreamChunk::from_pretty(
                 "  I I I
                 +  5 1 1
                 +  2 1 1
                 +  3 1 2
                 +  4 1 3",
-            ),
+            )
+            .sort_rows(),
         );
     }
 
