@@ -33,6 +33,7 @@
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(try_trait_v2)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]

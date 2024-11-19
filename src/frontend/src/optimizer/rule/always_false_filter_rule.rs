@@ -14,7 +14,7 @@
 
 use risingwave_common::types::ScalarImpl;
 
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
 use crate::PlanRef;
@@ -43,7 +43,7 @@ impl Rule for AlwaysFalseFilterRule {
 }
 
 impl AlwaysFalseFilterRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(AlwaysFalseFilterRule)
     }
 }
