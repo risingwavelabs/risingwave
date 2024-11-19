@@ -37,10 +37,6 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWrite
 
 pub const POSTGRES_SINK: &str = "postgres";
 
-fn default_max_batch_rows() -> usize {
-    1024
-}
-
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PostgresConfig {
@@ -51,9 +47,14 @@ pub struct PostgresConfig {
     pub password: String,
     pub database: String,
     pub table: String,
+    #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+}
+
+fn default_max_batch_rows() -> usize {
+    1024
 }
 
 impl PostgresConfig {
