@@ -86,7 +86,7 @@ message CreateSinkRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
   optional ReplaceTablePlan affected_table_change = 3;
-  // The list of object IDs that this materialized view depends on.
+  // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
 }
 
