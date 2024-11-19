@@ -174,8 +174,8 @@ pub struct PostgresSinkWriter {
     client: tokio_postgres::Client,
     buffer: Buffer,
     insert_statement: Statement,
-    delete_statement: Statement,
-    merge_statement: Statement,
+    delete_statement: Option<Statement>,
+    merge_statement: Option<Statement>,
 }
 
 impl PostgresSinkWriter {
@@ -215,29 +215,33 @@ impl PostgresSinkWriter {
                 .context("Failed to prepare insert statement")?
         };
 
-        let delete_statement = {
+        let delete_statement = if is_append_only {
+            None
+        } else {
             let delete_types = pk_indices
                 .iter()
                 .map(|i| schema.fields()[*i].data_type().to_pg_type())
                 .collect_vec();
             let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
-            client
+            Some(client
                 .prepare_typed(&delete_sql, &delete_types)
                 .await
-                .context("Failed to prepare delete statement")?
+                .context("Failed to prepare delete statement")?)
         };
 
-        let merge_statement = {
+        let merge_statement = if is_append_only {
+            None
+        } else {
             let merge_types = schema
                 .fields
                 .iter()
                 .map(|field| field.data_type().to_pg_type())
                 .collect_vec();
             let merge_sql = create_merge_sql(&schema, &config.table, &pk_indices);
-            client
+            Some(client
                 .prepare_typed(&merge_sql, &merge_types)
                 .await
-                .context("Failed to prepare merge statement")?
+                .context("Failed to prepare merge statement")?)
         };
 
         let writer = Self {
@@ -284,13 +288,13 @@ impl PostgresSinkWriter {
                             // in that case it needs to be `INSERTED` rather than UPDATED.
                             // On the other hand, if the record is there, it should be `UPDATED`.
                             self.client
-                                .execute_raw(&self.merge_statement, row.iter())
+                                .execute_raw(self.merge_statement.as_ref().unwrap(), row.iter())
                                 .await?;
                         }
                         Op::Delete => {
                             self.client
                                 .execute_raw(
-                                    &self.delete_statement,
+                                    self.delete_statement.as_ref().unwrap(),
                                     row.project(&self.pk_indices).iter(),
                                 )
                                 .await?;
