@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::pin::Pin;
 
 use either::Either;
-use futures::stream;
 use futures::stream::select_with_strategy;
+use futures::{select, stream, FutureExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -27,7 +28,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
     ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::cdc::external::CdcOffset;
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
 
@@ -42,7 +43,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::executor::UpdateMutation;
+use crate::executor::{BarrierInner, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -130,7 +131,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .inc_by(upstream_processed_row_count);
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    // #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
@@ -168,9 +169,40 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
+        let mut upstream_pending_barriers: VecDeque<Barrier> = VecDeque::new();
+
         let mut upstream = transform_upstream(upstream, &self.output_columns)
+            .fuse()
             .boxed()
             .peekable();
+
+        let table_reader: StreamExecutorResult<ExternalTableReaderImpl> = async {
+            let mut table_reader: Option<ExternalTableReaderImpl> = None;
+            loop {
+                select! {
+                    create_res = create_table_reader(&self.external_table).fuse() => {
+                        table_reader = Some(create_res?);
+                        break;
+                    },
+                    Some(msg) = upstream.next() => {
+                        // the upstream could be barrier and cdc events, we can drop cdc events
+                        match msg? {
+                            Message::Barrier(barrier) => {
+                                // TODO: cache barrier in a queue, and consume
+                                yield Message::Barrier(barrier);
+                            }
+                            _ => {
+                                // ignore cdc events
+                            }
+                        }
+                    },
+                }
+            }
+            Ok(table_reader.expect("table reader must exist"))
+        }
+        .await;
+
+        let table_reader = Arc::new(table_reader?);
 
         state_impl.init_epoch(first_barrier_epoch).await?;
 
@@ -183,14 +215,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
 
-        let mut last_binlog_offset: Option<CdcOffset> = state
-            .last_cdc_offset
-            .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
+        let mut last_binlog_offset: Option<CdcOffset> = state.last_cdc_offset.map_or(
+            self.external_table
+                .current_cdc_offset(&table_reader)
+                .await?,
+            Some,
+        );
 
-        let offset_parse_func = upstream_table_reader
-            .inner()
-            .table_reader()
-            .get_cdc_offset_parser();
+        let offset_parse_func = table_reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
@@ -295,8 +327,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     external_database_name.clone(),
                 );
 
-                let right_snapshot = pin!(upstream_table_reader
-                    .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
+                // let right_snapshot = pin!(upstream_table_reader
+                //     .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
+                //     .map(Either::Right));
+
+                let right_snapshot = pin!(self
+                    .external_table
+                    .snapshot_read_full_table(
+                        table_reader,
+                        read_args,
+                        self.options.snapshot_batch_size
+                    )
                     .map(Either::Right));
 
                 let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
@@ -700,6 +741,36 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         }
     }
+}
+
+async fn create_table_reader(
+    external_table: &ExternalStorageTable,
+) -> StreamExecutorResult<ExternalTableReaderImpl> {
+    let table_reader = external_table.create_table_reader().await?;
+    Ok(table_reader)
+
+    // let mut table_reader: Option<ExternalTableReaderImpl> = None;
+    // loop {
+    //     select! {
+    //         create_res = external_table.create_table_reader().fuse() => {
+    //             table_reader = Some(create_res?);
+    //             break;
+    //         },
+    //         msg = upstream.next().fuse() => {
+    //             // the upstream could be barrier and cdc events, we can drop cdc events
+    //             match msg? {
+    //                 Message::Barrier(barrier) => {
+    //                     // the first barrier should be propagated
+    //                     yield Message::Barrier(barrier);
+    //                 }
+    //                 _ => {
+    //                     // ignore cdc events
+    //                 }
+    //             }
+    //         },
+    //     }
+    // }
+    // Ok(table_reader.expect("table reader must exist"))
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]

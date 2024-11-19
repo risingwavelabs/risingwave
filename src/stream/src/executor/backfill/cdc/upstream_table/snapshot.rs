@@ -138,120 +138,120 @@ fn with_additional_columns(
     StreamChunk::with_visibility(ops, columns, visibility)
 }
 
-impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
-    #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
-        let primary_keys = self
-            .inner
-            .pk_indices()
-            .iter()
-            .map(|idx| {
-                let f = &self.inner.schema().fields[*idx];
-                f.name.clone()
-            })
-            .collect_vec();
-
-        // prepare rate limiter
-        if args.rate_limit_rps == Some(0) {
-            // If limit is 0, we should not read any data from the upstream table.
-            // Keep waiting util the stream is rebuilt.
-            let future = futures::future::pending::<()>();
-            future.await;
-            unreachable!();
-        }
-        let limiter = args.rate_limit_rps.map(|limit| {
-            tracing::info!(rate_limit = limit, "rate limit applied");
-            RateLimiter::direct_with_clock(
-                Quota::per_second(NonZeroU32::new(limit).unwrap()),
-                &MonotonicClock,
-            )
-        });
-
-        let mut read_args = args;
-        let schema_table_name = read_args.schema_table_name.clone();
-        let database_name = read_args.database_name.clone();
-        // loop to read all data from the table
-        loop {
-            tracing::debug!(
-                "snapshot_read primary keys: {:?}, current_pos: {:?}",
-                primary_keys,
-                read_args.current_pos
-            );
-
-            let mut read_count: usize = 0;
-            let row_stream = self.inner.table_reader().snapshot_read(
-                self.inner.schema_table_name(),
-                read_args.current_pos.clone(),
-                primary_keys.clone(),
-                batch_size,
-            );
-
-            pin_mut!(row_stream);
-            let mut builder = DataChunkBuilder::new(
-                self.inner.schema().data_types(),
-                limited_chunk_size(read_args.rate_limit_rps),
-            );
-            let chunk_stream = iter_chunks(row_stream, &mut builder);
-            let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
-
-            #[for_await]
-            for chunk in chunk_stream {
-                let chunk = chunk?;
-                let chunk_size = chunk.capacity();
-                read_count += chunk.cardinality();
-                current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
-
-                if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
-                    // no limit, or empty chunk
-                    yield Some(with_additional_columns(
-                        chunk,
-                        &read_args.additional_columns,
-                        schema_table_name.clone(),
-                        database_name.clone(),
-                    ));
-                    continue;
-                } else {
-                    // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
-                    // May be should be refactored to a common function later.
-                    let limiter = limiter.as_ref().unwrap();
-                    let limit = read_args.rate_limit_rps.unwrap() as usize;
-
-                    // Because we produce chunks with limited-sized data chunk builder and all rows
-                    // are `Insert`s, the chunk size should never exceed the limit.
-                    assert!(chunk_size <= limit);
-
-                    // `InsufficientCapacity` should never happen because we have check the cardinality
-                    limiter
-                        .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
-                        .await
-                        .unwrap();
-                    yield Some(with_additional_columns(
-                        chunk,
-                        &read_args.additional_columns,
-                        schema_table_name.clone(),
-                        database_name.clone(),
-                    ));
-                }
-            }
-
-            // check read_count if the snapshot batch is finished
-            if read_count < batch_size as _ {
-                tracing::debug!("finished loading of full table snapshot");
-                yield None;
-                unreachable!()
-            } else {
-                // update PK position and continue to read the table
-                read_args.current_pos = Some(current_pk_pos);
-            }
-        }
-    }
-
-    async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
-        let binlog = self.inner.table_reader().current_cdc_offset();
-        let binlog = binlog.await?;
-        Ok(Some(binlog))
-    }
-}
+// impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
+//     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
+//     async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
+//         let primary_keys = self
+//             .inner
+//             .pk_indices()
+//             .iter()
+//             .map(|idx| {
+//                 let f = &self.inner.schema().fields[*idx];
+//                 f.name.clone()
+//             })
+//             .collect_vec();
+//
+//         // prepare rate limiter
+//         if args.rate_limit_rps == Some(0) {
+//             // If limit is 0, we should not read any data from the upstream table.
+//             // Keep waiting util the stream is rebuilt.
+//             let future = futures::future::pending::<()>();
+//             future.await;
+//             unreachable!();
+//         }
+//         let limiter = args.rate_limit_rps.map(|limit| {
+//             tracing::info!(rate_limit = limit, "rate limit applied");
+//             RateLimiter::direct_with_clock(
+//                 Quota::per_second(NonZeroU32::new(limit).unwrap()),
+//                 &MonotonicClock,
+//             )
+//         });
+//
+//         let mut read_args = args;
+//         let schema_table_name = read_args.schema_table_name.clone();
+//         let database_name = read_args.database_name.clone();
+//         // loop to read all data from the table
+//         loop {
+//             tracing::debug!(
+//                 "snapshot_read primary keys: {:?}, current_pos: {:?}",
+//                 primary_keys,
+//                 read_args.current_pos
+//             );
+//
+//             let mut read_count: usize = 0;
+//             let row_stream = self.inner.table_reader().snapshot_read(
+//                 self.inner.schema_table_name(),
+//                 read_args.current_pos.clone(),
+//                 primary_keys.clone(),
+//                 batch_size,
+//             );
+//
+//             pin_mut!(row_stream);
+//             let mut builder = DataChunkBuilder::new(
+//                 self.inner.schema().data_types(),
+//                 limited_chunk_size(read_args.rate_limit_rps),
+//             );
+//             let chunk_stream = iter_chunks(row_stream, &mut builder);
+//             let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
+//
+//             #[for_await]
+//             for chunk in chunk_stream {
+//                 let chunk = chunk?;
+//                 let chunk_size = chunk.capacity();
+//                 read_count += chunk.cardinality();
+//                 current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
+//
+//                 if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
+//                     // no limit, or empty chunk
+//                     yield Some(with_additional_columns(
+//                         chunk,
+//                         &read_args.additional_columns,
+//                         schema_table_name.clone(),
+//                         database_name.clone(),
+//                     ));
+//                     continue;
+//                 } else {
+//                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
+//                     // May be should be refactored to a common function later.
+//                     let limiter = limiter.as_ref().unwrap();
+//                     let limit = read_args.rate_limit_rps.unwrap() as usize;
+//
+//                     // Because we produce chunks with limited-sized data chunk builder and all rows
+//                     // are `Insert`s, the chunk size should never exceed the limit.
+//                     assert!(chunk_size <= limit);
+//
+//                     // `InsufficientCapacity` should never happen because we have check the cardinality
+//                     limiter
+//                         .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
+//                         .await
+//                         .unwrap();
+//                     yield Some(with_additional_columns(
+//                         chunk,
+//                         &read_args.additional_columns,
+//                         schema_table_name.clone(),
+//                         database_name.clone(),
+//                     ));
+//                 }
+//             }
+//
+//             // check read_count if the snapshot batch is finished
+//             if read_count < batch_size as _ {
+//                 tracing::debug!("finished loading of full table snapshot");
+//                 yield None;
+//                 unreachable!()
+//             } else {
+//                 // update PK position and continue to read the table
+//                 read_args.current_pos = Some(current_pk_pos);
+//             }
+//         }
+//     }
+//
+//     async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
+//         let binlog = self.inner.table_reader().current_cdc_offset();
+//         let binlog = binlog.await?;
+//         Ok(Some(binlog))
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
