@@ -18,7 +18,7 @@ message = {
     "timestamp": 1639581841
 }
 
-SERVER_URL = "http://127.0.0.1:4560/message/dev/public/"
+SERVER_URL = "http://127.0.0.1:4560/webhook/dev/public/"
 
 
 def generate_signature_hmac(secret, payload, auth_algo, prefix):
@@ -118,7 +118,7 @@ def send_hubspot_sha256_v2(secret):
     url = SERVER_URL + "hubspot_sha256_v2"
 
     payload_json = json.dumps(payload)
-    payload = secret + 'POST' + SERVER_URL + str(payload_json)
+    payload = secret + 'POST' + url + str(payload_json)
     signature = hashlib.sha256(payload.encode('utf-8')).hexdigest()
     # Webhook message headers
     headers = {

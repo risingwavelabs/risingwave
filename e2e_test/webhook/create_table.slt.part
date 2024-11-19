@@ -49,7 +49,7 @@ create table hubspot_sha256_v2 (
   encode(
     sha256(
       convert_to(
-        (test_secret || 'POST' || 'http://127.0.0.1:4560/message/dev/public/' || convert_from(data, 'utf8'))
+        (test_secret || 'POST' || 'http://127.0.0.1:4560/webhook/dev/public/hubspot_sha256_v2' || convert_from(data, 'utf8'))
       , 'UTF8')
     ), 'hex')
 );

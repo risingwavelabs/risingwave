@@ -188,7 +188,7 @@ impl WebhookService {
             .layer(cors_layer);
 
         let app = Router::new()
-            .nest("/message", api_router)
+            .nest("/webhook", api_router)
             .layer(CompressionLayer::new());
 
         let listener = TcpListener::bind(&srv.webhook_addr)
