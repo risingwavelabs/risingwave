@@ -32,7 +32,7 @@ use risingwave_common::must_match;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::StateStoreImpl;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -145,14 +145,21 @@ use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitialPartialGraph;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
-fn sync_epoch<S: StateStore>(
-    state_store: &S,
+fn sync_epoch(
+    state_store: &StateStoreImpl,
     streaming_metrics: &StreamingMetrics,
     prev_epoch: u64,
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let future = state_store.sync(prev_epoch, table_ids);
+    let hummock = state_store.as_hummock().cloned();
+    let future = async move {
+        if let Some(hummock) = hummock {
+            hummock.sync(vec![(prev_epoch, table_ids)]).await
+        } else {
+            Ok(SyncResult::default())
+        }
+    };
     future
         .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
@@ -771,16 +778,12 @@ impl PartialGraphManagedBarrierState {
                     None
                 }
                 BarrierKind::Barrier => None,
-                BarrierKind::Checkpoint => {
-                    dispatch_state_store!(&self.state_store, state_store, {
-                        Some(sync_epoch(
-                            state_store,
-                            &self.streaming_metrics,
-                            prev_epoch,
-                            table_ids.expect("should be Some on BarrierKind::Checkpoint"),
-                        ))
-                    })
-                }
+                BarrierKind::Checkpoint => Some(sync_epoch(
+                    &self.state_store,
+                    &self.streaming_metrics,
+                    prev_epoch,
+                    table_ids.expect("should be Some on BarrierKind::Checkpoint"),
+                )),
             };
 
             let barrier = barrier_state.barrier.clone();
