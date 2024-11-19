@@ -60,15 +60,11 @@ pub async fn handle_create_function(
     };
 
     let runtime = match params.runtime {
-        Some(runtime) => {
-            if language == "javascript" {
-                Some(runtime.real_value())
-            } else {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "runtime is only supported for javascript".to_string(),
-                )
-                .into());
-            }
+        Some(_) => {
+            return Err(ErrorCode::InvalidParameterValue(
+                "runtime selection is currently not supported".to_string(),
+            )
+            .into());
         }
         None => None,
     };
@@ -141,13 +137,6 @@ pub async fn handle_create_function(
         }
         _ => None,
     };
-    let function_type = match params.function_type {
-        Some(CreateFunctionType::Sync) => Some("sync".to_string()),
-        Some(CreateFunctionType::Async) => Some("async".to_string()),
-        Some(CreateFunctionType::Generator) => Some("generator".to_string()),
-        Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
-        None => None,
-    };
 
     let create_fn =
         risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
@@ -176,6 +165,7 @@ pub async fn handle_create_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
+        runtime,
         identifier: Some(output.identifier),
         link: link.map(|s| s.to_string()),
         body: output.body,
@@ -184,8 +174,6 @@ pub async fn handle_create_function(
         always_retry_on_network_error: with_options
             .always_retry_on_network_error
             .unwrap_or_default(),
-        runtime,
-        function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;

@@ -23,7 +23,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};
@@ -37,6 +37,7 @@ use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
+
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
@@ -147,6 +148,30 @@ impl<S> MonitoredStateStore<S> {
 
         Ok(value)
     }
+
+    async fn monitored_get_keyed_row(
+        &self,
+        get_keyed_row_future: impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>>,
+        table_id: TableId,
+        key_len: usize,
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
+        let mut stats =
+            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
+
+        let value = get_keyed_row_future
+            .verbose_instrument_await("store_get_keyed_row")
+            .instrument(tracing::trace_span!("store_get_keyed_row"))
+            .await
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in get"))?;
+
+        stats.get_key_size = key_len;
+        if let Some((_, value)) = value.as_ref() {
+            stats.get_value_size = value.len();
+        }
+        stats.report();
+
+        Ok(value)
+    }
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
@@ -154,15 +179,19 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     type Iter = impl StateStoreReadIter;
     type RevIter = impl StateStoreReadIter;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
+    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + '_ {
         let table_id = read_options.table_id;
         let key_len = key.len();
-        self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
+        self.monitored_get_keyed_row(
+            self.inner.get_keyed_row(key, epoch, read_options),
+            table_id,
+            key_len,
+        )
     }
 
     fn iter(
@@ -306,25 +335,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
-    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let future = self
-            .inner
-            .sync(epoch, table_ids)
-            .instrument_await("store_sync");
-        let timer = self.storage_metrics.sync_duration.start_timer();
-        let sync_size = self.storage_metrics.sync_size.clone();
-        async move {
-            let sync_result = future
-                .await
-                .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
-            timer.observe_duration();
-            if sync_result.sync_size != 0 {
-                sync_size.observe(sync_result.sync_size as _);
-            }
-            Ok(sync_result)
-        }
-    }
-
     fn monitored(
         self,
         _storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -350,6 +360,26 @@ impl MonitoredStateStore<HummockStorage> {
 
     pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager().clone()
+    }
+
+    pub async fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> StorageResult<SyncResult> {
+        let future = self
+            .inner
+            .sync(sync_table_epochs)
+            .instrument_await("store_sync");
+        let timer = self.storage_metrics.sync_duration.start_timer();
+        let sync_size = self.storage_metrics.sync_size.clone();
+        let sync_result = future
+            .await
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
+        timer.observe_duration();
+        if sync_result.sync_size != 0 {
+            sync_size.observe(sync_result.sync_size as _);
+        }
+        Ok(sync_result)
     }
 }
 
