@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -39,7 +39,9 @@ use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::{commit_multi_var, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_object_id};
-use crate::hummock::{TableWriteThroughputStatistic, TableWriteThroughputStatisticManager};
+use crate::hummock::table_write_throughput_statistic::{
+    TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
+};
 use crate::manager::MetaOpts;
 
 impl HummockManager {
@@ -742,12 +744,12 @@ impl HummockManager {
         _table_size: &u64,
         parent_group_id: u64,
     ) {
-        if let Some(table_throughput) = table_write_throughput_statistic_manager
-            .get_table_throughput(
-                table_id,
-                self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
-            )
-        {
+        let table_throughput = table_write_throughput_statistic_manager.get_table_throughput(
+            table_id,
+            self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
+        );
+
+        if !table_throughput.is_empty() {
             let is_high_write_throughput = is_table_high_write_throughput(
                 table_throughput,
                 self.env.opts.table_high_write_throughput_threshold,
@@ -957,7 +959,7 @@ impl HummockManager {
 
 /// Check if the table is high write throughput with the given threshold and ratio.
 pub fn is_table_high_write_throughput(
-    table_throughput: Vec<&TableWriteThroughputStatistic>,
+    table_throughput: VecDeque<&TableWriteThroughputStatistic>,
     threshold: u64,
     high_write_throughput_ratio: f64,
 ) -> bool {
@@ -973,7 +975,7 @@ pub fn is_table_high_write_throughput(
 }
 
 pub fn is_table_low_write_throughput(
-    table_throughput: Vec<&TableWriteThroughputStatistic>,
+    table_throughput: VecDeque<&TableWriteThroughputStatistic>,
     threshold: u64,
     low_write_throughput_ratio: f64,
 ) -> bool {
@@ -996,13 +998,19 @@ fn check_is_low_write_throughput_compaction_group(
     let table_with_statistic: Vec<_> = group
         .table_statistic
         .keys()
-        .filter(|table_id| table_write_throughput_statistic_manager.contains(**table_id))
         .cloned()
         .filter_map(|table_id| {
-            table_write_throughput_statistic_manager.get_table_throughput(
-                table_id,
-                opts.table_stat_throuput_window_seconds_for_merge as i64,
-            )
+            let table_write_throughput_statistic = table_write_throughput_statistic_manager
+                .get_table_throughput(
+                    table_id,
+                    opts.table_stat_throuput_window_seconds_for_merge as i64,
+                );
+
+            if table_write_throughput_statistic.is_empty() {
+                return None;
+            } else {
+                return Some(table_write_throughput_statistic);
+            }
         })
         .collect();
 

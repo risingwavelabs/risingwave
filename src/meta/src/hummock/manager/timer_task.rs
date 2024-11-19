@@ -316,12 +316,12 @@ impl HummockManager {
                                                     .table_stat_throuput_window_seconds_for_merge,
                                             );
                                             for table_id in group_info.table_statistic.keys() {
-                                                if let Some(statistic_vec) = tables_throughput
+                                                let statistic_vec = tables_throughput
                                                     .get_table_throughput(
                                                         *table_id,
                                                         max_statistic_expired_time as i64,
-                                                    )
-                                                {
+                                                    );
+                                                if !statistic_vec.is_empty() {
                                                     let table_avg_throughput = statistic_vec
                                                         .iter()
                                                         .map(|statistic| statistic.throughput)

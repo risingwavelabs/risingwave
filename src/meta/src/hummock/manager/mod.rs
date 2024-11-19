@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
+use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
@@ -58,6 +59,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
 mod transaction;
@@ -499,70 +501,5 @@ async fn write_exclusive_cluster_id(
             }
             Err(e.into())
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TableWriteThroughputStatistic {
-    pub throughput: u64,
-    pub timestamp: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TableWriteThroughputStatisticManager {
-    table_throughput: HashMap<u32, Vec<TableWriteThroughputStatistic>>,
-    max_statistic_expired_time: i64,
-}
-
-impl TableWriteThroughputStatisticManager {
-    pub fn new(max_statistic_expired_time: i64) -> Self {
-        Self {
-            table_throughput: HashMap::new(),
-            max_statistic_expired_time,
-        }
-    }
-
-    pub fn add_table_throughput_with_ts(&mut self, table_id: u32, throughput: u64, timestamp: i64) {
-        let table_throughput = self
-            .table_throughput
-            .entry(table_id)
-            .or_insert_with(Vec::new);
-        table_throughput.push(TableWriteThroughputStatistic {
-            throughput,
-            timestamp,
-        });
-
-        table_throughput
-            .retain(|statistic| timestamp - statistic.timestamp <= self.max_statistic_expired_time);
-    }
-
-    pub fn get_table_throughput(
-        &self,
-        table_id: u32,
-        expired_time: i64,
-    ) -> Option<Vec<&TableWriteThroughputStatistic>> {
-        let timestamp = chrono::Utc::now().timestamp();
-        if let Some(statistics) = self.table_throughput.get(&table_id) {
-            let table_throughput_statistics = statistics
-                .iter()
-                .filter(|statistic| timestamp - statistic.timestamp <= expired_time)
-                .collect_vec();
-
-            if !table_throughput_statistics.is_empty() {
-                Some(table_throughput_statistics)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    pub fn retain(&mut self) {
-        self.table_throughput.retain(|_, v| !v.is_empty());
-    }
-
-    pub fn contains(&self, table_id: u32) -> bool {
-        self.table_throughput.contains_key(&table_id)
     }
 }
