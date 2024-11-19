@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
@@ -112,7 +113,7 @@ impl HummockManager {
         let state_table_info = &version.latest_version().state_table_info;
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
         let mut new_table_ids = HashMap::new();
-        let mut compaction_groups = HashMap::new();
+        let mut new_compaction_groups = Vec::new();
         let mut compaction_group_manager_txn = None;
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
@@ -143,17 +144,13 @@ impl HummockManager {
                     )
                 };
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-            compaction_groups.insert(
-                new_compaction_group_id,
-                (true, compaction_group_config.clone()),
-            );
-            compaction_group_manager.insert(
-                new_compaction_group_id,
-                CompactionGroup {
-                    group_id: new_compaction_group_id,
-                    compaction_config: compaction_group_config,
-                },
-            );
+            let new_compaction_group = CompactionGroup {
+                group_id: new_compaction_group_id,
+                compaction_config: compaction_group_config.clone(),
+            };
+
+            new_compaction_groups.push(new_compaction_group.clone());
+            compaction_group_manager.insert(new_compaction_group_id, new_compaction_group);
 
             on_handle_add_new_table(
                 state_table_info,
@@ -168,35 +165,35 @@ impl HummockManager {
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
 
-        let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
+        let modified_compaction_groups = commit_sstables.keys().cloned().collect_vec();
         // fill compaction_groups
+        let mut group_id_to_config = HashMap::new();
         if let Some(compaction_group_manager) = compaction_group_manager_txn.as_ref() {
             for cg_id in &modified_compaction_groups {
-                if !compaction_groups.contains_key(cg_id) {
-                    let compaction_group = compaction_group_manager
-                        .get(cg_id)
-                        .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
-                        .compaction_config();
-                    compaction_groups.insert(*cg_id, (false, compaction_group));
-                }
+                let compaction_group = compaction_group_manager
+                    .get(cg_id)
+                    .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                    .compaction_config();
+                group_id_to_config.insert(*cg_id, compaction_group);
             }
         } else {
             let compaction_group_manager = self.compaction_group_manager.read().await;
             for cg_id in &modified_compaction_groups {
-                if !compaction_groups.contains_key(cg_id) {
-                    let compaction_group = compaction_group_manager
-                        .try_get_compaction_group_config(*cg_id)
-                        .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
-                        .compaction_config();
-                    compaction_groups.insert(*cg_id, (false, compaction_group));
-                }
+                let compaction_group = compaction_group_manager
+                    .try_get_compaction_group_config(*cg_id)
+                    .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                    .compaction_config();
+                group_id_to_config.insert(*cg_id, compaction_group);
             }
         }
 
+        let group_id_to_sub_levels =
+            rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
+
         let time_travel_delta = version.pre_commit_epoch(
             &tables_to_commit,
-            compaction_groups,
-            commit_sstables,
+            new_compaction_groups,
+            group_id_to_sub_levels,
             &new_table_ids,
             new_table_watermarks,
             change_log_delta,
@@ -444,4 +441,45 @@ fn on_handle_add_new_table(
     }
 
     Ok(())
+}
+
+/// Rewrite the commit sstables to sub-levels based on the compaction group config.
+/// The type of `compaction_group_manager_txn` is too complex to be used in the function signature. So we use `HashMap` instead.
+fn rewrite_commit_sstables_to_sub_level(
+    commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
+    group_id_to_config: &HashMap<CompactionGroupId, Arc<CompactionConfig>>,
+) -> BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>> {
+    let mut overlapping_sstables: BTreeMap<u64, Vec<Vec<SstableInfo>>> = BTreeMap::new();
+    for (group_id, inserted_table_infos) in commit_sstables {
+        let config = group_id_to_config
+            .get(&group_id)
+            .expect("compaction group should exist");
+
+        let mut accumulated_size = 0;
+        let mut ssts = vec![];
+        let sub_level_size_limit = config.sub_level_max_compaction_bytes * 2; // TODO: use config instead of magic number
+
+        let level = overlapping_sstables.entry(group_id).or_default();
+
+        for sst in inserted_table_infos {
+            accumulated_size += sst.sst_size;
+            ssts.push(sst);
+            if accumulated_size > sub_level_size_limit {
+                level.push(ssts);
+
+                // reset the accumulated size and ssts
+                accumulated_size = 0;
+                ssts = vec![];
+            }
+        }
+
+        if accumulated_size != 0 {
+            level.push(ssts);
+        }
+
+        // The uploader organizes the ssts in decreasing epoch order, so the level needs to be reversed to ensure that the latest epoch is at the top.
+        level.reverse();
+    }
+
+    overlapping_sstables
 }
