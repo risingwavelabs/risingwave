@@ -258,6 +258,54 @@ impl PostgresSinkWriter {
                 .context("Failed to prepare delete statement")?
         };
 
+        let merge_statement = {
+            let named_parameters: String = self
+                .schema
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, field)| {
+                    // let data_type = field.data_type();
+                    // check_data_type_compatibility(&data_type)?;
+                    format!("${} as {}", i + 1, &field.name)
+                })
+                .collect_vec()
+                .join(",");
+            let conditions: String = pk_fields
+                .iter()
+                .map(|pk_field| format!("source.{} = target.{}", pk_field.name, pk_field.name))
+                .collect_vec()
+                .join(" AND ");
+            let update_vars: String = self
+                .schema
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, field)| format!("target.{} = source.{}", field.name, field.name))
+                .collect_vec()
+                .join(",");
+            let insert_vars: String = self
+                .schema
+                .fields
+                .iter()
+                .map(|field| format!("source.{}", field.name))
+                .collect_vec()
+                .join(",");
+            let merge_sql = format!(
+                "
+            MERGE INTO {table_name} target
+            USING (SELECT {named_parameters} FROM {table_name}) AS source
+            ON ({conditions})
+            WHEN MATCHED THEN UPDATE SET ({update_vars})
+            WHEN NOT MATCHED THEN INSERT VALUES ({insert_vars})
+            "
+            );
+            self.client
+                .prepare(&merge_sql) // TODO: use prepare_typed instead
+                .await
+                .context("Failed to prepare merge statement")?
+        };
+
         for chunk in self.buffer.drain() {
             for (op, row) in chunk.rows() {
                 match op {
@@ -271,9 +319,17 @@ impl PostgresSinkWriter {
                         let params_ref = &params[..];
                         self.client.execute(&insert_statement, params_ref).await?;
                     }
-                    Op::UpdateInsert => {}
-                    Op::Delete => {}
-                    Op::UpdateDelete => {
+                    Op::UpdateInsert => {
+                        let owned = row.into_owned_row();
+                        let params = owned
+                            .as_inner()
+                            .iter()
+                            .map(|s| s as &(dyn ToSql + Sync))
+                            .collect_vec();
+                        let params_ref = &params[..];
+                        self.client.execute(&merge_statement, params_ref).await?;
+                    }
+                    Op::Delete => {
                         let owned = row.project(&self.pk_indices).into_owned_row();
                         let params = owned
                             .as_inner()
@@ -283,6 +339,7 @@ impl PostgresSinkWriter {
                         let params_ref = &params[..];
                         self.client.execute(&delete_statement, params_ref).await?;
                     }
+                    Op::UpdateDelete => {}
                 }
             }
         }
