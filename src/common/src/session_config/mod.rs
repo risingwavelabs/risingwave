@@ -77,7 +77,7 @@ pub struct SessionConfig {
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
+    #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
 
     /// Sets the number of digits displayed for floating-point values.
