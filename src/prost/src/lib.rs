@@ -336,9 +336,16 @@ impl stream_plan::FragmentTypeFlag {
         stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
     }
 
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn sink_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Sink as i32
+    }
+
     /// Note: this doesn't include `FsFetch` created in old versions.
     pub fn rate_limit_fragments() -> i32 {
-        Self::backfill_rate_limit_fragments() | Self::source_rate_limit_fragments()
+        Self::backfill_rate_limit_fragments()
+            | Self::source_rate_limit_fragments()
+            | Self::sink_rate_limit_fragments()
     }
 
     pub fn dml_rate_limit_fragments() -> i32 {
