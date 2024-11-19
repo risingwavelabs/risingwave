@@ -34,10 +34,10 @@ use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
 use crate::executor::prelude::*;
-
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
@@ -52,6 +52,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     need_advance_delete: bool,
     re_construct_with_sink_pk: bool,
     compact_chunk: bool,
+    rate_limit: Option<u32>,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -93,6 +94,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_store_factory: F,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
+        rate_limit: Option<u32>,
     ) -> StreamExecutorResult<Self> {
         let sink = build_sink(sink_param.clone())
             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
@@ -180,6 +182,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             need_advance_delete,
             re_construct_with_sink_pk,
             compact_chunk,
+            rate_limit,
         })
     }
 
@@ -218,6 +221,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         );
 
         if self.sink.is_sink_into_table() {
+            // TODO(hzxa21): support rate limit?
             processed_input.boxed()
         } else {
             let labels = [
@@ -240,6 +244,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 log_store_write_rows,
             };
 
+            let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+            // Init the rate limit
+            rate_limit_tx.send(self.rate_limit).unwrap();
+
             self.log_store_factory
                 .build()
                 .map(move |(log_reader, log_writer)| {
@@ -247,6 +255,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        rate_limit_tx,
                     );
 
                     let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
@@ -257,6 +266,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
+                            rate_limit_rx,
                         )
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
@@ -276,6 +286,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: impl LogWriter,
         actor_id: ActorId,
+        rate_limit_tx: UnboundedSender<Option<u32>>,
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
@@ -314,6 +325,23 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Mutation::Resume => {
                                 log_writer.resume()?;
                                 is_paused = false;
+                            }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                                    tracing::info!(
+                                        rate_limit = new_rate_limit,
+                                        "update actor {actor_id} sink rate limit"
+                                    );
+                                    if let Err(e) = rate_limit_tx.send(*new_rate_limit) {
+                                        error!(
+                                            error = %e.as_report(),
+                                            "fail to send sink ate limit update"
+                                        );
+                                        return Err(StreamExecutorError::from(
+                                            e.to_report_string(),
+                                        ));
+                                    }
+                                }
                             }
                             _ => (),
                         }
@@ -464,6 +492,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
+        rate_limit_rx: UnboundedReceiver<Option<u32>>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
             .iter()
@@ -506,7 +535,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     chunk
                 }
             })
-            .monitored(metrics);
+            .monitored(metrics)
+            .rate_limited(rate_limit_rx);
 
         log_reader.init().await?;
 
@@ -664,6 +694,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            None,
         )
         .await
         .unwrap();
@@ -793,6 +824,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
+            None,
         )
         .await
         .unwrap();
@@ -895,6 +927,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64],
+            None,
         )
         .await
         .unwrap();

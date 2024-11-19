@@ -1,0 +1,49 @@
+statement ok
+CREATE TABLE t1(v1 int, v2 int);
+
+statement ok
+CREATE SINK s1 AS select * from t1 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+SET SINK_RATE_LIMIT TO 100;
+
+statement ok
+SET SINK_RATE_LIMIT TO 0;
+
+statement ok
+SET SINK_RATE_LIMIT TO default;
+
+statement ok
+ALTER SINK s1 SET SINK_RATE_LIMIT = 1000;
+
+statement ok
+ALTER SINK s1 SET SINK_RATE_LIMIT = 0;
+
+statement ok
+ALTER SINK s1 SET SINK_RATE_LIMIT = default;
+
+statement ok
+create table t2 (v1 int primary key, v2 int);
+
+statement ok
+create sink s2 into t2 as select v1, v2 from t1;
+
+statement error
+ALTER SINK s2 SET SINK_RATE_LIMIT = 0;
+
+statement ok
+DROP SINK s2;
+
+statement ok
+DROP SINK s1;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+FLUSH;
