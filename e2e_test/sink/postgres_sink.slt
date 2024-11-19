@@ -36,8 +36,8 @@ CREATE TABLE rw_types_table (
     id BIGINT PRIMARY KEY,
     varchar_column VARCHAR,
     text_column TEXT,
-    integer_column INTEGER,
     smallint_column SMALLINT,
+    integer_column INTEGER,
     bigint_column BIGINT,
     decimal_column DECIMAL,
     real_column REAL,
@@ -45,9 +45,9 @@ CREATE TABLE rw_types_table (
     boolean_column BOOLEAN,
     date_column DATE,
     time_column TIME,
-    timestamp_column TIMESTAMP,
     interval_column INTERVAL,
-    jsonb_column JSONB
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
 );
 
 statement ok
