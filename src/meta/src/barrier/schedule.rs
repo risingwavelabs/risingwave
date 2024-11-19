@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,7 +32,6 @@ use super::notifier::Notifier;
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
 
@@ -106,9 +105,7 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs { .. }
-                    | Command::CancelStreamingJob(_)
-                    | Command::DropSubscription { .. }
+                Command::DropStreamingJobs { .. } | Command::DropSubscription { .. }
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -400,9 +397,7 @@ impl ScheduledBarriers {
 impl ScheduledBarriers {
     /// Pre buffered drop and cancel command, return true if any.
     pub(super) fn pre_apply_drop_cancel(&self) -> bool {
-        let (dropped_actors, cancelled) = self.pre_apply_drop_cancel_scheduled();
-
-        !dropped_actors.is_empty() || !cancelled.is_empty()
+        self.pre_apply_drop_cancel_scheduled()
     }
 
     /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
@@ -425,22 +420,18 @@ impl ScheduledBarriers {
 
     /// Try to pre apply drop and cancel scheduled command and return them if any.
     /// It should only be called in recovery.
-    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
+    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> bool {
         let mut queue = self.inner.queue.lock();
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
+        let mut applied = false;
 
         while let Some(ScheduledQueueItem {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs { actors, .. } => {
-                    dropped_actors.extend(actors);
-                }
-                Command::CancelStreamingJob(table_fragments) => {
-                    let table_id = table_fragments.table_id();
-                    cancel_table_ids.insert(table_id);
+                Command::DropStreamingJobs { .. } => {
+                    applied = true;
                 }
                 Command::DropSubscription { .. } => {}
                 _ => {
@@ -451,7 +442,7 @@ impl ScheduledBarriers {
                 notify.notify_collected();
             });
         }
-        (dropped_actors, cancel_table_ids)
+        applied
     }
 }
 

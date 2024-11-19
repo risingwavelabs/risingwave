@@ -28,6 +28,7 @@ mod bind_context;
 mod bind_param;
 mod create;
 mod create_view;
+mod declare_cursor;
 mod delete;
 mod expr;
 pub mod fetch_cursor;

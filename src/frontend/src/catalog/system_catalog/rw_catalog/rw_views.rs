@@ -27,7 +27,7 @@ struct RwView {
     schema_id: i32,
     owner: i32,
     definition: String,
-    acl: String,
+    acl: Vec<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_views")]

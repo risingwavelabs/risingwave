@@ -35,3 +35,8 @@ export async function getClusterInfoComputeNode() {
   )
   return res
 }
+
+export async function getClusterVersion() {
+  const res = await api.get("/version")
+  return res
+}

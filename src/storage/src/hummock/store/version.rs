@@ -66,7 +66,7 @@ use crate::mem_table::{
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions};
+use crate::store::{gen_min_epoch, ReadLogOptions, ReadOptions, StateStoreKeyedRow};
 
 pub type CommittedVersion = PinnedVersion;
 
@@ -530,7 +530,7 @@ impl HummockVersionReader {
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
@@ -558,7 +558,16 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    data.into_user_value()
+                    data.into_user_value().map(|v| {
+                        (
+                            FullKey::new_with_gap_epoch(
+                                read_options.table_id,
+                                table_key.clone(),
+                                data_epoch,
+                            ),
+                            v,
+                        )
+                    })
                 });
             }
         }
@@ -590,7 +599,16 @@ impl HummockVersionReader {
                 return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
-                    data.into_user_value()
+                    data.into_user_value().map(|v| {
+                        (
+                            FullKey::new_with_gap_epoch(
+                                read_options.table_id,
+                                table_key.clone(),
+                                data_epoch,
+                            ),
+                            v,
+                        )
+                    })
                 });
             }
         }
@@ -626,7 +644,16 @@ impl HummockVersionReader {
                             return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
                             } else {
-                                data.into_user_value()
+                                data.into_user_value().map(|v| {
+                                    (
+                                        FullKey::new_with_gap_epoch(
+                                            read_options.table_id,
+                                            table_key.clone(),
+                                            data_epoch,
+                                        ),
+                                        v,
+                                    )
+                                })
                             });
                         }
                     }
@@ -661,7 +688,16 @@ impl HummockVersionReader {
                         return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
                         } else {
-                            data.into_user_value()
+                            data.into_user_value().map(|v| {
+                                (
+                                    FullKey::new_with_gap_epoch(
+                                        read_options.table_id,
+                                        table_key.clone(),
+                                        data_epoch,
+                                    ),
+                                    v,
+                                )
+                            })
                         });
                     }
                 }

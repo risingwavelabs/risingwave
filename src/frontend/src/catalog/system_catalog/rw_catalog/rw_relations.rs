@@ -37,5 +37,5 @@ struct RwRelation {
     schema_id: i32,
     owner: i32,
     definition: String,
-    acl: String,
+    acl: Vec<String>,
 }

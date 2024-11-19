@@ -248,6 +248,7 @@ mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
 mod values_extract_project_rule;
 
+pub use batch::batch_iceberg_predicate_pushdown::*;
 pub use batch::batch_push_limit_to_scan_rule::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
 pub use source_to_iceberg_scan_rule::*;
@@ -331,6 +332,7 @@ macro_rules! for_all_rules {
             , { AggCallMergeRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
+            , { BatchIcebergPredicatePushDownRule }
             , { PullUpCorrelatedPredicateAggRule }
             , { SourceToKafkaScanRule }
             , { SourceToIcebergScanRule }
