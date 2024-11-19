@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
 
+use super::top_n_cache::TopNStaging;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::executor::prelude::*;
@@ -126,9 +127,11 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecuto
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.cache.limit);
-        let mut res_rows = Vec::with_capacity(self.cache.limit);
+    async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let mut staging = TopNStaging::new();
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
@@ -138,8 +141,7 @@ where
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state.insert(row_ref);
-                    self.cache
-                        .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
+                    self.cache.insert(cache_key, row_ref, &mut staging)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -151,14 +153,24 @@ where
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
-                            &mut res_ops,
-                            &mut res_rows,
+                            &mut staging,
                         )
                         .await?
                 }
             }
         }
-        generate_output(res_rows, res_ops, &self.schema)
+
+        let data_types = self.schema.data_types();
+        let deserializer = RowDeserializer::new(data_types.clone());
+        if staging.is_empty() {
+            return Ok(None);
+        }
+        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
+        for res in staging.into_deserialized_changes(&deserializer) {
+            let (op, row) = res?;
+            let _none = chunk_builder.append_row(op, row);
+        }
+        Ok(chunk_builder.take())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

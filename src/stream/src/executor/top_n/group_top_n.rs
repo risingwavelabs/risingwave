@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -157,14 +158,18 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.limit);
-        let mut res_rows = Vec::with_capacity(self.limit);
+    async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let keys = K::build_many(&self.group_by, chunk.data_chunk());
+        let mut stagings = HashMap::new(); // K -> `TopNStaging`
+
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row_ref)) = r else {
                 continue;
             };
+
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
@@ -184,12 +189,13 @@ where
             }
 
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
+            let staging = stagings.entry(group_cache_key.clone()).or_default();
 
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state.insert(row_ref);
-                    cache.insert(cache_key, row_ref, &mut res_ops, &mut res_rows);
+                    cache.insert(cache_key, row_ref, staging);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -200,17 +206,27 @@ where
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
-                            &mut res_ops,
-                            &mut res_rows,
+                            staging,
                         )
                         .await?;
                 }
             }
         }
+
         self.metrics
             .group_top_n_cached_entry_count
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, &self.schema)
+
+        let data_types = self.schema.data_types();
+        let deserializer = RowDeserializer::new(data_types.clone());
+        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(chunk.capacity()));
+        for staging in stagings.into_values() {
+            for res in staging.into_deserialized_changes(&deserializer) {
+                let (op, row) = res?;
+                let _none = chunk_builder.append_row(op, row);
+            }
+        }
+        Ok(chunk_builder.take())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

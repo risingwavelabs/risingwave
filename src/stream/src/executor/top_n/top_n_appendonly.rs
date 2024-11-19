@@ -17,7 +17,7 @@ use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::top_n_cache::AppendOnlyTopNCacheTrait;
+use super::top_n_cache::{AppendOnlyTopNCacheTrait, TopNStaging};
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::executor::prelude::*;
@@ -104,11 +104,13 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
 where
     TopNCache<WITH_TIES>: AppendOnlyTopNCacheTrait,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.cache.limit);
-        let mut res_rows = Vec::with_capacity(self.cache.limit);
+    async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let mut staging = TopNStaging::new();
         let data_types = self.schema.data_types();
-        let row_deserializer = RowDeserializer::new(data_types);
+        let deserializer = RowDeserializer::new(data_types.clone());
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
@@ -117,14 +119,21 @@ where
             self.cache.insert(
                 cache_key,
                 row_ref,
-                &mut res_ops,
-                &mut res_rows,
+                &mut staging,
                 &mut self.managed_state,
-                &row_deserializer,
+                &deserializer,
             )?;
         }
 
-        generate_output(res_rows, res_ops, &self.schema)
+        if staging.is_empty() {
+            return Ok(None);
+        }
+        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
+        for res in staging.into_deserialized_changes(&deserializer) {
+            let (op, row) = res?;
+            let _none = chunk_builder.append_row(op, row);
+        }
+        Ok(chunk_builder.take())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
