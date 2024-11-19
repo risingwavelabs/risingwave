@@ -12,6 +12,126 @@ drop table if exists rw_types_table_append_only cascade;
 system ok
 PGDATABASE=sink_test createdb
 
+################### test table pk can mismatch
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    smallint_column SMALLINT,
+    integer_column INTEGER,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
+);
+
+statement ok
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+drop table rw_types_table cascade;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table";
+
+################### test table col name cannot mismatch
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT,
+    varchar_column_mismatch_name VARCHAR,
+    text_column TEXT,
+    smallint_column SMALLINT,
+    integer_column INTEGER,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
+);
+
+statement error
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+drop table rw_types_table cascade;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table";
+
+################### test table col can be out of order
+
 system ok
 PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
     id BIGINT PRIMARY KEY,
@@ -49,6 +169,23 @@ CREATE TABLE rw_types_table (
     jsonb_column JSONB,
     timestamp_column TIMESTAMP
 );
+
+################### test sink with_options:primary_key mismatch should fail
+
+statement error
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id, date_column',
+);
+
+################### test pk match should work
 
 statement ok
 CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
