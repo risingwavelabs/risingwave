@@ -11,7 +11,12 @@
     <modelVersion>4.0.0</modelVersion>
     <name>risingwave-source-test</name>
     <packaging>jar</packaging>
-    <artifactId>risingwave-source-test</artifactId>
+    <artifactId>risingwave-source-cdc-test</artifactId>
+    <description>
+        This module contains the unit test of CDC sources. Usually we just put the unit test alongside
+        the main code, but these test cases relies on risingwave-connector-service, which will create a cyclic
+        dependency. Thus, we create a dedicated module here.
+    </description>
 
     <dependencies>
         <dependency>
@@ -47,13 +52,12 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.24.2</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
-            <version>5.0.1</version>
+            <version>6.0.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -76,18 +80,16 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
-            <version>4.11.1</version>
+            <version>5.2.0</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
-            <version>${jackson.version}</version>
             <scope>test</scope>
         </dependency>
 

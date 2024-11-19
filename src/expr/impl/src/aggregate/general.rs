@@ -124,25 +124,6 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
-#[aggregate("first_value(*) -> auto", state = "ref")]
-fn first_value<T>(state: T, _: T) -> T {
-    state
-}
-
-#[aggregate("last_value(*) -> auto", state = "ref")]
-fn last_value<T>(_: T, input: T) -> T {
-    input
-}
-
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
-fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
-    if retract {
-        state
-    } else {
-        input
-    }
-}
-
 /// Note the following corner cases:
 ///
 /// ```slt

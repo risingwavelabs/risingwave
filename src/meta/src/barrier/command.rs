@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Formatter;
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
+use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
@@ -36,12 +39,15 @@ use risingwave_pb::stream_plan::{
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
     StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{DdlType, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
@@ -226,6 +232,7 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
     DropStreamingJobs {
+        table_fragments_ids: HashSet<TableId>,
         actors: Vec<ActorId>,
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
@@ -247,11 +254,6 @@ pub enum Command {
     MergeSnapshotBackfillStreamingJobs(
         HashMap<TableId, (SnapshotBackfillInfo, InflightStreamingJobInfo)>,
     ),
-    /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
-    /// table fragment.
-    ///
-    /// The collecting and cleaning part works exactly the same as `DropStreamingJobs` command.
-    CancelStreamingJob(TableFragments),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
@@ -307,6 +309,18 @@ impl Command {
         Self::Resume(reason)
     }
 
+    pub fn cancel(table_fragments: &TableFragments) -> Self {
+        Self::DropStreamingJobs {
+            table_fragments_ids: HashSet::from_iter([table_fragments.table_id()]),
+            actors: table_fragments.actor_ids(),
+            unregistered_state_table_ids: table_fragments
+                .all_table_ids()
+                .map(TableId::new)
+                .collect(),
+            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
+        }
+    }
+
     pub(crate) fn fragment_changes(&self) -> Option<HashMap<FragmentId, CommandFragmentChanges>> {
         match self {
             Command::Flush => None,
@@ -346,13 +360,6 @@ impl Command {
 
                 Some(changes)
             }
-            Command::CancelStreamingJob(table_fragments) => Some(
-                table_fragments
-                    .fragments
-                    .values()
-                    .map(|fragment| (fragment.fragment_id, CommandFragmentChanges::RemoveFragment))
-                    .collect(),
-            ),
             Command::RescheduleFragment { reschedules, .. } => Some(
                 reschedules
                     .iter()
@@ -430,23 +437,23 @@ impl BarrierKind {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext {
+pub(super) struct CommandContext {
     /// Resolved info in this barrier loop.
-    pub node_map: HashMap<WorkerId, PbWorkerNode>,
-    pub subscription_info: InflightSubscriptionInfo,
+    pub(super) node_map: HashMap<WorkerId, PbWorkerNode>,
+    subscription_info: InflightSubscriptionInfo,
 
-    pub barrier_info: BarrierInfo,
+    pub(super) barrier_info: BarrierInfo,
 
-    pub table_ids_to_commit: HashSet<TableId>,
+    pub(super) table_ids_to_commit: HashSet<TableId>,
 
-    pub command: Option<Command>,
+    pub(super) command: Option<Command>,
 
     /// The tracing span of this command.
     ///
     /// Differs from [`crate::barrier::TracedEpoch`], this span focuses on the lifetime of the corresponding
     /// barrier, including the process of waiting for the barrier to be sent, flowing through the
     /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
-    pub _span: tracing::Span,
+    _span: tracing::Span,
 }
 
 impl std::fmt::Debug for CommandContext {
@@ -477,7 +484,7 @@ impl CommandContext {
         }
     }
 
-    pub fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
+    fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
         let Some(truncate_timestamptz) = Timestamptz::from_secs(
             self.barrier_info
                 .prev_epoch
@@ -490,6 +497,86 @@ impl CommandContext {
             return self.barrier_info.prev_epoch.value();
         };
         Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
+    }
+
+    pub(super) fn collect_commit_epoch_info(
+        &self,
+        info: &mut CommitEpochInfo,
+        resps: Vec<BarrierCompleteResponse>,
+        backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
+    ) {
+        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
+            collect_resp_info(resps);
+
+        let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
+            &self.command
+            && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
+        {
+            let table_fragments = &info.table_fragments;
+            let mut table_ids: HashSet<_> = table_fragments
+                .internal_table_ids()
+                .into_iter()
+                .map(TableId::new)
+                .collect();
+            if let Some(mv_table_id) = table_fragments.mv_table_id() {
+                table_ids.insert(TableId::new(mv_table_id));
+            }
+
+            vec![NewTableFragmentInfo { table_ids }]
+        } else {
+            vec![]
+        };
+
+        let mut mv_log_store_truncate_epoch = HashMap::new();
+        let mut update_truncate_epoch =
+            |table_id: TableId, truncate_epoch| match mv_log_store_truncate_epoch
+                .entry(table_id.table_id)
+            {
+                Entry::Occupied(mut entry) => {
+                    let prev_truncate_epoch = entry.get_mut();
+                    if truncate_epoch < *prev_truncate_epoch {
+                        *prev_truncate_epoch = truncate_epoch;
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(truncate_epoch);
+                }
+            };
+        for (mv_table_id, subscriptions) in &self.subscription_info.mv_depended_subscriptions {
+            if let Some(truncate_epoch) = subscriptions
+                .values()
+                .max()
+                .map(|max_retention| self.get_truncate_epoch(*max_retention).0)
+            {
+                update_truncate_epoch(*mv_table_id, truncate_epoch);
+            }
+        }
+        for (_, (backfill_epoch, upstream_mv_table_ids)) in backfill_pinned_log_epoch {
+            for mv_table_id in upstream_mv_table_ids {
+                update_truncate_epoch(mv_table_id, backfill_epoch);
+            }
+        }
+
+        let table_new_change_log = build_table_change_log_delta(
+            old_value_ssts.into_iter(),
+            synced_ssts.iter().map(|sst| &sst.sst_info),
+            must_match!(&self.barrier_info.kind, BarrierKind::Checkpoint(epochs) => epochs),
+            mv_log_store_truncate_epoch.into_iter(),
+        );
+
+        let epoch = self.barrier_info.prev_epoch();
+        for table_id in &self.table_ids_to_commit {
+            info.tables_to_commit
+                .try_insert(*table_id, epoch)
+                .expect("non duplicate");
+        }
+
+        info.sstables.extend(synced_ssts);
+        info.new_table_watermarks.extend(new_table_watermarks);
+        info.sst_to_context.extend(sst_to_context);
+        info.new_table_fragment_infos
+            .extend(new_table_fragment_infos);
+        info.change_log_delta.extend(table_new_change_log);
     }
 }
 
@@ -638,11 +725,6 @@ impl Command {
                             })
                             .collect(),
                     }))
-                }
-
-                Command::CancelStreamingJob(table_fragments) => {
-                    let actors = table_fragments.actor_ids();
-                    Some(Mutation::Stop(StopMutation { actors }))
                 }
 
                 Command::ReplaceTable(ReplaceTablePlan {
@@ -927,10 +1009,15 @@ impl Command {
     }
 
     /// For `CancelStreamingJob`, returns the table id of the target table.
-    pub fn table_to_cancel(&self) -> Option<TableId> {
+    pub fn tables_to_drop(&self) -> impl Iterator<Item = TableId> + '_ {
         match self {
-            Command::CancelStreamingJob(table_fragments) => Some(table_fragments.table_id()),
+            Command::DropStreamingJobs {
+                table_fragments_ids,
+                ..
+            } => Some(table_fragments_ids.iter().cloned()),
             _ => None,
         }
+        .into_iter()
+        .flatten()
     }
 }

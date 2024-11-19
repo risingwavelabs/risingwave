@@ -44,7 +44,7 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     }
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+    test_sink.wait_initial_parallelism(6).await?;
 
     let internal_tables = session.run("show internal tables").await?;
 

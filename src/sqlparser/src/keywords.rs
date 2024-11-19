@@ -90,7 +90,6 @@ define_keywords!(
     ASENSITIVE,
     ASOF,
     ASYMMETRIC,
-    ASYNC,
     AT,
     ATOMIC,
     AUTHORIZATION,
@@ -252,7 +251,6 @@ define_keywords!(
     FUNCTIONS,
     FUSION,
     GAP,
-    GENERATOR,
     GET,
     GLOBAL,
     GRANT,
@@ -582,7 +580,9 @@ define_keywords!(
     WITHOUT,
     WORK,
     WRITE,
+    XML,
     XOR,
+    YAML,
     YEAR,
     ZONE
 );

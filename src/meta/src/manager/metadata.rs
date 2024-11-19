@@ -723,7 +723,7 @@ impl MetadataManager {
 }
 
 impl MetadataManager {
-    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,
