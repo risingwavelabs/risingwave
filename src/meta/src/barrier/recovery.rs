@@ -659,6 +659,7 @@ impl GlobalBarrierWorkerContextImpl {
             .scale_controller
             .generate_table_resize_plan(TableResizePolicy {
                 worker_ids: schedulable_worker_ids,
+                refilter_node_label: None,
                 table_parallelisms: table_parallelisms.clone(),
             })
             .await?;

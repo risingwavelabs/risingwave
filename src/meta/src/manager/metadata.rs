@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{select, Either};
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, WorkerId};
+use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, StreamingParallelism, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
@@ -544,6 +544,21 @@ impl MetadataManager {
             .get_job_fragments_by_id(id.table_id as _)
             .await?;
         Ok(TableFragments::from_protobuf(pb_table_fragments))
+    }
+
+    pub async fn get_job_parallelism_by_id(&self, id: &TableId) -> MetaResult<TableParallelism> {
+        let parallelism = self
+            .catalog_controller
+            .get_job_parallelism_by_id(id.table_id as _)
+            .await?;
+
+        let parallelism = match parallelism {
+            StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+            StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+            StreamingParallelism::Custom => TableParallelism::Custom,
+        };
+
+        Ok(parallelism)
     }
 
     pub async fn get_running_actors_of_fragment(

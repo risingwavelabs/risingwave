@@ -388,7 +388,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into(), deferred)
+            .alter_table_parallelism(table_id, Some(parallelism.into()), deferred, None)
             .await
     }
 

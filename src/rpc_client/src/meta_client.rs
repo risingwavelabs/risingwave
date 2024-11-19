@@ -1035,6 +1035,19 @@ impl MetaClient {
         Ok((resp.success, resp.revision))
     }
 
+    pub async fn update_streaming_job_node_labels(
+        &self,
+        table_id: u32,
+        label: String,
+    ) -> Result<()> {
+        let request = UpdateStreamingJobNodeLabelsRequest {
+            id: table_id,
+            node_label: label,
+        };
+        let resp = self.inner.update_streaming_job_node_labels(request).await?;
+        Ok(())
+    }
+
     pub async fn risectl_get_pinned_versions_summary(
         &self,
     ) -> Result<RiseCtlGetPinnedVersionsSummaryResponse> {
@@ -2133,6 +2146,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
+            ,{ scale_client, update_streaming_job_node_labels, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }

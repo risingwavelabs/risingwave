@@ -597,11 +597,12 @@ impl GlobalStreamManager {
         cancelled_ids
     }
 
-    pub(crate) async fn alter_table_parallelism(
+    pub async fn alter_table_parallelism(
         &self,
         table_id: u32,
-        parallelism: TableParallelism,
+        parallelism: Option<TableParallelism>,
         deferred: bool,
+        label: Option<String>,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
@@ -625,6 +626,15 @@ impl GlobalStreamManager {
             .iter()
             .map(|node| node.id as WorkerId)
             .collect::<BTreeSet<_>>();
+
+        let parallelism = match parallelism {
+            Some(parallelism) => parallelism,
+            None => {
+                self.metadata_manager
+                    .get_job_parallelism_by_id(&table_id)
+                    .await?
+            }
+        };
 
         // Check if the provided parallelism is valid.
         let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
@@ -672,6 +682,7 @@ impl GlobalStreamManager {
                 .scale_controller
                 .generate_table_resize_plan(TableResizePolicy {
                     worker_ids,
+                    refilter_node_label: label,
                     table_parallelisms: table_parallelism_assignment
                         .iter()
                         .map(|(id, parallelism)| (id.table_id, *parallelism))
