@@ -308,9 +308,6 @@ impl HummockManager {
             table_throughput_statistic_manager
                 .add_table_throughput_with_ts(table_id, throughput, timestamp);
         }
-
-        // retain the empty table
-        table_throughput_statistic_manager.retain();
     }
 
     async fn correct_commit_ssts(

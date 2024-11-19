@@ -1007,9 +1007,9 @@ fn check_is_low_write_throughput_compaction_group(
                 );
 
             if table_write_throughput_statistic.is_empty() {
-                return None;
+                None
             } else {
-                return Some(table_write_throughput_statistic);
+                Some(table_write_throughput_statistic)
             }
         })
         .collect();
