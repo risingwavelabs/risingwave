@@ -842,6 +842,9 @@ OpendalS3Properties:
   - name: s3.endpoint_url
     field_type: String
     required: false
+  - name: s3.session_token
+    field_type: String
+    required: false
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -1046,6 +1049,9 @@ S3Properties:
     required: false
     default: Default::default
   - name: s3.endpoint_url
+    field_type: String
+    required: false
+  - name: s3.session_token
     field_type: String
     required: false
   - name: compression_format

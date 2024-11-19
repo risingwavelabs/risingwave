@@ -262,6 +262,7 @@ mod tests {
             match_pattern: None,
             access: None,
             secret: None,
+            session_token: None,
             endpoint_url: None,
             compression_format: CompressionFormat::None,
         }

@@ -48,6 +48,8 @@ pub struct S3Common {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
+    #[serde(rename = "s3.session_token")]
+    pub session_token: Option<String>,
     #[serde(rename = "s3.assume_role", default)]
     pub assume_role: Option<String>,
 }
@@ -96,6 +98,10 @@ impl<S: OpendalSinkBackend> FileSink<S> {
                 "secret access key of aws s3 is not set, bucket {}",
                 config.common.bucket_name
             );
+        }
+
+        if let Some(session_token) = config.common.session_token {
+            builder = builder.session_token(&session_token);
         }
 
         if let Some(assume_role) = config.common.assume_role {

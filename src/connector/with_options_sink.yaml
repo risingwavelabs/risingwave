@@ -1006,6 +1006,9 @@ S3Config:
   - name: s3.endpoint_url
     field_type: String
     required: false
+  - name: s3.session_token
+    field_type: String
+    required: false
   - name: s3.assume_role
     field_type: String
     required: false

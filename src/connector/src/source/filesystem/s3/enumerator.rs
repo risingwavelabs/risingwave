@@ -138,6 +138,7 @@ mod tests {
             match_pattern: Some("happy[0-9].csv".to_owned()),
             access: None,
             secret: None,
+            session_token: None,
             endpoint_url: None,
             compression_format: CompressionFormat::None,
         };

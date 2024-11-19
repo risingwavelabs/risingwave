@@ -42,6 +42,8 @@ pub struct S3PropertiesCommon {
     pub secret: Option<String>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
+    #[serde(rename = "s3.session_token")]
+    pub session_token: Option<String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
 }

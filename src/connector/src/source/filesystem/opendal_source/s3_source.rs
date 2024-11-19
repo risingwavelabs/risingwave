@@ -58,6 +58,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
             );
         }
 
+        if let Some(session_token) = s3_properties.session_token {
+            builder = builder.session_token(&session_token);
+        }
+
         if let Some(assume_role) = assume_role {
             builder = builder.role_arn(&assume_role);
         }
