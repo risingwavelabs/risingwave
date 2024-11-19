@@ -408,7 +408,7 @@ impl PlanRoot {
             "Iceberg Predicate Pushdown",
             vec![BatchIcebergPredicatePushDownRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
