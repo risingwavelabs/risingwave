@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -457,7 +458,11 @@ fn rewrite_commit_sstables_to_sub_level(
 
         let mut accumulated_size = 0;
         let mut ssts = vec![];
-        let sub_level_size_limit = config.sub_level_max_compaction_bytes * 2; // TODO: use config instead of magic number
+        let sub_level_size_limit = config.sub_level_max_compaction_bytes
+            * config
+                .max_overlapping_level_size_ratio
+                .unwrap_or(compaction_config::max_overlapping_level_size_ratio())
+                as u64;
 
         let level = overlapping_sstables.entry(group_id).or_default();
 

@@ -2230,6 +2230,10 @@ pub mod default {
         pub fn disable_auto_group_scheduling() -> bool {
             false
         }
+
+        pub fn max_overlapping_level_size_ratio() -> u32 {
+            4
+        }
     }
 
     pub mod object_store_config {

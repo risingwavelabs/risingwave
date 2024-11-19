@@ -71,6 +71,9 @@ impl CompactionConfigBuilder {
                 disable_auto_group_scheduling: Some(
                     compaction_config::disable_auto_group_scheduling(),
                 ),
+                max_overlapping_level_size_ratio: Some(
+                    compaction_config::max_overlapping_level_size_ratio(),
+                ),
             },
         }
     }

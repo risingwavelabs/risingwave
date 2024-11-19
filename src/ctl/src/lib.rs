@@ -191,6 +191,8 @@ enum HummockCommands {
         sst_allowed_trivial_move_min_size: Option<u64>,
         #[clap(long)]
         disable_auto_group_scheduling: Option<bool>,
+        #[clap(long)]
+        max_overlapping_level_size_ratio: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -578,6 +580,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
             disable_auto_group_scheduling,
+            max_overlapping_level_size_ratio,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -610,6 +613,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
                     disable_auto_group_scheduling,
+                    max_overlapping_level_size_ratio,
                 ),
             )
             .await?
