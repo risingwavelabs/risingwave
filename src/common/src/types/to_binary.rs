@@ -97,7 +97,7 @@ impl ToBinary for ListRef<'_> {
         let mut buf = BytesMut::new();
         buf.put_i32(1); // Number of dimensions (must be 1)
         buf.put_i32(1); // Has nulls?
-        buf.put_i32(ty.to_oid()); // Element type
+        buf.put_i32(element_ty.to_oid()); // Element type
         buf.put_i32(self.len() as i32); // Length of 1st dimension
         buf.put_i32(0); // Offset of 1st dimension
         for element in self.iter() {
