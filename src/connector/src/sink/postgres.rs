@@ -127,6 +127,8 @@ impl Sink for PostgresSink {
                 "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)")));
         }
 
+        // TODO(kwannoel): Add more validation - see sqlserver. Check type compatibility, etc.
+
         Ok(())
     }
 
@@ -446,11 +448,11 @@ fn create_insert_sql(schema: &Schema, table_name: &str) -> String {
         .iter()
         .map(|field| field.name.clone())
         .collect_vec()
-        .join(",");
+        .join(", ");
     let parameters: String = (0..schema.fields().len())
         .map(|i| format!("${}", i + 1))
         .collect_vec()
-        .join(",");
+        .join(", ");
     format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters})")
 }
 
@@ -477,21 +479,22 @@ fn create_merge_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> 
         .fields()
         .iter()
         .enumerate()
-        .map(|(i, field)| format!("{} = source.{}", field.name, field.name))
+        .filter(|(i, _)| !pk_indices.contains(i))
+        .map(|(_, field)| format!("{} = source.{}", field.name, field.name))
         .collect_vec()
-        .join(",");
+        .join(", ");
     let insert_columns: String = schema
         .fields()
         .iter()
         .map(|field| field.name.clone())
         .collect_vec()
-        .join(",");
+        .join(", ");
     let insert_vars: String = schema
         .fields()
         .iter()
         .map(|field| format!("source.{}", field.name))
         .collect_vec()
-        .join(",");
+        .join(", ");
     format!(
         "
         MERGE INTO {table_name} target
@@ -512,4 +515,89 @@ fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) ->
         .collect_vec()
         .join(" AND ");
     format!("DELETE FROM {table_name} WHERE {parameters}")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Display;
+    use super::*;
+    use expect_test::{expect, Expect};
+    use risingwave_common::catalog::Field;
+
+    fn check(actual: impl Display, expect: Expect) {
+        let actual = format!("{}", actual);
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_create_insert_sql() {
+        let schema = Schema::new(vec![
+           Field {
+                data_type: DataType::Int32,
+                name: "a".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+           },
+           Field {
+               data_type: DataType::Int32,
+               name: "b".to_string(),
+               sub_fields: vec![],
+               type_name: "".to_string(),
+           }
+        ]);
+        let table_name = "test_table";
+        let sql = create_insert_sql(&schema, table_name);
+        check(sql, expect!["INSERT INTO test_table (a, b) VALUES ($1, $2)"]);
+    }
+
+    #[test]
+    fn test_create_delete_sql() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "a".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "b".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            }
+        ]);
+        let table_name = "test_table";
+        let sql = create_delete_sql(&schema, table_name, &[1]);
+        check(sql, expect!["DELETE FROM test_table WHERE b = $2"]);
+    }
+
+    #[test]
+    fn test_create_merge_sql() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "a".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "b".to_string(),
+                sub_fields: vec![],
+                type_name: "".to_string(),
+            }
+        ]);
+        let table_name = "test_table";
+        let sql = create_merge_sql(&schema, table_name, &[1]);
+        check(sql, expect![[r#"
+
+                    MERGE INTO test_table target
+                    USING (SELECT $1 as a,$2 as b) AS source
+                    ON (source.b = target.b)
+                    WHEN MATCHED
+                      THEN UPDATE SET a = source.a
+                    WHEN NOT MATCHED
+                      THEN INSERT (a, b) VALUES (source.a, source.b)
+        "#]]);
+    }
 }
