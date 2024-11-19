@@ -101,7 +101,7 @@ pub(super) mod handlers {
                 .ok_or_else(|| {
                     err(
                         anyhow!("Table `{}` is not with webhook source", table),
-                        StatusCode::METHOD_NOT_ALLOWED,
+                        StatusCode::FORBIDDEN,
                     )
                 })?
                 .clone()
@@ -132,7 +132,7 @@ pub(super) mod handlers {
         let payload = String::from_utf8(body.to_vec()).map_err(|e| {
             err(
                 anyhow!(e).context("Failed to parse body"),
-                StatusCode::BAD_REQUEST,
+                StatusCode::UNPROCESSABLE_ENTITY,
             )
         })?;
 
