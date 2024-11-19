@@ -12,25 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::Ref;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, Datum, Decimal};
+use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
-use tokio::net::TcpStream;
-use tokio_postgres::types::ToSql;
 use tokio_postgres::Statement;
-use tokio_util::compat::TokioAsyncWriteCompatExt;
 use with_options::WithOptions;
 
 use super::{
@@ -87,7 +83,7 @@ pub struct PostgresSink {
 
 impl PostgresSink {
     pub fn new(
-        mut config: PostgresConfig,
+        config: PostgresConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
