@@ -152,11 +152,26 @@ impl Sink for PostgresSink {
         let result = client
             .query(
                 "
-                SELECT a.attname as col_name, i.indisprimary AS is_pk
-                    FROM pg_index i
-                    JOIN pg_attribute a ON a.attrelid = i.indrelid
-                                        AND a.attnum = ANY(i.indkey)
-                    WHERE i.indrelid = $1::regclass",
+                SELECT
+                   column_name,
+                   EXISTS (
+                       SELECT 1
+                       FROM pg_index i
+                       WHERE i.indrelid = c.table_name::regclass
+                       AND i.indisprimary
+                       AND column_name = ANY(
+                           SELECT a.attname
+                           FROM pg_attribute a
+                           WHERE a.attrelid = i.indrelid
+                           AND a.attnum = ANY(i.indkey)
+                       )
+                   ) AS is_primary_key
+                FROM
+                   information_schema.columns c
+                WHERE
+                   table_name = $1
+                ORDER BY
+                   ordinal_position;",
                 &[&table_name],
             )
             .await
