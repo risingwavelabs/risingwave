@@ -519,8 +519,7 @@ fn create_merge_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> 
         WHEN MATCHED
           THEN UPDATE SET {update_vars}
         WHEN NOT MATCHED
-          THEN INSERT ({insert_columns}) VALUES ({insert_vars})
-        "
+          THEN INSERT ({insert_columns}) VALUES ({insert_vars})"
     )
 }
 
@@ -543,7 +542,7 @@ mod tests {
     use super::*;
 
     fn check(actual: impl Display, expect: Expect) {
-        let actual = format!("{}", actual);
+        let actual = actual.to_string();
         expect.assert_eq(&actual);
     }
 
@@ -610,18 +609,16 @@ mod tests {
         ]);
         let table_name = "test_table";
         let sql = create_merge_sql(&schema, table_name, &[1]);
-        check(
+        assert_eq!(
             sql,
-            expect![[r#"
-
-                        MERGE INTO test_table target
-                        USING (SELECT $1 as a,$2 as b) AS source
-                        ON (source.b = target.b)
-                        WHEN MATCHED
-                          THEN UPDATE SET a = source.a
-                        WHEN NOT MATCHED
-                          THEN INSERT (a, b) VALUES (source.a, source.b)
-        "#]],
+        "
+        MERGE INTO test_table target
+        USING (SELECT $1 as a,$2 as b) AS source
+        ON (source.b = target.b)
+        WHEN MATCHED
+          THEN UPDATE SET a = source.a
+        WHEN NOT MATCHED
+          THEN INSERT (a, b) VALUES (source.a, source.b)".to_string()
         );
     }
 }
