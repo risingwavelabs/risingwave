@@ -23,13 +23,13 @@ use serde_with::serde_as;
 use tonic::async_trait;
 use with_options::WithOptions;
 
-use crate::connector_common::{AwsAuthProps, KafkaConnectionInner, KafkaPrivateLinkCommon};
+use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
 use crate::error::ConnectorResult;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 use crate::{dispatch_connection_impl, ConnectionImpl};
 
 #[async_trait]
-pub trait ConnectionValidate {
+pub trait Connection {
     async fn test_connection(&self) -> ConnectorResult<()>;
 }
 
@@ -38,7 +38,7 @@ pub trait ConnectionValidate {
 #[serde(deny_unknown_fields)]
 pub struct KafkaConnection {
     #[serde(flatten)]
-    pub inner: KafkaConnectionInner,
+    pub inner: KafkaConnectionProps,
     #[serde(flatten)]
     pub kafka_private_link_common: KafkaPrivateLinkCommon,
     #[serde(flatten)]
@@ -64,7 +64,7 @@ pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<(
 }
 
 #[async_trait]
-impl ConnectionValidate for KafkaConnection {
+impl Connection for KafkaConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
         let client = self.build_client().await?;
         // describe cluster here
@@ -109,7 +109,7 @@ impl KafkaConnection {
 pub struct IcebergConnection {}
 
 #[async_trait]
-impl ConnectionValidate for IcebergConnection {
+impl Connection for IcebergConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
         todo!()
     }
@@ -121,7 +121,7 @@ impl ConnectionValidate for IcebergConnection {
 pub struct SchemaRegistryConnection {}
 
 #[async_trait]
-impl ConnectionValidate for SchemaRegistryConnection {
+impl Connection for SchemaRegistryConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
         todo!()
     }

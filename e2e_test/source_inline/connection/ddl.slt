@@ -1,4 +1,3 @@
-# Note: control substitution on will force us to use "\n" instead of "\n" in commands
 control substitution on
 
 # for non-shared source

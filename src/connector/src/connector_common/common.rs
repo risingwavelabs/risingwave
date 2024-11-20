@@ -163,7 +163,7 @@ impl AwsAuthProps {
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
-pub struct KafkaConnectionInner {
+pub struct KafkaConnectionProps {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
@@ -322,7 +322,7 @@ impl RdKafkaPropertiesCommon {
     }
 }
 
-impl KafkaConnectionInner {
+impl KafkaConnectionProps {
     #[cfg(test)]
     pub fn test_default() -> Self {
         Self {

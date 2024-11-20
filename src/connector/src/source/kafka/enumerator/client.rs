@@ -31,14 +31,14 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{
-    KafkaConnectionInner, KafkaContextCommon, KafkaProperties, RwConsumerContext,
+    KafkaConnectionProps, KafkaContextCommon, KafkaProperties, RwConsumerContext,
     KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::SourceEnumeratorContextRef;
 
 type KafkaClientType = BaseConsumer<RwConsumerContext>;
 
-pub static SHARED_KAFKA_CLIENT: LazyLock<MokaCache<KafkaConnectionInner, Weak<KafkaClientType>>> =
+pub static SHARED_KAFKA_CLIENT: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaClientType>>> =
     LazyLock::new(|| moka::future::Cache::builder().build());
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
