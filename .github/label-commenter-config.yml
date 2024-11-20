@@ -7,7 +7,7 @@ comment:
     [peaceiris/actions-label-commenter]: https://github.com/peaceiris/actions-label-commenter"
 
 labels:
-  - name: 'type/feature'
+  - name: 'user-facing-changes'
     labeled:
       pr:
         body: |
