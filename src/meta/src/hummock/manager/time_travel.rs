@@ -119,6 +119,7 @@ impl HummockManager {
         };
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         let should_gc_objects = latest_valid_version_id <= min_pinned_version_id;
+        let mut object_ids_to_delete = HashSet::default();
         let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
                 .select_only()
@@ -165,9 +166,7 @@ impl HummockManager {
 
             if should_gc_objects {
                 let new_object_ids = delta_to_delete.newly_added_object_ids();
-                let object_ids_to_delete = &new_object_ids - &latest_valid_version_object_ids;
-                self.gc_manager
-                    .add_may_delete_object_ids(object_ids_to_delete.into_iter());
+                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             }
 
             tracing::debug!(
@@ -199,9 +198,7 @@ impl HummockManager {
                 .await?;
             if should_gc_objects {
                 let new_object_ids = prev_version.get_object_ids();
-                let object_ids_to_delete = &new_object_ids - &latest_valid_version_object_ids;
-                self.gc_manager
-                    .add_may_delete_object_ids(object_ids_to_delete.into_iter());
+                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             }
             tracing::debug!(
                 prev_version_id,
@@ -209,6 +206,10 @@ impl HummockManager {
                 res.rows_affected
             );
             next_version_sst_ids = sst_ids;
+        }
+        if !object_ids_to_delete.is_empty() {
+            self.gc_manager
+                .add_may_delete_object_ids(object_ids_to_delete.into_iter());
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
