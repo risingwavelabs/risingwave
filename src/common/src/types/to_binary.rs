@@ -14,12 +14,13 @@
 
 use bytes::{BufMut, Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
+use rw_iter_util::ZipEqFast;
 
 use super::{
     DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
     F64,
 };
-use crate::array::ListRef;
+use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
@@ -116,6 +117,29 @@ impl ToBinary for ListRef<'_> {
     }
 }
 
+impl ToBinary for StructRef<'_> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+        // Reference: Postgres code `src/backend/utils/adt/rowtypes.c`
+        // https://github.com/postgres/postgres/blob/a3699daea2026de324ed7cc7115c36d3499010d3/src/backend/utils/adt/rowtypes.c#L687
+        let mut buf = BytesMut::new();
+        buf.put_i32(ty.as_struct().len() as i32); // number of columns
+        for (datum, field_ty) in self.iter_fields_ref().zip_eq_fast(ty.as_struct().types()) {
+            buf.put_i32(field_ty.to_oid()); // column type
+            match datum {
+                None => {
+                    buf.put_i32(-1); // -1 length means a NULL
+                }
+                Some(value) => {
+                    let data = value.to_binary_with_type(field_ty)?;
+                    buf.put_i32(data.len() as i32); // Length of element
+                    buf.put(data);
+                }
+            }
+        }
+        Ok(buf.into())
+    }
+}
+
 impl ToBinary for ScalarRefImpl<'_> {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
         match self {
@@ -137,7 +161,8 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::Map(_) => {
+            ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Map(_) => {
                 bail_not_implemented!(
                     issue = 7949,
                     "the pgwire extended-mode encoding for {ty} is unsupported"

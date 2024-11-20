@@ -78,3 +78,20 @@ ABC
 
 statement ok
 drop table t;
+
+statement ok
+create table t (primary key (kafka_key))
+INCLUDE key as kafka_key
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_alter_table_test'
+)
+FORMAT UPSERT ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+statement ok
+ALTER TABLE t REFRESH SCHEMA;
+
+statement ok
+drop table t;
