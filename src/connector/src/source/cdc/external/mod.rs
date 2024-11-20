@@ -52,6 +52,7 @@ use crate::WithPropertiesExt;
 #[derive(Debug, Clone)]
 pub enum CdcTableType {
     Undefined,
+    Mock,
     MySql,
     Postgres,
     SqlServer,
@@ -101,6 +102,7 @@ impl CdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
     }

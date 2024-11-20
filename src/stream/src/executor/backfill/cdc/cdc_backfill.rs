@@ -231,7 +231,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         );
 
         // consume all pending barriers during table reader creation
-        for barrier in upstream_barriers.pending_barriers.drain(..) {
+        while let Some(barrier) = upstream_barriers.pending_barriers.pop_back() {
             // commit state to bump the epoch of state table
             state_impl.commit_state(barrier.epoch).await?;
             yield Message::Barrier(barrier);
