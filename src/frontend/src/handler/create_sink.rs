@@ -224,8 +224,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let target_table = target_table_catalog.as_ref().map(|catalog| catalog.id());
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -235,7 +233,7 @@ pub async fn gen_sink_plan(
         sink_from_table_name,
         format_desc,
         without_backfill,
-        target_table,
+        target_table_catalog.clone(),
         partition_info,
     )?;
 

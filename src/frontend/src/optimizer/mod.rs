@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 pub mod plan_node;
 
@@ -83,6 +84,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
+use crate::TableCatalog;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -958,7 +960,7 @@ impl PlanRoot {
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
         without_backfill: bool,
-        target_table: Option<TableId>,
+        target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {

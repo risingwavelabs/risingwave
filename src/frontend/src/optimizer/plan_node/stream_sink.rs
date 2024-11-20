@@ -14,6 +14,7 @@
 
 use std::assert_matches::assert_matches;
 use std::io::{Error, ErrorKind};
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
@@ -201,7 +202,7 @@ impl StreamSink {
         name: String,
         db_name: String,
         sink_from_table_name: String,
-        target_table: Option<TableId>,
+        target_table: Option<Arc<TableCatalog>>,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
@@ -211,7 +212,6 @@ impl StreamSink {
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
     ) -> Result<Self> {
-        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
         let (input, mut sink) = Self::derive_sink_desc(
             input,
             user_distributed_by,
@@ -220,7 +220,8 @@ impl StreamSink {
             sink_from_table_name,
             target_table,
             user_order_by,
-            columns,
+            user_cols,
+            out_names,
             definition,
             properties,
             format_desc,
@@ -314,9 +315,10 @@ impl StreamSink {
         name: String,
         db_name: String,
         sink_from_name: String,
-        target_table: Option<TableId>,
+        target_table: Option<Arc<TableCatalog>>,
         user_order_by: Order,
-        columns: Vec<ColumnCatalog>,
+        user_cols: FixedBitSet,
+        out_names: Vec<String>,
         definition: String,
         properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
@@ -324,10 +326,19 @@ impl StreamSink {
     ) -> Result<(PlanRef, SinkDesc)> {
         let sink_type =
             Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
-        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
-        let mut downstream_pk =
-            Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
 
+        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
+        let (pk, _) = derive_pk(input.clone(), user_order_by, &columns);
+        let mut downstream_pk = {
+            let from_properties =
+                Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
+            if let Some(t) = &target_table {
+                // TODO
+                from_properties
+            } else {
+                from_properties
+            }
+        };
         let mut extra_partition_col_idx = None;
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -406,7 +417,7 @@ impl StreamSink {
             secret_refs,
             sink_type,
             format_desc,
-            target_table,
+            target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
             create_type,
         };
