@@ -499,8 +499,6 @@ fn is_ordered_subset(vec_1: &Vec<u64>, vec_2: &Vec<u64>) -> bool {
     for item in vec_1 {
         if vec_2_iter.peek() == Some(&item) {
             vec_2_iter.next();
-        } else {
-            return false;
         }
     }
 
