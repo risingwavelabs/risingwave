@@ -12,15 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-pub mod context;
-mod has_privilege;
-mod pg_get_indexdef;
-mod pg_get_userbyid;
-mod pg_get_viewdef;
-mod pg_index_column_has_property;
-mod pg_indexes_size;
-mod pg_relation_size;
-mod rw_epoch_to_ts;
-mod rw_recovery_status;
+use risingwave_common::types::Timestamptz;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_expr::{function, Result};
+
+#[function("rw_epoch_to_ts(int8) -> timestamptz")]
+fn rw_epoch_to_ts(epoch: i64) -> Result<Timestamptz> {
+    Ok(Epoch(epoch as u64).as_timestamptz())
+}
