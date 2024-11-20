@@ -220,7 +220,7 @@ pub enum ExternalTableReaderImpl {
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct ExternalTableConfig {
     pub connector: String,
 

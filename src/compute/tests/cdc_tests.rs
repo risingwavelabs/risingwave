@@ -171,19 +171,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ]);
     let table_pk_indices = vec![0];
     let table_pk_order_types = vec![OrderType::ascending()];
-    let config = ExternalTableConfig {
-        connector: "".to_string(),
-        host: "".to_string(),
-        port: "".to_string(),
-        username: "".to_string(),
-        password: "".to_string(),
-        database: "".to_string(),
-        schema: "".to_string(),
-        table: "".to_string(),
-        ssl_mode: Default::default(),
-        ssl_root_cert: None,
-        encrypt: "".to_string(),
-    };
+    let config = ExternalTableConfig::default();
 
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
