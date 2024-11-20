@@ -292,7 +292,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
                 return val == Data.DataType.TypeName.INT64_VALUE;
-
             case "float":
             case "real":
                 return val == Data.DataType.TypeName.FLOAT_VALUE
@@ -303,6 +302,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "date":
+                return val == Data.DataType.TypeName.DATE_VALUE;
+            case "time":
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "datetime":
+                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "timestamp":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:

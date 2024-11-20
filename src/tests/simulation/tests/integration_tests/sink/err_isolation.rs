@@ -40,7 +40,7 @@ async fn test_sink_decouple_err_isolation() -> Result<()> {
     session.run("set sink_decouple = true").await?;
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+    test_sink.wait_initial_parallelism(6).await?;
 
     test_sink.set_err_rate(0.002);
 
@@ -81,7 +81,7 @@ async fn test_sink_error_event_logs() -> Result<()> {
     session.run("set sink_decouple = true").await?;
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+    test_sink.wait_initial_parallelism(6).await?;
 
     test_sink.store.wait_for_err(1).await?;
 

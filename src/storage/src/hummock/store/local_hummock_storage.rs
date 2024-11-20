@@ -112,7 +112,7 @@ impl LocalHummockStorage {
         table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let table_key_range = (
             Bound::Included(table_key.clone()),
             Bound::Included(table_key.clone()),
@@ -248,12 +248,12 @@ impl StateStoreRead for LocalHummockStorage {
     type Iter = HummockStorageIterator;
     type RevIter = HummockStorageRevIterator;
 
-    fn get(
+    fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Option<Bytes>>> + '_ {
+    ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
         assert!(epoch <= self.epoch());
         self.get_inner(key, epoch, read_options)
     }
@@ -305,7 +305,10 @@ impl LocalStateStore for LocalHummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         match self.mem_table.buffer.get(&key) {
-            None => self.get_inner(key, self.epoch(), read_options).await,
+            None => self
+                .get_inner(key, self.epoch(), read_options)
+                .await
+                .map(|e| e.map(|item| item.1)),
             Some(op) => match op {
                 KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
                 KeyOp::Delete(_) => Ok(None),
@@ -742,7 +745,7 @@ pub struct HummockStorageIteratorInner<'a> {
 }
 
 impl<'a> StateStoreIter for HummockStorageIteratorInner<'a> {
-    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'b>>> {
         let iter = &mut self.inner;
         if !self.initial_read {
             self.initial_read = true;
@@ -824,7 +827,7 @@ pub struct HummockStorageRevIteratorInner<'a> {
 }
 
 impl<'a> StateStoreIter for HummockStorageRevIteratorInner<'a> {
-    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreIterItemRef<'b>>> {
+    async fn try_next<'b>(&'b mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'b>>> {
         let iter = &mut self.inner;
         if !self.initial_read {
             self.initial_read = true;

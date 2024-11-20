@@ -217,6 +217,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
+                system_column: None,
             },
             is_hidden: false,
         });
@@ -1449,7 +1450,9 @@ fn get_source_and_resolved_table_name(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX};
+    use risingwave_common::catalog::{
+        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -1519,6 +1522,7 @@ mod tests {
                 vec![DataType::Int64,DataType::Float64,DataType::Float64],
                 vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
             ),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
         assert_eq!(columns, expected_columns);
