@@ -123,15 +123,20 @@ pub fn start_checkpoint_loop(
                     accumulated_may_delete_object_ids.extend(may_delete_objects);
                     const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
                     if accumulated_may_delete_object_ids.len() >= MIN_MINOR_GC_OBJECT_COUNT {
-                        let _ = hummock_manager
-                            .start_minor_gc(
-                                backup_manager.clone(),
-                                accumulated_may_delete_object_ids.drain(),
-                            )
-                            .await
-                            .inspect_err(|err| {
-                                tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
-                            });
+                        let to_delete = std::mem::take(&mut accumulated_may_delete_object_ids);
+                        let backup_manager_2 = backup_manager.clone();
+                        let hummock_manager_2 = hummock_manager.clone();
+                        tokio::task::spawn(async move {
+                            let _ = hummock_manager_2
+                                .start_minor_gc(
+                                    backup_manager_2,
+                                    to_delete.into_iter(),
+                                )
+                                .await
+                                .inspect_err(|err| {
+                                    tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                                });
+                        });
                     };
                 }
                 Err(err) => {
