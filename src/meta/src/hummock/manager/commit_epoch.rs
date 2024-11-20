@@ -351,6 +351,7 @@ impl HummockManager {
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
+        let commit_object_id_vec = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
         for commit_sst in sstables {
             let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
             for table_id in &commit_sst.sst_info.table_ids {
@@ -419,6 +420,12 @@ impl HummockManager {
             }
         }
 
+        // order check
+        for ssts in commit_sstables.values() {
+            let object_ids = ssts.iter().map(|s| s.object_id).collect_vec();
+            assert!(is_ordered_subset(&commit_object_id_vec, &object_ids));
+        }
+
         Ok(commit_sstables)
     }
 }
@@ -485,4 +492,17 @@ fn rewrite_commit_sstables_to_sub_level(
     }
 
     overlapping_sstables
+}
+
+fn is_ordered_subset(vec_1: &Vec<u64>, vec_2: &Vec<u64>) -> bool {
+    let mut vec_2_iter = vec_2.iter().peekable();
+    for item in vec_1 {
+        if vec_2_iter.peek() == Some(&item) {
+            vec_2_iter.next();
+        } else {
+            return false;
+        }
+    }
+
+    vec_2_iter.peek().is_none()
 }

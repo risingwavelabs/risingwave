@@ -2232,7 +2232,7 @@ pub mod default {
         }
 
         pub fn max_overlapping_level_size() -> u64 {
-            DEFAULT_MIN_COMPACTION_BYTES
+            256 * MB
         }
     }
 
