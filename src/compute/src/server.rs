@@ -296,7 +296,7 @@ pub async fn compute_node_serve(
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = MemoryManager::new(MemoryManagerConfig {
-        total_memory: compute_memory_bytes + storage_memory_bytes,
+        target_memory: compute_memory_bytes + storage_memory_bytes,
         threshold_aggressive: config
             .streaming
             .developer
