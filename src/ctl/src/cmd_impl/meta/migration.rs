@@ -177,10 +177,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     let databases = PbDatabase::list(&meta_store).await?;
     let schemas = PbSchema::list(&meta_store).await?;
     let users = PbUserInfo::list(&meta_store).await?;
-    let tables = PbTable::list(&meta_store).await?;
-    let sources = PbSource::list(&meta_store).await?;
-    let sinks = PbSink::list(&meta_store).await?;
-    let indexes = PbIndex::list(&meta_store).await?;
+    let mut tables = PbTable::list(&meta_store).await?;
+    let mut sources = PbSource::list(&meta_store).await?;
+    let mut sinks = PbSink::list(&meta_store).await?;
+    let mut indexes = PbIndex::list(&meta_store).await?;
     let views = PbView::list(&meta_store).await?;
     let functions = PbFunction::list(&meta_store).await?;
     let connections = PbConnection::list(&meta_store).await?;
@@ -416,6 +416,10 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
 
     // table fragments.
     let table_fragments = model::TableFragments::list(&meta_store).await?;
+    let streaming_job_ids = table_fragments
+        .iter()
+        .map(|tf| tf.table_id().table_id)
+        .collect_vec();
     let mut fragment_job_map = HashMap::new();
     let mut fragments = vec![];
     let mut actors = vec![];
@@ -487,6 +491,58 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     println!("table fragments migrated");
 
     let mut object_dependencies = vec![];
+
+    // To resolve the scenario where the catalog still exists but the metadata of the streaming
+    // job is missing, although this should not happen.
+    sources.retain(|s| {
+        if let Some(info) = &s.info
+            && info.is_shared()
+            && !streaming_job_ids.contains(&s.id)
+        {
+            tracing::warn!(
+                "source {} is shared but don't have a related streaming job.",
+                s.name
+            );
+            false
+        } else {
+            true
+        }
+    });
+    tables.retain(|t| {
+        if t.table_type() == PbTableType::Internal {
+            if !fragment_job_map.contains_key(&t.fragment_id) {
+                tracing::warn!(
+                    "table {} is internal but don't have a related streaming job.",
+                    t.name
+                );
+                return false;
+            }
+        } else if !streaming_job_ids.contains(&t.id) {
+            tracing::warn!(
+                "{} {} don't have a related streaming job.",
+                t.table_type().as_str_name(),
+                t.name
+            );
+            return false;
+        }
+        true
+    });
+    indexes.retain(|idx| {
+        if !streaming_job_ids.contains(&idx.index_table_id) {
+            tracing::warn!("index {} don't have a related streaming job.", idx.name);
+            false
+        } else {
+            true
+        }
+    });
+    sinks.retain(|s| {
+        if !streaming_job_ids.contains(&s.id) {
+            tracing::warn!("sink {} don't have a related streaming job.", s.name);
+            false
+        } else {
+            true
+        }
+    });
 
     // catalogs.
     // source
