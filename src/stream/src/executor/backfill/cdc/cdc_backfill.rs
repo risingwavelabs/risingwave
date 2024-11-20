@@ -198,6 +198,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .await?;
                 reader
             };
+
+            // emit one barrier if any
+            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
+                // commit state to bump the epoch of state table
+                state_impl.commit_state(barrier.epoch).await?;
+                yield Message::Barrier(barrier);
+            }
+
             match create_result {
                 Ok(reader) => {
                     table_reader = Some(reader);
@@ -214,12 +222,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         sleep(delay).await;
                     }
                 }
-            }
-            // emit one barrier if any
-            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
-                // commit state to bump the epoch of state table
-                state_impl.commit_state(barrier.epoch).await?;
-                yield Message::Barrier(barrier);
             }
         }
 
@@ -836,8 +838,7 @@ impl UpstreamBarriers {
 fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
     const BASE_DELAY: Duration = Duration::from_secs(1);
     const BACKOFF_FACTOR: u64 = 2;
-    const MAX_DELAY: Duration = Duration::from_secs(180);
-
+    const MAX_DELAY: Duration = Duration::from_secs(8);
     ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
         .factor(BACKOFF_FACTOR)
         .max_delay(MAX_DELAY)
