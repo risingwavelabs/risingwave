@@ -13,11 +13,15 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
+use anyhow::anyhow;
 use either::Either;
+use futures::future::pending;
 use futures::stream::select_with_strategy;
-use futures::{select, stream, FutureExt};
+use futures::{stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -31,6 +35,9 @@ use risingwave_connector::parser::{
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
+use tokio::time::sleep;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -43,7 +50,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::executor::{BarrierInner, UpdateMutation};
+use crate::executor::{MessageInner, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -131,7 +138,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .inc_by(upstream_processed_row_count);
     }
 
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
@@ -141,7 +148,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
-        let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let additional_columns = self
             .output_columns
@@ -169,41 +175,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
-        let mut upstream_pending_barriers: VecDeque<Barrier> = VecDeque::new();
-
-        let mut upstream = transform_upstream(upstream, &self.output_columns)
-            .fuse()
-            .boxed()
-            .peekable();
-
-        let table_reader: StreamExecutorResult<ExternalTableReaderImpl> = async {
-            let mut table_reader: Option<ExternalTableReaderImpl> = None;
-            loop {
-                select! {
-                    create_res = create_table_reader(&self.external_table).fuse() => {
-                        table_reader = Some(create_res?);
-                        break;
-                    },
-                    Some(msg) = upstream.next() => {
-                        // the upstream could be barrier and cdc events, we can drop cdc events
-                        match msg? {
-                            Message::Barrier(barrier) => {
-                                // TODO: cache barrier in a queue, and consume
-                                yield Message::Barrier(barrier);
-                            }
-                            _ => {
-                                // ignore cdc events
-                            }
-                        }
-                    },
-                }
-            }
-            Ok(table_reader.expect("table reader must exist"))
-        }
-        .await;
-
-        let table_reader = Arc::new(table_reader?);
-
         state_impl.init_epoch(first_barrier_epoch).await?;
 
         // restore backfill state
@@ -215,14 +186,62 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
 
-        let mut last_binlog_offset: Option<CdcOffset> = state.last_cdc_offset.map_or(
-            self.external_table
-                .current_cdc_offset(&table_reader)
-                .await?,
-            Some,
+        // After init the state table and forward the initial barrier to downstream,
+        // we now try to create the table reader with retry
+        let mut upstream_barriers = UpstreamBarriers::new(upstream);
+        let table_reader: Option<ExternalTableReaderImpl>;
+        let mut backoff = get_backoff_strategy();
+        loop {
+            let create_result: StreamExecutorResult<_> = try {
+                let reader = upstream_barriers
+                    .run_future(create_table_reader(&self.external_table))
+                    .await?;
+                reader
+            };
+
+            // emit one barrier if any
+            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
+                // commit state to bump the epoch of state table
+                state_impl.commit_state(barrier.epoch).await?;
+                yield Message::Barrier(barrier);
+            }
+            match create_result {
+                Ok(reader) => {
+                    table_reader = Some(reader);
+                    break;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        table_id,
+                        upstream_table_name,
+                        error = %e.as_report(),
+                        "failed to create table reader",
+                    );
+                    if let Some(delay) = backoff.next() {
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+        let upstream_table_reader = UpstreamTableReader::new(
+            self.external_table.clone(),
+            table_reader.expect("table reader must created"),
         );
 
-        let offset_parse_func = table_reader.get_cdc_offset_parser();
+        // consume all pending barriers during table reader creation
+        for barrier in upstream_barriers.pending_barriers.drain(..) {
+            // commit state to bump the epoch of state table
+            state_impl.commit_state(barrier.epoch).await?;
+            yield Message::Barrier(barrier);
+        }
+        let mut upstream = transform_upstream(upstream_barriers.upstream, &self.output_columns)
+            .boxed()
+            .peekable();
+        let mut last_binlog_offset: Option<CdcOffset> = state
+            .last_cdc_offset
+            .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
+
+        let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
@@ -327,17 +346,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     external_database_name.clone(),
                 );
 
-                // let right_snapshot = pin!(upstream_table_reader
-                //     .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
-                //     .map(Either::Right));
-
-                let right_snapshot = pin!(self
-                    .external_table
-                    .snapshot_read_full_table(
-                        table_reader,
-                        read_args,
-                        self.options.snapshot_batch_size
-                    )
+                let right_snapshot = pin!(upstream_table_reader
+                    .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                     .map(Either::Right));
 
                 let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
@@ -743,34 +753,102 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 }
 
+struct UpstreamBarriers {
+    upstream: BoxedMessageStream,
+    pending_barriers: VecDeque<Barrier>,
+}
+
+impl UpstreamBarriers {
+    fn new(upstream: BoxedMessageStream) -> Self {
+        Self {
+            upstream,
+            pending_barriers: VecDeque::new(),
+        }
+    }
+
+    async fn run_future<T>(
+        &mut self,
+        future: impl Future<Output = StreamExecutorResult<T>>,
+    ) -> StreamExecutorResult<T> {
+        tokio::select! {
+            biased;
+            e = self.concurrently_consume_upstream(10) => {
+                Err(e)
+            }
+            // this arm won't be starved, because the first arm is always pending unless returning with error
+            result = future => {
+                result
+            }
+        }
+    }
+
+    async fn next_pending_barrier(&mut self) -> StreamExecutorResult<Option<Barrier>> {
+        if self.pending_barriers.is_empty() {
+            self.consume_until_next_checkpoint_barrier().await?;
+        }
+        let barrier = self.pending_barriers.pop_back();
+        assert!(barrier.is_some(), "must have a barrier");
+        Ok(barrier)
+    }
+
+    async fn concurrently_consume_upstream(
+        &mut self,
+        barrier_num_limit: usize,
+    ) -> StreamExecutorError {
+        {
+            loop {
+                if let Err(e) = try {
+                    // pause the future when we reach the barrier number limit,
+                    if self.pending_barriers.len() >= barrier_num_limit {
+                        return pending().await;
+                    }
+                    self.consume_until_next_checkpoint_barrier().await?;
+                } {
+                    break e;
+                }
+            }
+        }
+    }
+
+    async fn consume_until_next_checkpoint_barrier(&mut self) -> StreamExecutorResult<()> {
+        loop {
+            let msg = self
+                .upstream
+                .try_next()
+                .await?
+                .ok_or_else(|| anyhow!("end of upstream"))?;
+            match msg {
+                MessageInner::Barrier(barrier) => {
+                    let is_checkpoint = barrier.kind.is_checkpoint();
+                    self.pending_barriers.push_front(barrier);
+                    if is_checkpoint {
+                        break Ok(());
+                    }
+                }
+                MessageInner::Chunk(_) | MessageInner::Watermark(_) => {
+                    // ignore
+                }
+            }
+        }
+    }
+}
+
+fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
+    const BASE_DELAY: Duration = Duration::from_secs(1);
+    const BACKOFF_FACTOR: u64 = 2;
+    const MAX_DELAY: Duration = Duration::from_secs(180);
+
+    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
+        .factor(BACKOFF_FACTOR)
+        .max_delay(MAX_DELAY)
+        .map(jitter)
+}
+
 async fn create_table_reader(
     external_table: &ExternalStorageTable,
 ) -> StreamExecutorResult<ExternalTableReaderImpl> {
     let table_reader = external_table.create_table_reader().await?;
     Ok(table_reader)
-
-    // let mut table_reader: Option<ExternalTableReaderImpl> = None;
-    // loop {
-    //     select! {
-    //         create_res = external_table.create_table_reader().fuse() => {
-    //             table_reader = Some(create_res?);
-    //             break;
-    //         },
-    //         msg = upstream.next().fuse() => {
-    //             // the upstream could be barrier and cdc events, we can drop cdc events
-    //             match msg? {
-    //                 Message::Barrier(barrier) => {
-    //                     // the first barrier should be propagated
-    //                     yield Message::Barrier(barrier);
-    //                 }
-    //                 _ => {
-    //                     // ignore cdc events
-    //                 }
-    //             }
-    //         },
-    //     }
-    // }
-    // Ok(table_reader.expect("table reader must exist"))
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]

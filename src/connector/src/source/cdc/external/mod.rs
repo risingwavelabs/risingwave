@@ -49,7 +49,7 @@ use crate::source::cdc::external::sql_server::{
 use crate::source::cdc::CdcSourceType;
 use crate::WithPropertiesExt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CdcTableType {
     Undefined,
     MySql,

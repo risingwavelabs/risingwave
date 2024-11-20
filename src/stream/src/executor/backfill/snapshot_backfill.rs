@@ -96,7 +96,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         }
     }
 
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         debug!("snapshot backfill executor start");
         let first_barrier = expect_first_barrier(&mut self.upstream).await?;
