@@ -20,21 +20,15 @@ use std::mem::replace;
 use std::sync::Arc;
 use std::task::Poll;
 
-use await_tree::InstrumentAwait;
-use futures::future::BoxFuture;
-use futures::{FutureExt, TryFutureExt};
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::SyncResult;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_storage::StateStoreImpl;
-use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
-use super::LocalBarrierWorker;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
@@ -66,104 +60,18 @@ enum ManagedBarrierStateInner {
 }
 
 #[derive(Debug)]
-pub(super) struct BarrierState {
+struct BarrierState {
     barrier: Barrier,
     /// Only be `Some(_)` when `barrier.kind` is `Checkpoint`
     table_ids: Option<HashSet<TableId>>,
     inner: ManagedBarrierStateInner,
 }
 
-mod await_epoch_completed_future {
-    use std::future::Future;
-
-    use futures::future::BoxFuture;
-    use futures::FutureExt;
-    use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-
-    use crate::error::StreamResult;
-    use crate::executor::Barrier;
-    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
-
-    pub(crate) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
-        + 'static;
-
-    pub(super) fn instrument_complete_barrier_future(
-        partial_graph_id: PartialGraphId,
-        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
-        barrier: Barrier,
-        barrier_await_tree_reg: Option<&await_tree::Registry>,
-        create_mview_progress: Vec<PbCreateMviewProgress>,
-    ) -> AwaitEpochCompletedFuture {
-        let prev_epoch = barrier.epoch.prev;
-        let future = async move {
-            if let Some(future) = complete_barrier_future {
-                let result = future.await;
-                result.map(Some)
-            } else {
-                Ok(None)
-            }
-        }
-        .map(move |result| {
-            (
-                partial_graph_id,
-                barrier,
-                result.map(|sync_result| BarrierCompleteResult {
-                    sync_result,
-                    create_mview_progress,
-                }),
-            )
-        });
-        if let Some(reg) = barrier_await_tree_reg {
-            reg.register(
-                await_tree_key::BarrierAwait { prev_epoch },
-                format!("SyncEpoch({})", prev_epoch),
-            )
-            .instrument(future)
-            .left_future()
-        } else {
-            future.right_future()
-        }
-    }
-}
-
-pub(crate) use await_epoch_completed_future::*;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitialPartialGraph;
 use risingwave_pb::stream_service::InjectBarrierRequest;
-
-fn sync_epoch(
-    state_store: &StateStoreImpl,
-    streaming_metrics: &StreamingMetrics,
-    prev_epoch: u64,
-    table_ids: HashSet<TableId>,
-) -> BoxFuture<'static, StreamResult<SyncResult>> {
-    let timer = streaming_metrics.barrier_sync_latency.start_timer();
-    let hummock = state_store.as_hummock().cloned();
-    let future = async move {
-        if let Some(hummock) = hummock {
-            hummock.sync(vec![(prev_epoch, table_ids)]).await
-        } else {
-            Ok(SyncResult::default())
-        }
-    };
-    future
-        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
-        .inspect_ok(move |_| {
-            timer.observe_duration();
-        })
-        .map_err(move |e| {
-            tracing::error!(
-                prev_epoch,
-                error = %e.as_report(),
-                "Failed to sync state store",
-            );
-            e.into()
-        })
-        .boxed()
-}
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     graph_states: &'a HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
@@ -378,9 +286,9 @@ pub(super) struct PartialGraphManagedBarrierState {
     /// in [`crate::task::barrier_manager::BarrierCompleteResult`].
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
-    pub(super) state_store: StateStoreImpl,
+    state_store: StateStoreImpl,
 
-    pub(super) streaming_metrics: Arc<StreamingMetrics>,
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 impl PartialGraphManagedBarrierState {
@@ -697,6 +605,21 @@ impl ManagedBarrierState {
             .expect("should exist");
         prev_graph_state.collect(actor_id, epoch);
     }
+
+    pub(super) fn pop_barrier_to_complete(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        prev_epoch: u64,
+    ) -> (
+        Barrier,
+        Option<HashSet<TableId>>,
+        Vec<PbCreateMviewProgress>,
+    ) {
+        self.graph_states
+            .get_mut(&partial_graph_id)
+            .expect("should exist")
+            .pop_barrier_to_complete(prev_epoch)
+    }
 }
 
 impl PartialGraphManagedBarrierState {
@@ -743,57 +666,30 @@ impl PartialGraphManagedBarrierState {
         }
         None
     }
-}
 
-impl LocalBarrierWorker {
-    pub(super) fn complete_barrier(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
-        {
-            let (popped_prev_epoch, barrier_state) = self
-                .state
-                .graph_states
-                .get_mut(&partial_graph_id)
-                .expect("should exist")
-                .epoch_barrier_state_map
-                .pop_first()
-                .expect("should exist");
+    fn pop_barrier_to_complete(
+        &mut self,
+        prev_epoch: u64,
+    ) -> (
+        Barrier,
+        Option<HashSet<TableId>>,
+        Vec<PbCreateMviewProgress>,
+    ) {
+        let (popped_prev_epoch, barrier_state) = self
+            .epoch_barrier_state_map
+            .pop_first()
+            .expect("should exist");
 
-            assert_eq!(prev_epoch, popped_prev_epoch);
+        assert_eq!(prev_epoch, popped_prev_epoch);
 
-            let create_mview_progress = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress) => {
-                create_mview_progress
-            });
-
-            let complete_barrier_future = match &barrier_state.barrier.kind {
-                BarrierKind::Unspecified => unreachable!(),
-                BarrierKind::Initial => {
-                    tracing::info!(
-                        epoch = prev_epoch,
-                        "ignore sealing data for the first barrier"
-                    );
-                    tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-                    None
-                }
-                BarrierKind::Barrier => None,
-                BarrierKind::Checkpoint => Some(sync_epoch(
-                    &self.actor_manager.env.state_store(),
-                    &self.actor_manager.streaming_metrics,
-                    prev_epoch,
-                    barrier_state
-                        .table_ids
-                        .expect("should be Some on BarrierKind::Checkpoint"),
-                )),
-            };
-
-            self.await_epoch_completed_futures.push_back({
-                instrument_complete_barrier_future(
-                    partial_graph_id,
-                    complete_barrier_future,
-                    barrier_state.barrier,
-                    self.actor_manager.await_tree_reg.as_ref(),
-                    create_mview_progress,
-                )
-            });
-        }
+        let create_mview_progress = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress) => {
+            create_mview_progress
+        });
+        (
+            barrier_state.barrier,
+            barrier_state.table_ids,
+            create_mview_progress,
+        )
     }
 }
 
@@ -925,6 +821,7 @@ impl PartialGraphManagedBarrierState {
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
         if let Some(barrier) = self.may_have_collected_all() {
+            self.pop_barrier_to_complete(barrier.epoch.prev);
             return barrier.epoch.prev;
         }
         pending().await
@@ -958,6 +855,14 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(0)
         );
+        assert_eq!(
+            managed_barrier_state
+                .epoch_barrier_state_map
+                .first_key_value()
+                .unwrap()
+                .0,
+            &test_epoch(1)
+        );
         managed_barrier_state.collect(1, barrier2.epoch);
         managed_barrier_state.collect(1, barrier3.epoch);
         managed_barrier_state.collect(2, barrier2.epoch);
@@ -965,12 +870,21 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(1)
         );
+        assert_eq!(
+            managed_barrier_state
+                .epoch_barrier_state_map
+                .first_key_value()
+                .unwrap()
+                .0,
+            { &test_epoch(2) }
+        );
         managed_barrier_state.collect(2, barrier3.epoch);
         managed_barrier_state.collect(3, barrier3.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(2)
         );
+        assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
     #[tokio::test]
@@ -1023,5 +937,6 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(2)
         );
+        assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 }
