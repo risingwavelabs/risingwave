@@ -814,6 +814,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
 pub struct TopNStaging {
     to_delete: BTreeMap<CacheKey, CompactedRow>,
     to_insert: BTreeMap<CacheKey, CompactedRow>,
+    to_update: BTreeMap<CacheKey, (CompactedRow, CompactedRow)>,
 }
 
 impl TopNStaging {
@@ -822,32 +823,60 @@ impl TopNStaging {
     }
 
     fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if self.to_delete.remove(&cache_key).is_none() {
+        if let Some(old_row) = self.to_delete.remove(&cache_key) {
+            if old_row != row {
+                self.to_update.insert(cache_key, (old_row, row));
+            }
+        } else {
+            debug_assert!(!self.to_update.contains_key(&cache_key));
+            debug_assert!(!self.to_insert.contains_key(&cache_key));
             self.to_insert.insert(cache_key, row);
         }
     }
 
     fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if self.to_insert.remove(&cache_key).is_none() {
+        if self.to_insert.remove(&cache_key).is_some() {
+            // do nothing more
+        } else if let Some((old_row, _)) = self.to_update.remove(&cache_key) {
+            self.to_delete.insert(cache_key, old_row);
+        } else {
             self.to_delete.insert(cache_key, row);
         }
     }
 
     /// Get the count of effective changes in the staging.
     pub fn len(&self) -> usize {
-        self.to_delete.len() + self.to_insert.len()
+        self.to_delete.len() + self.to_insert.len() + self.to_update.len()
     }
 
     /// Check if the staging is empty.
     pub fn is_empty(&self) -> bool {
-        self.to_delete.is_empty() && self.to_insert.is_empty()
+        self.to_delete.is_empty() && self.to_insert.is_empty() && self.to_update.is_empty()
     }
 
     /// Iterate over the changes in the staging.
     pub fn into_changes(self) -> impl Iterator<Item = (Op, CompactedRow)> {
-        self.to_delete
+        #[cfg(debug_assertions)]
+        {
+            let keys = self
+                .to_delete
+                .keys()
+                .chain(self.to_insert.keys())
+                .chain(self.to_update.keys())
+                .unique()
+                .count();
+            assert_eq!(
+                keys,
+                self.to_delete.len() + self.to_insert.len() + self.to_update.len(),
+                "should not have duplicate keys with different operations",
+            );
+        }
+
+        self.to_update
             .into_values()
-            .map(|row| (Op::Delete, row))
+            .map(|(old_row, new_row)| [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)])
+            .flatten()
+            .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
             .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
     }
 
