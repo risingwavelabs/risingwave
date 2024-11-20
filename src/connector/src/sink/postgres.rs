@@ -611,14 +611,15 @@ mod tests {
         let sql = create_merge_sql(&schema, table_name, &[1]);
         assert_eq!(
             sql,
-        "
+            "
         MERGE INTO test_table target
         USING (SELECT $1 as a,$2 as b) AS source
         ON (source.b = target.b)
         WHEN MATCHED
           THEN UPDATE SET a = source.a
         WHEN NOT MATCHED
-          THEN INSERT (a, b) VALUES (source.a, source.b)".to_string()
+          THEN INSERT (a, b) VALUES (source.a, source.b)"
+                .to_string()
         );
     }
 }
