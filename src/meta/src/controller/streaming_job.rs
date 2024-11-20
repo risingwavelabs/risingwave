@@ -1332,9 +1332,8 @@ impl CatalogController {
                     }
                 });
             }
-            if is_fs_source && *fragment_type_mask == PbFragmentTypeFlag::FragmentUnspecified as i32
-            {
-                // when create table with fs connector, the fragment type is unspecified
+            if is_fs_source {
+                // scan all fragments for StreamFsFetch node if using fs connector
                 visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::StreamFsFetch(node) = node {
                         if let Some(node_inner) = &mut node.node_inner

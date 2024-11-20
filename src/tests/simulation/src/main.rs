@@ -133,10 +133,13 @@ pub struct Args {
     /// Use arrangement backfill
     #[clap(long, default_value = "false")]
     use_arrangement_backfill: bool,
+
+    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+    #[clap(long, env = "RW_SIM_RANDOM_VNODE_COUNT")]
+    random_vnode_count: bool,
 }
 
 #[tokio::main]
-#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 
@@ -165,7 +168,6 @@ async fn main() {
         } else {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
-        ..Default::default()
     };
     let kill_opts = KillOpts {
         kill_meta: false,
@@ -186,7 +188,7 @@ async fn main() {
         cluster.create_kafka_producer(&datadir).await;
     }
 
-    let seed = madsim::runtime::Handle::current().seed();
+    let seed = sqlsmith_seed();
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -248,7 +250,12 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
+                let opts = Opts {
+                    kill_opts,
+                    background_ddl_rate: args.background_ddl_rate,
+                    random_vnode_count: args.random_vnode_count,
+                };
+                run_slt_task(cluster0, glob, opts).await;
             }
         })
         .await;
@@ -269,4 +276,9 @@ async fn main() {
     }
 
     cluster.graceful_shutdown().await;
+}
+
+#[cfg_or_panic(madsim)]
+fn sqlsmith_seed() -> u64 {
+    madsim::runtime::Handle::current().seed()
 }

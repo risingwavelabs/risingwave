@@ -28,7 +28,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
-use super::{create_mv, PgResponseStream, RwPgResponse};
+use super::{create_mv, declare_cursor, PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
@@ -146,6 +146,20 @@ pub async fn handle_execute(
                 dependent_relations,
                 columns,
                 emit_mode,
+            )
+            .await
+        }
+        Statement::DeclareCursor { stmt } => {
+            let session = handler_args.session.clone();
+            let plan_fragmenter_result = {
+                let context = OptimizerContext::from_handler_args(handler_args.clone());
+                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                gen_batch_plan_fragmenter(&session, plan_result)?
+            };
+            declare_cursor::handle_bound_declare_query_cursor(
+                handler_args,
+                stmt.cursor_name,
+                plan_fragmenter_result,
             )
             .await
         }

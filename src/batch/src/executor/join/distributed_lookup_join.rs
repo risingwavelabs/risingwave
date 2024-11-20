@@ -355,7 +355,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
 
         let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
-        if self.lookup_prefix_len == self.table.pk_indices().len() && !self.table.has_epoch_idx() {
+        if self.lookup_prefix_len == self.table.pk_indices().len() {
             let row = self.table.get_row(&pk_prefix, self.epoch.into()).await?;
 
             if let Some(row) = row {

@@ -23,7 +23,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 use tracing::{error, Instrument};
@@ -37,6 +37,7 @@ use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::monitor::monitored_storage_metrics::StateStoreIterStats;
 use crate::monitor::{StateStoreIterLogStats, StateStoreIterStatsTrait};
 use crate::store::*;
+
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
@@ -334,25 +335,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             .inspect_err(|e| error!(error = %e.as_report(), "Failed in wait_epoch"))
     }
 
-    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let future = self
-            .inner
-            .sync(epoch, table_ids)
-            .instrument_await("store_sync");
-        let timer = self.storage_metrics.sync_duration.start_timer();
-        let sync_size = self.storage_metrics.sync_size.clone();
-        async move {
-            let sync_result = future
-                .await
-                .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
-            timer.observe_duration();
-            if sync_result.sync_size != 0 {
-                sync_size.observe(sync_result.sync_size as _);
-            }
-            Ok(sync_result)
-        }
-    }
-
     fn monitored(
         self,
         _storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -378,6 +360,26 @@ impl MonitoredStateStore<HummockStorage> {
 
     pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
         self.inner.sstable_object_id_manager().clone()
+    }
+
+    pub async fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> StorageResult<SyncResult> {
+        let future = self
+            .inner
+            .sync(sync_table_epochs)
+            .instrument_await("store_sync");
+        let timer = self.storage_metrics.sync_duration.start_timer();
+        let sync_size = self.storage_metrics.sync_size.clone();
+        let sync_result = future
+            .await
+            .inspect_err(|e| error!(error = %e.as_report(), "Failed in sync"))?;
+        timer.observe_duration();
+        if sync_result.sync_size != 0 {
+            sync_size.observe(sync_result.sync_size as _);
+        }
+        Ok(sync_result)
     }
 }
 
