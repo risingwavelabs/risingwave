@@ -104,7 +104,7 @@ impl GcManager {
         prefix: Option<String>,
         start_after: Option<String>,
         limit: Option<u64>,
-    ) -> Result<(Vec<HummockSstableObjectId>, u64, u64, Option<String>)> {
+    ) -> Result<(HashSet<HummockSstableObjectId>, u64, u64, Option<String>)> {
         tracing::debug!(
             sst_retention_watermark,
             prefix,
@@ -142,7 +142,7 @@ impl GcManager {
                 };
                 async move { result }
             })
-            .try_collect::<Vec<HummockSstableObjectId>>()
+            .try_collect::<HashSet<HummockSstableObjectId>>()
             .await?;
         Ok((
             filtered,
@@ -320,6 +320,15 @@ impl HummockManager {
         tracing::info!(total_object_count, total_object_size, "Finish GC");
         self.metrics.total_object_size.set(total_object_size as _);
         self.metrics.total_object_count.set(total_object_count as _);
+        match self.time_travel_pinned_object_count().await {
+            Ok(count) => {
+                self.metrics.time_travel_object_count.set(count as _);
+            }
+            Err(err) => {
+                use thiserror_ext::AsReport;
+                tracing::warn!(error = %err.as_report(), "Failed to count time travel objects.");
+            }
+        }
         Ok(())
     }
 
@@ -327,7 +336,7 @@ impl HummockManager {
     /// Returns number of SSTs to delete.
     pub(crate) async fn complete_gc_batch(
         &self,
-        object_ids: Vec<HummockSstableObjectId>,
+        object_ids: HashSet<HummockSstableObjectId>,
         backup_manager: Option<BackupManagerRef>,
     ) -> Result<usize> {
         if object_ids.is_empty() {
@@ -349,31 +358,23 @@ impl HummockManager {
         metrics
             .full_gc_candidate_object_count
             .observe(candidate_object_number as _);
-        let time_travel_pinned = self
-            .all_object_ids_in_time_travel()
-            .await?
-            .collect::<HashSet<_>>();
-        self.metrics
-            .time_travel_object_count
-            .set(time_travel_pinned.len() as _);
-        // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|id| *id < min_sst_id)
-            .collect_vec();
-        let after_min_sst_id = object_ids.len();
-        // filter by time travel archive
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| !time_travel_pinned.contains(s))
-            .collect_vec();
-        let after_time_travel = object_ids.len();
         // filter by metadata backup
         let object_ids = object_ids
             .into_iter()
             .filter(|s| !pinned_by_metadata_backup.contains(s))
             .collect_vec();
         let after_metadata_backup = object_ids.len();
+        // filter by time travel archive
+        let object_ids = self
+            .filter_out_objects_by_time_travel(object_ids.into_iter())
+            .await?;
+        let after_time_travel = object_ids.len();
+        // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|id| *id < min_sst_id)
+            .collect_vec();
+        let after_min_sst_id = object_ids.len();
         // filter by version
         let after_version = self
             .finalize_objects_to_delete(object_ids.into_iter())
@@ -384,9 +385,9 @@ impl HummockManager {
             .observe(after_version_count as _);
         tracing::info!(
             candidate_object_number,
-            after_min_sst_id,
-            after_time_travel,
             after_metadata_backup,
+            after_time_travel,
+            after_min_sst_id,
             after_version_count,
             "complete gc batch"
         );
@@ -537,17 +538,14 @@ impl HummockManager {
             return Ok(());
         };
         // Objects pinned by either meta backup or time travel should be filtered out.
-        let time_travel_pinned: HashSet<_> = self.all_object_ids_in_time_travel().await?.collect();
-        self.metrics
-            .time_travel_object_count
-            .set(time_travel_pinned.len() as _);
         let backup_pinned: HashSet<_> = backup_manager.list_pinned_ssts();
         let object_ids = object_ids
             .into_iter()
-            .filter(|s| !time_travel_pinned.contains(s) && !backup_pinned.contains(s))
-            .collect_vec();
+            .filter(|s| !backup_pinned.contains(s));
+        let object_ids = self.filter_out_objects_by_time_travel(object_ids).await?;
         // Retry is not necessary. Full GC will handle these objects eventually.
-        self.delete_objects(object_ids).await?;
+        self.delete_objects(object_ids.into_iter().collect())
+            .await?;
         Ok(())
     }
 }

@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -35,8 +34,8 @@ use risingwave_meta_model::{
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ColumnTrait, Condition, DatabaseTransaction, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
-    TransactionTrait,
+    ColumnTrait, Condition, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, TransactionTrait,
 };
 
 use crate::hummock::error::{Error, Result};
@@ -236,21 +235,38 @@ impl HummockManager {
         Ok(())
     }
 
-    pub(crate) async fn all_object_ids_in_time_travel(
+    pub(crate) async fn filter_out_objects_by_time_travel(
         &self,
-    ) -> Result<impl Iterator<Item = HummockSstableId>> {
-        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
-            hummock_sstable_info::Entity::find()
-                .select_only()
-                .column(hummock_sstable_info::Column::ObjectId)
-                .into_tuple()
-                .all(&self.env.meta_store_ref().conn)
-                .await?;
-        let object_ids = object_ids
-            .into_iter()
-            .unique()
-            .map(|object_id| HummockSstableObjectId::try_from(object_id).unwrap());
-        Ok(object_ids)
+        objects: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> Result<HashSet<HummockSstableObjectId>> {
+        // The input object count is much smaller than time travel pinned object count in meta store.
+        // So search input object in meta store.
+        let mut result: HashSet<_> = objects.collect();
+        let mut remain: VecDeque<_> = result.iter().copied().collect();
+        const FILTER_BATCH_SIZE: usize = 1000;
+        while !remain.is_empty() {
+            let batch = remain.drain(..std::cmp::min(remain.len(), FILTER_BATCH_SIZE));
+            let reject_object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
+                hummock_sstable_info::Entity::find()
+                    .filter(hummock_sstable_info::Column::ObjectId.is_in(batch))
+                    .select_only()
+                    .column(hummock_sstable_info::Column::ObjectId)
+                    .into_tuple()
+                    .all(&self.env.meta_store_ref().conn)
+                    .await?;
+            for reject in reject_object_ids {
+                let object_id = HummockSstableObjectId::try_from(reject).unwrap();
+                result.remove(&object_id);
+            }
+        }
+        Ok(result)
+    }
+
+    pub(crate) async fn time_travel_pinned_object_count(&self) -> Result<u64> {
+        let count = hummock_sstable_info::Entity::find()
+            .count(&self.env.meta_store_ref().conn)
+            .await?;
+        Ok(count)
     }
 
     /// Attempt to locate the version corresponding to `query_epoch`.

@@ -110,7 +110,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum HummockSstableInfo {
+pub(crate) enum HummockSstableInfo {
     Table,
     SstId,
     ObjectId,
