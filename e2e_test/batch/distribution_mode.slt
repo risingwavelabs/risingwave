@@ -13,6 +13,7 @@ include ./aggregate/*.slt.part
 include ./types/*.slt.part
 include ./functions/*.slt.part
 include ./over_window/main.slt.part
+include ./subquery/**/*.slt.part
 
 statement ok
 SET QUERY_MODE TO auto;

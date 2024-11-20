@@ -9,6 +9,7 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_error
 - sql: |
     create table t(x int);
@@ -28,6 +29,7 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_error
 - sql: |
     create table t(x int);
@@ -35,6 +37,7 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_error
 - sql: |
     create table t(x int);
@@ -42,6 +45,7 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_error
 - sql: |
     create table t(x int);
@@ -49,6 +53,7 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_error
 - sql: |
     create table t1 (x int, y int);
