@@ -198,13 +198,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .await?;
                 reader
             };
-
-            // emit one barrier if any
-            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
-                // commit state to bump the epoch of state table
-                state_impl.commit_state(barrier.epoch).await?;
-                yield Message::Barrier(barrier);
-            }
             match create_result {
                 Ok(reader) => {
                     table_reader = Some(reader);
@@ -222,7 +215,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     }
                 }
             }
+            // emit one barrier if any
+            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
+                // commit state to bump the epoch of state table
+                state_impl.commit_state(barrier.epoch).await?;
+                yield Message::Barrier(barrier);
+            }
         }
+
         let upstream_table_reader = UpstreamTableReader::new(
             self.external_table.clone(),
             table_reader.expect("table reader must created"),
