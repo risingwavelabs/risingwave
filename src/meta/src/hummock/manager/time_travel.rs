@@ -44,39 +44,8 @@ use crate::hummock::HummockManager;
 
 /// Time travel.
 impl HummockManager {
-    fn add_time_travel_object_cache(
-        &self,
-        object_ids: impl Iterator<Item = HummockSstableObjectId>,
-    ) {
-        let mut guard = self.objects_pinned_by_time_travel.write();
-        guard.extend(object_ids);
-    }
-
-    fn sub_time_travel_object_cache(
-        &self,
-        object_ids: impl Iterator<Item = HummockSstableObjectId>,
-    ) {
-        let mut guard = self.objects_pinned_by_time_travel.write();
-        for object_id in object_ids {
-            guard.remove(&object_id);
-        }
-    }
-
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
-        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
-            hummock_sstable_info::Entity::find()
-                .select_only()
-                .column(hummock_sstable_info::Column::ObjectId)
-                .into_tuple()
-                .all(&self.env.meta_store_ref().conn)
-                .await?;
-        self.add_time_travel_object_cache(
-            object_ids
-                .into_iter()
-                .unique()
-                .map(|object_id| HummockSstableObjectId::try_from(object_id).unwrap()),
-        );
         let mut guard = self.versioning.write().await;
         guard.mark_next_time_travel_version_snapshot();
 
@@ -99,7 +68,6 @@ impl HummockManager {
     ) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
-
         let version_watermark = hummock_epoch_to_version::Entity::find()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
@@ -113,6 +81,11 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let watermark_version_id = std::cmp::min(
+            version_watermark.version_id,
+            min_pinned_version_id.to_u64().try_into().unwrap(),
+        );
         let res = hummock_epoch_to_version::Entity::delete_many()
             .filter(
                 hummock_epoch_to_version::Column::Epoch
@@ -126,9 +99,7 @@ impl HummockManager {
             res.rows_affected
         );
         let latest_valid_version = hummock_time_travel_version::Entity::find()
-            .filter(
-                hummock_time_travel_version::Column::VersionId.lte(version_watermark.version_id),
-            )
+            .filter(hummock_time_travel_version::Column::VersionId.lte(watermark_version_id))
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&txn)
             .await?
@@ -230,9 +201,10 @@ impl HummockManager {
             );
             next_version_sst_ids = sst_ids;
         }
-        self.sub_time_travel_object_cache(object_ids_to_delete.iter().copied());
-        self.gc_manager
-            .add_may_delete_object_ids(object_ids_to_delete.into_iter());
+        if !object_ids_to_delete.is_empty() {
+            self.gc_manager
+                .add_may_delete_object_ids(object_ids_to_delete.into_iter());
+        }
 
         let res = hummock_time_travel_version::Entity::delete_many()
             .filter(
@@ -264,16 +236,21 @@ impl HummockManager {
         Ok(())
     }
 
-    pub(crate) fn filter_out_object_ids_in_time_travel(
+    pub(crate) async fn all_object_ids_in_time_travel(
         &self,
-        object_ids: impl Iterator<Item = HummockSstableObjectId>,
-    ) -> HashSet<HummockSstableObjectId> {
-        let pinned = self.objects_pinned_by_time_travel.read();
-        object_ids.filter(|o| !pinned.contains(o)).collect()
-    }
-
-    pub(crate) fn object_count_in_time_travel(&self) -> usize {
-        self.objects_pinned_by_time_travel.read().len()
+    ) -> Result<impl Iterator<Item = HummockSstableId>> {
+        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
+            hummock_sstable_info::Entity::find()
+                .select_only()
+                .column(hummock_sstable_info::Column::ObjectId)
+                .into_tuple()
+                .all(&self.env.meta_store_ref().conn)
+                .await?;
+        let object_ids = object_ids
+            .into_iter()
+            .unique()
+            .map(|object_id| HummockSstableObjectId::try_from(object_id).unwrap());
+        Ok(object_ids)
     }
 
     /// Attempt to locate the version corresponding to `query_epoch`.
@@ -400,14 +377,11 @@ impl HummockManager {
             })
             .collect::<HashSet<_>>();
         async fn write_sstable_infos(
-            this: &HummockManager,
             sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
         ) -> Result<usize> {
-            let sst_infos_: Vec<_> = sst_infos.collect();
-            this.add_time_travel_object_cache(sst_infos_.iter().map(|s| s.object_id));
             let mut count = 0;
-            for sst_info in sst_infos_ {
+            for sst_info in sst_infos {
                 let m = hummock_sstable_info::ActiveModel {
                     sst_id: Set(sst_info.sst_id.try_into().unwrap()),
                     object_id: Set(sst_info.object_id.try_into().unwrap()),
@@ -447,7 +421,6 @@ impl HummockManager {
                     .collect(),
             );
             write_sstable_infos(
-                self,
                 version
                     .get_sst_infos_from_groups(&select_groups)
                     .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
@@ -469,7 +442,6 @@ impl HummockManager {
                 .await?;
         }
         let written = write_sstable_infos(
-            self,
             delta
                 .newly_added_sst_infos(Some(&select_groups))
                 .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
