@@ -51,15 +51,13 @@ diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
 diamonds_mv	SOURCE	{SOURCE}	0
 
 statement ok
-ALTER TABLE diamonds SET source_rate_limit TO 114;
+ALTER TABLE diamonds SET source_rate_limit TO DEFAULT;
 
 
 query T
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name, node_name;
 ----
-diamonds	FS_FETCH	{FS_FETCH}	114
-diamonds	SOURCE	{SOURCE}	114
 diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
 diamonds_mv	SOURCE	{SOURCE}	0
 
@@ -87,16 +85,12 @@ select * from diamonds_mv;
 
 
 statement ok
-ALTER SOURCE diamonds_source SET source_rate_limit TO 514;
+ALTER SOURCE diamonds_source SET source_rate_limit TO DEFAULT;
 
 query T
 select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
 order by name, node_name;
 ----
-diamonds	FS_FETCH	{FS_FETCH}	114
-diamonds	SOURCE	{SOURCE}	114
-diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	514
-diamonds_mv	SOURCE	{SOURCE}	514
 
 
 sleep 10s
