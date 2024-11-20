@@ -202,22 +202,23 @@ impl HummockManager {
         }
         {
             let mut guard = self.versioning.write().await;
-            let stale_objects = guard
+            guard
                 .checkpoint
                 .stale_objects
                 .entry(latest_valid_version_id)
+                .and_modify(|s| {
+                    s.id =
+                        s.id.iter()
+                            .chain(object_ids_to_delete.iter())
+                            .unique()
+                            .copied()
+                            .collect();
+                })
                 .or_insert(PbStaleObjects {
-                    id: vec![],
+                    id: object_ids_to_delete.into_iter().collect(),
                     // To avoid unnecessary computations, disregard size in this context.
                     total_file_size: 0,
                 });
-            stale_objects.id = stale_objects
-                .id
-                .iter()
-                .copied()
-                .chain(object_ids_to_delete)
-                .unique()
-                .collect();
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
