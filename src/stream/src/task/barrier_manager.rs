@@ -50,7 +50,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
@@ -531,11 +530,6 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        if barrier.kind == BarrierKind::Initial {
-            self.actor_manager
-                .watermark_epoch
-                .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
-        }
         debug!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, actor_ids_to_collect = {:?}",
