@@ -26,6 +26,7 @@ use risingwave_common::types::DataType;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
+use thiserror_ext::AsReport;
 use tokio_postgres::Statement;
 use with_options::WithOptions;
 
@@ -144,8 +145,8 @@ impl Sink for PostgresSink {
                 .await
                 .context("Failed to connect to Postgres for Sinking")?;
         tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::error!("connection error: {}", e);
+            if let Err(error) = connection.await {
+                tracing::error!("postgres sink connection error: {:?}", error.as_report());
             }
         });
 
@@ -278,8 +279,8 @@ impl PostgresSinkWriter {
                     .await
                     .context("Failed to connect to Postgres for Sinking")?;
             tokio::spawn(async move {
-                if let Err(e) = connection.await {
-                    tracing::error!("connection error: {}", e);
+                if let Err(error) = connection.await {
+                    tracing::error!("postgres sink connection error: {:?}", error.as_report());
                 }
             });
             client
