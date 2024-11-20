@@ -414,6 +414,19 @@ message DropSecretResponse {
   WaitVersion version = 1;
 }
 
+message AlterSecretRequest {
+  uint32 secret_id = 1;
+  string name = 2;
+  bytes value = 3;
+  uint32 database_id = 4;
+  uint32 schema_id = 5;
+  uint32 owner_id = 6;
+}
+
+message AlterSecretResponse {
+  WaitVersion version = 1;
+}
+
 message CreateConnectionRequest {
   message PrivateLink {
     catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
@@ -510,6 +523,7 @@ service DdlService {
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
   rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
+  rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);
   rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);

@@ -175,6 +175,16 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
 
+    async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()>;
+
     async fn alter_name(
         &self,
         object_id: alter_name_request::Object,
@@ -504,6 +514,29 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()> {
         let version = self.meta_client.alter_swap_rename(object).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_secret(
+                secret_id,
+                secret_name,
+                database_id,
+                schema_id,
+                owner_id,
+                payload,
+            )
+            .await?;
         self.wait_version(version).await
     }
 }

@@ -74,7 +74,23 @@ impl LocalSecretManager {
 
     pub fn add_secret(&self, secret_id: SecretId, secret: Vec<u8>) {
         let mut secret_guard = self.secrets.write();
-        secret_guard.insert(secret_id, secret);
+        if secret_guard.insert(secret_id, secret).is_some() {
+            tracing::error!(
+                secret_id = secret_id,
+                "adding a secret but it already exists, overwriting it"
+            );
+        };
+    }
+
+    pub fn update_secret(&self, secret_id: SecretId, secret: Vec<u8>) {
+        let mut secret_guard = self.secrets.write();
+        if secret_guard.insert(secret_id, secret).is_none() {
+            tracing::error!(
+                secret_id = secret_id,
+                "updating a secret but it does not exist, adding it"
+            );
+        }
+        self.remove_secret_file_if_exist(&secret_id);
     }
 
     pub fn init_secrets(&self, secrets: Vec<PbSecret>) {

@@ -22,6 +22,31 @@ mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_init_data
 statement ok
 create secret mysql_pwd with (
   backend = 'meta'
+) as 'incorrect_password';
+
+# create a cdc source job, with incorrct password
+statement error
+create source mysql_mytest with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'rwcdc',
+ password = secret mysql_pwd,
+ database.name = 'mytest',
+ server.id = '5601'
+);
+---
+db error: ERROR: Failed to run the query
+    
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to create source worker
+  3: failed to create SplitEnumerator
+  4: source cannot pass validation
+
+statement ok
+alter secret mysql_pwd with (
+  backend = 'meta'
 ) as '${MYSQL_PWD:}';
 
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
@@ -35,7 +60,6 @@ create source mysql_mytest with (
  database.name = 'mytest',
  server.id = '5601'
 );
-
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mysql_mytest;

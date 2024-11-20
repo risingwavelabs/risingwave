@@ -649,6 +649,18 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
         todo!()
     }
+
+    async fn alter_secret(
+        &self,
+        _secret_id: u32,
+        _secret_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
+        _payload: Vec<u8>,
+    ) -> Result<()> {
+        unreachable!()
+    }
 }
 
 impl MockCatalogWriter {

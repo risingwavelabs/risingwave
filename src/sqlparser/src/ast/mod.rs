@@ -38,8 +38,8 @@ use winnow::PResult;
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
-    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption,
+    ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::legacy_source::{
     get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
@@ -1432,6 +1432,13 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterConnectionOperation,
     },
+    /// ALTER SECRET
+    AlterSecret {
+        /// Secret name
+        name: ObjectName,
+        with_options: Vec<SqlOption>,
+        operation: AlterSecretOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1960,6 +1967,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
+            }
+            Statement::AlterSecret { name, with_options, operation } => {
+                write!(f, "ALTER SECRET {}", name)?;
+                if !with_options.is_empty() {
+                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
+                }
+                write!(f, " {}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),

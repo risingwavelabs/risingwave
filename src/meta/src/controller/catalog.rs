@@ -1397,6 +1397,42 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn alter_secret(
+        &self,
+        pb_secret: PbSecret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::update(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = pb_secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Secret(secret_plain),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)
@@ -1417,7 +1453,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
         ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
 
-        // Find affect users with privileges on the connection.
+        // Find affect users with privileges on the secret.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
