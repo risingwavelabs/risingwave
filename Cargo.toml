@@ -137,7 +137,7 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch dylan/fix_parquet_nested_type_field_id
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "3f4724158acee37a4785f56670a1427993a58739", features = [
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "b966734c18a1a84543e48fdceebc103c3f8469d9", features = [
     "prometheus",
 ] }
 arrow-array-iceberg = { package = "arrow-array", version = "52" }
