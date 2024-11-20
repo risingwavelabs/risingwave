@@ -223,7 +223,7 @@ pub async fn get_total_row_nums_for_parquet_file(
         }
         ConnectorProperties::OpendalS3(prop) => {
             let connector: OpendalEnumerator<OpendalS3> =
-                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role, false)?;
             let mut reader = connector
                 .op
                 .reader_with(parquet_file_name)

@@ -101,7 +101,7 @@ impl OpendalSource for OpendalS3 {
     type Properties = OpendalS3Properties;
 
     fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
+        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role, false)
     }
 }
 

@@ -30,6 +30,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub fn new_s3_source(
         s3_properties: S3PropertiesCommon,
         assume_role: Option<String>,
+        is_batch_query: bool,
     ) -> ConnectorResult<Self> {
         // Create s3 builder.
         let mut builder = S3::default()
@@ -59,7 +60,11 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         }
 
         if let Some(session_token) = s3_properties.session_token {
-            builder = builder.session_token(&session_token);
+            if is_batch_query {
+                builder = builder.session_token(&session_token);
+            } else {
+                tracing::warn!("Session token is set, but this is not a batch query. Streaming source requires non-expiring access key and secret key.");
+            }
         }
 
         if let Some(assume_role) = assume_role {
