@@ -170,7 +170,7 @@ impl GcManager {
         if guard.len() < least_count {
             None
         } else {
-            Some(guard.drain().collect())
+            Some(std::mem::take(&mut *guard))
         }
     }
 }
