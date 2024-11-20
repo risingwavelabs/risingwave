@@ -627,7 +627,7 @@ mod tests {
 
         // Empty input results immediate return, without waiting heartbeat.
         hummock_manager
-            .complete_gc_batch(vec![], None)
+            .complete_gc_batch(vec![].into_iter().collect(), None)
             .await
             .unwrap();
 
@@ -637,7 +637,9 @@ mod tests {
             3,
             hummock_manager
                 .complete_gc_batch(
-                    vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64],
+                    vec![i64::MAX as u64 - 2, i64::MAX as u64 - 1, i64::MAX as u64]
+                        .into_iter()
+                        .collect(),
                     None,
                 )
                 .await
@@ -663,7 +665,10 @@ mod tests {
             1,
             hummock_manager
                 .complete_gc_batch(
-                    [committed_object_ids, vec![max_committed_object_id + 1]].concat(),
+                    [committed_object_ids, vec![max_committed_object_id + 1]]
+                        .concat()
+                        .into_iter()
+                        .collect(),
                     None,
                 )
                 .await
