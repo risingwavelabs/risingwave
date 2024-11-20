@@ -32,11 +32,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, 
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
-use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig,
-    ExternalTableReaderImpl, SchemaTableName,
+    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
