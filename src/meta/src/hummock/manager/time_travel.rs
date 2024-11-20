@@ -65,6 +65,7 @@ impl HummockManager {
         &self,
         epoch_watermark: HummockEpoch,
     ) -> Result<()> {
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
         let version_watermark = hummock_epoch_to_version::Entity::find()
@@ -80,7 +81,6 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         let watermark_version_id = std::cmp::min(
             version_watermark.version_id,
             min_pinned_version_id.to_u64().try_into().unwrap(),
@@ -212,7 +212,7 @@ impl HummockManager {
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = ?version_watermark.version_id,
+            epoch_watermark_version_id = ?watermark_version_id,
             ?latest_valid_version_id,
             "delete {} rows from hummock_time_travel_version",
             res.rows_affected
@@ -225,7 +225,7 @@ impl HummockManager {
             .exec(&txn)
             .await?;
         tracing::debug!(
-            epoch_watermark_version_id = ?version_watermark.version_id,
+            epoch_watermark_version_id = ?watermark_version_id,
             ?latest_valid_version_id,
             "delete {} rows from hummock_time_travel_delta",
             res.rows_affected
