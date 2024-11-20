@@ -180,7 +180,7 @@ impl ElectionClient for EtcdElectionClient {
                                 continue;
                             }
                             Err(e) => {
-                                tracing::error!(error = %e.as_report(), "lease keeper failed");
+                                tracing::debug!(error = %e.as_report(), "lease keeper failed");
                                 continue;
                             }
                         };
