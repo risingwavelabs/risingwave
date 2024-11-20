@@ -36,13 +36,15 @@ create source mysql_mytest with (
  server.id = '5601'
 );
 ---
-db error: ERROR: Failed to run the query
+# The detailed error message is commented out because the user IP in error message may vary in different environments.
+# db error: ERROR: Failed to run the query
     
-Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
-  2: failed to create source worker
-  3: failed to create SplitEnumerator
-  4: source cannot pass validation
+# Caused by these errors (recent errors listed first):
+#   1: gRPC request to meta service failed: Internal error
+#   2: failed to create source worker
+#   3: failed to create SplitEnumerator
+#   4: source cannot pass validation
+#   5: Internal error: Access denied for user 'rwcdc'@'172.17.0.1' (using password: YES)
 
 statement ok
 alter secret mysql_pwd with (
