@@ -542,8 +542,7 @@ fn print_memory_config(
     reserved_memory_bytes: usize,
 ) {
     let memory_config = format!(
-        "\n\
-        Memory outline:\n\
+        "Memory outline:\n\
         > total_memory: {}\n\
         >     storage_memory: {}\n\
         >         block_cache_capacity: {}\n\
