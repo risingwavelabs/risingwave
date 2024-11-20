@@ -732,7 +732,7 @@ impl LogicalAggBuilder {
                     PbAggKind::VarPop | PbAggKind::StddevPop => {
                         ExprImpl::from(FunctionCall::new(ExprType::Equal, vec![count, zero])?)
                     }
-                    PbAggKind::StddevSamp | PbAggKind::VarSamp => ExprImpl::from(
+                    PbAggKind::VarSamp | PbAggKind::StddevSamp => ExprImpl::from(
                         FunctionCall::new(ExprType::LessThanOrEqual, vec![count, one])?,
                     ),
                     _ => unreachable!(),
