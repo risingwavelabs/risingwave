@@ -324,13 +324,9 @@ impl HummockManager {
         metrics
             .full_gc_candidate_object_count
             .observe(candidate_object_number as _);
-        let pinned_object_ids = self
-            .all_object_ids_in_time_travel()
-            .await?
-            .collect::<HashSet<_>>();
         self.metrics
             .time_travel_object_count
-            .set(pinned_object_ids.len() as _);
+            .set(self.object_count_in_time_travel() as _);
         // filter by SST id watermark, i.e. minimum id of uncommitted SSTs reported by compute nodes.
         let object_ids = object_ids
             .into_iter()
@@ -338,10 +334,7 @@ impl HummockManager {
             .collect_vec();
         let after_min_sst_id = object_ids.len();
         // filter by time travel archive
-        let object_ids = object_ids
-            .into_iter()
-            .filter(|s| !pinned_object_ids.contains(s))
-            .collect_vec();
+        let object_ids = self.filter_out_object_ids_in_time_travel(object_ids.into_iter());
         let after_time_travel = object_ids.len();
         // filter by metadata backup
         let object_ids = object_ids
@@ -509,16 +502,12 @@ impl HummockManager {
         object_ids: impl Iterator<Item = HummockSstableObjectId>,
     ) -> Result<()> {
         // Objects pinned by either meta backup or time travel should be filtered out.
-        let pinned_objects: HashSet<_> = backup_manager
-            .list_pinned_ssts()
-            .into_iter()
-            .chain(self.all_object_ids_in_time_travel().await?)
-            .collect();
-        let object_ids = object_ids
-            .filter(|s| !pinned_objects.contains(s))
-            .collect_vec();
+        let pinned_objects = backup_manager.list_pinned_ssts();
+        let object_ids = object_ids.filter(|s| !pinned_objects.contains(s));
+        let object_ids = self.filter_out_object_ids_in_time_travel(object_ids);
         // Retry is not necessary. Full GC will handle these objects eventually.
-        self.delete_objects(object_ids).await?;
+        self.delete_objects(object_ids.into_iter().collect())
+            .await?;
         Ok(())
     }
 }

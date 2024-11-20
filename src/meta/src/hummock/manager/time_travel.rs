@@ -45,8 +45,39 @@ use crate::hummock::HummockManager;
 
 /// Time travel.
 impl HummockManager {
+    fn add_time_travel_object_cache(
+        &self,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) {
+        let mut guard = self.objects_pinned_by_time_travel.write();
+        guard.extend(object_ids);
+    }
+
+    fn sub_time_travel_object_cache(
+        &self,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) {
+        let mut guard = self.objects_pinned_by_time_travel.write();
+        for object_id in object_ids {
+            guard.remove(&object_id);
+        }
+    }
+
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
+        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
+            hummock_sstable_info::Entity::find()
+                .select_only()
+                .column(hummock_sstable_info::Column::ObjectId)
+                .into_tuple()
+                .all(&self.env.meta_store_ref().conn)
+                .await?;
+        self.add_time_travel_object_cache(
+            object_ids
+                .into_iter()
+                .unique()
+                .map(|object_id| HummockSstableObjectId::try_from(object_id).unwrap()),
+        );
         let mut guard = self.versioning.write().await;
         guard.mark_next_time_travel_version_snapshot();
 
@@ -200,6 +231,7 @@ impl HummockManager {
             );
             next_version_sst_ids = sst_ids;
         }
+        self.sub_time_travel_object_cache(object_ids_to_delete.iter().copied());
         {
             let mut guard = self.versioning.write().await;
             guard
@@ -251,21 +283,16 @@ impl HummockManager {
         Ok(())
     }
 
-    pub(crate) async fn all_object_ids_in_time_travel(
+    pub(crate) fn filter_out_object_ids_in_time_travel(
         &self,
-    ) -> Result<impl Iterator<Item = HummockSstableId>> {
-        let object_ids: Vec<risingwave_meta_model::HummockSstableObjectId> =
-            hummock_sstable_info::Entity::find()
-                .select_only()
-                .column(hummock_sstable_info::Column::ObjectId)
-                .into_tuple()
-                .all(&self.env.meta_store_ref().conn)
-                .await?;
-        let object_ids = object_ids
-            .into_iter()
-            .unique()
-            .map(|object_id| HummockSstableObjectId::try_from(object_id).unwrap());
-        Ok(object_ids)
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> HashSet<HummockSstableObjectId> {
+        let pinned = self.objects_pinned_by_time_travel.read();
+        object_ids.filter(|o| !pinned.contains(o)).collect()
+    }
+
+    pub(crate) fn object_count_in_time_travel(&self) -> usize {
+        self.objects_pinned_by_time_travel.read().len()
     }
 
     /// Attempt to locate the version corresponding to `query_epoch`.
@@ -392,11 +419,14 @@ impl HummockManager {
             })
             .collect::<HashSet<_>>();
         async fn write_sstable_infos(
+            this: &HummockManager,
             sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
         ) -> Result<usize> {
+            let sst_infos_: Vec<_> = sst_infos.collect();
+            this.add_time_travel_object_cache(sst_infos_.iter().map(|s| s.object_id));
             let mut count = 0;
-            for sst_info in sst_infos {
+            for sst_info in sst_infos_ {
                 let m = hummock_sstable_info::ActiveModel {
                     sst_id: Set(sst_info.sst_id.try_into().unwrap()),
                     object_id: Set(sst_info.object_id.try_into().unwrap()),
@@ -436,6 +466,7 @@ impl HummockManager {
                     .collect(),
             );
             write_sstable_infos(
+                self,
                 version
                     .get_sst_infos_from_groups(&select_groups)
                     .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
@@ -457,6 +488,7 @@ impl HummockManager {
                 .await?;
         }
         let written = write_sstable_infos(
+            self,
             delta
                 .newly_added_sst_infos(Some(&select_groups))
                 .filter(|s| !skip_sst_ids.contains(&s.sst_id)),

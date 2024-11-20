@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    HummockContextId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
@@ -109,6 +109,7 @@ pub struct HummockManager {
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
+    objects_pinned_by_time_travel: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -283,6 +284,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            objects_pinned_by_time_travel: parking_lot::RwLock::new(HashSet::default()),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
