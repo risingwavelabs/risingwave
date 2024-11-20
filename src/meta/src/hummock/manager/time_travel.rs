@@ -117,7 +117,8 @@ impl HummockManager {
                 latest_valid_version.get_object_ids(),
             )
         };
-        let should_gc_objects = latest_valid_version_id <= self.get_min_pinned_version_id().await;
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let should_gc_objects = latest_valid_version_id <= min_pinned_version_id;
         let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
                 .select_only()
