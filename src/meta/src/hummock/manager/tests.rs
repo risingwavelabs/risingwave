@@ -575,11 +575,7 @@ async fn test_hummock_manager_basic() {
         (0, 0)
     );
     assert_eq!(
-        hummock_manager
-            .create_version_checkpoint(1)
-            .await
-            .unwrap()
-            .0,
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
     assert_eq!(
@@ -1202,11 +1198,7 @@ async fn test_extend_objects_to_delete() {
 
     // Checkpoint
     assert_eq!(
-        hummock_manager
-            .create_version_checkpoint(1)
-            .await
-            .unwrap()
-            .0,
+        hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
@@ -2151,11 +2143,7 @@ async fn test_gc_stats() {
     };
     assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
     assert_eq!(
-        hummock_manager
-            .create_version_checkpoint(0)
-            .await
-            .unwrap()
-            .0,
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
         0
     );
 
@@ -2169,11 +2157,7 @@ async fn test_gc_stats() {
     .await;
     assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
     assert_ne!(
-        hummock_manager
-            .create_version_checkpoint(0)
-            .await
-            .unwrap()
-            .0,
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
         0
     );
 
@@ -2185,11 +2169,7 @@ async fn test_gc_stats() {
 
     assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
     assert_eq!(
-        hummock_manager
-            .create_version_checkpoint(0)
-            .await
-            .unwrap()
-            .0,
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
         0
     );
 }

@@ -17,7 +17,6 @@ use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
@@ -207,21 +206,13 @@ impl HummockManager {
                 })
             })
             .sum::<u64>();
-        stale_objects
-            .entry(current_version.id)
-            .and_modify(|s| {
-                s.id =
-                    s.id.iter()
-                        .chain(removed_object_ids.iter())
-                        .unique()
-                        .copied()
-                        .collect();
-                s.total_file_size += total_file_size;
-            })
-            .or_insert(StaleObjects {
+        stale_objects.insert(
+            current_version.id,
+            StaleObjects {
                 id: removed_object_ids.into_iter().collect(),
                 total_file_size,
-            });
+            },
+        );
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
                 version: Some(PbHummockVersion::from(&old_checkpoint.version)),

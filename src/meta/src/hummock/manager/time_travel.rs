@@ -32,7 +32,6 @@ use risingwave_meta_model::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
-use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -232,26 +231,8 @@ impl HummockManager {
             next_version_sst_ids = sst_ids;
         }
         self.sub_time_travel_object_cache(object_ids_to_delete.iter().copied());
-        {
-            let mut guard = self.versioning.write().await;
-            guard
-                .checkpoint
-                .stale_objects
-                .entry(latest_valid_version_id)
-                .and_modify(|s| {
-                    s.id =
-                        s.id.iter()
-                            .chain(object_ids_to_delete.iter())
-                            .unique()
-                            .copied()
-                            .collect();
-                })
-                .or_insert(PbStaleObjects {
-                    id: object_ids_to_delete.into_iter().collect(),
-                    // To avoid unnecessary computations, disregard size in this context.
-                    total_file_size: 0,
-                });
-        }
+        self.gc_manager
+            .add_may_delete_object_ids(object_ids_to_delete.into_iter());
 
         let res = hummock_time_travel_version::Entity::delete_many()
             .filter(

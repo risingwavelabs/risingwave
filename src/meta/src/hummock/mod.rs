@@ -16,8 +16,6 @@ pub mod compactor_manager;
 pub mod error;
 mod manager;
 
-use std::collections::HashSet;
-
 pub use manager::*;
 use thiserror_ext::AsReport;
 
@@ -99,7 +97,6 @@ pub fn start_checkpoint_loop(
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut accumulated_may_delete_object_ids = HashSet::new();
         loop {
             tokio::select! {
                 // Wait for interval
@@ -115,33 +112,22 @@ pub fn start_checkpoint_loop(
             {
                 continue;
             }
-            match hummock_manager
+            if let Err(err) = hummock_manager
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                Ok((_, may_delete_objects)) => {
-                    accumulated_may_delete_object_ids.extend(may_delete_objects);
-                    const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
-                    if accumulated_may_delete_object_ids.len() >= MIN_MINOR_GC_OBJECT_COUNT {
-                        let to_delete = std::mem::take(&mut accumulated_may_delete_object_ids);
-                        let backup_manager_2 = backup_manager.clone();
-                        let hummock_manager_2 = hummock_manager.clone();
-                        tokio::task::spawn(async move {
-                            let _ = hummock_manager_2
-                                .start_minor_gc(
-                                    backup_manager_2,
-                                    to_delete.into_iter(),
-                                )
-                                .await
-                                .inspect_err(|err| {
-                                    tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
-                                });
+                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
+            } else {
+                let backup_manager_2 = backup_manager.clone();
+                let hummock_manager_2 = hummock_manager.clone();
+                tokio::task::spawn(async move {
+                    let _ = hummock_manager_2
+                        .try_start_minor_gc(backup_manager_2)
+                        .await
+                        .inspect_err(|err| {
+                            tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
                         });
-                    };
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.")
-                }
+                });
             }
         }
     });
