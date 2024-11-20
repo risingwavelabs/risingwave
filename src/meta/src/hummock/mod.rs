@@ -15,6 +15,9 @@ pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
+
+use std::collections::HashSet;
+
 pub use manager::*;
 use thiserror_ext::AsReport;
 
@@ -96,6 +99,7 @@ pub fn start_checkpoint_loop(
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut accumulated_may_delete_object_ids = HashSet::new();
         loop {
             tokio::select! {
                 // Wait for interval
@@ -111,18 +115,29 @@ pub fn start_checkpoint_loop(
             {
                 continue;
             }
-            if let Err(err) = hummock_manager
+            match hummock_manager
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
+                Ok((_, may_delete_objects)) => {
+                    accumulated_may_delete_object_ids.extend(may_delete_objects);
+                    const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
+                    if accumulated_may_delete_object_ids.len() >= MIN_MINOR_GC_OBJECT_COUNT {
+                        let _ = hummock_manager
+                            .start_minor_gc(
+                                backup_manager.clone(),
+                                accumulated_may_delete_object_ids.drain(),
+                            )
+                            .await
+                            .inspect_err(|err| {
+                                tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                            });
+                    };
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.")
+                }
             }
-            let _ = hummock_manager
-                .may_start_minor_gc(backup_manager.clone())
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
-                });
         }
     });
     (join_handle, shutdown_tx)

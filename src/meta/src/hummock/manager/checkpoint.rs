@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::{GroupDeltaCommon, HummockVersion};
-use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
     PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
@@ -122,7 +122,10 @@ impl HummockManager {
     /// Returns the diff between new and old checkpoint id.
     /// Note that this method must not be called concurrently, because internally it doesn't hold
     /// lock throughout the method.
-    pub async fn create_version_checkpoint(&self, min_delta_log_num: u64) -> Result<u64> {
+    pub async fn create_version_checkpoint(
+        &self,
+        min_delta_log_num: u64,
+    ) -> Result<(u64, HashSet<HummockSstableObjectId>)> {
         let timer = self.metrics.version_checkpoint_latency.start_timer();
         // 1. hold read lock and create new checkpoint
         let versioning_guard = self.versioning.read().await;
@@ -132,7 +135,7 @@ impl HummockManager {
         let new_checkpoint_id = current_version.id;
         let old_checkpoint_id = old_checkpoint.version.id;
         if new_checkpoint_id < old_checkpoint_id + min_delta_log_num {
-            return Ok(0);
+            return Ok((0, HashSet::default()));
         }
         if cfg!(test) && new_checkpoint_id == old_checkpoint_id {
             drop(versioning_guard);
@@ -140,7 +143,7 @@ impl HummockManager {
             let context_info = self.context_info.read().await;
             let min_pinned_version_id = context_info.min_pinned_version_id();
             trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
-            return Ok(0);
+            return Ok((0, HashSet::default()));
         }
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
@@ -229,8 +232,8 @@ impl HummockManager {
                 }
                 Some(object_ids.id.clone())
             })
-            .flatten();
-        self.gc_manager.add_may_delete_object_ids(may_delete_object);
+            .flatten()
+            .collect();
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
@@ -262,7 +265,7 @@ impl HummockManager {
             .checkpoint_version_id
             .set(new_checkpoint_id.to_u64() as i64);
 
-        Ok(new_checkpoint_id - old_checkpoint_id)
+        Ok((new_checkpoint_id - old_checkpoint_id, may_delete_object))
     }
 
     pub fn pause_version_checkpoint(&self) {
