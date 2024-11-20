@@ -34,7 +34,6 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
@@ -56,8 +55,8 @@ pub struct MetaSnapshotMetadata {
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
-    #[serde(default, with = "table_id_key_map")]
-    pub state_table_info: HashMap<TableId, StateTableInfo>,
+    #[serde(default)]
+    pub state_table_info: HashMap<u32, StateTableInfo>,
     pub rw_version: Option<String>,
 }
 
@@ -78,7 +77,7 @@ impl MetaSnapshotMetadata {
                 .state_table_info
                 .info()
                 .iter()
-                .map(|(id, info)| (*id, info.into()))
+                .map(|(id, info)| (id.table_id, info.into()))
                 .collect(),
             rw_version: Some(RW_VERSION.to_owned()),
         }
@@ -119,7 +118,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             state_table_info: m
                 .state_table_info
                 .iter()
-                .map(|(t, i)| (t.table_id, i.into()))
+                .map(|(t, i)| (*t, i.into()))
                 .collect(),
             rw_version: m.rw_version.clone(),
         }
@@ -132,44 +131,5 @@ impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
             manifest_id: m.manifest_id,
             snapshot_metadata: m.snapshot_metadata.iter().map_into().collect_vec(),
         }
-    }
-}
-
-mod table_id_key_map {
-    use std::collections::HashMap;
-    use std::str::FromStr;
-
-    use risingwave_common::catalog::TableId;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use crate::StateTableInfo;
-
-    pub fn serialize<S>(
-        map: &HashMap<TableId, StateTableInfo>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let map_as_str: HashMap<String, &StateTableInfo> =
-            map.iter().map(|(k, v)| (k.to_string(), v)).collect();
-        map_as_str.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<HashMap<TableId, StateTableInfo>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let map_as_str: HashMap<String, StateTableInfo> =
-            HashMap::deserialize(deserializer).unwrap_or_else(|_| HashMap::new());
-        map_as_str
-            .into_iter()
-            .map(|(k, v)| {
-                let key = u32::from_str(&k).map_err(serde::de::Error::custom)?;
-                Ok((TableId::new(key), v))
-            })
-            .collect()
     }
 }

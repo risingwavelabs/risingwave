@@ -35,16 +35,16 @@ pub(crate) struct BarrierWorkerState {
     pending_non_checkpoint_barriers: Vec<u64>,
 
     /// Inflight running actors info.
-    pub(crate) inflight_graph_info: InflightDatabaseInfo,
+    pub(super) inflight_graph_info: InflightDatabaseInfo,
 
-    pub(crate) inflight_subscription_info: InflightSubscriptionInfo,
+    pub(super) inflight_subscription_info: InflightSubscriptionInfo,
 
     /// Whether the cluster is paused and the reason.
     paused_reason: Option<PausedReason>,
 }
 
 impl BarrierWorkerState {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],

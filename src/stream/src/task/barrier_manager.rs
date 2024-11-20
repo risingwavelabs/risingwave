@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use std::future::pending;
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::StreamExt;
+use await_tree::InstrumentAwait;
+use futures::future::BoxFuture;
+use futures::stream::{BoxStream, FuturesOrdered};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
@@ -49,9 +53,10 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{HummockVersionId, LocalSstableInfo, SyncResult};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::streaming_control_stream_request::{InitRequest, Request};
+use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    InitRequest, InitialPartialGraph, Request,
+};
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
@@ -63,7 +68,9 @@ use risingwave_pb::stream_service::{
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner, StreamExecutorError};
-use crate::task::barrier_manager::managed_state::ManagedBarrierStateDebugInfo;
+use crate::task::barrier_manager::managed_state::{
+    ManagedBarrierStateDebugInfo, PartialGraphManagedBarrierState,
+};
 use crate::task::barrier_manager::progress::BackfillState;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -260,8 +267,8 @@ pub(super) struct LocalBarrierWorker {
     /// Current barrier collection state.
     pub(super) state: ManagedBarrierState,
 
-    /// Record all unexpected exited actors.
-    failure_actors: HashMap<ActorId, StreamError>,
+    /// Futures will be finished in the order of epoch in ascending order.
+    await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
 
     control_stream_handle: ControlStreamHandle,
 
@@ -272,13 +279,13 @@ pub(super) struct LocalBarrierWorker {
     barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
 
     actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
-
-    /// Cached result of [`Self::try_find_root_failure`].
-    cached_root_failure: Option<ScoredStreamError>,
 }
 
 impl LocalBarrierWorker {
-    pub(super) fn new(actor_manager: Arc<StreamActorManager>) -> Self {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        initial_partial_graphs: Vec<InitialPartialGraph>,
+    ) -> Self {
         let (event_tx, event_rx) = unbounded_channel();
         let (failure_tx, failure_rx) = unbounded_channel();
         let shared_context = Arc::new(SharedContext::new(
@@ -289,14 +296,17 @@ impl LocalBarrierWorker {
             },
         ));
         Self {
-            failure_actors: HashMap::default(),
-            state: ManagedBarrierState::new(actor_manager.clone(), shared_context.clone()),
+            state: ManagedBarrierState::new(
+                actor_manager.clone(),
+                shared_context.clone(),
+                initial_partial_graphs,
+            ),
+            await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             current_shared_context: shared_context,
             barrier_event_rx: event_rx,
             actor_failure_rx: failure_rx,
-            cached_root_failure: None,
         }
     }
 
@@ -312,10 +322,17 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
-                    if let Err(err) = result {
-                        self.notify_other_failure(err, "failed to complete epoch").await;
+                (partial_graph_id, barrier) = self.state.next_collected_epoch() => {
+                    self.complete_barrier(partial_graph_id, barrier.epoch.prev);
+                }
+                (partial_graph_id, barrier, result) = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
+                    match result {
+                        Ok(result) => {
+                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
+                        }
+                        Err(err) => {
+                            self.notify_other_failure(err, "failed to complete epoch").await;
+                        }
                     }
                 },
                 event = self.barrier_event_rx.recv() => {
@@ -334,8 +351,7 @@ impl LocalBarrierWorker {
                         match actor_op {
                             LocalActorOperation::NewControlStream { handle, init_request  } => {
                                 self.control_stream_handle.reset_stream_with_err(Status::internal("control stream has been reset to a new one"));
-                                self.reset(HummockVersionId::new(init_request.version_id)).await;
-                                self.state.add_subscriptions(init_request.subscriptions);
+                                self.reset(init_request.graphs).await;
                                 self.control_stream_handle = handle;
                                 self.control_stream_handle.send_response(StreamingControlStreamResponse {
                                     response: Some(streaming_control_stream_response::Response::Init(InitResponse {}))
@@ -384,6 +400,10 @@ impl LocalBarrierWorker {
                 self.remove_partial_graphs(
                     req.partial_graph_ids.into_iter().map(PartialGraphId::new),
                 );
+                Ok(())
+            }
+            Request::CreatePartialGraph(req) => {
+                self.add_partial_graph(PartialGraphId::new(req.partial_graph_id));
                 Ok(())
             }
             Request::Init(_) => {
@@ -447,23 +467,139 @@ impl LocalBarrierWorker {
     }
 }
 
-// event handler
+mod await_epoch_completed_future {
+    use std::future::Future;
+
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
+    use risingwave_hummock_sdk::SyncResult;
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+
+    use crate::error::StreamResult;
+    use crate::executor::Barrier;
+    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
+
+    pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
+        + 'static;
+
+    pub(super) fn instrument_complete_barrier_future(
+        partial_graph_id: PartialGraphId,
+        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
+        barrier: Barrier,
+        barrier_await_tree_reg: Option<&await_tree::Registry>,
+        create_mview_progress: Vec<PbCreateMviewProgress>,
+    ) -> AwaitEpochCompletedFuture {
+        let prev_epoch = barrier.epoch.prev;
+        let future = async move {
+            if let Some(future) = complete_barrier_future {
+                let result = future.await;
+                result.map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        .map(move |result| {
+            (
+                partial_graph_id,
+                barrier,
+                result.map(|sync_result| BarrierCompleteResult {
+                    sync_result,
+                    create_mview_progress,
+                }),
+            )
+        });
+        if let Some(reg) = barrier_await_tree_reg {
+            reg.register(
+                await_tree_key::BarrierAwait { prev_epoch },
+                format!("SyncEpoch({})", prev_epoch),
+            )
+            .instrument(future)
+            .left_future()
+        } else {
+            future.right_future()
+        }
+    }
+}
+
+use await_epoch_completed_future::*;
+use risingwave_common::catalog::TableId;
+use risingwave_storage::StateStoreImpl;
+
+fn sync_epoch(
+    state_store: &StateStoreImpl,
+    streaming_metrics: &StreamingMetrics,
+    prev_epoch: u64,
+    table_ids: HashSet<TableId>,
+) -> BoxFuture<'static, StreamResult<SyncResult>> {
+    let timer = streaming_metrics.barrier_sync_latency.start_timer();
+    let hummock = state_store.as_hummock().cloned();
+    let future = async move {
+        if let Some(hummock) = hummock {
+            hummock.sync(vec![(prev_epoch, table_ids)]).await
+        } else {
+            Ok(SyncResult::default())
+        }
+    };
+    future
+        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .inspect_ok(move |_| {
+            timer.observe_duration();
+        })
+        .map_err(move |e| {
+            tracing::error!(
+                prev_epoch,
+                error = %e.as_report(),
+                "Failed to sync state store",
+            );
+            e.into()
+        })
+        .boxed()
+}
+
 impl LocalBarrierWorker {
+    fn complete_barrier(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
+        {
+            let (barrier, table_ids, create_mview_progress) = self
+                .state
+                .pop_barrier_to_complete(partial_graph_id, prev_epoch);
+
+            let complete_barrier_future = match &barrier.kind {
+                BarrierKind::Unspecified => unreachable!(),
+                BarrierKind::Initial => {
+                    tracing::info!(
+                        epoch = prev_epoch,
+                        "ignore sealing data for the first barrier"
+                    );
+                    tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+                    None
+                }
+                BarrierKind::Barrier => None,
+                BarrierKind::Checkpoint => Some(sync_epoch(
+                    &self.actor_manager.env.state_store(),
+                    &self.actor_manager.streaming_metrics,
+                    prev_epoch,
+                    table_ids.expect("should be Some on BarrierKind::Checkpoint"),
+                )),
+            };
+
+            self.await_epoch_completed_futures.push_back({
+                instrument_complete_barrier_future(
+                    partial_graph_id,
+                    complete_barrier_future,
+                    barrier,
+                    self.actor_manager.await_tree_reg.as_ref(),
+                    create_mview_progress,
+                )
+            });
+        }
+    }
+
     fn on_epoch_completed(
         &mut self,
         partial_graph_id: PartialGraphId,
         epoch: u64,
-    ) -> StreamResult<()> {
-        let state = self
-            .state
-            .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
-        let result = state
-            .pop_completed_epoch(epoch)
-            .expect("should exist")
-            .expect("should have completed")?;
-
+        result: BarrierCompleteResult,
+    ) {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
@@ -517,7 +653,6 @@ impl LocalBarrierWorker {
         };
 
         self.control_stream_handle.send_response(result);
-        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
@@ -531,30 +666,12 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        if barrier.kind == BarrierKind::Initial {
-            self.actor_manager
-                .watermark_epoch
-                .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
-        }
         debug!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, actor_ids_to_collect = {:?}",
             barrier,
             request.actor_ids_to_collect
         );
-
-        for actor_id in &request.actor_ids_to_collect {
-            if self.failure_actors.contains_key(actor_id) {
-                // The failure actors could exit before the barrier is issued, while their
-                // up-downstream actors could be stuck somehow. Return error directly to trigger the
-                // recovery.
-                return Err(StreamError::barrier_send(
-                    barrier.clone(),
-                    *actor_id,
-                    "actor has already failed",
-                ));
-            }
-        }
 
         self.state.transform_to_issued(barrier, request)?;
         Ok(())
@@ -577,9 +694,20 @@ impl LocalBarrierWorker {
         }
     }
 
+    pub(super) fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
+        assert!(self
+            .state
+            .graph_states
+            .insert(
+                partial_graph_id,
+                PartialGraphManagedBarrierState::new(&self.actor_manager)
+            )
+            .is_none());
+    }
+
     /// Reset all internal states.
-    pub(super) fn reset_state(&mut self) {
-        *self = Self::new(self.actor_manager.clone());
+    pub(super) fn reset_state(&mut self, initial_partial_graphs: Vec<InitialPartialGraph>) {
+        *self = Self::new(self.actor_manager.clone(), initial_partial_graphs);
     }
 
     /// When a [`crate::executor::StreamConsumer`] (typically [`crate::executor::DispatchExecutor`]) get a barrier, it should report
@@ -596,8 +724,7 @@ impl LocalBarrierWorker {
         err: StreamError,
         err_context: &'static str,
     ) {
-        self.add_failure(actor_id, err.clone());
-        let root_err = self.try_find_root_failure().await.unwrap(); // always `Some` because we just added one
+        let root_err = self.try_find_root_failure(err).await;
 
         if let Some(actor_state) = self.state.actor_states.get(&actor_id)
             && (!actor_state.inflight_barriers.is_empty() || actor_state.is_running())
@@ -616,10 +743,7 @@ impl LocalBarrierWorker {
     /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
     /// the given `err` will be used if there's no root failure found.
     async fn notify_other_failure(&mut self, err: StreamError, message: impl Into<String>) {
-        let root_err = self
-            .try_find_root_failure()
-            .await
-            .unwrap_or_else(|| ScoredStreamError::new(err));
+        let root_err = self.try_find_root_failure(err).await;
 
         self.control_stream_handle.reset_stream_with_err(
             anyhow!(root_err)
@@ -628,40 +752,24 @@ impl LocalBarrierWorker {
         );
     }
 
-    fn add_failure(&mut self, actor_id: ActorId, err: StreamError) {
-        if let Some(prev_err) = self.failure_actors.insert(actor_id, err) {
-            warn!(
-                actor_id,
-                prev_err = %prev_err.as_report(),
-                "actor error overwritten"
-            );
-        }
-    }
-
     /// Collect actor errors for a while and find the one that might be the root cause.
     ///
     /// Returns `None` if there's no actor error received.
-    async fn try_find_root_failure(&mut self) -> Option<ScoredStreamError> {
-        if self.cached_root_failure.is_some() {
-            return self.cached_root_failure.clone();
-        }
-
+    async fn try_find_root_failure(&mut self, first_err: StreamError) -> ScoredStreamError {
+        let mut later_errs = vec![];
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
-            while let Some((actor_id, error)) = self.actor_failure_rx.recv().await {
-                self.add_failure(actor_id, error);
+            while let Some((_, error)) = self.actor_failure_rx.recv().await {
+                later_errs.push(error);
             }
         })
         .await;
 
-        // Find the error with highest score.
-        self.cached_root_failure = self
-            .failure_actors
-            .values()
+        once(first_err)
+            .chain(later_errs.into_iter())
             .map(|e| ScoredStreamError::new(e.clone()))
-            .max_by_key(|e| e.score);
-
-        self.cached_root_failure.clone()
+            .max_by_key(|e| e.score)
+            .expect("non-empty")
     }
 }
 
@@ -699,7 +807,7 @@ impl LocalBarrierWorker {
             await_tree_reg,
             runtime: runtime.into(),
         });
-        let worker = LocalBarrierWorker::new(actor_manager);
+        let worker = LocalBarrierWorker::new(actor_manager, vec![]);
         tokio::spawn(worker.run(actor_op_rx))
     }
 }
@@ -882,7 +990,9 @@ pub(crate) mod barrier_test_utils {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
-    use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+    use risingwave_pb::stream_service::streaming_control_stream_request::{
+        InitRequest, PbInitialPartialGraph,
+    };
     use risingwave_pb::stream_service::{
         streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
         StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -916,8 +1026,10 @@ pub(crate) mod barrier_test_utils {
                     UnboundedReceiverStream::new(request_rx).boxed(),
                 ),
                 init_request: InitRequest {
-                    version_id: 0,
-                    subscriptions: vec![],
+                    graphs: vec![PbInitialPartialGraph {
+                        partial_graph_id: u64::MAX,
+                        subscriptions: vec![],
+                    }],
                 },
             });
 

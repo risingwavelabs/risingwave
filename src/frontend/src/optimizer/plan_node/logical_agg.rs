@@ -14,7 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail, bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
@@ -684,17 +684,15 @@ impl LogicalAggBuilder {
                     agg_call.direct_args.clone(),
                 )?)?);
 
-                let one = ExprImpl::from(Literal::new(
-                    Datum::from(ScalarImpl::Int64(1)),
-                    DataType::Int64,
-                ));
+                let zero = ExprImpl::literal_int(0);
+                let one = ExprImpl::literal_int(1);
 
                 let squared_sum = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![sum.clone(), sum],
                 )?);
 
-                let numerator = ExprImpl::from(FunctionCall::new(
+                let raw_numerator = ExprImpl::from(FunctionCall::new(
                     ExprType::Subtract,
                     vec![
                         sum_of_sq,
@@ -703,6 +701,13 @@ impl LogicalAggBuilder {
                             vec![squared_sum, count.clone()],
                         )?),
                     ],
+                )?);
+
+                // We need to check for potential accuracy issues that may occasionally lead to results less than 0.
+                let numerator_type = raw_numerator.return_type();
+                let numerator = ExprImpl::from(FunctionCall::new(
+                    ExprType::Greatest,
+                    vec![raw_numerator, zero.clone().cast_explicit(numerator_type)?],
                 )?);
 
                 let denominator = match kind {
@@ -722,22 +727,21 @@ impl LogicalAggBuilder {
                     target = ExprImpl::from(FunctionCall::new(ExprType::Sqrt, vec![target])?);
                 }
 
-                match kind {
-                    PbAggKind::VarPop | PbAggKind::StddevPop => Ok(target),
-                    PbAggKind::StddevSamp | PbAggKind::VarSamp => {
-                        let case_cond = ExprImpl::from(FunctionCall::new(
-                            ExprType::LessThanOrEqual,
-                            vec![count, one],
-                        )?);
-                        let null = ExprImpl::from(Literal::new(None, agg_call.return_type()));
-
-                        Ok(ExprImpl::from(FunctionCall::new(
-                            ExprType::Case,
-                            vec![case_cond, null, target],
-                        )?))
+                let null = ExprImpl::from(Literal::new(None, agg_call.return_type()));
+                let case_cond = match kind {
+                    PbAggKind::VarPop | PbAggKind::StddevPop => {
+                        ExprImpl::from(FunctionCall::new(ExprType::Equal, vec![count, zero])?)
                     }
+                    PbAggKind::VarSamp | PbAggKind::StddevSamp => ExprImpl::from(
+                        FunctionCall::new(ExprType::LessThanOrEqual, vec![count, one])?,
+                    ),
                     _ => unreachable!(),
-                }
+                };
+
+                Ok(ExprImpl::from(FunctionCall::new(
+                    ExprType::Case,
+                    vec![case_cond, null, target],
+                )?))
             }
             AggType::Builtin(PbAggKind::ApproxPercentile) => {
                 if agg_call.order_by.sort_exprs[0].order_type == OrderType::descending() {

@@ -2365,15 +2365,6 @@ impl Parser<'_> {
             } else if self.parse_keyword(Keyword::USING) {
                 ensure_not_set(&body.using, "USING")?;
                 body.using = Some(self.parse_create_function_using()?);
-            } else if self.parse_keyword(Keyword::SYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, false)?);
-            } else if self.parse_keyword(Keyword::ASYNC) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(true, false)?);
-            } else if self.parse_keyword(Keyword::GENERATOR) {
-                ensure_not_set(&body.function_type, "SYNC | ASYNC")?;
-                body.function_type = Some(self.parse_function_type(false, true)?);
             } else {
                 return Ok(body);
             }
@@ -2393,25 +2384,6 @@ impl Parser<'_> {
                 Ok(CreateFunctionUsing::Base64(base64))
             }
             _ => unreachable!("{}", keyword),
-        }
-    }
-
-    fn parse_function_type(
-        &mut self,
-        is_async: bool,
-        is_generator: bool,
-    ) -> PResult<CreateFunctionType> {
-        let is_generator = if is_generator {
-            true
-        } else {
-            self.parse_keyword(Keyword::GENERATOR)
-        };
-
-        match (is_async, is_generator) {
-            (false, false) => Ok(CreateFunctionType::Sync),
-            (true, false) => Ok(CreateFunctionType::Async),
-            (false, true) => Ok(CreateFunctionType::Generator),
-            (true, true) => Ok(CreateFunctionType::AsyncGenerator),
         }
     }
 
@@ -3492,7 +3464,7 @@ impl Parser<'_> {
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
                 AlterSourceOperation::SetSourceRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA after SET");
+                return self.expected("SCHEMA or SOURCE_RATE_LIMIT after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -4077,9 +4049,16 @@ impl Parser<'_> {
                 Keyword::DISTSQL => options.explain_type = ExplainType::DistSql,
                 Keyword::FORMAT => {
                     options.explain_format = {
-                        match parser.expect_one_of_keywords(&[Keyword::TEXT, Keyword::JSON])? {
+                        match parser.expect_one_of_keywords(&[
+                            Keyword::TEXT,
+                            Keyword::JSON,
+                            Keyword::XML,
+                            Keyword::YAML,
+                        ])? {
                             Keyword::TEXT => ExplainFormat::Text,
                             Keyword::JSON => ExplainFormat::Json,
+                            Keyword::XML => ExplainFormat::Xml,
+                            Keyword::YAML => ExplainFormat::Yaml,
                             _ => unreachable!("{}", keyword),
                         }
                     }

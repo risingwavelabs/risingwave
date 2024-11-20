@@ -299,6 +299,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     self.stream_source_core.source_id
                 )
             })?;
+        // If the first barrier requires us to pause on startup, pause the stream.
+        let start_with_paused = barrier.is_pause_on_startup();
+        let first_epoch = barrier.epoch;
+        let mut boot_state = Vec::default();
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            boot_state = splits.to_vec();
+        }
+        let boot_state = boot_state;
+
+        yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder =
             self.stream_source_core.source_desc_builder.take().unwrap();
@@ -312,17 +322,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        let start_with_paused = barrier.is_pause_on_startup();
-
-        let mut boot_state = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            boot_state = splits.to_vec();
-        }
-
         self.stream_source_core
             .split_state_store
-            .init_epoch(barrier.epoch);
+            .init_epoch(first_epoch)
+            .await?;
 
         let all_completed: HashSet<SplitId> = self
             .stream_source_core
@@ -369,8 +372,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             stream.pause_stream();
             command_paused = true;
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
         // some other latencies like network and cost in Meta.

@@ -25,6 +25,7 @@ use async_trait::async_trait;
 use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
 use futures::stream::BoxStream;
+use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use risingwave_common::catalog::{FunctionId, IndexId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
@@ -1517,6 +1518,13 @@ impl MetaClient {
         self.inner.merge_compaction_group(req).await?;
         Ok(())
     }
+
+    /// List all rate limits for sources and backfills
+    pub async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
+        let request = ListRateLimitsRequest {};
+        let resp = self.inner.list_rate_limits(request).await?;
+        Ok(resp.rate_limits)
+    }
 }
 
 #[async_trait]
@@ -2067,6 +2075,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
+            ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }

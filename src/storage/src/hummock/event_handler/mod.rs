@@ -18,7 +18,7 @@ use std::sync::Arc;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
@@ -59,13 +59,12 @@ pub enum HummockEvent {
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
     SyncEpoch {
-        new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
-        table_ids: HashSet<TableId>,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
     },
 
     /// Clear shared buffer and reset all states
-    Clear(oneshot::Sender<()>, HummockVersionId),
+    Clear(oneshot::Sender<()>, Option<HashSet<TableId>>),
 
     Shutdown,
 
@@ -117,12 +116,13 @@ impl HummockEvent {
             HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
 
             HummockEvent::SyncEpoch {
-                new_sync_epoch,
                 sync_result_sender: _,
-                table_ids,
-            } => format!("AwaitSyncEpoch epoch {} {:?}", new_sync_epoch, table_ids),
+                sync_table_epochs,
+            } => format!("AwaitSyncEpoch epoch {:?}", sync_table_epochs),
 
-            HummockEvent::Clear(_, version_id) => format!("Clear {}", version_id),
+            HummockEvent::Clear(_, table_ids) => {
+                format!("Clear {:?}", table_ids)
+            }
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 

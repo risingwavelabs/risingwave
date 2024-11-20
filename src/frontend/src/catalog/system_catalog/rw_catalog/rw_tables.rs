@@ -28,7 +28,7 @@ struct RwTable {
     owner: i32,
     definition: String,
     append_only: bool,
-    acl: String,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,

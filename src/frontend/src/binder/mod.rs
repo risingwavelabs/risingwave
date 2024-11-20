@@ -28,6 +28,7 @@ mod bind_context;
 mod bind_param;
 mod create;
 mod create_view;
+mod declare_cursor;
 mod delete;
 mod expr;
 pub mod fetch_cursor;
@@ -57,7 +58,7 @@ pub use relation::{
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
-pub use update::BoundUpdate;
+pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;

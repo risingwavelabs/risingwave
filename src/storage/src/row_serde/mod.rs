@@ -103,6 +103,7 @@ mod test {
                                 column_type: None,
                             },
                             version: Pr13707,
+                            system_column: None,
                         },
                         ColumnDesc {
                             data_type: Int16,
@@ -116,6 +117,7 @@ mod test {
                                 column_type: None,
                             },
                             version: Pr13707,
+                            system_column: None,
                         },
                     ],
                     [
@@ -149,6 +151,7 @@ mod test {
                                 column_type: None,
                             },
                             version: Pr13707,
+                            system_column: None,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -162,6 +165,7 @@ mod test {
                                 column_type: None,
                             },
                             version: Pr13707,
+                            system_column: None,
                         },
                     ],
                     [

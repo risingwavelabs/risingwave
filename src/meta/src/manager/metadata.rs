@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -657,14 +658,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_mv_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -720,10 +721,15 @@ impl MetadataManager {
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
     }
+
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let rate_limits = self.catalog_controller.list_rate_limits().await?;
+        Ok(rate_limits)
+    }
 }
 
 impl MetadataManager {
-    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,

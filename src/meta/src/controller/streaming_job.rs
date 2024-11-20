@@ -21,6 +21,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, current_cluster_version};
+use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
@@ -38,6 +39,7 @@ use risingwave_meta_model::{
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
 use risingwave_pb::catalog::{PbCreateType, PbTable};
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::relation::{PbRelationInfo, RelationInfo};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
@@ -52,12 +54,12 @@ use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
     PbDispatcher, PbDispatcherType, PbFragmentTypeFlag, PbStreamActor,
 };
-use sea_orm::sea_query::{Expr, Query, SimpleExpr};
+use sea_orm::sea_query::{BinOper, Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveEnum, ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel,
-    JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait,
-    TransactionTrait,
+    IntoSimpleExpr, JoinType, ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect,
+    RelationTrait, TransactionTrait,
 };
 
 use crate::barrier::{ReplaceTablePlan, Reschedule};
@@ -1276,6 +1278,7 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
+        let is_fs_source = source.with_properties.inner_ref().is_new_fs_connector();
         let streaming_job_ids: Vec<ObjectId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id]
@@ -1315,13 +1318,27 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
-        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
                 visit_stream_node(stream_node, |node| {
                     if let PbNodeBody::Source(node) = node {
                         if let Some(node_inner) = &mut node.source_inner
+                            && node_inner.source_id == source_id as u32
+                        {
+                            node_inner.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    }
+                });
+            }
+            if is_fs_source {
+                // in older versions, there's no fragment type flag for `FsFetch` node,
+                // so we just scan all fragments for StreamFsFetch node if using fs connector
+                visit_stream_node(stream_node, |node| {
+                    if let PbNodeBody::StreamFsFetch(node) = node {
+                        *fragment_type_mask |= PbFragmentTypeFlag::FsFetch as i32;
+                        if let Some(node_inner) = &mut node.node_inner
                             && node_inner.source_id == source_id as u32
                         {
                             node_inner.rate_limit = rate_limit;
@@ -1338,9 +1355,10 @@ impl CatalogController {
             "source id should be used by at least one fragment"
         );
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
-        for (id, _, stream_node) in fragments {
+        for (id, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
                 fragment_id: Set(id),
+                fragment_type_mask: Set(fragment_type_mask),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
             }
@@ -1369,7 +1387,7 @@ impl CatalogController {
 
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
     // return the actor_ids to be applied
-    pub async fn update_mv_rate_limit_by_job_id(
+    pub async fn update_backfill_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
         rate_limit: Option<u32>,
@@ -1395,9 +1413,7 @@ impl CatalogController {
 
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
-            if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
-                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
-            {
+            if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
                 visit_stream_node(stream_node, |node| match node {
                     PbNodeBody::StreamCdcScan(node) => {
                         node.rate_limit = rate_limit;
@@ -1407,11 +1423,9 @@ impl CatalogController {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
-                    PbNodeBody::Source(node) => {
-                        if let Some(inner) = node.source_inner.as_mut() {
-                            inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+                    PbNodeBody::SourceBackfill(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
                     }
                     _ => {}
                 });
@@ -1766,4 +1780,107 @@ impl CatalogController {
 
         Ok(())
     }
+
+    /// Note: `FsFetch` created in old versions are not included.
+    /// Since this is only used for debugging, it should be fine.
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragments: Vec<(FragmentId, ObjectId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment_type_mask_intersects(
+                PbFragmentTypeFlag::rate_limit_fragments(),
+            ))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let mut rate_limits = Vec::new();
+        for (fragment_id, job_id, fragment_type_mask, stream_node) in fragments {
+            let mut stream_node = stream_node.to_protobuf();
+            let mut rate_limit = None;
+            let mut node_name = None;
+
+            visit_stream_node(&mut stream_node, |node| {
+                match node {
+                    // source rate limit
+                    PbNodeBody::Source(node) => {
+                        if let Some(node_inner) = &mut node.source_inner {
+                            debug_assert!(
+                                rate_limit.is_none(),
+                                "one fragment should only have 1 rate limit node"
+                            );
+                            rate_limit = node_inner.rate_limit;
+                            node_name = Some("SOURCE");
+                        }
+                    }
+                    PbNodeBody::StreamFsFetch(node) => {
+                        if let Some(node_inner) = &mut node.node_inner {
+                            debug_assert!(
+                                rate_limit.is_none(),
+                                "one fragment should only have 1 rate limit node"
+                            );
+                            rate_limit = node_inner.rate_limit;
+                            node_name = Some("FS_FETCH");
+                        }
+                    }
+                    // backfill rate limit
+                    PbNodeBody::SourceBackfill(node) => {
+                        debug_assert!(
+                            rate_limit.is_none(),
+                            "one fragment should only have 1 rate limit node"
+                        );
+                        rate_limit = node.rate_limit;
+                        node_name = Some("SOURCE_BACKFILL");
+                    }
+                    PbNodeBody::StreamScan(node) => {
+                        debug_assert!(
+                            rate_limit.is_none(),
+                            "one fragment should only have 1 rate limit node"
+                        );
+                        rate_limit = node.rate_limit;
+                        node_name = Some("STREAM_SCAN");
+                    }
+                    PbNodeBody::StreamCdcScan(node) => {
+                        debug_assert!(
+                            rate_limit.is_none(),
+                            "one fragment should only have 1 rate limit node"
+                        );
+                        rate_limit = node.rate_limit;
+                        node_name = Some("STREAM_CDC_SCAN");
+                    }
+                    _ => {}
+                }
+            });
+
+            if let Some(rate_limit) = rate_limit {
+                rate_limits.push(RateLimitInfo {
+                    fragment_id: fragment_id as u32,
+                    job_id: job_id as u32,
+                    fragment_type_mask: fragment_type_mask as u32,
+                    rate_limit,
+                    node_name: node_name.unwrap().to_string(),
+                });
+            }
+        }
+
+        Ok(rate_limits)
+    }
+}
+
+fn bitflag_intersects(column: SimpleExpr, value: i32) -> SimpleExpr {
+    column
+        .binary(BinOper::Custom("&"), value)
+        .binary(BinOper::NotEqual, 0)
+}
+
+fn fragment_type_mask_intersects(value: i32) -> SimpleExpr {
+    bitflag_intersects(fragment::Column::FragmentTypeMask.into_simple_expr(), value)
 }

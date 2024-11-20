@@ -27,7 +27,7 @@ struct RwConnection {
     owner: i32,
     type_: String,
     provider: String,
-    acl: String,
+    acl: Vec<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_connections")]
@@ -44,7 +44,7 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                 owner: conn.owner as i32,
                 type_: conn.connection_type().into(),
                 provider: conn.provider().into(),
-                acl: "".into(),
+                acl: vec![],
             })
         })
         .collect())

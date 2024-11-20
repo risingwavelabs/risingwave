@@ -15,20 +15,16 @@
 use risingwave_sqlparser::ast::Query;
 
 use crate::binder::Binder;
-use crate::error::{ErrorCode, Result};
+use crate::error::{bail_bind_error, Result};
 use crate::expr::{ExprImpl, Subquery, SubqueryKind};
 
 impl Binder {
-    pub(super) fn bind_subquery_expr(
-        &mut self,
-        query: Query,
-        kind: SubqueryKind,
-    ) -> Result<ExprImpl> {
+    pub fn bind_subquery_expr(&mut self, query: Query, kind: SubqueryKind) -> Result<ExprImpl> {
         let query = self.bind_query(query)?;
-        if !matches!(kind, SubqueryKind::Existential) && query.data_types().len() != 1 {
-            return Err(
-                ErrorCode::BindError("Subquery must return only one column".to_string()).into(),
-            );
+        if !matches!(kind, SubqueryKind::Existential | SubqueryKind::UpdateSet)
+            && query.data_types().len() != 1
+        {
+            bail_bind_error!("Subquery must return only one column");
         }
         Ok(Subquery::new(query, kind).into())
     }

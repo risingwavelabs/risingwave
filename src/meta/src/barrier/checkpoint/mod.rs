@@ -16,5 +16,5 @@ mod control;
 mod creating_job;
 mod state;
 
-pub(super) use control::{CheckpointControl, DatabaseCheckpointControl, EpochNode};
+pub(super) use control::{CheckpointControl, DatabaseCheckpointControl};
 pub(super) use state::BarrierWorkerState;

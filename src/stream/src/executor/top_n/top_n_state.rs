@@ -68,8 +68,8 @@ impl<S: StateStore> ManagedTopNState<S> {
     }
 
     /// Init epoch for the managed state table.
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_table.init_epoch(epoch)
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_table.init_epoch(epoch).await
     }
 
     /// Update vnode bitmap of state table, returning `cache_may_stale`.
@@ -352,7 +352,9 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+                .await
+                .unwrap();
             tb
         };
 
@@ -432,7 +434,9 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+                .await
+                .unwrap();
             tb
         };
 
@@ -479,7 +483,9 @@ mod tests {
                 &[0, 1],
             )
             .await;
-            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)));
+            tb.init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+                .await
+                .unwrap();
             tb
         };
 

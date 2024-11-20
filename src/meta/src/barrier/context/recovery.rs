@@ -64,7 +64,6 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    // FIXME: didn't consider Values here
     async fn recover_background_mv_progress(
         &self,
     ) -> MetaResult<HashMap<TableId, (String, TableFragments)>> {
@@ -82,7 +81,14 @@ impl GlobalBarrierWorkerContextImpl {
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
             let table_fragments = TableFragments::from_protobuf(table_fragments);
-            mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            if table_fragments.tracking_progress_actor_ids().is_empty() {
+                // If there's no tracking actor in the mview, we can finish the job directly.
+                mgr.catalog_controller
+                    .finish_streaming_job(mview.table_id, None)
+                    .await?;
+            } else {
+                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+            }
         }
 
         // If failed, enter recovery mode.
@@ -136,6 +142,12 @@ impl GlobalBarrierWorkerContextImpl {
                         .list_background_creating_jobs()
                         .await?;
 
+                    info!(
+                        "background streaming jobs: {:?} total {}",
+                        background_streaming_jobs,
+                        background_streaming_jobs.len()
+                    );
+
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // FIXME: Transactions should be used.
@@ -143,6 +155,7 @@ impl GlobalBarrierWorkerContextImpl {
                     let mut info = if !self.env.opts.disable_automatic_parallelism_control
                         && background_streaming_jobs.is_empty()
                     {
+                        info!("trigger offline scaling");
                         self.scale_actors(&active_streaming_nodes)
                             .await
                             .inspect_err(|err| {
@@ -153,6 +166,7 @@ impl GlobalBarrierWorkerContextImpl {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
                     } else {
+                        info!("trigger actor migration");
                         // Migrate actors in expired CN to newly joined one.
                         self.migrate_actors(&mut active_streaming_nodes)
                             .await
@@ -370,7 +384,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         mgr.catalog_controller.migrate_actors(plan).await?;
 
-        debug!("migrate actors succeed.");
+        info!("migrate actors succeed.");
 
         self.resolve_graph_info().await
     }
@@ -441,6 +455,11 @@ impl GlobalBarrierWorkerContextImpl {
             result
         };
 
+        info!(
+            "target table parallelisms for offline scaling: {:?}",
+            table_parallelisms
+        );
+
         let schedulable_worker_ids = active_nodes
             .current()
             .values()
@@ -453,6 +472,11 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .map(|worker| worker.id as WorkerId)
             .collect();
+
+        info!(
+            "target worker ids for offline scaling: {:?}",
+            schedulable_worker_ids
+        );
 
         let plan = self
             .scale_controller
@@ -491,6 +515,8 @@ impl GlobalBarrierWorkerContextImpl {
         // Because custom parallelism doesn't exist, this function won't result in a no-shuffle rewrite for table parallelisms.
         debug_assert_eq!(compared_table_parallelisms, table_parallelisms);
 
+        info!("post applying reschedule for offline scaling");
+
         if let Err(e) = self
             .scale_controller
             .post_apply_reschedule(&reschedule_fragment, &table_parallelisms)
@@ -504,7 +530,7 @@ impl GlobalBarrierWorkerContextImpl {
             return Err(e);
         }
 
-        debug!("scaling actors succeed.");
+        info!("scaling actors succeed.");
         Ok(())
     }
 
