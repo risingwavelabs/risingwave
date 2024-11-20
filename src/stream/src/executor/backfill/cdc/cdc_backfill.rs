@@ -181,29 +181,46 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !self.options.disable_backfill && !state.is_finished;
+        let need_backfill = !self.options.disable_backfill && !state.is_finished;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
 
         // After init the state table and forward the initial barrier to downstream,
-        // we now try to create the table reader with retry
-        let mut upstream_barriers = UpstreamBarriers::new(upstream);
+        // we now try to create the table reader with retry.
+        // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
+        // If backfill is finished, we should forward the upstream cdc events to downstream.
+        let mut upstream_buffer = UpstreamMessageBuffer::new(upstream);
         let table_reader: Option<ExternalTableReaderImpl>;
         let mut backoff = get_backoff_strategy();
         loop {
             let create_result: StreamExecutorResult<_> = try {
-                let reader = upstream_barriers
+                let reader = upstream_buffer
                     .run_future(create_table_reader(&self.external_table))
                     .await?;
                 reader
             };
 
-            // emit one barrier if any
-            if let Some(barrier) = upstream_barriers.next_pending_barrier().await? {
-                // commit state to bump the epoch of state table
-                state_impl.commit_state(barrier.epoch).await?;
-                yield Message::Barrier(barrier);
+            // emit upstream message if any
+            if let Some(msg) = upstream_buffer.next_pending_message().await? {
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // commit state to bump the epoch of state table
+                        state_impl.commit_state(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                    }
+                    Message::Chunk(chunk) => {
+                        if need_backfill {
+                            // ignore chunk if we need backfill, since we can read the data from the snapshot
+                        } else {
+                            // forward the chunk to downstream
+                            yield Message::Chunk(chunk);
+                        }
+                    }
+                    Message::Watermark(_) => {
+                        // ignore watermark
+                    }
+                }
             }
 
             match create_result {
@@ -216,7 +233,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         table_id,
                         upstream_table_name,
                         error = %e.as_report(),
-                        "failed to create table reader",
+                        "failed to create external table reader",
                     );
                     if let Some(delay) = backoff.next() {
                         sleep(delay).await;
@@ -230,13 +247,28 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             table_reader.expect("table reader must created"),
         );
 
-        // consume all pending barriers during table reader creation
-        while let Some(barrier) = upstream_barriers.pending_barriers.pop_back() {
-            // commit state to bump the epoch of state table
-            state_impl.commit_state(barrier.epoch).await?;
-            yield Message::Barrier(barrier);
+        // consume all pending messages
+        while let Some(msg) = upstream_buffer.pending_messages.pop_back() {
+            match msg {
+                Message::Barrier(barrier) => {
+                    // commit state to bump the epoch of state table
+                    state_impl.commit_state(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
+                }
+                Message::Chunk(chunk) => {
+                    if need_backfill {
+                        // ignore chunk if we need backfill, since we can read the data from the snapshot
+                    } else {
+                        // forward the chunk to downstream
+                        yield Message::Chunk(chunk);
+                    }
+                }
+                Message::Watermark(_) => {
+                    // ignore watermark
+                }
+            }
         }
-        let mut upstream = transform_upstream(upstream_barriers.upstream, &self.output_columns)
+        let mut upstream = transform_upstream(upstream_buffer.upstream, &self.output_columns)
             .boxed()
             .peekable();
         let mut last_binlog_offset: Option<CdcOffset> = state
@@ -280,7 +312,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // finished.
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
-        if to_backfill {
+        if need_backfill {
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
@@ -755,16 +787,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 }
 
-struct UpstreamBarriers {
+struct UpstreamMessageBuffer {
     upstream: BoxedMessageStream,
-    pending_barriers: VecDeque<Barrier>,
+    pending_messages: VecDeque<Message>,
 }
 
-impl UpstreamBarriers {
+impl UpstreamMessageBuffer {
     fn new(upstream: BoxedMessageStream) -> Self {
         Self {
             upstream,
-            pending_barriers: VecDeque::new(),
+            pending_messages: VecDeque::new(),
         }
     }
 
@@ -774,7 +806,7 @@ impl UpstreamBarriers {
     ) -> StreamExecutorResult<T> {
         tokio::select! {
             biased;
-            e = self.concurrently_consume_upstream(10) => {
+            e = self.concurrently_consume_upstream(8) => {
                 Err(e)
             }
             // this arm won't be starved, because the first arm is always pending unless returning with error
@@ -784,27 +816,27 @@ impl UpstreamBarriers {
         }
     }
 
-    async fn next_pending_barrier(&mut self) -> StreamExecutorResult<Option<Barrier>> {
-        if self.pending_barriers.is_empty() {
-            self.consume_until_next_checkpoint_barrier().await?;
+    async fn next_pending_message(&mut self) -> StreamExecutorResult<Option<Message>> {
+        if self.pending_messages.is_empty() {
+            self.consume_until_next_barrier().await?;
         }
-        let barrier = self.pending_barriers.pop_back();
-        assert!(barrier.is_some(), "must have a barrier");
-        Ok(barrier)
+        let message = self.pending_messages.pop_back();
+        assert!(message.is_some(), "must have a message");
+        Ok(message)
     }
 
     async fn concurrently_consume_upstream(
         &mut self,
-        barrier_num_limit: usize,
+        max_message_nums: usize,
     ) -> StreamExecutorError {
         {
             loop {
                 if let Err(e) = try {
-                    // pause the future when we reach the barrier number limit,
-                    if self.pending_barriers.len() >= barrier_num_limit {
+                    // pause the future when we reach the max message numbers
+                    if self.pending_messages.len() >= max_message_nums {
                         return pending().await;
                     }
-                    self.consume_until_next_checkpoint_barrier().await?;
+                    self.consume_until_next_barrier().await?;
                 } {
                     break e;
                 }
@@ -812,7 +844,7 @@ impl UpstreamBarriers {
         }
     }
 
-    async fn consume_until_next_checkpoint_barrier(&mut self) -> StreamExecutorResult<()> {
+    async fn consume_until_next_barrier(&mut self) -> StreamExecutorResult<()> {
         loop {
             let msg = self
                 .upstream
@@ -821,14 +853,14 @@ impl UpstreamBarriers {
                 .ok_or_else(|| anyhow!("end of upstream"))?;
             match msg {
                 MessageInner::Barrier(barrier) => {
-                    let is_checkpoint = barrier.kind.is_checkpoint();
-                    self.pending_barriers.push_front(barrier);
-                    if is_checkpoint {
-                        break Ok(());
-                    }
+                    self.pending_messages.push_front(Message::Barrier(barrier));
+                    break Ok(());
                 }
-                MessageInner::Chunk(_) | MessageInner::Watermark(_) => {
-                    // ignore
+                MessageInner::Chunk(chunk) => {
+                    self.pending_messages.push_front(Message::Chunk(chunk));
+                }
+                MessageInner::Watermark(_) => {
+                    // ignore watermark
                 }
             }
         }
@@ -838,7 +870,7 @@ impl UpstreamBarriers {
 fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
     const BASE_DELAY: Duration = Duration::from_secs(1);
     const BACKOFF_FACTOR: u64 = 2;
-    const MAX_DELAY: Duration = Duration::from_secs(8);
+    const MAX_DELAY: Duration = Duration::from_secs(10);
     ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
         .factor(BACKOFF_FACTOR)
         .max_delay(MAX_DELAY)
