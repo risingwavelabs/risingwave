@@ -32,6 +32,7 @@ use risingwave_meta_model::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
+use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -117,8 +118,6 @@ impl HummockManager {
                 latest_valid_version.get_object_ids(),
             )
         };
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
-        let should_gc_objects = latest_valid_version_id <= min_pinned_version_id;
         let mut object_ids_to_delete: HashSet<_> = HashSet::default();
         let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
@@ -163,12 +162,8 @@ impl HummockManager {
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
-
-            if should_gc_objects {
-                let new_object_ids = delta_to_delete.newly_added_object_ids();
-                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
-            }
-
+            let new_object_ids = delta_to_delete.newly_added_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
                 delta_id = delta_to_delete.id.to_u64(),
                 "delete {} rows from hummock_sstable_info",
@@ -196,10 +191,8 @@ impl HummockManager {
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
-            if should_gc_objects {
-                let new_object_ids = prev_version.get_object_ids();
-                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
-            }
+            let new_object_ids = prev_version.get_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
                 prev_version_id,
                 "delete {} rows from hummock_sstable_info",
@@ -207,9 +200,24 @@ impl HummockManager {
             );
             next_version_sst_ids = sst_ids;
         }
-        if !object_ids_to_delete.is_empty() {
-            self.gc_manager
-                .add_may_delete_object_ids(object_ids_to_delete.into_iter());
+        {
+            let mut guard = self.versioning.write().await;
+            let stale_objects = guard
+                .checkpoint
+                .stale_objects
+                .entry(latest_valid_version_id)
+                .or_insert(PbStaleObjects {
+                    id: vec![],
+                    // To avoid unnecessary computations, disregard size in this context.
+                    total_file_size: 0,
+                });
+            stale_objects.id = stale_objects
+                .id
+                .iter()
+                .copied()
+                .chain(object_ids_to_delete)
+                .unique()
+                .collect();
         }
 
         let res = hummock_time_travel_version::Entity::delete_many()
