@@ -657,14 +657,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_mv_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()

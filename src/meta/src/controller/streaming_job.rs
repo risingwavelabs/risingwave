@@ -1317,7 +1317,6 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
-        // TODO: limit source backfill?
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if *fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
@@ -1384,7 +1383,7 @@ impl CatalogController {
 
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
     // return the actor_ids to be applied
-    pub async fn update_mv_rate_limit_by_job_id(
+    pub async fn update_backfill_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
         rate_limit: Option<u32>,
@@ -1411,7 +1410,7 @@ impl CatalogController {
         fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
             let mut found = false;
             if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
-                || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::SourceScan as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| match node {
                     PbNodeBody::StreamCdcScan(node) => {
@@ -1422,11 +1421,9 @@ impl CatalogController {
                         node.rate_limit = rate_limit;
                         found = true;
                     }
-                    PbNodeBody::Source(node) => {
-                        if let Some(inner) = node.source_inner.as_mut() {
-                            inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+                    PbNodeBody::SourceBackfill(node) => {
+                        node.rate_limit = rate_limit;
+                        found = true;
                     }
                     _ => {}
                 });
