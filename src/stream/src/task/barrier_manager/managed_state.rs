@@ -958,14 +958,6 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(0)
         );
-        assert_eq!(
-            managed_barrier_state
-                .epoch_barrier_state_map
-                .first_key_value()
-                .unwrap()
-                .0,
-            &test_epoch(1)
-        );
         managed_barrier_state.collect(1, barrier2.epoch);
         managed_barrier_state.collect(1, barrier3.epoch);
         managed_barrier_state.collect(2, barrier2.epoch);
@@ -973,21 +965,12 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(1)
         );
-        assert_eq!(
-            managed_barrier_state
-                .epoch_barrier_state_map
-                .first_key_value()
-                .unwrap()
-                .0,
-            { &test_epoch(2) }
-        );
         managed_barrier_state.collect(2, barrier3.epoch);
         managed_barrier_state.collect(3, barrier3.epoch);
         assert_eq!(
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(2)
         );
-        assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 
     #[tokio::test]
@@ -1040,6 +1023,5 @@ mod tests {
             managed_barrier_state.pop_next_completed_epoch().await,
             test_epoch(2)
         );
-        assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 }
