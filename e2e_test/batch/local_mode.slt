@@ -10,10 +10,11 @@ include ./order/*.slt.part
 include ./join/*.slt.part
 include ./join/*/*.slt.part
 include ./aggregate/*.slt.part
-include ./types/*.slt.part
+include ./types/**/*.slt.part
 include ./catalog/*.slt.part
 include ./functions/*.slt.part
 include ./over_window/main.slt.part
+include ./subquery/**/*.slt.part
 
 statement ok
 SET QUERY_MODE TO auto;

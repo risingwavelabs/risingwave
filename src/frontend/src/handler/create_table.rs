@@ -1310,6 +1310,7 @@ pub async fn generate_stream_graph_for_replace_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
+    include_column_options: IncludeOption,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1328,7 +1329,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 append_only,
                 on_conflict,
                 with_version_column,
-                vec![],
+                include_column_options,
             )
             .await?,
             TableJobType::General,

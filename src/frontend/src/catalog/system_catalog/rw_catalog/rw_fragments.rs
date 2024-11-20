@@ -32,7 +32,7 @@ struct RwFragment {
     max_parallelism: i32,
 }
 
-fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
+pub(super) fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
     let mut result = vec![];
     for i in 0..32 {
         let bit = 1 << i;

@@ -370,8 +370,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
-        // `get_row` doesn't support select `_rw_timestamp` yet.
-        assert!(self.epoch_idx.is_none());
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         let read_committed = wait_epoch.is_read_committed();
@@ -406,7 +404,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             cache_policy: CachePolicy::Fill(CacheContext::Default),
             ..Default::default()
         };
-        if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
+        if let Some((full_key, value)) = self
+            .store
+            .get_keyed_row(serialized_pk, epoch, read_options)
+            .await?
+        {
             let row = self.row_serde.deserialize(&value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
 
@@ -416,7 +418,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                         pk.project(&self.output_row_in_key_indices).into_owned_row();
                     let mut result_row_vec = vec![];
                     for idx in &self.output_indices {
-                        if self.value_output_indices.contains(idx) {
+                        if let Some(epoch_idx) = self.epoch_idx
+                            && *idx == epoch_idx
+                        {
+                            let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                            result_row_vec
+                                .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                        } else if self.value_output_indices.contains(idx) {
                             let item_position_in_value_indices = &self
                                 .value_output_indices
                                 .iter()
@@ -440,7 +448,32 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     let result_row = OwnedRow::new(result_row_vec);
                     Ok(Some(result_row))
                 }
-                None => Ok(Some(result_row_in_value.into_owned_row())),
+                None => match &self.epoch_idx {
+                    Some(epoch_idx) => {
+                        let mut result_row_vec = vec![];
+                        for idx in &self.output_indices {
+                            if idx == epoch_idx {
+                                let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+                                result_row_vec
+                                    .push(risingwave_common::types::Datum::from(epoch.as_scalar()));
+                            } else {
+                                let item_position_in_value_indices = &self
+                                    .value_output_indices
+                                    .iter()
+                                    .position(|p| idx == p)
+                                    .unwrap();
+                                result_row_vec.push(
+                                    result_row_in_value
+                                        .datum_at(*item_position_in_value_indices)
+                                        .to_owned_datum(),
+                                );
+                            }
+                        }
+                        let result_row = OwnedRow::new(result_row_vec);
+                        Ok(Some(result_row))
+                    }
+                    None => Ok(Some(result_row_in_value.into_owned_row())),
+                },
             }
         } else {
             Ok(None)
@@ -451,10 +484,6 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
         self.distribution.update_vnode_bitmap(new_vnodes)
-    }
-
-    pub fn has_epoch_idx(&self) -> bool {
-        self.epoch_idx.is_some()
     }
 }
 

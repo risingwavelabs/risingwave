@@ -71,7 +71,7 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -110,7 +110,7 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
+pub async fn create_split_reader<P: SourceProperties>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
@@ -376,6 +376,10 @@ pub trait SplitReader: Sized + Send {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
+    }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        Err(anyhow!("seek_to_latest is not supported for this connector").into())
     }
 }
 
