@@ -41,6 +41,7 @@ id bigint false NULL
 modified timestamp without time zone false NULL
 name character varying false NULL
 custinfo jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
@@ -66,6 +67,7 @@ name character varying false NULL
 custinfo jsonb false NULL
 v1 character varying false NULL
 v2 double precision false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
@@ -96,6 +98,7 @@ name character varying false NULL
 custinfo jsonb false NULL
 v1 character varying false NULL
 v2 double precision false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL
@@ -126,6 +129,7 @@ describe rw_customers;
 id bigint false NULL
 name character varying false NULL
 custinfo jsonb false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key id NULL NULL
 distribution key id NULL NULL
 table description rw_customers NULL NULL

@@ -987,7 +987,7 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     pub fn binary_format(&self, data_type: &DataType) -> to_binary::Result<Bytes> {
         use self::to_binary::ToBinary;
-        self.to_binary_with_type(data_type).transpose().unwrap()
+        self.to_binary_with_type(data_type)
     }
 
     pub fn text_format(&self, data_type: &DataType) -> String {
