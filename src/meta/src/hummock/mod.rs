@@ -15,6 +15,9 @@ pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
+
+use std::collections::HashSet;
+
 pub use manager::*;
 use thiserror_ext::AsReport;
 
@@ -33,11 +36,13 @@ pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::backup_restore::BackupManagerRef;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
@@ -45,6 +50,7 @@ pub fn start_hummock_workers(
     let workers = vec![
         start_checkpoint_loop(
             hummock_manager.clone(),
+            backup_manager,
             Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
             meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
         ),
@@ -85,6 +91,7 @@ pub fn start_vacuum_metadata_loop(
 
 pub fn start_checkpoint_loop(
     hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     interval: Duration,
     min_delta_log_num: u64,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -92,6 +99,7 @@ pub fn start_checkpoint_loop(
     let join_handle = tokio::spawn(async move {
         let mut min_trigger_interval = tokio::time::interval(interval);
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut accumulated_may_delete_object_ids = HashSet::new();
         loop {
             tokio::select! {
                 // Wait for interval
@@ -107,11 +115,28 @@ pub fn start_checkpoint_loop(
             {
                 continue;
             }
-            if let Err(err) = hummock_manager
+            match hummock_manager
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error");
+                Ok((_, may_delete_objects)) => {
+                    accumulated_may_delete_object_ids.extend(may_delete_objects);
+                    const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
+                    if accumulated_may_delete_object_ids.len() >= MIN_MINOR_GC_OBJECT_COUNT {
+                        let _ = hummock_manager
+                            .start_minor_gc(
+                                backup_manager.clone(),
+                                accumulated_may_delete_object_ids.drain(),
+                            )
+                            .await
+                            .inspect_err(|err| {
+                                tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                            });
+                    };
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.")
+                }
             }
         }
     });

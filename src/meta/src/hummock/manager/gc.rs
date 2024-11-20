@@ -506,6 +506,26 @@ impl HummockManager {
         }
         Ok(total)
     }
+
+    /// Minor GC attempts to delete objects that were part of Hummock version but are no longer in use.
+    pub async fn start_minor_gc(
+        &self,
+        backup_manager: BackupManagerRef,
+        object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) -> Result<()> {
+        // Objects pinned by either meta backup or time travel should be filtered out.
+        let pinned_objects: HashSet<_> = backup_manager
+            .list_pinned_ssts()
+            .into_iter()
+            .chain(self.all_object_ids_in_time_travel().await?)
+            .collect();
+        let object_ids = object_ids
+            .filter(|s| !pinned_objects.contains(s))
+            .collect_vec();
+        // Retry is not necessary. Full GC will handle these objects eventually.
+        self.delete_objects(object_ids).await?;
+        Ok(())
+    }
 }
 
 async fn collect_min_uncommitted_sst_id(

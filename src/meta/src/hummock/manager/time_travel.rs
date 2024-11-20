@@ -32,6 +32,7 @@ use risingwave_meta_model::{
     hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
     hummock_time_travel_version,
 };
+use risingwave_pb::hummock::hummock_version_checkpoint::PbStaleObjects;
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::Set;
@@ -95,7 +96,7 @@ impl HummockManager {
             "delete {} rows from hummock_epoch_to_version",
             res.rows_affected
         );
-        let earliest_valid_version = hummock_time_travel_version::Entity::find()
+        let latest_valid_version = hummock_time_travel_version::Entity::find()
             .filter(
                 hummock_time_travel_version::Column::VersionId.lte(version_watermark.version_id),
             )
@@ -103,23 +104,29 @@ impl HummockManager {
             .one(&txn)
             .await?
             .map(|m| HummockVersion::from_persisted_protobuf(&m.version.to_protobuf()));
-        let Some(earliest_valid_version) = earliest_valid_version else {
+        let Some(latest_valid_version) = latest_valid_version else {
             txn.commit().await?;
             return Ok(());
         };
-        let (earliest_valid_version_id, earliest_valid_version_sst_ids) = {
+        let (
+            latest_valid_version_id,
+            latest_valid_version_sst_ids,
+            latest_valid_version_object_ids,
+        ) = {
             (
-                earliest_valid_version.id,
-                earliest_valid_version.get_sst_ids(),
+                latest_valid_version.id,
+                latest_valid_version.get_sst_ids(),
+                latest_valid_version.get_object_ids(),
             )
         };
+        let mut object_ids_to_delete: HashSet<_> = HashSet::default();
         let version_ids_to_delete: Vec<risingwave_meta_model::HummockVersionId> =
             hummock_time_travel_version::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
                 .filter(
                     hummock_time_travel_version::Column::VersionId
-                        .lt(earliest_valid_version_id.to_u64()),
+                        .lt(latest_valid_version_id.to_u64()),
                 )
                 .order_by_desc(hummock_time_travel_version::Column::VersionId)
                 .into_tuple()
@@ -131,7 +138,7 @@ impl HummockManager {
                 .column(hummock_time_travel_delta::Column::VersionId)
                 .filter(
                     hummock_time_travel_delta::Column::VersionId
-                        .lt(earliest_valid_version_id.to_u64()),
+                        .lt(latest_valid_version_id.to_u64()),
                 )
                 .into_tuple()
                 .all(&txn)
@@ -146,25 +153,27 @@ impl HummockManager {
                         delta_id_to_delete
                     )))
                 })?;
-            let new_sst_ids = HummockVersionDelta::from_persisted_protobuf(
+            let delta_to_delete = HummockVersionDelta::from_persisted_protobuf(
                 &delta_to_delete.version_delta.to_protobuf(),
-            )
-            .newly_added_sst_ids();
+            );
+            let new_sst_ids = delta_to_delete.newly_added_sst_ids();
             // The SST ids added and then deleted by compaction between the 2 versions.
-            let sst_ids_to_delete = &new_sst_ids - &earliest_valid_version_sst_ids;
+            let sst_ids_to_delete = &new_sst_ids - &latest_valid_version_sst_ids;
             let res = hummock_sstable_info::Entity::delete_many()
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
+            let new_object_ids = delta_to_delete.newly_added_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
-                delta_id = delta_to_delete.version_id,
+                delta_id = delta_to_delete.id.to_u64(),
                 "delete {} rows from hummock_sstable_info",
                 res.rows_affected
             );
         }
-        let mut next_version_sst_ids = earliest_valid_version_sst_ids;
+        let mut next_version_sst_ids = latest_valid_version_sst_ids;
         for prev_version_id in version_ids_to_delete {
-            let sst_ids = {
+            let prev_version = {
                 let prev_version = hummock_time_travel_version::Entity::find_by_id(prev_version_id)
                     .one(&txn)
                     .await?
@@ -175,14 +184,16 @@ impl HummockManager {
                         )))
                     })?;
                 HummockVersion::from_persisted_protobuf(&prev_version.version.to_protobuf())
-                    .get_sst_ids()
             };
+            let sst_ids = prev_version.get_sst_ids();
             // The SST ids deleted by compaction between the 2 versions.
             let sst_ids_to_delete = &sst_ids - &next_version_sst_ids;
             let res = hummock_sstable_info::Entity::delete_many()
                 .filter(hummock_sstable_info::Column::SstId.is_in(sst_ids_to_delete))
                 .exec(&txn)
                 .await?;
+            let new_object_ids = prev_version.get_object_ids();
+            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             tracing::debug!(
                 prev_version_id,
                 "delete {} rows from hummock_sstable_info",
@@ -190,30 +201,49 @@ impl HummockManager {
             );
             next_version_sst_ids = sst_ids;
         }
+        {
+            let mut guard = self.versioning.write().await;
+            guard
+                .checkpoint
+                .stale_objects
+                .entry(latest_valid_version_id)
+                .and_modify(|s| {
+                    s.id =
+                        s.id.iter()
+                            .chain(object_ids_to_delete.iter())
+                            .unique()
+                            .copied()
+                            .collect();
+                })
+                .or_insert(PbStaleObjects {
+                    id: object_ids_to_delete.into_iter().collect(),
+                    // To avoid unnecessary computations, disregard size in this context.
+                    total_file_size: 0,
+                });
+        }
 
         let res = hummock_time_travel_version::Entity::delete_many()
             .filter(
-                hummock_time_travel_version::Column::VersionId
-                    .lt(earliest_valid_version_id.to_u64()),
+                hummock_time_travel_version::Column::VersionId.lt(latest_valid_version_id.to_u64()),
             )
             .exec(&txn)
             .await?;
         tracing::debug!(
             epoch_watermark_version_id = ?version_watermark.version_id,
-            ?earliest_valid_version_id,
+            ?latest_valid_version_id,
             "delete {} rows from hummock_time_travel_version",
             res.rows_affected
         );
 
         let res = hummock_time_travel_delta::Entity::delete_many()
             .filter(
-                hummock_time_travel_delta::Column::VersionId.lt(earliest_valid_version_id.to_u64()),
+                hummock_time_travel_delta::Column::VersionId.lt(latest_valid_version_id.to_u64()),
             )
             .exec(&txn)
             .await?;
         tracing::debug!(
             epoch_watermark_version_id = ?version_watermark.version_id,
-            ?earliest_valid_version_id,
+            ?latest_valid_version_id,
             "delete {} rows from hummock_time_travel_delta",
             res.rows_affected
         );
