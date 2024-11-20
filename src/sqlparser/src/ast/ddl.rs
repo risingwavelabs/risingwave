@@ -215,6 +215,7 @@ pub enum AlterConnectionOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterSecretOperation {
     ChangeCredential { new_credential: Value },
 }
