@@ -38,7 +38,7 @@ create source mysql_mytest with (
 ---
 # The detailed error message is commented out because the user IP in error message may vary in different environments.
 # db error: ERROR: Failed to run the query
-    
+
 # Caused by these errors (recent errors listed first):
 #   1: gRPC request to meta service failed: Internal error
 #   2: failed to create source worker
