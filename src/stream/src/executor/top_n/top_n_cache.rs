@@ -874,8 +874,9 @@ impl TopNStaging {
 
         self.to_update
             .into_values()
-            .map(|(old_row, new_row)| [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)])
-            .flatten()
+            .flat_map(|(old_row, new_row)| {
+                [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)]
+            })
             .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
             .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
     }
