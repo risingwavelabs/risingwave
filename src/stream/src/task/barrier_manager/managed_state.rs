@@ -654,18 +654,20 @@ impl ManagedBarrierState {
 
     pub(super) fn next_collected_epoch(
         &mut self,
-    ) -> impl Future<Output = (PartialGraphId, Barrier)> {
-        let mut output = None;
-        for (partial_graph_id, graph_state) in &mut self.graph_states {
-            if let Some(barrier) = graph_state.may_have_collected_all() {
-                if let Some(actors_to_stop) = barrier.all_stop_actors() {
-                    self.current_shared_context.drop_actors(actors_to_stop);
+    ) -> impl Future<Output = (PartialGraphId, Barrier)> + '_ {
+        poll_fn(|_| {
+            let mut output = None;
+            for (partial_graph_id, graph_state) in &mut self.graph_states {
+                if let Some(barrier) = graph_state.may_have_collected_all() {
+                    if let Some(actors_to_stop) = barrier.all_stop_actors() {
+                        self.current_shared_context.drop_actors(actors_to_stop);
+                    }
+                    output = Some((*partial_graph_id, barrier));
+                    break;
                 }
-                output = Some((*partial_graph_id, barrier));
-                break;
             }
-        }
-        poll_fn(move |_| output.take().map(Poll::Ready).unwrap_or(Poll::Pending))
+            output.map(Poll::Ready).unwrap_or(Poll::Pending)
+        })
     }
 }
 
