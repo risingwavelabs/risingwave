@@ -196,85 +196,6 @@ impl StreamSink {
         &self.sink_desc
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn create(
-        input: PlanRef,
-        name: String,
-        db_name: String,
-        sink_from_table_name: String,
-        target_table: Option<Arc<TableCatalog>>,
-        user_distributed_by: RequiredDist,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-        out_names: Vec<String>,
-        definition: String,
-        properties: WithOptionsSecResolved,
-        format_desc: Option<SinkFormatDesc>,
-        partition_info: Option<PartitionComputeInfo>,
-    ) -> Result<Self> {
-        let (input, mut sink) = Self::derive_sink_desc(
-            input,
-            user_distributed_by,
-            name,
-            db_name,
-            sink_from_table_name,
-            target_table,
-            user_order_by,
-            user_cols,
-            out_names,
-            definition,
-            properties,
-            format_desc,
-            partition_info,
-        )?;
-
-        let unsupported_sink =
-            |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
-
-        // check and ensure that the sink connector is specified and supported
-        let sink_decouple = match sink.properties.get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => {
-                match_sink_name_str!(
-                    connector.to_lowercase().as_str(),
-                    SinkType,
-                    {
-                        // the table sink is created by with properties
-                        if connector == TABLE_SINK && sink.target_table.is_none() {
-                            unsupported_sink(TABLE_SINK)
-                        } else {
-                            SinkType::set_default_commit_checkpoint_interval(
-                                &mut sink,
-                                &input.ctx().session_ctx().config().sink_decouple(),
-                            )?;
-                            SinkType::is_sink_decouple(
-                                &input.ctx().session_ctx().config().sink_decouple(),
-                            )
-                        }
-                    },
-                    |other: &str| unsupported_sink(other)
-                )?
-            }
-            None => {
-                return Err(
-                    SinkError::Config(anyhow!("connector not specified when create sink")).into(),
-                );
-            }
-        };
-        // For file sink, it must have sink_decouple turned on.
-        if !sink_decouple && sink.is_file_sink() {
-            return Err(
-                SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
-            );
-        }
-        let log_store_type = if sink_decouple {
-            SinkLogStoreType::KvLogStore
-        } else {
-            SinkLogStoreType::InMemoryLogStore
-        };
-
-        Ok(Self::new(input, sink, log_store_type))
-    }
-
     fn derive_iceberg_sink_distribution(
         input: PlanRef,
         partition_info: Option<PartitionComputeInfo>,
@@ -309,13 +230,13 @@ impl StreamSink {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn derive_sink_desc(
+    pub fn create(
         mut input: PlanRef,
-        user_distributed_by: RequiredDist,
         name: String,
         db_name: String,
-        sink_from_name: String,
+        sink_from_table_name: String,
         target_table: Option<Arc<TableCatalog>>,
+        user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
@@ -323,7 +244,7 @@ impl StreamSink {
         properties: WithOptionsSecResolved,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
-    ) -> Result<(PlanRef, SinkDesc)> {
+    ) -> Result<Self> {
         let sink_type =
             Self::derive_sink_type(input.append_only(), &properties, format_desc.as_ref())?;
 
@@ -340,6 +261,7 @@ impl StreamSink {
             }
         };
         let mut extra_partition_col_idx = None;
+
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
@@ -403,11 +325,11 @@ impl StreamSink {
             CreateType::Foreground
         };
         let (properties, secret_refs) = properties.into_parts();
-        let sink_desc = SinkDesc {
+        let mut sink_desc = SinkDesc {
             id: SinkId::placeholder(),
             name,
             db_name,
-            sink_from_name,
+            sink_from_name: sink_from_table_name,
             definition,
             columns,
             plan_pk: pk,
@@ -421,7 +343,52 @@ impl StreamSink {
             extra_partition_col_idx,
             create_type,
         };
-        Ok((input, sink_desc))
+
+        let unsupported_sink =
+            |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)));
+
+        // check and ensure that the sink connector is specified and supported
+        let sink_decouple = match sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
+            Some(connector) => {
+                match_sink_name_str!(
+                    connector.to_lowercase().as_str(),
+                    SinkType,
+                    {
+                        // the table sink is created by with properties
+                        if connector == TABLE_SINK && sink_desc.target_table.is_none() {
+                            unsupported_sink(TABLE_SINK)
+                        } else {
+                            SinkType::set_default_commit_checkpoint_interval(
+                                &mut sink_desc,
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )?;
+                            SinkType::is_sink_decouple(
+                                &input.ctx().session_ctx().config().sink_decouple(),
+                            )
+                        }
+                    },
+                    |other: &str| unsupported_sink(other)
+                )?
+            }
+            None => {
+                return Err(
+                    SinkError::Config(anyhow!("connector not specified when create sink")).into(),
+                );
+            }
+        };
+        // For file sink, it must have sink_decouple turned on.
+        if !sink_decouple && sink_desc.is_file_sink() {
+            return Err(
+                SinkError::Config(anyhow!("File sink can only be created with sink_decouple enabled. Please run `set sink_decouple = true` first.")).into(),
+            );
+        }
+        let log_store_type = if sink_decouple {
+            SinkLogStoreType::KvLogStore
+        } else {
+            SinkLogStoreType::InMemoryLogStore
+        };
+
+        Ok(Self::new(input, sink_desc, log_store_type))
     }
 
     fn is_user_defined_append_only(properties: &WithOptionsSecResolved) -> Result<bool> {
