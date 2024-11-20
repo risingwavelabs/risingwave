@@ -361,6 +361,10 @@ fn build_fragment(
                 current_fragment.requires_singleton = true;
             }
 
+            NodeBody::StreamFsFetch(_) => {
+                current_fragment.fragment_type_mask |= FragmentTypeFlag::FsFetch as u32;
+            }
+
             _ => {}
         };
 

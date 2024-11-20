@@ -84,10 +84,25 @@ SELECT progress from rw_ddl_progress;
 ----
 0 rows consumed
 
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	0
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
+
+
 ############## Alter Source (rate_limit = 0 --> rate_limit = 1000)
 
 statement ok
 alter source kafka_source set source_rate_limit to 1000;
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 
 sleep 3s
 
@@ -114,15 +129,32 @@ LINE 1: alter materialized view rl_mv2 set source_rate_limit = 1000;
                                            ^
 
 
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
+
+
 statement ok
 alter materialized view rl_mv2 set backfill_rate_limit = 2000;
 
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
+
 sleep 3s
 
-query ?
+query T
 select * from rl_mv2;
 ----
 2000
+
 
 
 ############## Cleanup
