@@ -572,16 +572,11 @@ impl Distill for StreamSink {
         vec.push(("type", Pretty::from(sink_type)));
         vec.push(("columns", column_names));
         if self.sink_desc.sink_type.is_upsert() {
-            let pk = IndicesDisplay {
-                indices: &self
-                    .sink_desc
-                    .plan_pk
-                    .iter()
-                    .map(|k| k.column_index)
-                    .collect_vec(),
+            let sink_pk = IndicesDisplay {
+                indices: &self.sink_desc.downstream_pk.clone(),
                 schema: self.base.schema(),
             };
-            vec.push(("pk", pk.distill()));
+            vec.push(("downstream_pk", sink_pk.distill()));
         }
         childless_record("StreamSink", vec)
     }
