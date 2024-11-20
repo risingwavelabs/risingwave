@@ -146,7 +146,7 @@ impl Sink for PostgresSink {
                 .context("Failed to connect to Postgres for Sinking")?;
         tokio::spawn(async move {
             if let Err(error) = connection.await {
-                tracing::error!("postgres sink connection error: {:?}", error.as_report());
+                tracing::error!(error = %error.as_report(), "postgres sink connection error");
             }
         });
 
@@ -280,7 +280,7 @@ impl PostgresSinkWriter {
                     .context("Failed to connect to Postgres for Sinking")?;
             tokio::spawn(async move {
                 if let Err(error) = connection.await {
-                    tracing::error!("postgres sink connection error: {:?}", error.as_report());
+                    tracing::error!(error = %error.as_report(), "postgres sink connection error");
                 }
             });
             client
