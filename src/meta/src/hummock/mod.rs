@@ -33,11 +33,13 @@ pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::backup_restore::BackupManagerRef;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
@@ -45,6 +47,7 @@ pub fn start_hummock_workers(
     let workers = vec![
         start_checkpoint_loop(
             hummock_manager.clone(),
+            backup_manager,
             Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
             meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
         ),
@@ -85,6 +88,7 @@ pub fn start_vacuum_metadata_loop(
 
 pub fn start_checkpoint_loop(
     hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     interval: Duration,
     min_delta_log_num: u64,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -111,8 +115,14 @@ pub fn start_checkpoint_loop(
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error");
+                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
             }
+            let _ = hummock_manager
+                .may_start_minor_gc(backup_manager.clone())
+                .await
+                .inspect_err(|err| {
+                    tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                });
         }
     });
     (join_handle, shutdown_tx)

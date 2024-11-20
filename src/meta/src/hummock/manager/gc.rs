@@ -48,6 +48,8 @@ pub(crate) struct GcManager {
     store: ObjectStoreRef,
     path_prefix: String,
     use_new_object_prefix_strategy: bool,
+    /// These objects may still be used by backup or time travel.
+    may_delete_object_ids: parking_lot::Mutex<HashSet<HummockSstableObjectId>>,
 }
 
 impl GcManager {
@@ -60,6 +62,7 @@ impl GcManager {
             store,
             path_prefix: path_prefix.to_owned(),
             use_new_object_prefix_strategy,
+            may_delete_object_ids: Default::default(),
         }
     }
 
@@ -147,6 +150,28 @@ impl GcManager {
             total_object_size as u64,
             next_start_after,
         ))
+    }
+
+    pub fn add_may_delete_object_ids(
+        &self,
+        may_delete_object_ids: impl Iterator<Item = HummockSstableObjectId>,
+    ) {
+        self.may_delete_object_ids
+            .lock()
+            .extend(may_delete_object_ids);
+    }
+
+    /// Takes if `least_count` elements available.
+    pub fn try_take_may_delete_object_ids(
+        &self,
+        least_count: usize,
+    ) -> Option<HashSet<HummockSstableObjectId>> {
+        let mut guard = self.may_delete_object_ids.lock();
+        if guard.len() < least_count {
+            None
+        } else {
+            Some(guard.drain().collect())
+        }
     }
 }
 
@@ -500,6 +525,29 @@ impl HummockManager {
             tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
         }
         Ok(total)
+    }
+
+    pub async fn may_start_minor_gc(&self, backup_manager: BackupManagerRef) -> Result<()> {
+        const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
+        let Some(object_ids) = self
+            .gc_manager
+            .try_take_may_delete_object_ids(MIN_MINOR_GC_OBJECT_COUNT)
+        else {
+            return Ok(());
+        };
+        // Objects pinned by either meta backup or time travel should be filtered out.
+        let pinned_objects: HashSet<_> = backup_manager
+            .list_pinned_ssts()
+            .into_iter()
+            .chain(self.all_object_ids_in_time_travel().await?)
+            .collect();
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| !pinned_objects.contains(s))
+            .collect_vec();
+        // Retry is not necessary. Full GC will handle these objects eventually.
+        self.delete_objects(object_ids).await?;
+        Ok(())
     }
 }
 

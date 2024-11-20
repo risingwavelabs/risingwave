@@ -220,8 +220,17 @@ impl HummockManager {
                     .collect(),
             });
         }
-        // We can directly discard reference to stale objects that will no longer be used.
         let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let may_delete_object = stale_objects
+            .iter()
+            .filter_map(|(version_id, object_ids)| {
+                if *version_id >= min_pinned_version_id {
+                    return None;
+                }
+                Some(object_ids.id.clone())
+            })
+            .flatten();
+        self.gc_manager.add_may_delete_object_ids(may_delete_object);
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
