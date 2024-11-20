@@ -614,13 +614,13 @@ mod tests {
             sql,
             expect![[r#"
 
-                    MERGE INTO test_table target
-                    USING (SELECT $1 as a,$2 as b) AS source
-                    ON (source.b = target.b)
-                    WHEN MATCHED
-                      THEN UPDATE SET a = source.a
-                    WHEN NOT MATCHED
-                      THEN INSERT (a, b) VALUES (source.a, source.b)
+                        MERGE INTO test_table target
+                        USING (SELECT $1 as a,$2 as b) AS source
+                        ON (source.b = target.b)
+                        WHEN MATCHED
+                          THEN UPDATE SET a = source.a
+                        WHEN NOT MATCHED
+                          THEN INSERT (a, b) VALUES (source.a, source.b)
         "#]],
         );
     }
