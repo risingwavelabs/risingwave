@@ -155,7 +155,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
-                hack_seek_to_latest: false,
             })
             .collect();
 
@@ -263,7 +262,6 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
-                    hack_seek_to_latest:false
                 }
             })
             .collect::<Vec<KafkaSplit>>())
