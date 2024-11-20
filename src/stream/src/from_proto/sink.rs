@@ -263,8 +263,29 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 );
 
                 let table = node.table.as_ref().unwrap().clone();
-                let input_schema = input_executor.schema();
-                let pk_info = resolve_pk_info(input_schema, &table)?;
+                let schema = if let Some(extra_partition_col_idx) =
+                    sink_write_param.extra_partition_col_idx
+                {
+                    // remove extra partition column from input schema, since log store table won't have it.
+                    let fields = input_executor
+                        .schema()
+                        .fields()
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            if i == extra_partition_col_idx {
+                                None
+                            } else {
+                                Some(v)
+                            }
+                        })
+                        .collect_vec();
+                    Schema::new(fields)
+                } else {
+                    input_executor.schema().clone()
+                };
+                let pk_info = resolve_pk_info(&schema, &table)?;
 
                 // TODO: support setting max row count in config
                 let factory = KvLogStoreFactory::new(
