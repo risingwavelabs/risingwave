@@ -527,6 +527,7 @@ impl HummockManager {
         Ok(total)
     }
 
+    /// Minor GC attempts to delete objects that were part of Hummock version but are no longer in use.
     pub async fn may_start_minor_gc(&self, backup_manager: BackupManagerRef) -> Result<()> {
         const MIN_MINOR_GC_OBJECT_COUNT: usize = 1000;
         let Some(object_ids) = self
