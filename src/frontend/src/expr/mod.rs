@@ -14,6 +14,7 @@
 
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use function_call::bail_cast_error;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
@@ -300,7 +301,7 @@ impl ExprImpl {
             ))),
             DataType::Int32 => Ok(self),
             dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
-            _ => bail!("unsupported input type"),
+            _ => bail_cast_error!("unsupported input type"),
         }
     }
 

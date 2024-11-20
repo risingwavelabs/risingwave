@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{bail, def_anyhow_newtype};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use thiserror_ext::AsReport;
+use thiserror::Error;
+use thiserror_ext::{AsReport, Box, Macro};
 
 use super::type_inference::cast;
 use super::{infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -174,7 +174,7 @@ impl FunctionCall {
     ) -> Result<(), CastError> {
         // Can only cast to a struct type.
         let DataType::Struct(t) = &target_type else {
-            bail!(
+            bail_cast_error!(
                 "cannot cast type \"{}\" to \"{}\"",
                 func.return_type(), // typically "record"
                 target_type,
@@ -191,8 +191,8 @@ impl FunctionCall {
                 func.return_type = target_type;
                 Ok(())
             }
-            std::cmp::Ordering::Less => bail!("input has too few columns"),
-            std::cmp::Ordering::Greater => bail!("input has too many columns"),
+            std::cmp::Ordering::Less => bail_cast_error!("input has too few columns"),
+            std::cmp::Ordering::Greater => bail_cast_error!("input has too many columns"),
         }
     }
 
@@ -423,9 +423,14 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
     false
 }
 
-def_anyhow_newtype! {
-    pub CastError,
+#[derive(Error, Debug, Box, Macro)]
+#[thiserror_ext(newtype(name = CastError), macro(path = "crate::expr::function_call"))]
+#[error("{message}")]
+pub struct CastErrorInner {
+    pub source: Option<CastError>,
+    pub message: Box<str>,
 }
+
 pub type CastResult<T = ()> = Result<T, CastError>;
 
 impl From<CastError> for ErrorCode {

@@ -15,15 +15,13 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use anyhow::Context;
 use itertools::Itertools as _;
 use parse_display::Display;
-use risingwave_common::error::bail;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::ErrorCode;
-use crate::expr::function_call::{CastError, CastResult};
+use crate::expr::function_call::{bail_cast_error, cast_error, CastError, CastResult};
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -121,7 +119,7 @@ fn canmeh(ok: bool) -> CastResult {
     if ok {
         Ok(())
     } else {
-        bail!("")
+        bail_cast_error!()
     }
 }
 fn cannot() -> CastResult {
@@ -144,13 +142,15 @@ pub fn cast(source: &DataType, target: &DataType, allows: CastContext) -> Result
     } else {
         canmeh(cast_ok_base(source, target, allows))
     }
-    .with_context(|| {
-        format!(
+    .map_err(|inner| {
+        cast_error!(
+            source = inner,
             "cannot cast type \"{}\" to \"{}\" in {:?} context",
-            source, target, allows
+            source,
+            target,
+            allows
         )
     })
-    .map_err(Into::into)
 }
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
@@ -171,7 +171,7 @@ fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> 
                 unreachable!("record type should be already processed at this point");
             }
             if lty.len() != rty.len() {
-                bail!("cannot cast structs of different lengths");
+                bail_cast_error!("cannot cast structs of different lengths");
             }
             // ... and all fields are castable
             lty.types()
