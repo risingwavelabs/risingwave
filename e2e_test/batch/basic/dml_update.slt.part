@@ -55,7 +55,6 @@ statement error must return only one column
 update t set v1 = (select 666, 888);
 
 
-
 # Multiple assignment clauses.
 statement ok
 update t set v1 = 1919, v2 = 810;
@@ -113,6 +112,21 @@ statement error update modifying column `_rw_timestamp` is unsupported
 update t set _rw_timestamp = _rw_timestamp + interval '1 second';
 
 
+# https://github.com/risingwavelabs/risingwave/pull/19402#pullrequestreview-2444427475
+# https://github.com/risingwavelabs/risingwave/pull/19452
+statement ok
+create table y (v1 int, v2 int);
 
+statement ok
+insert into y values (11, 11), (22, 22);
+
+statement error Scalar subquery produced more than one row
+update t set (v1, v2) = (select y.v1, y.v2 from y);
+
+statement ok
+drop table y;
+
+
+# Cleanup.
 statement ok
 drop table t;
