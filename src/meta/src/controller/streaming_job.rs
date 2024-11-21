@@ -910,13 +910,13 @@ impl CatalogController {
             Some(ReplaceTablePlan {
                 streaming_job,
                 merge_updates,
-                dummy_id,
+                tmp_id,
                 ..
             }) => {
                 let incoming_sink_id = job_id;
 
                 let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-                    dummy_id as ObjectId,
+                    tmp_id as ObjectId,
                     merge_updates,
                     None,
                     Some(incoming_sink_id as _),
@@ -965,7 +965,7 @@ impl CatalogController {
 
     pub async fn finish_replace_streaming_job(
         &self,
-        dummy_id: ObjectId,
+        tmp_id: ObjectId,
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
@@ -977,7 +977,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-            dummy_id,
+            tmp_id,
             merge_updates,
             table_col_index_mapping,
             creating_sink_id,
@@ -1008,7 +1008,7 @@ impl CatalogController {
     }
 
     pub async fn finish_replace_streaming_job_inner(
-        dummy_id: ObjectId,
+        tmp_id: ObjectId,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
         creating_sink_id: Option<SinkId>,
@@ -1066,7 +1066,7 @@ impl CatalogController {
                 fragment::Column::FragmentId,
                 fragment::Column::StateTableIds,
             ])
-            .filter(fragment::Column::JobId.eq(dummy_id))
+            .filter(fragment::Column::JobId.eq(tmp_id))
             .into_tuple()
             .all(txn)
             .await?;
@@ -1091,7 +1091,7 @@ impl CatalogController {
             .await?;
         Fragment::update_many()
             .col_expr(fragment::Column::JobId, SimpleExpr::from(job_id))
-            .filter(fragment::Column::JobId.eq(dummy_id))
+            .filter(fragment::Column::JobId.eq(tmp_id))
             .exec(txn)
             .await?;
 
@@ -1190,7 +1190,7 @@ impl CatalogController {
         }
 
         // 3. remove dummy object.
-        Object::delete_by_id(dummy_id).exec(txn).await?;
+        Object::delete_by_id(tmp_id).exec(txn).await?;
 
         // 4. update catalogs and notify.
         let mut relations = vec![];
