@@ -10502,7 +10502,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.63",
- "twox-hash 1.6.3",
+ "twox-hash 2.0.1",
 ]
 
 [[package]]
@@ -10546,7 +10546,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
- "twox-hash 1.6.3",
+ "twox-hash 2.0.1",
  "workspace-hack",
 ]
 
@@ -10804,7 +10804,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "twox-hash 1.6.3",
+ "twox-hash 2.0.1",
  "url",
  "uuid",
  "workspace-hack",
