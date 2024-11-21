@@ -46,7 +46,7 @@ echo "--- Setting up cluster config"
 full-without-monitoring:
   steps:
     - use: minio
-    - use: etcd
+    - use: sqlite
     - use: meta-node
     - use: compute-node
     - use: frontend
@@ -59,9 +59,10 @@ EOF
 full-without-monitoring:
  steps:
    - use: minio
+   - use: sqlite
    - use: etcd
    - use: meta-node
-     meta-backend: etcd
+     meta-backend: sqlite
    - use: compute-node
    - use: frontend
    - use: compactor
