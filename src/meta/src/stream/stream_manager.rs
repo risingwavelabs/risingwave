@@ -185,7 +185,7 @@ pub struct ReplaceTableContext {
 
     pub streaming_job: StreamingJob,
 
-    pub dummy_id: u32,
+    pub tmp_id: u32,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -354,11 +354,10 @@ impl GlobalStreamManager {
                 .prepare_streaming_job(&table_fragments, &streaming_job, true)
                 .await?;
 
-            let dummy_table_id = table_fragments.table_id();
-            let init_split_assignment =
-                self.source_manager.allocate_splits(&dummy_table_id).await?;
+            let tmp_table_id = table_fragments.table_id();
+            let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
-            replace_table_id = Some(dummy_table_id);
+            replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
@@ -367,7 +366,7 @@ impl GlobalStreamManager {
                 dispatchers: context.dispatchers,
                 init_split_assignment,
                 streaming_job,
-                dummy_id: dummy_table_id.table_id,
+                tmp_id: tmp_table_id.table_id,
             });
         }
 
@@ -447,8 +446,8 @@ impl GlobalStreamManager {
                 if create_type == CreateType::Foreground || err.is_cancelled() {
                     let mut table_ids: HashSet<TableId> =
                         HashSet::from_iter(std::iter::once(table_id));
-                    if let Some(dummy_table_id) = replace_table_id {
-                        table_ids.insert(dummy_table_id);
+                    if let Some(tmp_table_id) = replace_table_id {
+                        table_ids.insert(tmp_table_id);
                     }
                 }
 
@@ -465,13 +464,13 @@ impl GlobalStreamManager {
             old_table_fragments,
             merge_updates,
             dispatchers,
-            dummy_id,
+            tmp_id,
             streaming_job,
             ..
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
-        let dummy_table_id = table_fragments.table_id();
-        let init_split_assignment = self.source_manager.allocate_splits(&dummy_table_id).await?;
+        let tmp_table_id = table_fragments.table_id();
+        let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
@@ -482,7 +481,7 @@ impl GlobalStreamManager {
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
-                    dummy_id,
+                    tmp_id,
                     streaming_job,
                 }),
             )

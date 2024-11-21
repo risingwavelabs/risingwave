@@ -101,7 +101,7 @@ pub struct ReplaceTablePlan {
     /// The `StreamingJob` info of the table to be replaced. Must be `StreamingJob::Table`
     pub streaming_job: StreamingJob,
     /// The temporary dummy table fragments id of new table fragment
-    pub dummy_id: u32,
+    pub tmp_id: u32,
 }
 
 impl ReplaceTablePlan {
