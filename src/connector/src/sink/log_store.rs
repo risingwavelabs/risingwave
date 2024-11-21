@@ -352,7 +352,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
             select! {
                 biased;
                 new_rate_limit = control_rx.recv() => {
-                    self.update_rate_limit(new_rate_limit)
+                    self.update_rate_limit(new_rate_limit);
                 },
                 item = self.inner.next_item() => {
                     if let Some(rate_limiter) = self.rate_limiter.as_mut() {
