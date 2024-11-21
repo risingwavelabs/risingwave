@@ -328,10 +328,14 @@ pub async fn compute_node_serve(
     });
 
     // Run a background memory manager
-    tokio::spawn(memory_mgr.clone().run(
-        system_params.barrier_interval_ms(),
-        system_params_manager.watch_params(),
-    ));
+    tokio::spawn(
+        memory_mgr.clone().run(Duration::from_millis(
+            config
+                .streaming
+                .developer
+                .memory_controller_update_interval_ms as _,
+        )),
+    );
 
     let heap_profiler = HeapProfiler::new(
         opts.total_memory_bytes,

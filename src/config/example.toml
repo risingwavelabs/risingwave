@@ -120,6 +120,7 @@ stream_memory_controller_threshold_stable = 0.72
 stream_memory_controller_eviction_factor_aggressive = 2.0
 stream_memory_controller_eviction_factor_graceful = 1.5
 stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_update_interval_ms = 100
 stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
