@@ -22,7 +22,7 @@ message InjectBarrierRequest {
   repeated stream_plan.SubscriptionUpstreamInfo subscriptions_to_remove = 11;
 }
 
-message BarrierCompleteResponse {
+message BarrierCollectResponse {
   message CreateMviewProgress {
     // Note: ideally we should use `executor_id`, but `actor_id` is ok-ish.
     // See <https://github.com/risingwavelabs/risingwave/issues/6236>.
@@ -34,9 +34,19 @@ message BarrierCompleteResponse {
     uint64 consumed_rows = 4;
     uint32 pending_barrier_num = 5;
   }
-  string request_id = 1;
-  common.Status status = 2;
+  uint64 partial_graph_id = 1;
+  // prev_epoch of barrier
+  uint64 epoch = 2;
   repeated CreateMviewProgress create_mview_progress = 3;
+}
+
+message BarrierCompleteRequest {
+  uint64 task_id = 1;
+  map<uint64, uint64> partial_graph_sync_epochs = 2;
+}
+
+message BarrierCompleteResponse {
+  uint64 task_id = 1;
   message LocalSstableInfo {
     reserved 1;
     reserved "compaction_group_id";
@@ -48,9 +58,6 @@ message BarrierCompleteResponse {
   uint32 worker_id = 5;
   map<uint32, hummock.TableWatermarks> table_watermarks = 6;
   repeated hummock.SstableInfo old_value_sstables = 7;
-  uint64 partial_graph_id = 8;
-  // prev_epoch of barrier
-  uint64 epoch = 9;
 }
 
 message WaitEpochCommitRequest {
@@ -85,6 +92,7 @@ message StreamingControlStreamRequest {
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
     CreatePartialGraphRequest create_partial_graph = 4;
+    BarrierCompleteRequest complete_barrier = 5;
   }
 }
 
@@ -96,6 +104,7 @@ message StreamingControlStreamResponse {
     InitResponse init = 1;
     BarrierCompleteResponse complete_barrier = 2;
     ShutdownResponse shutdown = 3;
+    BarrierCollectResponse collect_barrier = 4;
   }
 }
 

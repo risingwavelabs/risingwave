@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::mem::take;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::Bound::Unbounded;
 use std::ops::{Bound, RangeBounds};
 use std::time::Instant;
@@ -22,7 +21,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::BarrierCollectResponse;
 use tracing::debug;
 
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -31,7 +30,7 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 struct CreatingStreamingJobEpochState {
     epoch: u64,
     node_to_collect: HashSet<WorkerId>,
-    resps: Vec<BarrierCompleteResponse>,
+    collected_resps: HashMap<WorkerId, BarrierCollectResponse>,
     is_checkpoint: bool,
     enqueue_time: Instant,
 }
@@ -46,7 +45,8 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     max_collected_epoch: Option<u64>,
     // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
-    completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
+    // newer epoch at the front.
+    completing_barriers: VecDeque<(CreatingStreamingJobEpochState, HistogramTimer)>,
 
     // metrics
     consuming_snapshot_barrier_latency: LabelGuardedHistogram<2>,
@@ -66,7 +66,7 @@ impl CreatingStreamingJobBarrierControl {
             initial_epoch: None,
             max_collected_epoch: None,
             pending_barriers_to_complete: Default::default(),
-            completing_barrier: None,
+            completing_barriers: Default::default(),
 
             consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
                 .snapshot_backfill_barrier_latency
@@ -107,7 +107,7 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn is_empty(&self) -> bool {
         self.inflight_barrier_queue.is_empty()
             && self.pending_barriers_to_complete.is_empty()
-            && self.completing_barrier.is_none()
+            && self.completing_barriers.is_empty()
     }
 
     pub(super) fn enqueue_epoch(
@@ -132,7 +132,7 @@ impl CreatingStreamingJobBarrierControl {
         let epoch_state = CreatingStreamingJobEpochState {
             epoch,
             node_to_collect,
-            resps: vec![],
+            collected_resps: Default::default(),
             is_checkpoint,
             enqueue_time: Instant::now(),
         };
@@ -149,7 +149,7 @@ impl CreatingStreamingJobBarrierControl {
         &mut self,
         epoch: u64,
         worker_id: WorkerId,
-        resp: BarrierCompleteResponse,
+        resp: BarrierCollectResponse,
     ) {
         debug!(
             epoch,
@@ -163,7 +163,10 @@ impl CreatingStreamingJobBarrierControl {
             .get_mut(&epoch)
             .expect("should exist");
         assert!(state.node_to_collect.remove(&worker_id));
-        state.resps.push(resp);
+        state
+            .collected_resps
+            .try_insert(worker_id, resp)
+            .expect("non-duplicate");
         while let Some((_, state)) = self.inflight_barrier_queue.first_key_value()
             && state.node_to_collect.is_empty()
         {
@@ -183,13 +186,12 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn start_completing(
         &mut self,
         epoch_end_bound: Bound<u64>,
-    ) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
-        assert!(self.completing_barrier.is_none());
+    ) -> Option<(u64, bool, HashSet<WorkerId>)> {
         let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);
         while let Some(epoch_state) = self.pending_barriers_to_complete.back()
             && epoch_range.contains(&epoch_state.epoch)
         {
-            let mut epoch_state = self
+            let epoch_state = self
                 .pending_barriers_to_complete
                 .pop_back()
                 .expect("non-empty");
@@ -200,10 +202,10 @@ impl CreatingStreamingJobBarrierControl {
             } else if !epoch_state.is_checkpoint {
                 continue;
             }
-
-            let resps = take(&mut epoch_state.resps);
-            self.completing_barrier = Some((epoch_state, self.wait_commit_latency.start_timer()));
-            return Some((epoch, resps, is_first));
+            let workers = epoch_state.collected_resps.keys().cloned().collect();
+            self.completing_barriers
+                .push_front((epoch_state, self.wait_commit_latency.start_timer()));
+            return Some((epoch, is_first, workers));
         }
         None
     }
@@ -213,7 +215,7 @@ impl CreatingStreamingJobBarrierControl {
     /// Return the upstream epoch to be notified when there is any.
     pub(super) fn ack_completed(&mut self, completed_epoch: u64) {
         let (epoch_state, wait_commit_timer) =
-            self.completing_barrier.take().expect("should exist");
+            self.completing_barriers.pop_back().expect("should exist");
         wait_commit_timer.observe_duration();
         assert_eq!(epoch_state.epoch, completed_epoch);
     }

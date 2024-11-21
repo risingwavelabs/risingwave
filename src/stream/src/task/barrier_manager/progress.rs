@@ -16,7 +16,7 @@ use std::assert_matches::assert_matches;
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_collect_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;

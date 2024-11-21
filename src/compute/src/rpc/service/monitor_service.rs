@@ -86,10 +86,16 @@ impl MonitorService for MonitorServiceImpl {
             Default::default()
         };
 
+        let mut barrier_traces_next_key = 0;
+        let barrier_traces_next_key = &mut barrier_traces_next_key;
         let barrier_traces = if let Some(reg) = self.stream_mgr.await_tree_reg() {
             reg.collect::<BarrierAwait>()
                 .into_iter()
-                .map(|(k, v)| (k.prev_epoch, v.to_string()))
+                .map(|(k, v)| {
+                    let key = *barrier_traces_next_key;
+                    *barrier_traces_next_key += 1;
+                    (key, format!("{:?}", (k.sync_graph_epochs, v.to_string())))
+                })
                 .collect()
         } else {
             Default::default()

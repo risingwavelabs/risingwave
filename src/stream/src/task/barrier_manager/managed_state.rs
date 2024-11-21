@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::cell::LazyCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
@@ -56,7 +57,7 @@ enum ManagedBarrierStateInner {
     Issued(IssuedState),
 
     /// The barrier has been collected by all remaining actors
-    AllCollected(Vec<PbCreateMviewProgress>),
+    AwaitComplete,
 }
 
 #[derive(Debug)]
@@ -69,7 +70,7 @@ struct BarrierState {
 
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
-use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_collect_response::PbCreateMviewProgress;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitialPartialGraph;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
@@ -129,7 +130,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
                     }
                     write!(f, "]")?;
                 }
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AwaitComplete => {
                     write!(f, "AllCollected")?;
                 }
             }
@@ -569,15 +570,16 @@ impl ManagedBarrierState {
 
     pub(super) fn next_collected_epoch(
         &mut self,
-    ) -> impl Future<Output = (PartialGraphId, Barrier)> + '_ {
+    ) -> impl Future<Output = (PartialGraphId, Barrier, Vec<PbCreateMviewProgress>)> + '_ {
         poll_fn(|_| {
             let mut output = None;
             for (partial_graph_id, graph_state) in &mut self.graph_states {
-                if let Some(barrier) = graph_state.may_have_collected_all() {
+                if let Some((barrier, create_mview_progress)) = graph_state.may_have_collected_all()
+                {
                     if let Some(actors_to_stop) = barrier.all_stop_actors() {
                         self.current_shared_context.drop_actors(actors_to_stop);
                     }
-                    output = Some((*partial_graph_id, barrier));
+                    output = Some((*partial_graph_id, barrier, create_mview_progress));
                     break;
                 }
             }
@@ -610,11 +612,7 @@ impl ManagedBarrierState {
         &mut self,
         partial_graph_id: PartialGraphId,
         prev_epoch: u64,
-    ) -> (
-        Barrier,
-        Option<HashSet<TableId>>,
-        Vec<PbCreateMviewProgress>,
-    ) {
+    ) -> (Barrier, HashSet<TableId>) {
         self.graph_states
             .get_mut(&partial_graph_id)
             .expect("should exist")
@@ -626,13 +624,13 @@ impl PartialGraphManagedBarrierState {
     /// This method is called when barrier state is modified in either `Issued` or `Stashed`
     /// to transform the state to `AllCollected` and start state store `sync` when the barrier
     /// has been collected from all actors for an `Issued` barrier.
-    fn may_have_collected_all(&mut self) -> Option<Barrier> {
-        for barrier_state in self.epoch_barrier_state_map.values_mut() {
+    fn may_have_collected_all(&mut self) -> Option<(Barrier, Vec<PbCreateMviewProgress>)> {
+        for (prev_epoch, barrier_state) in &mut self.epoch_barrier_state_map {
             match &barrier_state.inner {
                 ManagedBarrierStateInner::Issued(IssuedState {
                     remaining_actors, ..
                 }) if remaining_actors.is_empty() => {}
-                ManagedBarrierStateInner::AllCollected(_) => {
+                ManagedBarrierStateInner::AwaitComplete => {
                     continue;
                 }
                 ManagedBarrierStateInner::Issued(_) => {
@@ -650,10 +648,27 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor))
                 .collect();
 
-            let prev_state = replace(
-                &mut barrier_state.inner,
-                ManagedBarrierStateInner::AllCollected(create_mview_progress),
-            );
+            let (barrier, prev_state) = match &barrier_state.barrier.kind {
+                BarrierKind::Unspecified => {
+                    unreachable!()
+                }
+                BarrierKind::Initial | BarrierKind::Barrier => {
+                    let prev_epoch = *prev_epoch;
+                    // non-checkpoint barrier no need to further complete
+                    let state = self
+                        .epoch_barrier_state_map
+                        .remove(&prev_epoch)
+                        .expect("should exist");
+                    (state.barrier, state.inner)
+                }
+                BarrierKind::Checkpoint => (
+                    barrier_state.barrier.clone(),
+                    replace(
+                        &mut barrier_state.inner,
+                        ManagedBarrierStateInner::AwaitComplete,
+                    ),
+                ),
+            };
 
             must_match!(prev_state, ManagedBarrierStateInner::Issued(IssuedState {
                 barrier_inflight_latency: timer,
@@ -662,33 +677,30 @@ impl PartialGraphManagedBarrierState {
                 timer.observe_duration();
             });
 
-            return Some(barrier_state.barrier.clone());
+            return Some((barrier, create_mview_progress));
         }
         None
     }
 
-    fn pop_barrier_to_complete(
-        &mut self,
-        prev_epoch: u64,
-    ) -> (
-        Barrier,
-        Option<HashSet<TableId>>,
-        Vec<PbCreateMviewProgress>,
-    ) {
+    fn pop_barrier_to_complete(&mut self, prev_epoch: u64) -> (Barrier, HashSet<TableId>) {
         let (popped_prev_epoch, barrier_state) = self
             .epoch_barrier_state_map
             .pop_first()
             .expect("should exist");
 
-        assert_eq!(prev_epoch, popped_prev_epoch);
+        assert_eq!(
+            prev_epoch, popped_prev_epoch,
+            "barrier_state: {:?}",
+            barrier_state
+        );
+        assert!(barrier_state.barrier.kind.is_checkpoint());
 
-        let create_mview_progress = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected(create_mview_progress) => {
-            create_mview_progress
-        });
+        assert_matches!(barrier_state.inner, ManagedBarrierStateInner::AwaitComplete);
         (
             barrier_state.barrier,
-            barrier_state.table_ids,
-            create_mview_progress,
+            barrier_state
+                .table_ids
+                .expect("should be Some on checkpoint barrier"),
         )
     }
 }
@@ -820,7 +832,7 @@ impl PartialGraphManagedBarrierState {
 
     #[cfg(test)]
     async fn pop_next_completed_epoch(&mut self) -> u64 {
-        if let Some(barrier) = self.may_have_collected_all() {
+        if let Some((barrier, _)) = self.may_have_collected_all() {
             self.pop_barrier_to_complete(barrier.epoch.prev);
             return barrier.epoch.prev;
         }

@@ -34,7 +34,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbInitRequest, PbInitialPartialGraph, RemovePartialGraphRequest,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
+    streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteRequest,
     InjectBarrierRequest, StreamingControlStreamRequest,
 };
 use risingwave_rpc_client::StreamingControlHandle;
@@ -170,7 +170,7 @@ impl ControlStreamManager {
         *self = Self::new(self.env.clone());
     }
 
-    async fn next_response(
+    async fn next_response_inner(
         &mut self,
     ) -> Option<(
         WorkerId,
@@ -227,24 +227,13 @@ impl ControlStreamManager {
         Some((worker_id, result))
     }
 
-    pub(super) async fn next_collect_barrier_response(
+    pub(super) async fn next_response(
         &mut self,
-    ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
-        use streaming_control_stream_response::Response;
-
-        {
-            let (worker_id, result) = pending_on_none(self.next_response()).await;
-
-            (
-                worker_id,
-                result.map(|resp| match resp {
-                    Response::CompleteBarrier(resp) => resp,
-                    Response::Shutdown(_) | Response::Init(_) => {
-                        unreachable!("should be treated as error")
-                    }
-                }),
-            )
-        }
+    ) -> (
+        WorkerId,
+        MetaResult<streaming_control_stream_response::Response>,
+    ) {
+        pending_on_none(self.next_response_inner()).await
     }
 
     pub(super) async fn collect_errors(
@@ -256,7 +245,7 @@ impl ControlStreamManager {
         #[cfg(not(madsim))]
         {
             let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-                while let Some((worker_id, result)) = self.next_response().await {
+                while let Some((worker_id, result)) = self.next_response_inner().await {
                     if let Err(e) = result {
                         errors.push((worker_id, e));
                     }
@@ -444,6 +433,45 @@ impl ControlStreamManager {
                     .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
             })?;
         Ok(node_need_collect)
+    }
+
+    pub(super) fn complete_barrier(
+        &mut self,
+        task_id: u64,
+        infos: impl Iterator<Item = (DatabaseId, Option<TableId>, &HashSet<WorkerId>, u64)>,
+    ) -> MetaResult<HashSet<WorkerId>> {
+        let mut workers = HashSet::new();
+        let mut worker_request: HashMap<_, HashMap<_, _>> = HashMap::new();
+        for (database_id, creating_job_id, workers, epoch) in infos {
+            let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
+            for worker_id in workers {
+                worker_request
+                    .entry(*worker_id)
+                    .or_default()
+                    .try_insert(partial_graph_id, epoch)
+                    .expect("non-duplicate");
+            }
+        }
+
+        worker_request
+            .into_iter()
+            .try_for_each::<_, Result<_, MetaError>>(|(worker_id, partial_graph_sync_epochs)| {
+                workers.insert(worker_id);
+                self.nodes
+                    .get_mut(&worker_id)
+                    .ok_or_else(|| anyhow!("unconnected node: {}", worker_id))?
+                    .handle
+                    .send_request(StreamingControlStreamRequest {
+                        request: Some(streaming_control_stream_request::Request::CompleteBarrier(
+                            BarrierCompleteRequest {
+                                task_id,
+                                partial_graph_sync_epochs,
+                            },
+                        )),
+                    })?;
+                Ok(())
+            })?;
+        Ok(workers)
     }
 
     pub(super) fn add_partial_graph(

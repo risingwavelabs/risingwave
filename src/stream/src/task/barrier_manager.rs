@@ -26,10 +26,7 @@ use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
-use risingwave_pb::stream_plan::barrier::BarrierKind;
-use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCreateMviewProgress, PbLocalSstableInfo,
-};
+use risingwave_pb::stream_service::barrier_complete_response::PbLocalSstableInfo;
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -53,7 +50,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     InitRequest, InitialPartialGraph, Request,
 };
@@ -61,8 +58,8 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
+    streaming_control_stream_response, BarrierCollectResponse, BarrierCompleteResponse,
+    InjectBarrierRequest, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -80,11 +77,9 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct BarrierCompleteResult {
+    task_id: u64,
     /// The result returned from `sync` of `StateStore`.
-    pub sync_result: Option<SyncResult>,
-
-    /// The updated creation progress of materialized view after this barrier.
-    pub create_mview_progress: Vec<PbCreateMviewProgress>,
+    pub sync_result: SyncResult,
 }
 
 pub(super) struct ControlStreamHandle {
@@ -322,13 +317,23 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, barrier) = self.state.next_collected_epoch() => {
-                    self.complete_barrier(partial_graph_id, barrier.epoch.prev);
+                (partial_graph_id, barrier, create_mview_progress) = self.state.next_collected_epoch() => {
+                    self.control_stream_handle.send_response(StreamingControlStreamResponse {
+                        response: Some(
+                            streaming_control_stream_response::Response::CollectBarrier(
+                                BarrierCollectResponse {
+                                    partial_graph_id: partial_graph_id.0,
+                                    epoch: barrier.epoch.prev,
+                                    create_mview_progress,
+                                },
+                            ),
+                        ),
+                    });
                 }
-                (partial_graph_id, barrier, result) = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
+                result = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
                     match result {
                         Ok(result) => {
-                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
+                            self.on_epoch_completed(result);
                         }
                         Err(err) => {
                             self.notify_other_failure(err, "failed to complete epoch").await;
@@ -394,6 +399,17 @@ impl LocalBarrierWorker {
                 let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
                 self.update_actor_info(req.broadcast_info.iter().cloned())?;
                 self.send_barrier(&barrier, req)?;
+                Ok(())
+            }
+            Request::CompleteBarrier(req) => {
+                self.complete_barrier(
+                    req.task_id,
+                    req.partial_graph_sync_epochs
+                        .iter()
+                        .map(|(partial_graph_id, epoch)| {
+                            (PartialGraphId::new(*partial_graph_id), *epoch)
+                        }),
+                );
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
@@ -473,48 +489,30 @@ mod await_epoch_completed_future {
     use futures::future::BoxFuture;
     use futures::FutureExt;
     use risingwave_hummock_sdk::SyncResult;
-    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
     use crate::error::StreamResult;
-    use crate::executor::Barrier;
     use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
 
-    pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
-        + 'static;
+    pub(super) type AwaitEpochCompletedFuture =
+        impl Future<Output = StreamResult<BarrierCompleteResult>> + 'static;
 
     pub(super) fn instrument_complete_barrier_future(
-        partial_graph_id: PartialGraphId,
-        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
-        barrier: Barrier,
+        task_id: u64,
+        complete_barrier_future: BoxFuture<'static, StreamResult<SyncResult>>,
+        sync_graph_epochs: Vec<(PartialGraphId, u64)>,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
-        create_mview_progress: Vec<PbCreateMviewProgress>,
     ) -> AwaitEpochCompletedFuture {
-        let prev_epoch = barrier.epoch.prev;
-        let future = async move {
-            if let Some(future) = complete_barrier_future {
-                let result = future.await;
-                result.map(Some)
-            } else {
-                Ok(None)
-            }
-        }
-        .map(move |result| {
-            (
-                partial_graph_id,
-                barrier,
-                result.map(|sync_result| BarrierCompleteResult {
-                    sync_result,
-                    create_mview_progress,
-                }),
-            )
+        let future = complete_barrier_future.map(move |result| {
+            result.map(|sync_result| BarrierCompleteResult {
+                task_id,
+                sync_result,
+            })
         });
         if let Some(reg) = barrier_await_tree_reg {
-            reg.register(
-                await_tree_key::BarrierAwait { prev_epoch },
-                format!("SyncEpoch({})", prev_epoch),
-            )
-            .instrument(future)
-            .left_future()
+            let span = format!("SyncEpoch({:?})", sync_graph_epochs);
+            reg.register(await_tree_key::BarrierAwait { sync_graph_epochs }, span)
+                .instrument(future)
+                .left_future()
         } else {
             future.right_future()
         }
@@ -528,26 +526,26 @@ use risingwave_storage::StateStoreImpl;
 fn sync_epoch(
     state_store: &StateStoreImpl,
     streaming_metrics: &StreamingMetrics,
-    prev_epoch: u64,
-    table_ids: HashSet<TableId>,
+    sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
     let timer = streaming_metrics.barrier_sync_latency.start_timer();
     let hummock = state_store.as_hummock().cloned();
+    let sync_table_epochs_clone = sync_table_epochs.clone();
     let future = async move {
         if let Some(hummock) = hummock {
-            hummock.sync(vec![(prev_epoch, table_ids)]).await
+            hummock.sync(sync_table_epochs_clone).await
         } else {
             Ok(SyncResult::default())
         }
     };
     future
-        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .instrument_await(format!("sync_epoch (epoch {:?})", sync_table_epochs))
         .inspect_ok(move |_| {
             timer.observe_duration();
         })
         .map_err(move |e| {
             tracing::error!(
-                prev_epoch,
+                ?sync_table_epochs,
                 error = %e.as_report(),
                 "Failed to sync state store",
             );
@@ -557,73 +555,56 @@ fn sync_epoch(
 }
 
 impl LocalBarrierWorker {
-    fn complete_barrier(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
+    fn complete_barrier(
+        &mut self,
+        task_id: u64,
+        sync_graph_epochs: impl Iterator<Item = (PartialGraphId, u64)>,
+    ) {
+        let sync_graph_epochs = sync_graph_epochs.collect_vec();
         {
-            let (barrier, table_ids, create_mview_progress) = self
-                .state
-                .pop_barrier_to_complete(partial_graph_id, prev_epoch);
-
-            let complete_barrier_future = match &barrier.kind {
-                BarrierKind::Unspecified => unreachable!(),
-                BarrierKind::Initial => {
-                    tracing::info!(
-                        epoch = prev_epoch,
-                        "ignore sealing data for the first barrier"
-                    );
-                    tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
-                    None
-                }
-                BarrierKind::Barrier => None,
-                BarrierKind::Checkpoint => Some(sync_epoch(
-                    &self.actor_manager.env.state_store(),
-                    &self.actor_manager.streaming_metrics,
-                    prev_epoch,
-                    table_ids.expect("should be Some on BarrierKind::Checkpoint"),
-                )),
-            };
+            let complete_barrier_future = sync_epoch(
+                &self.actor_manager.env.state_store(),
+                &self.actor_manager.streaming_metrics,
+                sync_graph_epochs
+                    .iter()
+                    .map(|(partial_graph_id, prev_epoch)| {
+                        let (barrier, table_ids) = self
+                            .state
+                            .pop_barrier_to_complete(*partial_graph_id, *prev_epoch);
+                        assert!(barrier.kind.is_checkpoint());
+                        (barrier.epoch.prev, table_ids)
+                    })
+                    .collect_vec(),
+            );
 
             self.await_epoch_completed_futures.push_back({
                 instrument_complete_barrier_future(
-                    partial_graph_id,
+                    task_id,
                     complete_barrier_future,
-                    barrier,
+                    sync_graph_epochs,
                     self.actor_manager.await_tree_reg.as_ref(),
-                    create_mview_progress,
                 )
             });
         }
     }
 
-    fn on_epoch_completed(
-        &mut self,
-        partial_graph_id: PartialGraphId,
-        epoch: u64,
-        result: BarrierCompleteResult,
-    ) {
+    fn on_epoch_completed(&mut self, result: BarrierCompleteResult) {
         let BarrierCompleteResult {
-            create_mview_progress,
+            task_id,
             sync_result,
         } = result;
 
-        let (synced_sstables, table_watermarks, old_value_ssts) = sync_result
-            .map(|sync_result| {
-                (
-                    sync_result.uncommitted_ssts,
-                    sync_result.table_watermarks,
-                    sync_result.old_value_ssts,
-                )
-            })
-            .unwrap_or_default();
+        let (synced_sstables, table_watermarks, old_value_ssts) = (
+            sync_result.uncommitted_ssts,
+            sync_result.table_watermarks,
+            sync_result.old_value_ssts,
+        );
 
         let result = StreamingControlStreamResponse {
             response: Some(
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
-                        request_id: "todo".to_string(),
-                        partial_graph_id: partial_graph_id.into(),
-                        epoch,
-                        status: None,
-                        create_mview_progress,
+                        task_id,
                         synced_sstables: synced_sstables
                             .into_iter()
                             .map(

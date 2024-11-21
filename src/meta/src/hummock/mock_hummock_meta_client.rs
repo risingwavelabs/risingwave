@@ -198,10 +198,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             BTreeSet::new()
         };
         let table_change_log = build_table_change_log_delta(
-            sync_result
-                .old_value_ssts
-                .into_iter()
-                .map(|sst| sst.sst_info),
+            sync_result.old_value_ssts.iter().map(|sst| &sst.sst_info),
             sync_result.uncommitted_ssts.iter().map(|sst| &sst.sst_info),
             &vec![epoch],
             table_change_log_table_ids

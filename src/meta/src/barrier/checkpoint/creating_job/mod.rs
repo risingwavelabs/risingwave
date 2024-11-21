@@ -16,7 +16,7 @@ mod barrier_control;
 mod status;
 
 use std::cmp::max;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound::{Excluded, Unbounded};
 
 use barrier_control::CreatingStreamingJobBarrierControl;
@@ -26,7 +26,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::BarrierCollectResponse;
 use status::{CreatingJobInjectBarrierInfo, CreatingStreamingJobStatus};
 use tracing::info;
 
@@ -254,7 +254,7 @@ impl CreatingStreamingJobControl {
         &mut self,
         epoch: u64,
         worker_id: WorkerId,
-        resp: BarrierCompleteResponse,
+        resp: BarrierCollectResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
         let prev_barriers_to_inject = self.status.update_progress(&resp.create_mview_progress);
@@ -301,7 +301,7 @@ impl CreatingStreamingJobControl {
     pub(super) fn start_completing(
         &mut self,
         min_upstream_inflight_epoch: Option<u64>,
-    ) -> Option<(u64, Vec<BarrierCompleteResponse>, CompleteJobType)> {
+    ) -> Option<(u64, CompleteJobType, HashSet<WorkerId>)> {
         let (finished_at_epoch, epoch_end_bound) = match &self.status {
             CreatingStreamingJobStatus::Finishing(finish_at_epoch) => {
                 let epoch_end_bound = min_upstream_inflight_epoch
@@ -324,12 +324,10 @@ impl CreatingStreamingJobControl {
             ),
         };
         self.barrier_control.start_completing(epoch_end_bound).map(
-            |(epoch, resps, is_first_commit)| {
+            |(epoch, is_first_commit, workers)| {
                 let status = if let Some(finish_at_epoch) = finished_at_epoch {
                     assert!(!is_first_commit);
                     if epoch == finish_at_epoch {
-                        self.barrier_control.ack_completed(epoch);
-                        assert!(self.barrier_control.is_empty());
                         CompleteJobType::Finished
                     } else {
                         CompleteJobType::Normal
@@ -339,7 +337,7 @@ impl CreatingStreamingJobControl {
                 } else {
                     CompleteJobType::Normal
                 };
-                (epoch, resps, status)
+                (epoch, status, workers)
             },
         )
     }

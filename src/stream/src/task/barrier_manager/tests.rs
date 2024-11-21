@@ -69,7 +69,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
         let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
         let resp = resp.response.unwrap();
         match resp {
-            streaming_control_stream_response::Response::CompleteBarrier(_complete_barrier) => {}
+            streaming_control_stream_response::Response::CollectBarrier(_) => {}
             _ => unreachable!(),
         }
     }));
@@ -151,7 +151,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
         let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
         let resp = resp.response.unwrap();
         match resp {
-            streaming_control_stream_response::Response::CompleteBarrier(_complete_barrier) => {}
+            streaming_control_stream_response::Response::CollectBarrier(_) => {}
             _ => unreachable!(),
         }
     }));
@@ -228,8 +228,8 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
 
     let resp = test_env.response_rx.recv().await.unwrap().unwrap();
     match resp.response.unwrap() {
-        streaming_control_stream_response::Response::CompleteBarrier(complete_barrier) => {
-            assert_eq!(complete_barrier.epoch, barrier1.epoch.prev);
+        streaming_control_stream_response::Response::CollectBarrier(resp) => {
+            assert_eq!(resp.epoch, barrier1.epoch.prev);
         }
         _ => unreachable!(),
     }
@@ -240,8 +240,8 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
         let resp: StreamingControlStreamResponse = result.unwrap().unwrap();
         let resp = resp.response.unwrap();
         match resp {
-            streaming_control_stream_response::Response::CompleteBarrier(complete_barrier) => {
-                assert_eq!(complete_barrier.epoch, barrier2.epoch.prev);
+            streaming_control_stream_response::Response::CollectBarrier(resp) => {
+                assert_eq!(resp.epoch, barrier2.epoch.prev);
             }
             _ => unreachable!(),
         }

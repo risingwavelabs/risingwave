@@ -22,8 +22,8 @@ use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
-use risingwave_pb::stream_service::PbBarrierCompleteResponse;
+use risingwave_pb::stream_service::barrier_collect_response::PbCreateMviewProgress;
+use risingwave_pb::stream_service::PbBarrierCollectResponse;
 
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
@@ -383,7 +383,7 @@ impl CreateMviewProgressTracker {
             &CreateStreamingJobCommandInfo,
             Option<&ReplaceStreamJobPlan>,
         )>,
-        create_mview_progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
+        create_mview_progress: impl IntoIterator<Item = &'a PbCreateMviewProgress>,
         version_stats: &HummockVersionStats,
     ) {
         {
@@ -425,7 +425,7 @@ impl CreateMviewProgressTracker {
         &mut self,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
-        resps: impl IntoIterator<Item = &PbBarrierCompleteResponse>,
+        resps: impl IntoIterator<Item = &PbBarrierCollectResponse>,
         version_stats: &HummockVersionStats,
     ) -> Vec<TrackingJob> {
         let new_tracking_job_info =
@@ -593,7 +593,7 @@ impl CreateMviewProgressTracker {
     /// If all actors in this MV have finished, returns the command.
     pub fn update(
         &mut self,
-        progress: &CreateMviewProgress,
+        progress: &PbCreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
         tracing::trace!(?progress, "update progress");

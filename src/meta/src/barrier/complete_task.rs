@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::{pending, Future};
 use std::mem::replace;
 use std::sync::Arc;
@@ -22,27 +22,28 @@ use futures::future::try_join_all;
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::must_match;
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tokio::task::JoinHandle;
 
-use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::schedule::PeriodicBarriers;
-use crate::hummock::CommitEpochInfo;
+use crate::barrier::utils::collect_resp_info;
+use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
-pub(super) enum CompletingTask {
+pub(super) enum CommittingTask {
     None,
-    Completing {
+    Committing {
         #[expect(clippy::type_complexity)]
-        /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+        /// `database_id` -> (`Some(database_graph_committed_epoch)`, vec(`creating_job_id`, `creating_job_committed_epoch`, `is_finished`)])
+        epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64, bool)>)>,
 
         // The join handle of a spawned task that completes the barrier.
         // The return value indicate whether there is some create streaming job command
@@ -53,26 +54,43 @@ pub(super) enum CompletingTask {
     Err(MetaError),
 }
 
+#[derive(Debug)]
+pub(super) struct DatabaseCompleteBarrierTask {
+    pub(super) command: CommandContext,
+    pub(super) enqueue_time: HistogramTimer,
+    pub(super) backfill_pinned_upstream_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
+    pub(super) workers: HashSet<WorkerId>,
+}
+
+#[derive(Debug)]
+pub(super) struct CreatingJobCompleteBarrierTask {
+    pub(super) job_id: TableId,
+    pub(super) epoch: u64,
+    pub(super) is_first_commit: bool,
+    pub(super) tables_to_commit: HashSet<TableId>,
+    pub(super) workers: HashSet<WorkerId>,
+    pub(super) is_finished: bool,
+}
+
 #[derive(Default)]
 pub(super) struct CompleteBarrierTask {
-    pub(super) commit_info: CommitEpochInfo,
     pub(super) finished_jobs: Vec<TrackingJob>,
     pub(super) notifiers: Vec<Notifier>,
-    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
-    #[expect(clippy::type_complexity)]
-    pub(super) epoch_infos: HashMap<
+    pub(super) tasks: HashMap<
         DatabaseId,
         (
-            Option<(CommandContext, HistogramTimer)>,
-            Vec<(TableId, u64)>,
+            Option<DatabaseCompleteBarrierTask>,
+            Vec<CreatingJobCompleteBarrierTask>,
         ),
     >,
 }
 
 impl CompleteBarrierTask {
     #[expect(clippy::type_complexity)]
-    pub(super) fn epochs_to_ack(&self) -> HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)> {
-        self.epoch_infos
+    pub(super) fn epochs_to_ack(
+        &self,
+    ) -> HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64, bool)>)> {
+        self.tasks
             .iter()
             .map(|(database_id, (command_context, creating_job_epochs))| {
                 (
@@ -80,18 +98,46 @@ impl CompleteBarrierTask {
                     (
                         command_context
                             .as_ref()
-                            .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
-                        creating_job_epochs.clone(),
+                            .map(|task| task.command.barrier_info.prev_epoch.value().0),
+                        creating_job_epochs
+                            .iter()
+                            .map(|task| (task.job_id, task.epoch, task.is_finished))
+                            .collect(),
                     ),
                 )
             })
             .collect()
+    }
+
+    fn graph_to_complete(
+        &self,
+    ) -> impl Iterator<Item = (DatabaseId, Option<TableId>, &'_ HashSet<WorkerId>, u64)> + '_ {
+        self.tasks
+            .iter()
+            .flat_map(|(database_id, (database, creating_jobs))| {
+                database
+                    .iter()
+                    .map(|database| {
+                        (
+                            *database_id,
+                            None,
+                            &database.workers,
+                            database.command.barrier_info.prev_epoch(),
+                        )
+                    })
+                    .chain(
+                        creating_jobs.iter().map(|task| {
+                            (*database_id, Some(task.job_id), &task.workers, task.epoch)
+                        }),
+                    )
+            })
     }
 }
 
 impl CompleteBarrierTask {
     pub(super) async fn complete_barrier(
         self,
+        commit_info: CommitEpochInfo,
         context: &impl GlobalBarrierWorkerContext,
         env: MetaSrvEnv,
     ) -> MetaResult<HummockVersionStats> {
@@ -99,11 +145,11 @@ impl CompleteBarrierTask {
             let wait_commit_timer = GLOBAL_META_METRICS
                 .barrier_wait_commit_latency
                 .start_timer();
-            let version_stats = context.commit_epoch(self.commit_info).await?;
+            let version_stats = context.commit_epoch(commit_info).await?;
             for command_ctx in self
-                .epoch_infos
+                .tasks
                 .values()
-                .flat_map(|(command, _)| command.as_ref().map(|(command, _)| command))
+                .flat_map(|(command, _)| command.as_ref().map(|task| &task.command))
             {
                 context.post_collect_command(command_ctx).await?;
             }
@@ -131,16 +177,12 @@ impl CompleteBarrierTask {
                     .map(|finished_job| context.finish_creating_job(finished_job)),
             )
             .await?;
-            for (command_ctx, enqueue_time) in self
-                .epoch_infos
-                .into_values()
-                .flat_map(|(command_context, _)| command_context)
-            {
-                let duration_sec = enqueue_time.stop_and_record();
-                Self::report_complete_event(&env, duration_sec, &command_ctx);
+            for task in self.tasks.into_values().flat_map(|(task, _)| task) {
+                let duration_sec = task.enqueue_time.stop_and_record();
+                Self::report_complete_event(&env, duration_sec, &task.command);
                 GLOBAL_META_METRICS
                     .last_committed_barrier_time
-                    .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
+                    .set(task.command.barrier_info.curr_epoch.value().as_unix_secs() as i64);
             }
             version_stats
         };
@@ -171,37 +213,120 @@ impl CompleteBarrierTask {
 
 pub(super) struct BarrierCompleteOutput {
     #[expect(clippy::type_complexity)]
-    /// `database_id` -> (`Some(database_graph_committed_epoch)`, [(`creating_job_id`, `creating_job_committed_epoch`)])
-    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64)>)>,
+    /// `database_id` -> (`Some(database_graph_committed_epoch)`, vec(`creating_job_id`, `creating_job_committed_epoch`, `is_finished`)])
+    pub epochs_to_ack: HashMap<DatabaseId, (Option<u64>, Vec<(TableId, u64, bool)>)>,
     pub hummock_version_stats: HummockVersionStats,
 }
 
+pub(super) struct SyncingTask {
+    node_to_collect: HashSet<WorkerId>,
+    collected_resps: HashMap<WorkerId, BarrierCompleteResponse>,
+    task: CompleteBarrierTask,
+}
+
+impl SyncingTask {
+    fn new(
+        task_id: u64,
+        task: CompleteBarrierTask,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> MetaResult<Self> {
+        let node_to_collect =
+            control_stream_manager.complete_barrier(task_id, task.graph_to_complete())?;
+        Ok(Self {
+            node_to_collect,
+            collected_resps: HashMap::new(),
+            task,
+        })
+    }
+
+    pub(super) fn is_collected(&self) -> bool {
+        self.node_to_collect.is_empty()
+    }
+
+    pub(super) fn into_commit_info(self) -> (CommitEpochInfo, CompleteBarrierTask) {
+        assert!(self.node_to_collect.is_empty());
+        let (mut commit_info, old_value_ssts) = collect_resp_info(self.collected_resps);
+        for (database_task, creating_jobs) in self.task.tasks.values() {
+            if let Some(task) = database_task {
+                task.command.collect_extra_commit_epoch_info(
+                    &commit_info.sstables,
+                    &old_value_ssts,
+                    task.backfill_pinned_upstream_log_epoch.clone(),
+                    &mut commit_info.tables_to_commit,
+                    &mut commit_info.new_table_fragment_infos,
+                    &mut commit_info.change_log_delta,
+                )
+            }
+            for task in creating_jobs {
+                task.tables_to_commit.iter().for_each(|table_id| {
+                    commit_info
+                        .tables_to_commit
+                        .try_insert(*table_id, task.epoch)
+                        .expect("non duplicate");
+                });
+                if task.is_first_commit {
+                    commit_info
+                        .new_table_fragment_infos
+                        .push(NewTableFragmentInfo {
+                            table_ids: task.tables_to_commit.clone(),
+                        });
+                };
+            }
+        }
+        (commit_info, self.task)
+    }
+}
+
+pub(super) struct CompletingTask {
+    next_task_id: u64,
+    pub(super) committing_task: CommittingTask,
+    pub(super) syncing_tasks: BTreeMap<u64, SyncingTask>,
+}
+
 impl CompletingTask {
+    pub(super) fn new() -> Self {
+        Self {
+            next_task_id: 0,
+            committing_task: CommittingTask::None,
+            syncing_tasks: Default::default(),
+        }
+    }
+
+    pub(super) fn push(
+        &mut self,
+        task: CompleteBarrierTask,
+        control_stream_manager: &mut ControlStreamManager,
+    ) -> MetaResult<()> {
+        let task_id = self.next_task_id;
+        self.next_task_id += 1;
+        let task = SyncingTask::new(task_id, task, control_stream_manager)?;
+        self.syncing_tasks.insert(task_id, task);
+        Ok(())
+    }
+
     pub(super) fn next_completed_barrier<'a>(
         &'a mut self,
-        scheduled_barriers: &mut PeriodicBarriers,
-        checkpoint_control: &mut CheckpointControl,
-        control_stream_manager: &mut ControlStreamManager,
         context: &Arc<impl GlobalBarrierWorkerContext>,
         env: &MetaSrvEnv,
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = self {
-            if let Some(task) = checkpoint_control
-                .next_complete_barrier_task(Some((scheduled_barriers, control_stream_manager)))
+        if let CommittingTask::None = &self.committing_task {
+            if let Some((_, task)) = self.syncing_tasks.first_key_value()
+                && task.is_collected()
             {
-                {
-                    let epochs_to_ack = task.epochs_to_ack();
-                    let context = context.clone();
-                    let env = env.clone();
-                    let join_handle =
-                        tokio::spawn(async move { task.complete_barrier(&*context, env).await });
-                    *self = CompletingTask::Completing {
-                        epochs_to_ack,
-                        join_handle,
-                    };
-                }
+                let (_, task) = self.syncing_tasks.pop_first().expect("non-empty");
+                let (commit_info, task) = task.into_commit_info();
+                let epochs_to_ack = task.epochs_to_ack();
+                let context = context.clone();
+                let env = env.clone();
+                let join_handle = tokio::spawn(async move {
+                    task.complete_barrier(commit_info, &*context, env).await
+                });
+                self.committing_task = CommittingTask::Committing {
+                    epochs_to_ack,
+                    join_handle,
+                };
             }
         }
 
@@ -209,7 +334,7 @@ impl CompletingTask {
     }
 
     async fn next_completed_barrier_inner(&mut self) -> MetaResult<BarrierCompleteOutput> {
-        let CompletingTask::Completing { join_handle, .. } = self else {
+        let CommittingTask::Committing { join_handle, .. } = &mut self.committing_task else {
             return pending().await;
         };
 
@@ -223,14 +348,15 @@ impl CompletingTask {
                 // It's important to reset the completing_command after await no matter the result is err
                 // or not, and otherwise the join handle will be polled again after ready.
                 let next_completing_command_status = if let Err(e) = &join_result {
-                    CompletingTask::Err(e.clone())
+                    CommittingTask::Err(e.clone())
                 } else {
-                    CompletingTask::None
+                    CommittingTask::None
                 };
-                let completed_command = replace(self, next_completing_command_status);
+                let completed_task =
+                    replace(&mut self.committing_task, next_completing_command_status);
                 let hummock_version_stats = join_result?;
 
-                must_match!(completed_command, CompletingTask::Completing {
+                must_match!(completed_task, CommittingTask::Committing {
                     epochs_to_ack,
                     ..
                 } => {
@@ -241,5 +367,26 @@ impl CompletingTask {
                 })
             }
         }
+    }
+
+    pub(super) fn on_barrier_complete_resp(
+        &mut self,
+        worker_id: WorkerId,
+        resp: BarrierCompleteResponse,
+    ) {
+        let task = self
+            .syncing_tasks
+            .get_mut(&resp.task_id)
+            .expect("should exist");
+        assert!(task.node_to_collect.remove(&worker_id));
+        task.collected_resps
+            .try_insert(worker_id, resp)
+            .expect("non-duplicate");
+    }
+
+    pub(super) fn is_failed_at_worker_err(&self, worker_id: WorkerId) -> bool {
+        self.syncing_tasks
+            .values()
+            .any(|task| task.node_to_collect.contains(&worker_id))
     }
 }
