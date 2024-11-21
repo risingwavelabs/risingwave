@@ -4,7 +4,6 @@ import math
 
 def test_psycopg_extended_mode():
     conn = psycopg.connect(host='localhost', port='4566', dbname='dev', user='root')
-    # conn = psycopg.connect(host='localhost', port='5432', dbname='test', user='eric')
     with conn.cursor() as cur:
         # Array
         cur.execute("select Array[1::bigint, 2::bigint, 3::bigint]", binary=True)
@@ -32,6 +31,16 @@ def test_psycopg_extended_mode():
 
         cur.execute("select '-Infinity'::numeric, '-Infinity'::real, '-Infinity'::double precision")
         assert cur.fetchone() == (float('-inf'), float('-inf'), float('-inf'))
+
+        # JSONB
+        cur.execute("select '{\"name\": \"John\", \"age\": 30, \"city\": null}'::jsonb", binary=True)
+        assert cur.fetchone() == ({'name': 'John', 'age': 30, 'city': None},)
+
+        cur.execute("select '{\"scores\": [85.5, 90, null], \"passed\": true}'::jsonb", binary=True) 
+        assert cur.fetchone() == ({'scores': [85.5, 90, None], 'passed': True},)
+
+        cur.execute("select '[{\"id\": 1, \"value\": null}, {\"id\": 2, \"value\": \"test\"}]'::jsonb", binary=True)
+        assert cur.fetchone() == ([{'id': 1, 'value': None}, {'id': 2, 'value': 'test'}],)
 
 if __name__ == '__main__':
     test_psycopg_extended_mode()
