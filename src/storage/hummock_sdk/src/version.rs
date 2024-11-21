@@ -37,7 +37,8 @@ use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
 use crate::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+    CompactionGroupId, HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    FIRST_VERSION_ID,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -506,27 +507,38 @@ where
     }
 }
 
-impl HummockVersionDelta {
+pub trait SstableIdReader {
+    fn sst_id(&self) -> HummockSstableId;
+}
+
+pub trait ObjectIdReader {
+    fn object_id(&self) -> HummockSstableObjectId;
+}
+
+impl<T> HummockVersionDeltaCommon<T>
+where
+    T: SstableIdReader + ObjectIdReader,
+{
     /// Get the newly added object ids from the version delta.
     ///
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
     pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.newly_added_sst_infos(None)
-            .map(|sst| sst.object_id)
+            .map(|sst| sst.object_id())
             .collect()
     }
 
     pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
         self.newly_added_sst_infos(None)
-            .map(|sst| sst.sst_id)
+            .map(|sst| sst.sst_id())
             .collect()
     }
 
     pub fn newly_added_sst_infos<'a>(
         &'a self,
         select_group: Option<&'a HashSet<CompactionGroupId>>,
-    ) -> impl Iterator<Item = &'a SstableInfo> + 'a {
+    ) -> impl Iterator<Item = &'a T> + 'a {
         self.group_deltas
             .iter()
             .filter_map(move |(cg_id, group_deltas)| {
@@ -559,7 +571,9 @@ impl HummockVersionDelta {
                 new_log.new_value.iter().chain(new_log.old_value.iter())
             }))
     }
+}
 
+impl HummockVersionDelta {
     #[expect(deprecated)]
     pub fn max_committed_epoch_for_migration(&self) -> HummockEpoch {
         self.max_committed_epoch

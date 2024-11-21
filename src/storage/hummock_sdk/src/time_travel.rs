@@ -23,6 +23,7 @@ use crate::level::Level;
 use crate::sstable_info::SstableInfo;
 use crate::version::{
     HummockVersion, HummockVersionCommon, HummockVersionDelta, HummockVersionDeltaCommon,
+    ObjectIdReader, SstableIdReader,
 };
 use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
@@ -170,6 +171,18 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
 pub struct SstableIdInVersion {
     sst_id: HummockSstableId,
     object_id: HummockSstableObjectId,
+}
+
+impl SstableIdReader for SstableIdInVersion {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableIdInVersion {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
+    }
 }
 
 impl From<&SstableIdInVersion> for PbSstableInfo {
