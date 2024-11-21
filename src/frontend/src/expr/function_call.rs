@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use thiserror::Error;
-use thiserror_ext::{AsReport, Box, Macro};
+use thiserror_ext::{Box, Macro};
 
 use super::type_inference::cast;
 use super::{infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -434,9 +434,9 @@ pub struct CastErrorInner {
 
 pub type CastResult<T = ()> = Result<T, CastError>;
 
-// TODO(error-handling): do not use report string but directly make it a source of `ErrorCode`.
+// TODO(error-handling): shall we make it a new variant?
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_report_string())
+        ErrorCode::Uncategorized(value.into()).into()
     }
 }
