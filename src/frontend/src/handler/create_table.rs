@@ -1331,19 +1331,17 @@ pub async fn handle_create_table(
             };
 
             let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
-                s3_ak
+                Some(s3_ak)
             } else if iceberg_enable_config_load {
-                // Since config load is enabled, we will use a placeholder for iceberg sink and source
-                "xxx".to_string()
+                None
             } else {
                 bail!("To create an iceberg engine table in dev mode, AWS_ACCESS_KEY_ID needed to be set")
             };
 
             let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
-                s3_sk
+                Some(s3_sk)
             } else if iceberg_enable_config_load {
-                // Since config load is enabled, we will use a placeholder for iceberg sink and source
-                "xxx".to_string()
+                None
             } else {
                 bail!("To create an iceberg engine table in dev mode, AWS_SECRET_ACCESS_KEY needed to be set")
             };
@@ -1500,8 +1498,12 @@ pub async fn handle_create_table(
             if let Some(s3_endpoint) = s3_endpoint.clone() {
                 with.insert("s3.endpoint".to_string(), s3_endpoint);
             }
-            with.insert("s3.access.key".to_string(), s3_ak.clone());
-            with.insert("s3.secret.key".to_string(), s3_sk.clone());
+            if let Some(s3_ak) = s3_ak.clone() {
+                with.insert("s3.access.key".to_string(), s3_ak.clone());
+            }
+            if let Some(s3_sk) = s3_sk.clone() {
+                with.insert("s3.secret.key".to_string(), s3_sk.clone());
+            }
             with.insert("s3.region".to_string(), s3_region.clone());
             with.insert("catalog.uri".to_string(), catalog_uri.clone());
             with.insert("catalog.jdbc.user".to_string(), meta_store_user.clone());
@@ -1545,8 +1547,12 @@ pub async fn handle_create_table(
             if let Some(s3_endpoint) = s3_endpoint {
                 with.insert("s3.endpoint".to_string(), s3_endpoint.clone());
             }
-            with.insert("s3.access.key".to_string(), s3_ak.clone());
-            with.insert("s3.secret.key".to_string(), s3_sk.clone());
+            if let Some(s3_ak) = s3_ak.clone() {
+                with.insert("s3.access.key".to_string(), s3_ak.clone());
+            }
+            if let Some(s3_sk) = s3_sk.clone() {
+                with.insert("s3.secret.key".to_string(), s3_sk.clone());
+            }
             with.insert("s3.region".to_string(), s3_region.clone());
             with.insert("catalog.uri".to_string(), catalog_uri.clone());
             with.insert("catalog.jdbc.user".to_string(), meta_store_user.clone());

@@ -92,10 +92,10 @@ IcebergProperties:
     required: false
   - name: s3.access.key
     field_type: String
-    required: true
+    required: false
   - name: s3.secret.key
     field_type: String
-    required: true
+    required: false
   - name: warehouse.path
     field_type: String
     comments: Path of iceberg warehouse, only applicable in storage catalog.
@@ -119,6 +119,8 @@ IcebergProperties:
     required: true
   - name: s3.path.style.access
     field_type: bool
+    required: false
+    default: Default::default
   - name: enable_config_load
     field_type: bool
     comments: enable config load currently is used by iceberg engine, so it only support jdbc catalog.
