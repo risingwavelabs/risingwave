@@ -423,6 +423,7 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
     false
 }
 
+/// A stack of error messages for the cast operation.
 #[derive(Error, Debug, Box, Macro)]
 #[thiserror_ext(newtype(name = CastError), macro(path = "crate::expr::function_call"))]
 #[error("{message}")]
@@ -433,6 +434,7 @@ pub struct CastErrorInner {
 
 pub type CastResult<T = ()> = Result<T, CastError>;
 
+// TODO(error-handling): do not use report string but directly make it a source of `ErrorCode`.
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
         ErrorCode::BindError(value.to_report_string())
