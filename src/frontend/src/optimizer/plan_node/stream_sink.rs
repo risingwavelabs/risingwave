@@ -44,7 +44,7 @@ use super::utils::{
     childless_record, infer_kv_log_store_table_catalog_inner, Distill, IndicesDisplay,
 };
 use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode, StreamProject};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
@@ -255,8 +255,20 @@ impl StreamSink {
             let from_properties =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
             if let Some(t) = &target_table {
-                // TODO
-                from_properties
+                if sink_type != SinkType::Upsert {
+                    vec![]
+                } else {
+                    let target_table_mapping = target_table_mapping.unwrap();
+
+                    t.pk()
+                    .iter()
+                    .map(|c| {
+                        target_table_mapping[c.column_index].ok_or(
+                            ErrorCode::SinkError(Box::new(Error::new(ErrorKind::InvalidInput,
+                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_string()
+                        ))).into())})
+                    .try_collect::<_, _, RwError>()?
+                }
             } else {
                 from_properties
             }

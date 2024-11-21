@@ -1048,7 +1048,7 @@ impl PlanRoot {
                 if user_specified_columns {
                     visible_col_idxes_by_name.get(tar_col.name()).cloned()
                 } else {
-                    (tar_i < visible_col_idxes.len()).then_some(visible_cols[tar_i].0)
+                    (tar_i < visible_col_idxes.len()).then(|| visible_cols[tar_i].0)
                 }
             })
             .collect()
