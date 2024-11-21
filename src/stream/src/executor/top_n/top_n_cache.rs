@@ -808,7 +808,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
     }
 }
 
-/// Used to manage staging changes for one `TopNCache` (for one group).
+/// Used to build diff between before and after applying an input chunk, for `TopNCache` (of one group).
 /// It should be maintained when an entry is inserted or deleted from the `middle` cache.
 #[derive(Debug, Default)]
 pub struct TopNStaging {
@@ -822,18 +822,20 @@ impl TopNStaging {
         Self::default()
     }
 
+    /// Insert a row into the staging changes. This method must be called when a row is
+    /// added to the `middle` cache.
     fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
         if let Some(old_row) = self.to_delete.remove(&cache_key) {
             if old_row != row {
                 self.to_update.insert(cache_key, (old_row, row));
             }
         } else {
-            debug_assert!(!self.to_update.contains_key(&cache_key));
-            debug_assert!(!self.to_insert.contains_key(&cache_key));
             self.to_insert.insert(cache_key, row);
         }
     }
 
+    /// Delete a row from the staging changes. This method must be called when a row is
+    /// removed from the `middle` cache.
     fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
         if self.to_insert.remove(&cache_key).is_some() {
             // do nothing more
@@ -872,6 +874,10 @@ impl TopNStaging {
             );
         }
 
+        // We expect one `CacheKey` to appear at most once in the staging, and, the order of
+        // the outputs of `TopN` doesn't really matter, so we can simply chain the three maps.
+        // Although the output order is not important, we still ensure that `Delete`s are emitted
+        // before `Insert`s, so that we can avoid temporary violation of the `LIMIT` constraint.
         self.to_update
             .into_values()
             .flat_map(|(old_row, new_row)| {
