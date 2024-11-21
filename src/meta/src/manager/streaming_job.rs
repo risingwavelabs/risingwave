@@ -303,7 +303,7 @@ impl StreamingJob {
     pub fn dependent_relations(&self) -> Vec<u32> {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
+            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
             StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
             StreamingJob::Index(index, index_table) => {
                 // TODO(rc): record index dependencies via `dependencies` field

@@ -203,10 +203,7 @@ impl CatalogController {
                 if let Some(target_table_id) = sink.target_table {
                     if check_sink_into_table_cycle(
                         target_table_id as ObjectId,
-                        sink.dependent_relations
-                            .iter()
-                            .map(|id| *id as ObjectId)
-                            .collect(),
+                        dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await?

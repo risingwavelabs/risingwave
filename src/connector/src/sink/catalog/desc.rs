@@ -103,7 +103,6 @@ impl SinkDesc {
             downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
-            dependent_relations: vec![], // TODO(rc): to be deprecated
             properties: self.properties,
             secret_refs: self.secret_refs,
             sink_type: self.sink_type,
