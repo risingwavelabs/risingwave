@@ -12,6 +12,16 @@ def test_psycopg_extended_mode():
         cur.execute("select Array['foo', null, 'bar']", binary=True)
         assert cur.fetchone() == (['foo', None, 'bar'],)
 
+        # Byte array
+        cur.execute("select '\\xDEADBEEF'::bytea", binary=True)
+        assert cur.fetchone() == (b'\xDE\xAD\xBE\xEF',)
+
+        cur.execute("select '\\x'::bytea", binary=True) 
+        assert cur.fetchone() == (b'',)
+
+        cur.execute("select array['\\xDEADBEEF'::bytea, '\\x0102'::bytea]", binary=True)
+        assert cur.fetchone() == ([b'\xDE\xAD\xBE\xEF', b'\x01\x02'],)
+
         # Struct
         cur.execute("select ROW('123 Main St'::varchar, 'New York'::varchar, 10001)", binary=True)
         assert cur.fetchone() == (('123 Main St', 'New York', 10001),)
@@ -26,10 +36,10 @@ def test_psycopg_extended_mode():
         assert math.isnan(result[1])
         assert math.isnan(result[2])
 
-        cur.execute("select 'Infinity'::numeric, 'Infinity'::real, 'Infinity'::double precision")
+        cur.execute("select 'Infinity'::numeric, 'Infinity'::real, 'Infinity'::double precision", binary=True)
         assert cur.fetchone() == (float('inf'), float('inf'), float('inf'))
 
-        cur.execute("select '-Infinity'::numeric, '-Infinity'::real, '-Infinity'::double precision")
+        cur.execute("select '-Infinity'::numeric, '-Infinity'::real, '-Infinity'::double precision", binary=True)
         assert cur.fetchone() == (float('-inf'), float('-inf'), float('-inf'))
 
         # JSONB
