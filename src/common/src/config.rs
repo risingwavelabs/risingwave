@@ -1822,7 +1822,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            32
+            2
         }
     }
 
