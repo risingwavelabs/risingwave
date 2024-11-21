@@ -19,13 +19,13 @@ use std::future::{poll_fn, Future};
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
+
+use await_tree::InstrumentAwait;
+use futures::{TryFuture, TryFutureExt};
 use governor::clock::MonotonicClock;
 use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
-
-use await_tree::InstrumentAwait;
-use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -331,7 +331,6 @@ pub struct RateLimitedLogReader<R: LogReader> {
     control_rx: UnboundedReceiver<usize>,
 }
 
-
 impl<R: LogReader> RateLimitedLogReader<R> {
     fn update_rate_limit(&mut self, rate_limit: usize) {
         if rate_limit == 0 {
@@ -349,23 +348,20 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        select! {
-            biased;
-            new_rate_limit = control_rx.recv() => {
-                if let Some(rate_limit) = new_rate_limit {
-                    self.rate_limiter = Some(RateLimiter::direct(Quota::per_second(rate_limit as u64)));
+        loop {
+            select! {
+                biased;
+                new_rate_limit = control_rx.recv() => {
+                    self.update_rate_limit(new_rate_limit)
+                },
+                item = self.inner.next_item() => {
+                    if let Some(rate_limiter) = self.rate_limiter.as_mut() {
+                        rate_limiter.until_ready().await;
+                    }
+                    return item
                 }
-            },
-            item = self.inner.next_item() => {
-                if let Some(rate_limiter) = self.rate_limiter.as_mut() {
-                    rate_limiter.check_keyed(()).await?;
-                }
-                item
             }
         }
-        self.inner
-            .next_item()
-            .await
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
