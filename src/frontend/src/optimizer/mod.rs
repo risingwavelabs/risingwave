@@ -52,7 +52,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;

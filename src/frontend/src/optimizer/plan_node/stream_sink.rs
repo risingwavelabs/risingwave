@@ -21,7 +21,7 @@ use fixedbitset::FixedBitSet;
 use icelake::types::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, CreateType, TableId};
+use risingwave_common::catalog::{ColumnCatalog, CreateType};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::match_sink_name_str;

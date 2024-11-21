@@ -26,7 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, UserId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
