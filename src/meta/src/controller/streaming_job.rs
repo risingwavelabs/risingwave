@@ -72,7 +72,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
-use crate::model::{StreamContext, TableFragments, TableParallelism};
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -403,7 +403,7 @@ impl CatalogController {
     // making them the source of truth and performing a full replacement for those in the meta store?
     pub async fn prepare_streaming_job(
         &self,
-        table_fragments: &TableFragments,
+        table_fragments: &StreamJobFragments,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {

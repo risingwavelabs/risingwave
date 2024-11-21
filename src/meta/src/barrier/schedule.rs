@@ -198,7 +198,7 @@ impl BarrierScheduler {
 
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
-                && info.table_fragments.table_id() == table_id
+                && info.table_fragments.stream_job_id() == table_id
             {
                 true
             } else {

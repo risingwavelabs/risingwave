@@ -49,7 +49,7 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{DdlType, StreamingJob};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -88,8 +88,8 @@ pub struct Reschedule {
 /// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
 pub struct ReplaceTablePlan {
-    pub old_table_fragments: TableFragments,
-    pub new_table_fragments: TableFragments,
+    pub old_table_fragments: StreamJobFragments,
+    pub new_table_fragments: StreamJobFragments,
     pub merge_updates: Vec<MergeUpdate>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
@@ -149,7 +149,7 @@ impl ReplaceTablePlan {
 #[educe(Debug)]
 pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
-    pub table_fragments: TableFragments,
+    pub table_fragments: StreamJobFragments,
     /// Refer to the doc on [`crate::manager::MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
@@ -309,9 +309,9 @@ impl Command {
         Self::Resume(reason)
     }
 
-    pub fn cancel(table_fragments: &TableFragments) -> Self {
+    pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
         Self::DropStreamingJobs {
-            table_fragments_ids: HashSet::from_iter([table_fragments.table_id()]),
+            table_fragments_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
             actors: table_fragments.actor_ids(),
             unregistered_state_table_ids: table_fragments
                 .all_table_ids()
@@ -668,7 +668,7 @@ impl Command {
                                 .upstream_mv_table_ids
                                 .iter()
                                 .map(|table_id| SubscriptionUpstreamInfo {
-                                    subscriber_id: table_fragments.table_id().table_id,
+                                    subscriber_id: table_fragments.stream_job_id().table_id,
                                     upstream_mv_table_id: table_id.table_id,
                                 })
                                 .collect()
@@ -947,7 +947,7 @@ impl Command {
     }
 
     fn generate_update_mutation_for_replace_table(
-        old_table_fragments: &TableFragments,
+        old_table_fragments: &StreamJobFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: &SplitAssignment,

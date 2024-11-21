@@ -39,7 +39,7 @@ use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, Wor
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, FragmentId, SubscriptionId, TableFragments, TableParallelism,
+    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
 };
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -551,12 +551,12 @@ impl MetadataManager {
         })
     }
 
-    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<TableFragments> {
+    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<StreamJobFragments> {
         let pb_table_fragments = self
             .catalog_controller
             .get_job_fragments_by_id(id.table_id as _)
             .await?;
-        Ok(TableFragments::from_protobuf(pb_table_fragments))
+        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -596,14 +596,14 @@ impl MetadataManager {
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
-    ) -> MetaResult<Vec<TableFragments>> {
+    ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
             let pb_table_fragments = self
                 .catalog_controller
                 .get_job_fragments_by_id(id.table_id as _)
                 .await?;
-            table_fragments.push(TableFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
         }
         Ok(table_fragments)
     }
@@ -612,7 +612,7 @@ impl MetadataManager {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
-            let tf = TableFragments::from_protobuf(fragments);
+            let tf = StreamJobFragments::from_protobuf(fragments);
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)

@@ -173,7 +173,7 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_table_fragments(
-                        table_fragments.table_id().table_id as _,
+                        table_fragments.stream_job_id().table_id as _,
                         table_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
@@ -191,7 +191,7 @@ impl CommandContext {
                         .metadata_manager
                         .catalog_controller
                         .post_collect_table_fragments(
-                            new_table_fragments.table_id().table_id as _,
+                            new_table_fragments.stream_job_id().table_id as _,
                             new_table_fragments.actor_ids(),
                             dispatchers.clone(),
                             init_split_assignment,
@@ -235,7 +235,7 @@ impl CommandContext {
                     .metadata_manager
                     .catalog_controller
                     .post_collect_table_fragments(
-                        new_table_fragments.table_id().table_id as _,
+                        new_table_fragments.stream_job_id().table_id as _,
                         new_table_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,

@@ -35,7 +35,7 @@ use crate::barrier::{
 };
 use crate::error::bail_invalid_parameter;
 use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
-use crate::model::{ActorId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -77,7 +77,7 @@ pub struct CreateStreamingJobContext {
     pub ddl_type: DdlType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
-    pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, TableFragments)>,
+    pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, StreamJobFragments)>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
 
@@ -169,7 +169,7 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
     /// The old table fragments to be replaced.
-    pub old_table_fragments: TableFragments,
+    pub old_table_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
@@ -234,10 +234,10 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
         self: &Arc<Self>,
-        table_fragments: TableFragments,
+        table_fragments: StreamJobFragments,
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
-        let table_id = table_fragments.table_id();
+        let table_id = table_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
@@ -324,7 +324,7 @@ impl GlobalStreamManager {
 
     async fn create_streaming_job_impl(
         &self,
-        table_fragments: TableFragments,
+        table_fragments: StreamJobFragments,
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
@@ -342,7 +342,7 @@ impl GlobalStreamManager {
         let mut replace_table_id = None;
 
         tracing::debug!(
-            table_id = %table_fragments.table_id(),
+            table_id = %table_fragments.stream_job_id(),
             "built actors finished"
         );
 
@@ -354,7 +354,7 @@ impl GlobalStreamManager {
                 .prepare_streaming_job(&table_fragments, &streaming_job, true)
                 .await?;
 
-            let tmp_table_id = table_fragments.table_id();
+            let tmp_table_id = table_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
             replace_table_id = Some(tmp_table_id);
@@ -370,7 +370,7 @@ impl GlobalStreamManager {
             });
         }
 
-        let table_id = table_fragments.table_id();
+        let table_id = table_fragments.stream_job_id();
 
         // Here we need to consider:
         // - Shared source
@@ -459,7 +459,7 @@ impl GlobalStreamManager {
 
     pub async fn replace_table(
         &self,
-        table_fragments: TableFragments,
+        table_fragments: StreamJobFragments,
         ReplaceTableContext {
             old_table_fragments,
             merge_updates,
@@ -469,7 +469,7 @@ impl GlobalStreamManager {
             ..
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
-        let tmp_table_id = table_fragments.table_id();
+        let tmp_table_id = table_fragments.stream_job_id();
         let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
         self.barrier_scheduler

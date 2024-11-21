@@ -316,6 +316,11 @@ message Function {
   message AggregateFunction {}
 }
 
+// Includes full information about a table.
+//
+// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+// It is not the same as a user-side table created by `CREATE TABLE`.
+//
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
   enum TableType {

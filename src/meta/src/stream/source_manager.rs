@@ -42,7 +42,7 @@ use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetadataManager;
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -763,7 +763,7 @@ impl SourceManager {
     }
 
     /// For dropping MV.
-    pub async fn drop_source_fragments_vec(&self, table_fragments: &[TableFragments]) {
+    pub async fn drop_source_fragments_vec(&self, table_fragments: &[StreamJobFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.

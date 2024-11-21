@@ -30,7 +30,7 @@ use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
 };
 use crate::manager::{DdlType, MetadataManager};
-use crate::model::{ActorId, BackfillUpstreamType, TableFragments};
+use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
 use crate::MetaResult;
 
 type ConsumedRows = u64;
@@ -246,7 +246,7 @@ impl TrackingJob {
 
     pub(crate) fn table_to_create(&self) -> TableId {
         match self {
-            TrackingJob::New(command) => command.info.table_fragments.table_id(),
+            TrackingJob::New(command) => command.info.table_fragments.stream_job_id(),
             TrackingJob::Recovered(recovered) => (recovered.id as u32).into(),
         }
     }
@@ -258,7 +258,7 @@ impl std::fmt::Debug for TrackingJob {
             TrackingJob::New(command) => write!(
                 f,
                 "TrackingJob::New({:?})",
-                command.info.table_fragments.table_id()
+                command.info.table_fragments.stream_job_id()
             ),
             TrackingJob::Recovered(recovered) => {
                 write!(f, "TrackingJob::RecoveredV2({:?})", recovered.id)
@@ -302,7 +302,7 @@ impl CreateMviewProgressTracker {
     /// 1. `CreateMviewProgress`.
     /// 2. `Backfill` position.
     pub fn recover(
-        mview_map: HashMap<TableId, (String, TableFragments)>,
+        mview_map: HashMap<TableId, (String, StreamJobFragments)>,
         version_stats: &HummockVersionStats,
     ) -> Self {
         let mut actor_map = HashMap::new();
@@ -523,7 +523,7 @@ impl CreateMviewProgressTracker {
             ..
         } = &info;
 
-        let creating_mv_id = table_fragments.table_id();
+        let creating_mv_id = table_fragments.stream_job_id();
 
         let (upstream_mv_count, upstream_total_key_count, ddl_type, create_type) = {
             // Keep track of how many times each upstream MV appears.

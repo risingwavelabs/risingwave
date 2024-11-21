@@ -71,7 +71,7 @@ use crate::manager::{
     DdlType, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
     IGNORED_NOTIFICATION_VERSION,
 };
-use crate::model::{FragmentId, StreamContext, TableFragments, TableParallelism};
+use crate::model::{FragmentId, StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
@@ -612,7 +612,7 @@ impl DdlController {
     /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
     pub(crate) async fn validate_cdc_table(
         table: &Table,
-        table_fragments: &TableFragments,
+        table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
         let stream_scan_fragment = table_fragments
             .fragments
@@ -663,11 +663,11 @@ impl DdlController {
         mgr: &MetadataManager,
         stream_ctx: StreamContext,
         sink: Option<&Sink>,
-        creating_sink_table_fragments: Option<&TableFragments>,
+        creating_sink_table_fragments: Option<&StreamJobFragments>,
         dropping_sink_id: Option<SinkId>,
         streaming_job: &StreamingJob,
         fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
+    ) -> MetaResult<(ReplaceTableContext, StreamJobFragments)> {
         let (mut replace_table_ctx, mut table_fragments) = self
             .build_replace_table(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
             .await?;
@@ -771,7 +771,7 @@ impl DdlController {
         sink_fragment: &PbFragment,
         table: &Table,
         replace_table_ctx: &mut ReplaceTableContext,
-        table_fragments: &mut TableFragments,
+        table_fragments: &mut StreamJobFragments,
         target_fragment_id: FragmentId,
         unique_identity: Option<&str>,
     ) {
@@ -1541,7 +1541,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
-    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
+    ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
         let expr_context = stream_ctx.to_expr_context();
@@ -1618,7 +1618,7 @@ impl DdlController {
             _ => TableParallelism::Fixed(parallelism.get()),
         };
 
-        let table_fragments = TableFragments::new(
+        let table_fragments = StreamJobFragments::new(
             id.into(),
             graph,
             &building_locations.actor_locations,
@@ -1713,7 +1713,7 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         table_col_index_mapping: Option<ColIndexMapping>,
         tmp_table_id: TableId,
-    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
+    ) -> MetaResult<(ReplaceTableContext, StreamJobFragments)> {
         let id = stream_job.id();
         let expr_context = stream_ctx.to_expr_context();
 
@@ -1821,7 +1821,7 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let table_fragments = TableFragments::new(
+        let table_fragments = StreamJobFragments::new(
             (tmp_table_id as u32).into(),
             graph,
             &building_locations.actor_locations,

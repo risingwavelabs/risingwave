@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::{
 
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::TableFragments;
+use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -459,7 +459,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let ActorGraphBuildResult { graph, .. } =
         actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
-    let table_fragments = TableFragments::for_test(TableId::default(), graph);
+    let table_fragments = StreamJobFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let mview_actor_ids = table_fragments.mview_actor_ids();
 
