@@ -11280,6 +11280,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz 0.10.0",
+ "constant_time_eq",
  "criterion",
  "educe",
  "expect-test",

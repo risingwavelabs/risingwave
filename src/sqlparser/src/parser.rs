@@ -2599,14 +2599,13 @@ impl Parser<'_> {
             if !contain_webhook {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
+
             self.expect_keyword(Keyword::SECRET)?;
-            let secret_ref = SecretRef {
-                secret_name: self.parse_object_name()?,
-                ref_as: SecretRefAsType::Text,
-            };
-            if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+            let secret_ref = self.parse_secret_ref()?;
+            if secret_ref.ref_as == SecretRefAsType::File {
                 parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
             };
+
             self.expect_keyword(Keyword::AS)?;
             let signature_expr = self.parse_function()?;
 
@@ -3657,16 +3656,8 @@ impl Parser<'_> {
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
                 Keyword::SECRET => {
-                    let secret_name = self.parse_object_name()?;
-                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
-                        SecretRefAsType::File
-                    } else {
-                        SecretRefAsType::Text
-                    };
-                    Ok(Value::Ref(SecretRef {
-                        secret_name,
-                        ref_as,
-                    }))
+                    let secret = self.parse_secret_ref()?;
+                    Ok(Value::Ref(secret))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
@@ -3678,6 +3669,19 @@ impl Parser<'_> {
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             _ => self.expected_at(checkpoint, "a value"),
         }
+    }
+
+    fn parse_secret_ref(&mut self) -> PResult<SecretRef> {
+        let secret_name = self.parse_object_name()?;
+        let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+            SecretRefAsType::File
+        } else {
+            SecretRefAsType::Text
+        };
+        Ok(SecretRef {
+            secret_name,
+            ref_as,
+        })
     }
 
     fn parse_set_variable(&mut self) -> PResult<SetVariableValue> {

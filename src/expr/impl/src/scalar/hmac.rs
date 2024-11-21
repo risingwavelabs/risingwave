@@ -49,11 +49,6 @@ fn hmac_sha1(secret: &str, payload: &[u8]) -> Box<[u8]> {
     code_bytes.as_slice().into()
 }
 
-#[function("secure_compare(varchar, varchar) -> boolean")]
-pub fn secure_compare(left: &str, right: &str) -> bool {
-    left == right
-}
-
 #[cfg(test)]
 mod tests {
     use hex::encode;

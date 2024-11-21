@@ -1,5 +1,7 @@
 use sea_orm_migration::prelude::{Table as MigrationTable, *};
 
+use crate::utils::ColumnDefExt;
+
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -10,7 +12,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(ColumnDef::new(Table::WebhookInfo).integer())
+                    .add_column(ColumnDef::new(Table::WebhookInfo).rw_binary(manager))
                     .to_owned(),
             )
             .await
