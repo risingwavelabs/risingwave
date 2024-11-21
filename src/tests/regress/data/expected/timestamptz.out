@@ -2636,6 +2636,193 @@ SELECT '2014-10-26 02:00:00'::timestamp AT TIME ZONE 'MSK';
  2014-10-25 23:00:00+00
 (1 row)
 
+SELECT timezone('Asia/Shanghai', '2024-11-20 20:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2024-11-21 04:00:00
+(1 row)
+
+SELECT timezone('Asia/Shanghai', '2023-02-28 20:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2023-03-01 04:00:00
+(1 row)
+
+SELECT timezone('Asia/Shanghai', '2024-02-28 20:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2024-02-29 04:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-26 22:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 01:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-26 22:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 01:59:59
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-26 23:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 03:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-26 23:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 03:00:01
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-27 01:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 05:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-27 02:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 06:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-27 02:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 06:59:59
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2011-03-27 03:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 07:00:00
+(1 row)
+
+SELECT timezone('MSK', '2011-03-26 22:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 01:00:00 
+(1 row)
+
+SELECT timezone('MSK', '2011-03-26 22:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 01:59:59
+(1 row)
+
+SELECT timezone('MSK', '2011-03-26 23:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 03:00:00
+(1 row)
+
+SELECT timezone('MSK', '2011-03-26 23:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 03:00:01
+(1 row)
+
+SELECT timezone('MSK', '2011-03-27 01:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 05:00:00
+(1 row)
+
+SELECT timezone('MSK', '2011-03-27 02:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 06:00:00
+(1 row)
+
+SELECT timezone('MSK', '2011-03-27 02:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 06:59:59
+(1 row)
+
+SELECT timezone('MSK', '2011-03-27 03:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2011-03-27 07:00:00
+(1 row)
+
+
+SELECT timezone('Europe/Moscow', '2014-10-25 21:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:59:59
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2014-10-25 22:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2014-10-25 22:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:59:59
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2014-10-25 23:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 02:00:00
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2014-10-25 23:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 02:00:01
+(1 row)
+
+SELECT timezone('Europe/Moscow', '2014-10-26 02:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 05:00:01
+(1 row)
+
+SELECT timezone('MSK', '2014-10-25 21:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:59:59
+(1 row)
+
+SELECT timezone('MSK', '2014-10-25 22:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:00:00
+(1 row)
+
+SELECT timezone('MSK', '2014-10-25 22:59:59 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 01:59:59
+(1 row)
+
+SELECT timezone('MSK', '2014-10-25 23:00:00 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 02:00:00
+(1 row)
+
+SELECT timezone('MSK', '2014-10-25 23:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 02:00:01
+(1 row)
+
+SELECT timezone('MSK', '2014-10-26 02:00:01 UTC'::timestamptz);
+      timezone       
+---------------------
+ 2014-10-26 05:00:01
+(1 row)
+
 SELECT make_timestamptz(2014, 10, 26, 0, 0, 0, 'MSK');
     make_timestamptz    
 ------------------------
