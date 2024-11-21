@@ -44,8 +44,11 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::connector_service::sink_coordinator_pre_commit_metadata::Metadata::Serialized as SerializedPreCommit;
+use risingwave_pb::connector_service::sink_coordinator_pre_commit_metadata::SerializedPreCommitMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+// use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{
     SinkCoordinatorPreCommitMetadata, SinkCoordinatorPreCommitRequest,
     SinkCoordinatorPreCommitResponse, SinkMetadata,
@@ -851,6 +854,47 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
     }
 }
 
+impl<'a> TryFrom<&'a WriteResult> for SinkCoordinatorPreCommitMetadata {
+    type Error = SinkError;
+
+    fn try_from(
+        value: &'a WriteResult,
+    ) -> std::result::Result<SinkCoordinatorPreCommitMetadata, Self::Error> {
+        let json_data_files = serde_json::Value::Array(
+            value
+                .data_files
+                .iter()
+                .cloned()
+                .map(data_file_to_json)
+                .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_delete_files = serde_json::Value::Array(
+            value
+                .delete_files
+                .iter()
+                .cloned()
+                .map(data_file_to_json)
+                .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_value = serde_json::Value::Object(
+            vec![
+                (DATA_FILES.to_string(), json_data_files),
+                (DELETE_FILES.to_string(), json_delete_files),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        Ok(SinkCoordinatorPreCommitMetadata {
+            metadata: Some(SerializedPreCommit(SerializedPreCommitMetadata {
+                metadata: serde_json::to_vec(&json_value)
+                    .context("Can't serialize iceberg sink metadata")?,
+            })),
+        })
+    }
+}
+
 pub struct IcebergSinkCommitter {
     catalog: CatalogRef,
     table: Table,
@@ -872,6 +916,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
+
         if write_results.is_empty()
             || write_results
                 .iter()
@@ -880,6 +925,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+
+        let mut pre_commit_metadata = vec![];
+        for write_result in &write_results {
+            pre_commit_metadata.push(SinkCoordinatorPreCommitMetadata::try_from(write_result)?);
+        }
+        self.pre_commit(epoch, pre_commit_metadata).await?;
         // Load the latest table to avoid concurrent modification with the best effort.
         self.table = self
             .catalog

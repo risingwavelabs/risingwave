@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use risingwave_pb::connector_service::sink_coordinator_pre_commit_request::CommitMetadata as PreCommitMetadata;
 use risingwave_pb::connector_service::sink_coordinator_stream_request::CommitMetadata;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
@@ -132,7 +133,12 @@ impl SinkCoordinatorPreCommitStreamHandle {
         pre_commit_metadata: Vec<SinkCoordinatorPreCommitMetadata>,
     ) -> Result<()> {
         self.send_request(SinkCoordinatorPreCommitRequest {
-            pre_commit_metadata: None,
+            request: Some(sink_coordinator_pre_commit_request::Request::Commit(
+                PreCommitMetadata {
+                    epoch,
+                    metadata: pre_commit_metadata,
+                },
+            )),
         })
         .await?;
         match self.next_response().await? {

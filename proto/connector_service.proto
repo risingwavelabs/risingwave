@@ -124,8 +124,21 @@ message SinkCoordinatorPreCommitMetadata {
   }
 }
 
+
 message SinkCoordinatorPreCommitRequest {
-  SinkCoordinatorPreCommitMetadata pre_commit_metadata = 1;
+  message StartCoordinator {
+    SinkParam param = 1;
+  }
+
+  message CommitMetadata {
+    uint64 epoch = 1;
+    repeated SinkCoordinatorPreCommitMetadata metadata = 2;
+  }
+
+  oneof request {
+    StartCoordinator start = 1;
+    CommitMetadata commit = 2;
+  }
 }
 
 message SinkCoordinatorPreCommitResponse {
