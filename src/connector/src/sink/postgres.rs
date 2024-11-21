@@ -48,6 +48,8 @@ pub struct PostgresConfig {
     pub password: String,
     pub database: String,
     pub table: String,
+    #[serde(default = "default_schema")]
+    pub schema: String,
     #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
@@ -56,6 +58,10 @@ pub struct PostgresConfig {
 
 fn default_max_batch_rows() -> usize {
     1024
+}
+
+fn default_schema() -> String {
+    "public".to_string()
 }
 
 impl PostgresConfig {
