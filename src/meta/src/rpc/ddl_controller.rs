@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -137,6 +137,7 @@ pub enum DdlCommand {
         StreamFragmentGraphProto,
         CreateType,
         Option<ReplaceTableInfo>,
+        HashSet<ObjectId>,
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceTableInfo>),
     AlterName(alter_name_request::Object, String),
@@ -177,7 +178,7 @@ impl DdlCommand {
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
-            DdlCommand::CreateStreamingJob(_, _, _, _)
+            DdlCommand::CreateStreamingJob(_, _, _, _, _)
             | DdlCommand::CreateSourceWithoutStreamingJob(_)
             | DdlCommand::ReplaceTable(_)
             | DdlCommand::AlterSourceColumn(_)
@@ -310,11 +311,13 @@ impl DdlController {
                     fragment_graph,
                     _create_type,
                     affected_table_replace_info,
+                    dependencies,
                 ) => {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         affected_table_replace_info,
+                        dependencies,
                     )
                     .await
                 }
@@ -914,6 +917,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceTableInfo>,
+        dependencies: HashSet<ObjectId>,
     ) -> MetaResult<NotificationVersion> {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         self.metadata_manager
@@ -923,6 +927,7 @@ impl DdlController {
                 &ctx,
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
+                dependencies,
             )
             .await?;
         let job_id = streaming_job.id();
@@ -941,7 +946,6 @@ impl DdlController {
             .unwrap();
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
-        let id = streaming_job.id();
         let name = streaming_job.name();
         let definition = streaming_job.definition();
         let source_id = match &streaming_job {
@@ -963,7 +967,7 @@ impl DdlController {
             Err(err) => {
                 tracing::error!(id = job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
-                    id,
+                    id: job_id,
                     name,
                     definition,
                     error: err.as_report().to_string(),

@@ -113,6 +113,7 @@ impl CatalogController {
         ctx: &StreamContext,
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
+        mut dependencies: HashSet<ObjectId>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -134,9 +135,16 @@ impl CatalogController {
         )
         .await?;
 
-        // check if any dependent relation is in altering status.
-        let dependent_relations = streaming_job.dependent_relations();
-        if !dependent_relations.is_empty() {
+        // TODO(rc): pass all dependencies uniformly, deprecate `dependent_relations` and `dependent_secret_ids`.
+        dependencies.extend(
+            streaming_job
+                .dependent_relations()
+                .into_iter()
+                .map(|id| id as ObjectId),
+        );
+
+        // check if any dependency is in altering status.
+        if !dependencies.is_empty() {
             let altering_cnt = ObjectDependency::find()
                 .join(
                     JoinType::InnerJoin,
@@ -145,7 +153,7 @@ impl CatalogController {
                 .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
                 .filter(
                     object_dependency::Column::Oid
-                        .is_in(dependent_relations.iter().map(|id| *id as ObjectId))
+                        .is_in(dependencies.clone())
                         .and(object::Column::ObjType.eq(ObjectType::Table))
                         .and(streaming_job::Column::JobStatus.ne(JobStatus::Created))
                         .and(
@@ -195,10 +203,7 @@ impl CatalogController {
                 if let Some(target_table_id) = sink.target_table {
                     if check_sink_into_table_cycle(
                         target_table_id as ObjectId,
-                        sink.dependent_relations
-                            .iter()
-                            .map(|id| *id as ObjectId)
-                            .collect(),
+                        dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await?
@@ -309,17 +314,19 @@ impl CatalogController {
             }
         }
 
-        // get dependent secrets.
-        let dependent_secret_ids = streaming_job.dependent_secret_ids()?;
+        // collect dependent secrets.
+        dependencies.extend(
+            streaming_job
+                .dependent_secret_ids()?
+                .into_iter()
+                .map(|secret_id| secret_id as ObjectId),
+        );
 
-        let dependent_objs = dependent_relations
-            .iter()
-            .chain(dependent_secret_ids.iter());
         // record object dependency.
-        if !dependent_secret_ids.is_empty() || !dependent_relations.is_empty() {
-            ObjectDependency::insert_many(dependent_objs.map(|id| {
+        if !dependencies.is_empty() {
+            ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
                 object_dependency::ActiveModel {
-                    oid: Set(*id as _),
+                    oid: Set(oid),
                     used_by: Set(streaming_job.id() as _),
                     ..Default::default()
                 }

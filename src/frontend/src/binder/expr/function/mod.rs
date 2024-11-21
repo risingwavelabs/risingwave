@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -154,6 +154,8 @@ impl Binder {
             .flatten_ok()
             .try_collect()?;
 
+        let mut referred_udfs = HashSet::new();
+
         let wrapped_agg_type = if scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
@@ -167,12 +169,16 @@ impl Binder {
             let scalar_func_expr = if let Ok(schema) = self.first_valid_schema()
                 && let Some(func) = schema.get_function_by_name_inputs(&func_name, &mut array_args)
             {
+                // record the dependency upon the UDF
+                referred_udfs.insert(func.id);
+
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "expect a scalar function after `AGGREGATE:`".to_string(),
                     )
                     .into());
                 }
+
                 if func.language == "sql" {
                     self.bind_sql_udf(func.clone(), array_args)?
                 } else {
@@ -194,6 +200,9 @@ impl Binder {
                 .get_function_by_name_inputs(&func_name, &mut args)
                 .cloned()
         {
+            // record the dependency upon the UDF
+            referred_udfs.insert(func.id);
+
             if func.language == "sql" {
                 let name = format!("SQL user-defined function `{}`", func.name);
                 reject_syntax!(
@@ -227,6 +236,8 @@ impl Binder {
         } else {
             None
         };
+
+        self.included_udfs.extend(referred_udfs);
 
         let agg_type = if wrapped_agg_type.is_some() {
             wrapped_agg_type

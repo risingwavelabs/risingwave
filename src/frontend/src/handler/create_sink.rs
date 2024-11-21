@@ -23,7 +23,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, UserId};
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId, ObjectId, Schema, SchemaId, UserId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -72,6 +72,7 @@ pub struct SinkPlanContext {
     pub sink_plan: PlanRef,
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
+    pub dependencies: HashSet<ObjectId>,
 }
 
 pub async fn gen_sink_plan(
@@ -122,10 +123,14 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound,
+        )
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -250,15 +255,24 @@ pub async fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string());
     }
 
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+            .into_iter()
+            .map(|id| id.table_id() as ObjectId)
+            .chain(
+                dependent_udfs
+                    .into_iter()
+                    .map(|id| id.function_id() as ObjectId),
+            )
+            .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
         None, // deprecated: private link connection id
-        dependent_relations.into_iter().collect_vec(),
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -311,6 +325,7 @@ pub async fn gen_sink_plan(
         sink_plan,
         sink_catalog,
         target_table_catalog,
+        dependencies,
     })
 }
 
@@ -425,12 +440,13 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let (mut sink, graph, target_table_catalog) = {
+    let (mut sink, graph, target_table_catalog, dependencies) = {
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
+            dependencies,
         } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -443,7 +459,7 @@ pub async fn handle_create_sink(
 
         let graph = build_graph(plan)?;
 
-        (sink, graph, target_table_catalog)
+        (sink, graph, target_table_catalog, dependencies)
     };
 
     let mut target_table_replace_plan = None;
@@ -501,7 +517,12 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(sink.to_proto(), graph, target_table_replace_plan)
+        .create_sink(
+            sink.to_proto(),
+            graph,
+            target_table_replace_plan,
+            dependencies,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
