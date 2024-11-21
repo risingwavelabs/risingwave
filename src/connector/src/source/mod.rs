@@ -25,6 +25,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+mod util;
 
 use std::future::IntoFuture;
 
@@ -47,6 +48,7 @@ use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use thiserror_ext::AsReport;
+pub use util::fill_adaptive_split;
 
 pub use crate::source::filesystem::opendal_source::{
     AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR,

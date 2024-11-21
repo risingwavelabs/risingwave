@@ -457,6 +457,11 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kinesis(_))
     }
 
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
+    }
+
     /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
         dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
