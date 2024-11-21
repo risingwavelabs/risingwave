@@ -36,10 +36,11 @@ docker-compose up
 
 | Memory for RW container (`resource.limits.memory`) | 8 GiB | 14 GiB | 28 GiB | 58 GiB |
 |----------------------------------------------------|---|---|---|---|
-| `compute-opts.memory-manager-target-bytes`         | 6 GiB | 10 GiB | 20 GiB | 46 GiB |
+| `compute-opts.total-memory-bytes`                  | 6 GiB | 10 GiB | 20 GiB | 46 GiB |
 | `frontend-opts.frontend-total-memory-bytes`        | 1 GiB | 2 GiB | 4 GiB | 6 GiB |
 | `compactor-opts.compactor-total-memory-bytes`      | 1 GiB | 2 GiB | 4 GiB | 6 GiB |
 | `compute-opts.memory-manager-target-bytes`         | 5.6 GiB | 9.8 GiB | 20.8 GiB | 44.8 GiB |
+
 
 ### Standalone (S3 backend)
 
