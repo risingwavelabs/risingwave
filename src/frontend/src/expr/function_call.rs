@@ -437,6 +437,6 @@ pub type CastResult<T = ()> = Result<T, CastError>;
 // TODO(error-handling): shall we make it a new variant?
 impl From<CastError> for ErrorCode {
     fn from(value: CastError) -> Self {
-        ErrorCode::Uncategorized(value.into()).into()
+        ErrorCode::Uncategorized(value.into())
     }
 }
