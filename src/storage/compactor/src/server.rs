@@ -362,7 +362,9 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
     };
 
-    risingwave_storage::hummock::compactor::start_shared_compactor(
+    // TODO(shutdown): don't collect there's no need to gracefully shutdown them.
+    // Hold the join handle and tx to keep the compactor running.
+    let _compactor_handle = risingwave_storage::hummock::compactor::start_shared_compactor(
         grpc_proxy_client,
         receiver,
         compactor_context,
