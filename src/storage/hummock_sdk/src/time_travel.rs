@@ -23,8 +23,9 @@ use crate::level::Level;
 use crate::sstable_info::SstableInfo;
 use crate::version::{
     HummockVersion, HummockVersionCommon, HummockVersionDelta, HummockVersionDeltaCommon,
+    ObjectIdReader, SstableIdReader,
 };
-use crate::{CompactionGroupId, HummockSstableId};
+use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub type IncompleteHummockVersion = HummockVersionCommon<SstableIdInVersion>;
 
@@ -167,12 +168,28 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
     }
 }
 
-pub struct SstableIdInVersion(HummockSstableId);
+pub struct SstableIdInVersion {
+    sst_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
+}
+
+impl SstableIdReader for SstableIdInVersion {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableIdInVersion {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
+    }
+}
 
 impl From<&SstableIdInVersion> for PbSstableInfo {
     fn from(sst_id: &SstableIdInVersion) -> Self {
         Self {
-            sst_id: sst_id.0,
+            sst_id: sst_id.sst_id,
+            object_id: sst_id.object_id,
             ..Default::default()
         }
     }
@@ -185,8 +202,11 @@ impl From<SstableIdInVersion> for PbSstableInfo {
 }
 
 impl From<&PbSstableInfo> for SstableIdInVersion {
-    fn from(value: &PbSstableInfo) -> Self {
-        SstableIdInVersion(value.sst_id)
+    fn from(s: &PbSstableInfo) -> Self {
+        SstableIdInVersion {
+            sst_id: s.sst_id,
+            object_id: s.object_id,
+        }
     }
 }
 

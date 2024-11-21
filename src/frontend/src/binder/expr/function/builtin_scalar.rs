@@ -661,6 +661,7 @@ impl Binder {
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
+                ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes

@@ -12,20 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_sqlparser::ast::Query;
+use risingwave_common::types::Timestamptz;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_expr::{function, Result};
 
-use crate::binder::Binder;
-use crate::error::{bail_bind_error, Result};
-use crate::expr::{ExprImpl, Subquery, SubqueryKind};
-
-impl Binder {
-    pub fn bind_subquery_expr(&mut self, query: Query, kind: SubqueryKind) -> Result<ExprImpl> {
-        let query = self.bind_query(query)?;
-        if !matches!(kind, SubqueryKind::Existential | SubqueryKind::UpdateSet)
-            && query.data_types().len() != 1
-        {
-            bail_bind_error!("Subquery must return only one column");
-        }
-        Ok(Subquery::new(query, kind).into())
-    }
+#[function("rw_epoch_to_ts(int8) -> timestamptz")]
+fn rw_epoch_to_ts(epoch: i64) -> Result<Timestamptz> {
+    Ok(Epoch(epoch as u64).as_timestamptz())
 }
