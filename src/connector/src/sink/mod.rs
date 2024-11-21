@@ -78,7 +78,9 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_pb::catalog::PbSinkType;
-use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::connector_service::{
+    PbSinkParam, SinkCoordinatorPreCommitMetadata, SinkMetadata, TableSchema,
+};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use starrocks::STARROCKS_SINK;
@@ -675,6 +677,14 @@ pub trait SinkCommitCoordinator {
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkCoordinatorPreCommitMetadata>,
+    ) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub struct DummySinkCommitCoordinator;

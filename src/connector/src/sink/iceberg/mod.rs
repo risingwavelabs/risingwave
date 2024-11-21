@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use futures::{Stream, StreamExt};
 use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
@@ -45,10 +46,17 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::{
+    SinkCoordinatorPreCommitMetadata, SinkCoordinatorPreCommitRequest,
+    SinkCoordinatorPreCommitResponse, SinkMetadata,
+};
+use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::SinkCoordinatorPreCommitStreamHandle;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::{channel, Receiver};
+use tokio_stream::wrappers::ReceiverStream;
 use with_options::WithOptions;
 
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
@@ -402,12 +410,24 @@ impl Sink for IcebergSink {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
-
+        let pre_commit_stream_handle = self
+            .start_sink_coordinator_pre_commit_stream(self.param.clone())
+            .await?;
         Ok(IcebergSinkCommitter {
             catalog,
             table,
             partition_type,
+            pre_commit_stream_handle,
         })
+    }
+}
+
+impl IcebergSink {
+    async fn start_sink_coordinator_pre_commit_stream(
+        &self,
+        param: SinkParam,
+    ) -> Result<SinkCoordinatorPreCommitStreamHandle> {
+        todo!()
     }
 }
 
@@ -835,6 +855,7 @@ pub struct IcebergSinkCommitter {
     catalog: CatalogRef,
     table: Table,
     partition_type: Any,
+    pre_commit_stream_handle: SinkCoordinatorPreCommitStreamHandle,
 }
 
 #[async_trait::async_trait]
@@ -876,6 +897,17 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         })?;
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+        Ok(())
+    }
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        pre_commit_metadata: Vec<SinkCoordinatorPreCommitMetadata>,
+    ) -> Result<()> {
+        self.pre_commit_stream_handle
+            .pre_commit(epoch, pre_commit_metadata)
+            .await?;
         Ok(())
     }
 }

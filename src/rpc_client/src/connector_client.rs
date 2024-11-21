@@ -121,3 +121,35 @@ impl SinkCoordinatorStreamHandle {
         }
     }
 }
+
+pub type SinkCoordinatorPreCommitStreamHandle =
+    BidiStreamHandle<SinkCoordinatorPreCommitRequest, SinkCoordinatorPreCommitResponse>;
+
+impl SinkCoordinatorPreCommitStreamHandle {
+    pub async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        pre_commit_metadata: Vec<SinkCoordinatorPreCommitMetadata>,
+    ) -> Result<()> {
+        self.send_request(SinkCoordinatorPreCommitRequest {
+            pre_commit_metadata: None,
+        })
+        .await?;
+        match self.next_response().await? {
+            SinkCoordinatorPreCommitResponse { commit_success } => {
+                if commit_success {
+                    Ok(())
+                } else {
+                    Err(RpcError::Internal(anyhow!(
+                        "Fail to persist pre commit metadata{}",
+                        epoch,
+                    )))
+                }
+            }
+            msg => Err(RpcError::Internal(anyhow!(
+                "should get Commit response but get {:?}",
+                msg
+            ))),
+        }
+    }
+}

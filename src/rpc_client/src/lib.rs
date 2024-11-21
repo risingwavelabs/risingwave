@@ -64,7 +64,9 @@ mod tracing;
 
 pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
-pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
+pub use connector_client::{
+    SinkCoordinatorPreCommitStreamHandle, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
+};
 pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};

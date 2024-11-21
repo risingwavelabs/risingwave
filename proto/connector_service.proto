@@ -115,6 +115,24 @@ message SinkMetadata {
   }
 }
 
+message SinkCoordinatorPreCommitMetadata {
+  message SerializedPreCommitMetadata {
+    bytes metadata = 1;
+  }
+  oneof metadata {
+    SerializedPreCommitMetadata serialized = 1;
+  }
+}
+
+message SinkCoordinatorPreCommitRequest {
+  SinkCoordinatorPreCommitMetadata pre_commit_metadata = 1;
+}
+
+message SinkCoordinatorPreCommitResponse {
+  bool commit_success = 1;
+}
+
+
 message SinkCoordinatorStreamRequest {
   message StartCoordinator {
     SinkParam param = 1;
