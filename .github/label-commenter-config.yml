@@ -18,5 +18,5 @@ labels:
           * `src/meta/src/telemetry.rs`
           * `src/stream/src/telemetry.rs`
           * `src/storage/compactor/src/telemetry.rs`
-          Or calling `report_event_common` (`src/storage/compactor/src/telemetry.rs`) as if finding it hard to implement.
+          Or calling `report_event_common` (`src/common/telemetry_event/src/lib.rs`) as if finding it hard to implement.
           :sparkles: Thank you for your contribution to RisingWave! :sparkles:
