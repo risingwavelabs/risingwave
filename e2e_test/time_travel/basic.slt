@@ -1,7 +1,7 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement error time_travel_retention_ms cannot be less than 600000
+statement error time_travel_retention_ms cannot be less than 60000
 ALTER SYSTEM SET time_travel_retention_ms to 10;
 
 statement ok
