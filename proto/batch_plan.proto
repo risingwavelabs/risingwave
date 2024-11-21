@@ -43,20 +43,37 @@ message SysRowSeqScanNode {
 //     and `lower_bound` & `upper_bound` is the range for the (i+1)th column
 // - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
 message ScanRange {
-  // The i-th element represents the value of the i-th PK column.
-  repeated bytes eq_conds = 1;
+  message AndScanRange{
+    // The i-th element represents the value of the i-th PK column.
+    repeated bytes eq_conds = 1;
 
-  // `None` represent unbounded.
-  message Bound {
-    bytes value = 1;
-    bool inclusive = 2;
+    // `None` represent unbounded.
+    message Bound {
+      bytes value = 1;
+      bool inclusive = 2;
+    }
+    //  The lower bound of the next PK column subsequent to those in `eq_conds`.
+    Bound lower_bound = 2;
+    //  The upper bound of the next PK column subsequent to those in `eq_conds`.
+    Bound upper_bound = 3;
   }
-  //  The lower bound of the next PK column subsequent to those in `eq_conds`.
-  Bound lower_bound = 2;
-  //  The upper bound of the next PK column subsequent to those in `eq_conds`.
-  Bound upper_bound = 3;
 
-  bool is_real_unbounded = 4;
+  message StructScanRange{
+    // `None` represent unbounded.
+    message Bound {
+      repeated bytes value = 1;
+      bool inclusive = 2;
+    }
+    //  The lower bound of the next PK column subsequent to those in `eq_conds`.
+    Bound lower_bound = 2;
+    //  The upper bound of the next PK column subsequent to those in `eq_conds`.
+    Bound upper_bound = 3;
+  }
+
+  oneof scan_range {
+    AndScanRange and_scan_range = 1;
+    StructScanRange struct_scan_range = 2;
+  }
 }
 
 message SourceNode {

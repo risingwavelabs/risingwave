@@ -46,16 +46,23 @@ impl BatchSysSeqScan {
 
         {
             // validate scan_range
-            scan_ranges.iter().for_each(|scan_range| {
-                assert!(!scan_range.is_full_table_scan());
-                let scan_pk_prefix_len = scan_range.eq_conds.len();
-                let order_len = core.table_desc.order_column_indices().len();
-                assert!(
-                    scan_pk_prefix_len < order_len
-                        || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
-                    "invalid scan_range",
-                );
-            })
+            scan_ranges
+                .iter()
+                .filter_map(|scan_range| match scan_range {
+                    ScanRange::AndScanRange(a) => Some(a),
+                    ScanRange::StructScanRange(_) => None,
+                })
+                .for_each(|scan_range| {
+                    assert!(!scan_range.is_full_table_scan());
+                    let scan_pk_prefix_len = scan_range.eq_conds.len();
+                    let order_len = core.table_desc.order_column_indices().len();
+                    assert!(
+                        scan_pk_prefix_len < order_len
+                            || (scan_pk_prefix_len == order_len
+                                && is_full_range(&scan_range.range)),
+                        "invalid scan_range",
+                    );
+                })
         }
 
         Self {
