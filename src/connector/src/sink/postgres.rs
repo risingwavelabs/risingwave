@@ -323,7 +323,7 @@ impl PostgresSinkWriter {
                 .iter()
                 .map(|field| field.data_type().to_pg_type())
                 .collect_vec();
-            let merge_sql = create_merge_sql(&schema, &config.table, &pk_indices);
+            let merge_sql = create_upsert_sql(&schema, &config.table, &pk_indices);
             Some(
                 client
                     .prepare_typed(&merge_sql, &merge_types)
@@ -472,55 +472,32 @@ fn create_insert_sql(schema: &Schema, table_name: &str) -> String {
     format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters})")
 }
 
-fn create_merge_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
-    let named_parameters: String = schema
-        .fields()
-        .iter()
-        .enumerate()
-        .map(|(i, field)| format!("${} as {}", i + 1, &field.name))
-        .collect_vec()
-        .join(",");
-    let conditions: String = pk_indices
-        .iter()
-        .map(|i| {
-            format!(
-                "source.{} = target.{}",
-                schema.fields()[*i].name,
-                schema.fields()[*i].name
-            )
-        })
-        .collect_vec()
-        .join(" AND ");
-    let update_vars: String = schema
-        .fields()
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !pk_indices.contains(i))
-        .map(|(_, field)| format!("{} = source.{}", field.name, field.name))
-        .collect_vec()
-        .join(", ");
-    let insert_columns: String = schema
+fn create_upsert_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
+    let columns: String = schema
         .fields()
         .iter()
         .map(|field| field.name.clone())
         .collect_vec()
         .join(", ");
-    let insert_vars: String = schema
-        .fields()
-        .iter()
-        .map(|field| format!("source.{}", field.name))
+    let parameters: String = (0..schema.fields().len())
+        .map(|i| format!("${}", i + 1))
         .collect_vec()
         .join(", ");
-    format!(
-        "
-        MERGE INTO {table_name} target
-        USING (SELECT {named_parameters}) AS source
-        ON ({conditions})
-        WHEN MATCHED
-          THEN UPDATE SET {update_vars}
-        WHEN NOT MATCHED
-          THEN INSERT ({insert_columns}) VALUES ({insert_vars})"
-    )
+    let pk_columns = pk_indices
+        .iter()
+        .map(|i| schema.fields()[*i].name.clone())
+        .collect_vec()
+        .join(", ");
+    let update_parameters: String = (0..schema.fields().len())
+        .filter(|i| !pk_indices.contains(i))
+        .map(|i| {
+            let column = schema.fields()[i].name.clone();
+            let param = format!("${}", i + 1);
+            format!("{column} = {param}")
+        })
+        .collect_vec()
+        .join(", ");
+    format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters}) on conflict ({pk_columns}) do update set {update_parameters}")
 }
 
 fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
@@ -592,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_merge_sql() {
+    fn test_create_upsert_sql() {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
@@ -608,18 +585,7 @@ mod tests {
             },
         ]);
         let table_name = "test_table";
-        let sql = create_merge_sql(&schema, table_name, &[1]);
-        assert_eq!(
-            sql,
-            "
-        MERGE INTO test_table target
-        USING (SELECT $1 as a,$2 as b) AS source
-        ON (source.b = target.b)
-        WHEN MATCHED
-          THEN UPDATE SET a = source.a
-        WHEN NOT MATCHED
-          THEN INSERT (a, b) VALUES (source.a, source.b)"
-                .to_string()
-        );
+        let sql = create_upsert_sql(&schema, table_name, &[1]);
+        check(sql, expect!["INSERT INTO test_table (a, b) VALUES ($1, $2) on conflict do update set a = $1"]);
     }
 }
