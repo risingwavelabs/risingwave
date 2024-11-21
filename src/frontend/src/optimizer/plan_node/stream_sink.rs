@@ -255,6 +255,22 @@ impl StreamSink {
             let from_properties =
                 Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
             if let Some(t) = &target_table {
+                let user_defined_primary_key_table = t.row_id_index.is_none();
+                let sink_is_append_only =
+                    sink_type == SinkType::AppendOnly || sink_type == SinkType::ForceAppendOnly;
+
+                if !user_defined_primary_key_table && !sink_is_append_only {
+                    return Err(RwError::from(ErrorCode::BindError(
+                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                    )));
+                }
+
+                if t.append_only && !sink_is_append_only {
+                    return Err(RwError::from(ErrorCode::BindError(
+                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                    )));
+                }
+
                 if sink_type != SinkType::Upsert {
                     vec![]
                 } else {
