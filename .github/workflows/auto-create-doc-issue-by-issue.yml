@@ -18,7 +18,7 @@ jobs:
         with:
           token: ${{ secrets.ACCESS_TOKEN }}
           owner: risingwavelabs
-          repo: risingwave-docs
+          repo: risingwave-docs-new
           title: |
             Document: ${{ github.event.issue.title }}
           body: |
