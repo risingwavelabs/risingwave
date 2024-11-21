@@ -262,7 +262,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapDelete
             | Type::MapInsert
             | Type::MapLength
-            | Type::VnodeUser =>
+            | Type::VnodeUser
+            |Type::RwEpochToTs =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call
