@@ -86,9 +86,10 @@ impl From<TableParallelism> for PbTableParallelism {
 }
 
 /// Fragments of a streaming job. Corresponds to [`PbTableFragments`].
+/// (It was previously called `TableFragments` due to historical reasons.)
 ///
 /// We store whole fragments in a single column family as follow:
-/// `table_id` => `TableFragments`.
+/// `stream_job_id` => `StreamJobFragments`.
 #[derive(Debug, Clone)]
 pub struct StreamJobFragments {
     /// The table id.

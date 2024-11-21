@@ -80,14 +80,17 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
-            let table_fragments = StreamJobFragments::from_protobuf(table_fragments);
-            if table_fragments.tracking_progress_actor_ids().is_empty() {
+            let stream_job_fragments = StreamJobFragments::from_protobuf(table_fragments);
+            if stream_job_fragments
+                .tracking_progress_actor_ids()
+                .is_empty()
+            {
                 // If there's no tracking actor in the mview, we can finish the job directly.
                 mgr.catalog_controller
                     .finish_streaming_job(mview.table_id, None)
                     .await?;
             } else {
-                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+                mview_map.insert(table_id, (mview.definition.clone(), stream_job_fragments));
             }
         }
 
