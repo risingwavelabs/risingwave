@@ -31,12 +31,13 @@ use super::{group_split, StateTableId};
 use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::level::{Level, Levels, OverlappingLevel};
+use crate::level::{Level, LevelCommon, Levels, OverlappingLevel};
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{ReadTableWatermark, TableWatermarks};
 use crate::version::{
     GroupDelta, GroupDeltaCommon, HummockVersion, HummockVersionCommon, HummockVersionDelta,
-    HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon,
+    HummockVersionStateTableInfo, IntraLevelDelta, IntraLevelDeltaCommon, ObjectIdReader,
+    SstableIdReader,
 };
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 #[derive(Debug, Clone, Default)]
@@ -62,33 +63,6 @@ impl HummockVersion {
         self.levels
             .get_mut(&compaction_group_id)
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
-    }
-
-    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ Level> + '_ {
-        self.levels
-            .values()
-            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
-    }
-
-    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.object_id).collect()
-    }
-
-    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos().map(|s| s.sst_id).collect()
-    }
-
-    pub fn get_sst_infos(&self) -> impl Iterator<Item = &SstableInfo> {
-        self.get_combined_levels()
-            .flat_map(|level| level.table_infos.iter())
-            .chain(self.table_change_log.values().flat_map(|change_log| {
-                change_log.0.iter().flat_map(|epoch_change_log| {
-                    epoch_change_log
-                        .old_value
-                        .iter()
-                        .chain(epoch_change_log.new_value.iter())
-                })
-            }))
     }
 
     // only scan the sst infos from levels in the specified compaction group (without table change log)
@@ -859,9 +833,7 @@ impl HummockVersion {
 
         group_split::merge_levels(left_levels, right_levels);
     }
-}
 
-impl HummockVersionCommon<SstableInfo> {
     pub fn init_with_parent_group_v2(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -990,6 +962,38 @@ impl HummockVersionCommon<SstableInfo> {
             .sub_levels
             .iter()
             .all(|level| !level.table_infos.is_empty()));
+    }
+}
+
+impl<T> HummockVersionCommon<T>
+where
+    T: SstableIdReader + ObjectIdReader,
+{
+    pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
+        self.levels
+            .values()
+            .flat_map(|level| level.l0.sub_levels.iter().rev().chain(level.levels.iter()))
+    }
+
+    pub fn get_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.object_id()).collect()
+    }
+
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
+        self.get_sst_infos().map(|s| s.sst_id()).collect()
+    }
+
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
+        self.get_combined_levels()
+            .flat_map(|level| level.table_infos.iter())
+            .chain(self.table_change_log.values().flat_map(|change_log| {
+                change_log.0.iter().flat_map(|epoch_change_log| {
+                    epoch_change_log
+                        .old_value
+                        .iter()
+                        .chain(epoch_change_log.new_value.iter())
+                })
+            }))
     }
 }
 
