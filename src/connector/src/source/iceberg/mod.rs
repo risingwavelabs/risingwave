@@ -69,7 +69,7 @@ impl IcebergProperties {
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
-            .create_catalog_v2(&None, &java_catalog_props)
+            .create_catalog_v2(&java_catalog_props)
             .await
     }
 

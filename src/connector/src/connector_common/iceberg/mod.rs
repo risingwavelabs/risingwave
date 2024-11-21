@@ -186,7 +186,9 @@ impl IcebergCommon {
 
             java_catalog_configs.insert("uri".to_string(), catalog_uri.to_string());
 
-            java_catalog_configs.insert("warehouse".to_string(), self.warehouse_path.clone());
+            if let Some(warehouse_path) = &self.warehouse_path {
+                java_catalog_configs.insert("warehouse".to_string(), warehouse_path.clone());
+            }
             java_catalog_configs.extend(java_catalog_props.clone());
 
             // Currently we only support s3, so let's set it to s3

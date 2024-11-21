@@ -1319,7 +1319,7 @@ pub async fn handle_create_table(
             };
 
             let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                bail!("To create an iceberg engine table, AWS_BUCKET needed to be set");
+                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
             };
 
             let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
@@ -1472,7 +1472,7 @@ pub async fn handle_create_table(
                 MetaBackend::Sqlite => {
                     format!("jdbc:sqlite:{}", meta_store_database.clone())
                 }
-                MetaBackend::Etcd | MetaBackend::Sql | MetaBackend::Mem => {
+                MetaBackend::Sql | MetaBackend::Mem => {
                     bail!(
                         "Unsupported meta backend for iceberg engine table: {}",
                         meta_store_backend
