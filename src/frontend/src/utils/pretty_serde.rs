@@ -28,7 +28,9 @@ use pretty_xmlish::Pretty;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Serialize, Serializer};
 
-pub struct PrettySerde<'a>(pub Pretty<'a>);
+// Second anymous field is include_children.
+// If true the children information will be serialized.
+pub struct PrettySerde<'a>(pub Pretty<'a>, pub bool);
 
 impl Serialize for PrettySerde<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -46,31 +48,33 @@ impl Serialize for PrettySerde<'_> {
                     &node
                         .fields
                         .iter()
-                        .map(|(k, v)| (k.as_ref(), PrettySerde(v.clone())))
+                        .map(|(k, v)| (k.as_ref(), PrettySerde(v.clone(), self.1)))
                         .collect::<BTreeMap<_, _>>(),
                 )?;
-                state.serialize_field(
-                    "children",
-                    &node
-                        .children
-                        .iter()
-                        .map(|c| PrettySerde(c.clone()))
-                        .collect::<Vec<_>>(),
-                )?;
+                if self.1 {
+                    state.serialize_field(
+                        "children",
+                        &node
+                            .children
+                            .iter()
+                            .map(|c| PrettySerde(c.clone(), self.1))
+                            .collect::<Vec<_>>(),
+                    )?;
+                }
                 state.end()
             }
 
             Pretty::Array(elements) => {
                 let mut seq = serializer.serialize_seq(Some(elements.len()))?;
                 for element in elements {
-                    seq.serialize_element(&PrettySerde((*element).clone()))?;
+                    seq.serialize_element(&PrettySerde((*element).clone(), self.1))?;
                 }
                 seq.end()
             }
 
             Pretty::Linearized(inner, size) => {
                 let mut state = serializer.serialize_struct("Linearized", 2)?;
-                state.serialize_field("inner", &PrettySerde((**inner).clone()))?;
+                state.serialize_field("inner", &PrettySerde((**inner).clone(), self.1))?;
                 state.serialize_field("size", size)?;
                 state.end()
             }
@@ -94,7 +98,7 @@ mod tests {
     #[test]
     fn test_pretty_serde() {
         let pretty = Pretty::childless_record("root", vec![("a", Pretty::Text("1".into()))]);
-        let pretty_serde = PrettySerde(pretty);
+        let pretty_serde = PrettySerde(pretty, true);
         let serialized = serde_json::to_string(&pretty_serde).unwrap();
         check(
             serialized,
