@@ -80,10 +80,9 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
     Ok(Timestamptz::from_micros(usec))
 }
 
-#[function("timezone(varchar, timestamp) -> timestamp")]
-pub fn timezone_timestamp_at_time_zone(time_zone: &str, input: Timestamp) -> Result<Timestamp> {
+#[function("timezone(varchar, timestamp) -> timestamptz")]
+pub fn timezone_timestamp_at_time_zone(time_zone: &str, input: Timestamp) -> Result<Timestamptz> {
     timestamp_at_time_zone(input, time_zone)
-        .map(|timestamptz| timestamptz.to_datetime_utc().naive_utc().into())
 }
 
 #[function("timezone(varchar, timestamptz) -> timestamp")]

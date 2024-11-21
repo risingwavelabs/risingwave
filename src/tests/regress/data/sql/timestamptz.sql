@@ -480,41 +480,21 @@ SELECT '2014-10-26 01:00:00'::timestamp AT TIME ZONE 'MSK';
 SELECT '2014-10-26 01:00:01'::timestamp AT TIME ZONE 'MSK';
 SELECT '2014-10-26 02:00:00'::timestamp AT TIME ZONE 'MSK';
 
-SELECT timezone('Asia/Shanghai', '2024-11-20 20:00:00 UTC'::timestamptz);
-SELECT timezone('Asia/Shanghai', '2023-02-28 20:00:00 UTC'::timestamptz);
-SELECT timezone('Asia/Shanghai', '2024-02-28 20:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-27 02:00:00'::timestamp);
+SELECT timezone('Europe/Moscow', '2011-03-27 02:59:59'::timestamp);
+SELECT timezone('Europe/Moscow', '2011-03-27 03:00:00'::timestamp);
 
-SELECT timezone('Europe/Moscow', '2011-03-26 22:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-26 22:59:59 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-26 23:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-26 23:00:01 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-27 01:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-27 02:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-27 02:59:59 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2011-03-27 03:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-27 02:00:00'::timestamp);
+SELECT timezone('MSK', '2011-03-27 02:59:59'::timestamp);
+SELECT timezone('MSK', '2011-03-27 03:00:00'::timestamp);
 
-SELECT timezone('MSK', '2011-03-26 22:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-26 22:59:59 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-26 23:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-26 23:00:01 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-27 01:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-27 02:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-27 02:59:59 UTC'::timestamptz);
-SELECT timezone('MSK', '2011-03-27 03:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-26 00:59:59'::timestamp);
+SELECT timezone('Europe/Moscow', '2014-10-26 01:00:00'::timestamp);
+SELECT timezone('Europe/Moscow', '2014-10-26 01:00:01'::timestamp);
 
-SELECT timezone('Europe/Moscow', '2014-10-25 21:59:59 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2014-10-25 22:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2014-10-25 22:59:59 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2014-10-25 23:00:00 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2014-10-25 23:00:01 UTC'::timestamptz);
-SELECT timezone('Europe/Moscow', '2014-10-26 02:00:01 UTC'::timestamptz);
-
-SELECT timezone('MSK', '2014-10-25 21:59:59 UTC'::timestamptz);
-SELECT timezone('MSK', '2014-10-25 22:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2014-10-25 22:59:59 UTC'::timestamptz);
-SELECT timezone('MSK', '2014-10-25 23:00:00 UTC'::timestamptz);
-SELECT timezone('MSK', '2014-10-25 23:00:01 UTC'::timestamptz);
-SELECT timezone('MSK', '2014-10-26 02:00:01 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-26 00:59:59'::timestamp);
+SELECT timezone('MSK', '2014-10-26 01:00:00'::timestamp);
+SELECT timezone('MSK', '2014-10-26 01:00:01'::timestamp);
 
 SELECT make_timestamptz(2014, 10, 26, 0, 0, 0, 'MSK');
 SELECT make_timestamptz(2014, 10, 26, 1, 0, 0, 'MSK');
@@ -576,6 +556,42 @@ SELECT '2014-10-25 21:59:59 UTC'::timestamptz AT TIME ZONE 'MSK';
 SELECT '2014-10-25 22:00:00 UTC'::timestamptz AT TIME ZONE 'MSK';
 SELECT '2014-10-25 22:00:01 UTC'::timestamptz AT TIME ZONE 'MSK';
 SELECT '2014-10-25 23:00:00 UTC'::timestamptz AT TIME ZONE 'MSK';
+
+SELECT timezone('Asia/Shanghai', '2024-11-20 20:00:00 UTC'::timestamptz);
+SELECT timezone('Asia/Shanghai', '2023-02-28 20:00:00 UTC'::timestamptz);
+SELECT timezone('Asia/Shanghai', '2024-02-28 20:00:00 UTC'::timestamptz);
+
+SELECT timezone('Europe/Moscow', '2011-03-26 22:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-26 22:59:59 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-26 23:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-26 23:00:01 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-27 01:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-27 02:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-27 02:59:59 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2011-03-27 03:00:00 UTC'::timestamptz);
+
+SELECT timezone('MSK', '2011-03-26 22:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-26 22:59:59 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-26 23:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-26 23:00:01 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-27 01:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-27 02:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-27 02:59:59 UTC'::timestamptz);
+SELECT timezone('MSK', '2011-03-27 03:00:00 UTC'::timestamptz);
+
+SELECT timezone('Europe/Moscow', '2014-10-25 21:59:59 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-25 22:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-25 22:59:59 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-25 23:00:00 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-25 23:00:01 UTC'::timestamptz);
+SELECT timezone('Europe/Moscow', '2014-10-26 02:00:01 UTC'::timestamptz);
+
+SELECT timezone('MSK', '2014-10-25 21:59:59 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-25 22:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-25 22:59:59 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-25 23:00:00 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-25 23:00:01 UTC'::timestamptz);
+SELECT timezone('MSK', '2014-10-26 02:00:01 UTC'::timestamptz);
 
 --
 -- Test that AT TIME ZONE isn't misoptimized when using an index (bug #14504)
