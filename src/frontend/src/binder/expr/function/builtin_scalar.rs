@@ -210,7 +210,7 @@ impl Binder {
                 ("scale", raw_call(ExprType::Scale)),
                 ("min_scale", raw_call(ExprType::MinScale)),
                 ("trim_scale", raw_call(ExprType::TrimScale)),
-
+                // date and time
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -223,8 +223,9 @@ impl Binder {
                 ("make_date", raw_call(ExprType::MakeDate)),
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
-                ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
+                ("timezone", raw_call(ExprType::Timezone)),
+                ("to_date", raw_call(ExprType::CharToDate)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),

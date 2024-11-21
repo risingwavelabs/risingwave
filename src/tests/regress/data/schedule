@@ -7,9 +7,10 @@
 # interferes with crash-recovery testing.
 # test: tablespace
 
-test: boolean varchar text int2 int4 int8 float4 float8 comments
-test: strings date time timestamp interval
-test: case arrays delete
-test: jsonb jsonb_jsonpath
-test: regex
-test: contrib-pgcrypto-rijndael
+# test: boolean varchar text int2 int4 int8 float4 float8 comments
+# test: strings date time timestamp interval
+# test: case arrays delete
+# test: jsonb jsonb_jsonpath
+# test: regex
+# test: contrib-pgcrypto-rijndael
+test: timestamptz

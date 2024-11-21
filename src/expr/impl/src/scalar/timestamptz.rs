@@ -41,6 +41,14 @@ pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     Ok(Timestamptz::from_micros(micros))
 }
 
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
+pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
+    let instant_local = input.to_datetime_in_zone(time_zone);
+    let naive = instant_local.naive_local();
+    Ok(Timestamp(naive))
+}
+
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
 pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
@@ -72,6 +80,17 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
     Ok(Timestamptz::from_micros(usec))
 }
 
+#[function("timezone(varchar, timestamp) -> timestamp")]
+pub fn timezone_timestamp_at_time_zone(time_zone: &str, input: Timestamp) -> Result<Timestamp> {
+    timestamp_at_time_zone(input, time_zone)
+        .map(|timestamptz| timestamptz.to_datetime_utc().naive_utc().into())
+}
+
+#[function("timezone(varchar, timestamptz) -> timestamp")]
+pub fn timezone_timestamptz_at_time_zone(time_zone: &str, input: Timestamptz) -> Result<Timestamp> {
+    timestamptz_at_time_zone(input, time_zone)
+}
+
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(
     elem: Timestamptz,
@@ -94,14 +113,6 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
             time_zone,
         )
     })
-}
-
-#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
-pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
-    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
-    let instant_local = input.to_datetime_in_zone(time_zone);
-    let naive = instant_local.naive_local();
-    Ok(Timestamp(naive))
 }
 
 /// This operation is zone agnostic.
@@ -227,6 +238,12 @@ mod tests {
                 .zip_eq_fast(zones)
                 .for_each(|(local, zone)| {
                     let local = local.parse().unwrap();
+
+                    let actual = timezone_timestamptz_at_time_zone(zone, usecs).unwrap();
+                    assert_eq!(local, actual);
+
+                    let actual = timezone_timestamp_at_time_zone(zone, local).unwrap();
+                    assert_eq!(Timestamp::from(usecs.to_datetime_utc().naive_utc()), actual);
 
                     let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
                     assert_eq!(local, actual);

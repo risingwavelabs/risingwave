@@ -70,6 +70,7 @@ message ExprNode {
     ADD_WITH_TIME_ZONE = 109;
     SUBTRACT_WITH_TIME_ZONE = 110;
     MAKE_TIMESTAMPTZ = 112;
+    Timezone = 116;
     // other functions
     CAST = 201;
     SUBSTR = 202;

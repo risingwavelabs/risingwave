@@ -135,6 +135,7 @@ impl Strong {
             | ExprType::CastWithTimeZone
             | ExprType::SubtractWithTimeZone
             | ExprType::MakeTimestamptz
+            | ExprType::Timezone
             | ExprType::Substr
             | ExprType::Length
             | ExprType::ILike
