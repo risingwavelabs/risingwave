@@ -71,7 +71,7 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
-    /// enable config load currently is used by nimtable, so it only support jdbc catalog.
+    /// enable config load currently is used by iceberg engine, so it only support jdbc catalog.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
 }
@@ -127,7 +127,12 @@ impl IcebergCommon {
             let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
                 bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
             };
-            let warehouse_path = format!("s3://{}/{}/nimtable/{}", s3_bucket, data_directory, self.database_name.clone().unwrap());
+            let warehouse_path = format!(
+                "s3://{}/{}/iceberg/{}",
+                s3_bucket,
+                data_directory,
+                self.database_name.clone().unwrap()
+            );
 
             let (bucket, _) = {
                 let url = Url::parse(&warehouse_path)

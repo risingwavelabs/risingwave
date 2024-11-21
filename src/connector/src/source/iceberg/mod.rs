@@ -68,9 +68,7 @@ impl IcebergProperties {
             java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
-        self.common
-            .create_catalog_v2(&java_catalog_props)
-            .await
+        self.common.create_catalog_v2(&java_catalog_props).await
     }
 
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {

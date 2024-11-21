@@ -46,7 +46,11 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions, Ident, ObjectName, OnConflict, SourceWatermark, Statement, TableConstraint, WithProperties};
+use risingwave_sqlparser::ast::{
+    CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement,
+    CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions,
+    Ident, ObjectName, OnConflict, SourceWatermark, Statement, TableConstraint, WithProperties,
+};
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
@@ -1293,14 +1297,14 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            let nimtable_enable_config_load = if let Ok(nimtable_enable_config_load) =
-                std::env::var("NIMTABLE_ENABLE_CONFIG_LOAD")
+            let iceberg_enable_config_load = if let Ok(iceberg_enable_config_load) =
+                std::env::var("ICEBERG_ENABLE_CONFIG_LOAD")
             {
-                nimtable_enable_config_load
+                iceberg_enable_config_load
                     .parse()
                     .map_err(|e: ParseBoolError| {
                         RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "NIMTABLE_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
+                            "ICEBERG_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
                             e.as_report()
                         )))
                     })?
@@ -1328,7 +1332,7 @@ pub async fn handle_create_table(
 
             let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
                 s3_ak
-            } else if nimtable_enable_config_load {
+            } else if iceberg_enable_config_load {
                 // Since config load is enabled, we will use a placeholder for iceberg sink and source
                 "xxx".to_string()
             } else {
@@ -1337,7 +1341,7 @@ pub async fn handle_create_table(
 
             let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
                 s3_sk
-            } else if nimtable_enable_config_load {
+            } else if iceberg_enable_config_load {
                 // Since config load is enabled, we will use a placeholder for iceberg sink and source
                 "xxx".to_string()
             } else {
@@ -1480,7 +1484,10 @@ pub async fn handle_create_table(
                 }
             };
 
-            let warehouse_path = format!("s3://{}/{}/nimtable/{}", s3_bucket, data_directory, iceberg_catalog_name);
+            let warehouse_path = format!(
+                "s3://{}/{}/iceberg/{}",
+                s3_bucket, data_directory, iceberg_catalog_name
+            );
 
             let mut sink_handler_args = handler_args.clone();
             let mut with = BTreeMap::new();
@@ -1507,7 +1514,7 @@ pub async fn handle_create_table(
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
             with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
-            if nimtable_enable_config_load {
+            if iceberg_enable_config_load {
                 with.insert("enable_config_load".to_string(), "true".to_string());
             }
             sink_handler_args.with_options = WithOptions::new_with_options(with);
@@ -1550,7 +1557,7 @@ pub async fn handle_create_table(
             with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
             with.insert("database.name".to_string(), iceberg_database_name.clone());
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
-            if nimtable_enable_config_load {
+            if iceberg_enable_config_load {
                 with.insert("enable_config_load".to_string(), "true".to_string());
             }
             source_handler_args.with_options = WithOptions::new_with_options(with);

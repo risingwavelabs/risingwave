@@ -214,7 +214,7 @@ pub async fn get_replace_table_plan(
         cdc_table_info,
         new_version_columns,
         include_column_options,
-        engine
+        engine,
     )
     .await?;
 

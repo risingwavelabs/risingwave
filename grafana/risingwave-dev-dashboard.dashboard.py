@@ -4179,7 +4179,7 @@ def section_iceberg_metrics(outer_panels):
                             "read @ {{table_name}}",
                         ),
                         panels.target(
-                            f"sum({metric('nimtable_read_bytes')})",
+                            f"sum({metric('iceberg_read_bytes')})",
                             "total read",
                         ),
                     ],

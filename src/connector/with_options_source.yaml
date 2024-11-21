@@ -121,7 +121,7 @@ IcebergProperties:
     field_type: bool
   - name: enable_config_load
     field_type: bool
-    comments: enable config load currently is used by nimtable, so it only support jdbc catalog.
+    comments: enable config load currently is used by iceberg engine, so it only support jdbc catalog.
     required: false
     default: Default::default
   - name: catalog.jdbc.user

@@ -130,7 +130,7 @@ profile:
 
   iceberg:
     env:
-      NIMTABLE_ENABLE_CONFIG_LOAD: "false"
+      ICEBERG_ENABLE_CONFIG_LOAD: "false"
       AWS_ENDPOINT_URL: "http://127.0.0.1:9301"
       AWS_REGION: "ap-southeast-2"
       AWS_S3_BUCKET: "hummock001"
