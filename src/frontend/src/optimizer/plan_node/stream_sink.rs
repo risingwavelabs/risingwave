@@ -236,6 +236,7 @@ impl StreamSink {
         db_name: String,
         sink_from_table_name: String,
         target_table: Option<Arc<TableCatalog>>,
+        target_table_mapping: Option<Vec<Option<usize>>>,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,

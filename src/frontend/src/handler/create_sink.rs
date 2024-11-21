@@ -235,6 +235,7 @@ pub async fn gen_sink_plan(
         without_backfill,
         target_table_catalog.clone(),
         partition_info,
+        user_specified_columns,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
