@@ -99,7 +99,7 @@ update t set (v1, v2) = (select '888.88', 999);
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: cannot cast type "record" to "record" in Assign context
+  1: cannot cast type "record" to "record"
   2: cannot cast type "character varying" to "integer" in Assign context
 
 

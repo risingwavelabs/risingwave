@@ -87,7 +87,7 @@
     Failed to bind expression: CAST(CAST('[]' AS INT[]) AS BYTEA[])
 
     Caused by these errors (recent errors listed first):
-      1: cannot cast type "integer[]" to "bytea[]" in Explicit context
+      1: cannot cast type "integer[]" to "bytea[]"
       2: cannot cast type "integer" to "bytea" in Explicit context
 - name: composite type cast error message (struct)
   sql: |
@@ -97,9 +97,11 @@
     Failed to bind expression: CAST(v AS STRUCT<d STRUCT<e BYTEA>, f BOOLEAN>)
 
     Caused by these errors (recent errors listed first):
-      1: cannot cast type "struct<a struct<b integer>, c boolean>" to "struct<d struct<e bytea>, f boolean>" in Explicit context
-      2: cannot cast type "struct<b integer>" to "struct<e bytea>" in Explicit context
-      3: cannot cast type "integer" to "bytea" in Explicit context
+      1: cannot cast type "struct<a struct<b integer>, c boolean>" to "struct<d struct<e bytea>, f boolean>"
+      2: cannot cast struct field "a" to struct field "d"
+      3: cannot cast type "struct<b integer>" to "struct<e bytea>"
+      4: cannot cast struct field "b" to struct field "e"
+      5: cannot cast type "integer" to "bytea" in Explicit context
 - name: composite type cast error message (map)
   sql: |
     create table t (v map(int, int));
@@ -108,7 +110,6 @@
     Failed to bind expression: CAST(v AS MAP(INT,BYTEA))
 
     Caused by these errors (recent errors listed first):
-      1: cannot cast type "map(integer,integer)" to "map(integer,bytea)" in Explicit context
-      2: cannot cast type "struct<key integer, value integer>[]" to "struct<key integer, value bytea>[]" in Explicit context
-      3: cannot cast type "struct<key integer, value integer>" to "struct<key integer, value bytea>" in Explicit context
-      4: cannot cast type "integer" to "bytea" in Explicit context
+      1: cannot cast type "map(integer,integer)" to "map(integer,bytea)"
+      2: cannot cast map value
+      3: cannot cast type "integer" to "bytea" in Explicit context

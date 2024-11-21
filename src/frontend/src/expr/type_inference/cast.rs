@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::sync::LazyLock;
 
 use itertools::Itertools as _;
 use parse_display::Display;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 use crate::error::ErrorCode;
 use crate::expr::function_call::{bail_cast_error, cast_error, CastError, CastResult};
@@ -148,12 +149,18 @@ pub fn cast(source: &DataType, target: &DataType, allows: CastContext) -> Result
         canmeh(cast_ok_base(source, target, allows))
     }
     .map_err(|inner| {
+        // Only show "in .. context" once in the error source chain.
+        let in_context = if inner.source().is_none() {
+            &format!(" in {:?} context", allows)
+        } else {
+            ""
+        };
         cast_error!(
             source = inner,
-            "cannot cast type \"{}\" to \"{}\" in {:?} context",
+            "cannot cast type \"{}\" to \"{}\"{}",
             source,
             target,
-            allows
+            in_context,
         )
     })
 }
@@ -181,15 +188,32 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
                 bail_cast_error!("cannot cast structs of different lengths");
             }
             // ... and all fields are castable
-            lty.types()
-                .zip_eq_fast(rty.types())
-                .try_for_each(|(src, dst)| {
-                    if src == dst {
+            lty.iter().zip_eq_debug(rty.iter()).try_for_each(
+                |((src_name, src_ty), (dst_name, dst_ty))| {
+                    if src_ty == dst_ty {
                         Ok(())
                     } else {
-                        cast(src, dst, allows)
+                        cast(src_ty, dst_ty, allows).map_err(|inner| {
+                            if src_name.is_empty() {
+                                inner
+                            } else if dst_name.is_empty() {
+                                cast_error!(
+                                    source = inner,
+                                    "cannot cast struct field \"{}\"",
+                                    src_name
+                                )
+                            } else {
+                                cast_error!(
+                                    source = inner,
+                                    "cannot cast struct field \"{}\" to struct field \"{}\"",
+                                    src_name,
+                                    dst_name
+                                )
+                            }
+                        })
                     }
-                })
+                },
+            )
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
@@ -216,11 +240,17 @@ fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> Cast
 
 fn cast_map(source: &DataType, target: &DataType, allows: CastContext) -> CastResult {
     match (source, target) {
-        (DataType::Map(source_elem), DataType::Map(target_elem)) => cast(
-            &source_elem.clone().into_list(),
-            &target_elem.clone().into_list(),
-            allows,
-        ),
+        (DataType::Map(source_elem), DataType::Map(target_elem)) => {
+            if source_elem.key() != target_elem.key() {
+                cast(source_elem.key(), target_elem.key(), allows)
+                    .map_err(|inner| cast_error!(source = inner, "cannot cast map key"))?;
+            }
+            if source_elem.value() != target_elem.value() {
+                cast(source_elem.value(), target_elem.value(), allows)
+                    .map_err(|inner| cast_error!(source = inner, "cannot cast map value"))?;
+            }
+            Ok(())
+        }
         _ => cannot(),
     }
 }
