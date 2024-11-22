@@ -962,8 +962,7 @@ impl PlanRoot {
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
-            let columns = t.columns();
-            self.target_columns_to_plan_mapping(&columns, user_specified_columns)
+            self.target_columns_to_plan_mapping(t.columns(), user_specified_columns)
         });
         StreamSink::create(
             stream_plan,
