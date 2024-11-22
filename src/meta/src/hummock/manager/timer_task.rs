@@ -316,20 +316,23 @@ impl HummockManager {
                                                     .table_stat_throuput_window_seconds_for_merge,
                                             );
                                             for table_id in group_info.table_statistic.keys() {
-                                                let statistic_vec = tables_throughput
+                                                let statistic_iter = tables_throughput
                                                     .get_table_throughput(
                                                         *table_id,
                                                         max_statistic_expired_time as i64,
                                                     );
-                                                if !statistic_vec.is_empty() {
-                                                    let table_avg_throughput = statistic_vec
-                                                        .iter()
-                                                        .map(|statistic| statistic.throughput)
-                                                        .sum::<u64>()
-                                                        / statistic_vec.len() as u64;
 
-                                                    avg_throuput += table_avg_throughput;
+                                                let (sum, count) =
+                                                    statistic_iter.fold((0, 0), |acc, item| {
+                                                        (acc.0 + item.throughput, acc.1 + 1)
+                                                    });
+
+                                                if count == 0 {
+                                                    continue;
                                                 }
+
+                                                let table_avg_throughput = sum / count;
+                                                avg_throuput += table_avg_throughput;
                                             }
 
                                             hummock_manager

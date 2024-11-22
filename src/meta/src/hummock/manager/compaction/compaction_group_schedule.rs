@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -744,44 +744,48 @@ impl HummockManager {
         _table_size: &u64,
         parent_group_id: u64,
     ) {
-        let table_throughput = table_write_throughput_statistic_manager.get_table_throughput(
-            table_id,
-            self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
+        let mut table_throughput = table_write_throughput_statistic_manager
+            .get_table_throughput(
+                table_id,
+                self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
+            )
+            .peekable();
+
+        if table_throughput.peek().is_none() {
+            return;
+        }
+
+        let is_high_write_throughput = is_table_high_write_throughput(
+            table_throughput,
+            self.env.opts.table_high_write_throughput_threshold,
+            self.env
+                .opts
+                .table_stat_high_write_throughput_ratio_for_split,
         );
 
-        if !table_throughput.is_empty() {
-            let is_high_write_throughput = is_table_high_write_throughput(
-                table_throughput,
-                self.env.opts.table_high_write_throughput_threshold,
-                self.env
-                    .opts
-                    .table_stat_high_write_throughput_ratio_for_split,
-            );
+        // do not split a table to dedicated compaction group if it is not high write throughput
+        if !is_high_write_throughput {
+            return;
+        }
 
-            // do not split a table to dedicated compaction group if it is not high write throughput
-            if !is_high_write_throughput {
-                return;
+        let ret = self
+            .move_state_tables_to_dedicated_compaction_group(
+                parent_group_id,
+                &[table_id],
+                Some(self.env.opts.partition_vnode_count),
+            )
+            .await;
+        match ret {
+            Ok(split_result) => {
+                tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
             }
-
-            let ret = self
-                .move_state_tables_to_dedicated_compaction_group(
+            Err(e) => {
+                tracing::info!(
+                    error = %e.as_report(),
+                    "failed to split state table [{}] from group-{}",
+                    table_id,
                     parent_group_id,
-                    &[table_id],
-                    Some(self.env.opts.partition_vnode_count),
                 )
-                .await;
-            match ret {
-                Ok(split_result) => {
-                    tracing::info!("split state table [{}] from group-{} success table_vnode_partition_count {:?} split result {:?}", table_id, parent_group_id, self.env.opts.partition_vnode_count, split_result);
-                }
-                Err(e) => {
-                    tracing::info!(
-                        error = %e.as_report(),
-                        "failed to split state table [{}] from group-{}",
-                        table_id,
-                        parent_group_id,
-                    )
-                }
             }
         }
     }
@@ -959,13 +963,14 @@ impl HummockManager {
 
 /// Check if the table is high write throughput with the given threshold and ratio.
 pub fn is_table_high_write_throughput(
-    table_throughput: VecDeque<&TableWriteThroughputStatistic>,
+    table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
     threshold: u64,
     high_write_throughput_ratio: f64,
 ) -> bool {
-    let sample_size = table_throughput.len();
+    let mut sample_size = 0;
     let mut high_write_throughput_count = 0;
     for statistic in table_throughput {
+        sample_size += 1;
         if statistic.throughput > threshold {
             high_write_throughput_count += 1;
         }
@@ -975,13 +980,14 @@ pub fn is_table_high_write_throughput(
 }
 
 pub fn is_table_low_write_throughput(
-    table_throughput: VecDeque<&TableWriteThroughputStatistic>,
+    table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
     threshold: u64,
     low_write_throughput_ratio: f64,
 ) -> bool {
-    let sample_size = table_throughput.len();
+    let mut sample_size = 0;
     let mut low_write_throughput_count = 0;
     for statistic in table_throughput {
+        sample_size += 1;
         if statistic.throughput <= threshold {
             low_write_throughput_count += 1;
         }
@@ -995,24 +1001,20 @@ fn check_is_low_write_throughput_compaction_group(
     group: &CompactionGroupStatistic,
     opts: &Arc<MetaOpts>,
 ) -> bool {
-    let table_with_statistic: Vec<_> = group
-        .table_statistic
-        .keys()
-        .cloned()
-        .filter_map(|table_id| {
-            let table_write_throughput_statistic = table_write_throughput_statistic_manager
-                .get_table_throughput(
-                    table_id,
-                    opts.table_stat_throuput_window_seconds_for_merge as i64,
-                );
+    let mut table_with_statistic = Vec::with_capacity(group.table_statistic.len());
+    for table_id in group.table_statistic.keys() {
+        let mut table_throughput = table_write_throughput_statistic_manager
+            .get_table_throughput(
+                *table_id,
+                opts.table_stat_throuput_window_seconds_for_merge as i64,
+            )
+            .peekable();
+        if table_throughput.peek().is_none() {
+            continue;
+        }
 
-            if table_write_throughput_statistic.is_empty() {
-                None
-            } else {
-                Some(table_write_throughput_statistic)
-            }
-        })
-        .collect();
+        table_with_statistic.push(table_throughput);
+    }
 
     // if all tables in the group do not have enough statistics, return true
     if table_with_statistic.is_empty() {

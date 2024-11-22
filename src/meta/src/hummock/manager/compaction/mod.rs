@@ -1478,7 +1478,7 @@ impl HummockManager {
             for (table_id, compact_table_size) in table_size_info {
                 let write_throughput = history_table_throughput_guard
                     .get_table_throughput(table_id, timestamp)
-                    .back()
+                    .last()
                     .map(|item| item.throughput)
                     .unwrap_or(0);
                 if compact_table_size > compact_task_table_size_partition_threshold_high
