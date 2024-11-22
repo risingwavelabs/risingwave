@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
@@ -234,8 +234,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let target_table = target_table_catalog.as_ref().map(|catalog| catalog.id());
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -245,8 +243,9 @@ pub async fn gen_sink_plan(
         sink_from_table_name,
         format_desc,
         without_backfill,
-        target_table,
+        target_table_catalog.clone(),
         partition_info,
+        user_specified_columns,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -276,18 +275,6 @@ pub async fn gen_sink_plan(
             if column.is_generated() {
                 unreachable!("can not derive generated columns in a sink's catalog, but meet one");
             }
-        }
-
-        let user_defined_primary_key_table =
-            !(table_catalog.append_only || table_catalog.row_id_index.is_some());
-
-        if !(user_defined_primary_key_table
-            || sink_catalog.sink_type == SinkType::AppendOnly
-            || sink_catalog.sink_type == SinkType::ForceAppendOnly)
-        {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys.".to_string(),
-            )));
         }
 
         let exprs = derive_default_column_project_for_sink(
