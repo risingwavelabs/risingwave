@@ -85,6 +85,7 @@ enum ComputeCommands {
     ShowConfig { host: String },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node

@@ -70,8 +70,8 @@ pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetr
 
 impl MonitoredStorageMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
-        // 256B ~ max 4GB
-        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 256B ~ max 64GB
+        let size_buckets = exponential_buckets(256.0, 16.0, 8).unwrap();
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----

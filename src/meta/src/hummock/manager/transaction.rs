@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
@@ -24,11 +23,12 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, GroupConstruct, HummockVersionDeltas,
-    HummockVersionStats, StateTableInfoDelta,
+    CompatibilityVersion, GroupConstruct, HummockVersionDeltas, HummockVersionStats,
+    StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
+use crate::hummock::model::CompactionGroup;
 use crate::manager::NotificationManager;
 use crate::model::{
     InMemValTransaction, MetadataModelResult, Transactional, ValTransaction, VarTransaction,
@@ -111,8 +111,8 @@ impl<'a> HummockVersionTransaction<'a> {
     pub(super) fn pre_commit_epoch(
         &mut self,
         tables_to_commit: &HashMap<TableId, u64>,
-        new_compaction_groups: HashMap<CompactionGroupId, Arc<CompactionConfig>>,
-        commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
+        new_compaction_groups: Vec<CompactionGroup>,
+        group_id_to_sub_levels: BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
@@ -121,38 +121,36 @@ impl<'a> HummockVersionTransaction<'a> {
         new_version_delta.new_table_watermarks = new_table_watermarks;
         new_version_delta.change_log_delta = change_log_delta;
 
-        for (compaction_group_id, compaction_group_config) in new_compaction_groups {
-            {
-                let group_deltas = &mut new_version_delta
-                    .group_deltas
-                    .entry(compaction_group_id)
-                    .or_default()
-                    .group_deltas;
+        for compaction_group in &new_compaction_groups {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(compaction_group.group_id())
+                .or_default()
+                .group_deltas;
 
-                #[expect(deprecated)]
-                group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
-                    group_config: Some((*compaction_group_config).clone()),
-                    group_id: compaction_group_id,
-                    parent_group_id: StaticCompactionGroupId::NewCompactionGroup
-                        as CompactionGroupId,
-                    new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
-                    table_ids: vec![],
-                    version: CompatibilityVersion::SplitGroupByTableId as i32,
-                    split_key: None,
-                }));
-            }
+            #[expect(deprecated)]
+            group_deltas.push(GroupDelta::GroupConstruct(GroupConstruct {
+                group_config: Some(compaction_group.compaction_config().as_ref().clone()),
+                group_id: compaction_group.group_id(),
+                parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
+                new_sst_start_id: 0, // No need to set it when `NewCompactionGroup`
+                table_ids: vec![],
+                version: CompatibilityVersion::SplitGroupByTableId as i32,
+                split_key: None,
+            }));
         }
 
         // Append SSTs to a new version.
-        for (compaction_group_id, inserted_table_infos) in commit_sstables {
+        for (compaction_group_id, sub_levels) in group_id_to_sub_levels {
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
-            let group_delta = GroupDelta::NewL0SubLevel(inserted_table_infos);
 
-            group_deltas.push(group_delta);
+            for sub_level in sub_levels {
+                group_deltas.push(GroupDelta::NewL0SubLevel(sub_level));
+            }
         }
 
         // update state table info
