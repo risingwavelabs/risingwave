@@ -483,7 +483,7 @@ fn rewrite_commit_sstables_to_sub_level(
             }
         }
 
-        if accumulated_size != 0 {
+        if !ssts.is_empty() {
             level.push(ssts);
         }
 
