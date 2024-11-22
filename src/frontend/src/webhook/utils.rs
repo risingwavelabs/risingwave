@@ -63,7 +63,7 @@ impl IntoResponse for WebhookError {
 pub(crate) fn header_map_to_json(headers: &HeaderMap) -> JsonbVal {
     let mut header_map = HashMap::new();
 
-    for (key, value) in headers.iter() {
+    for (key, value) in headers {
         let key = key.as_str().to_string();
         let value = value.to_str().unwrap_or("").to_string();
         header_map.insert(key, value);

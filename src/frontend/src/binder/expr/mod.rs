@@ -95,7 +95,7 @@ impl Binder {
                     // - secret name
                     // - the name of the payload column
                     // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
-                    if ident.real_value() == "headers".to_string() {
+                    if ident.real_value() == *"headers" {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
                     } else if ident.real_value() == ctx.secret_name {
                         Ok(InputRef::new(1, DataType::Varchar).into())
