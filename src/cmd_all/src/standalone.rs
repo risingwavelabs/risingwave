@@ -391,17 +391,9 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
 
 #[cfg(test)]
 mod test {
-    use std::fmt::Debug;
-
-    use expect_test::{expect, Expect};
-
     use super::*;
 
-    fn check(actual: impl Debug, expect: Expect) {
-        let actual = format!("{:#?}", actual);
-        expect.assert_eq(&actual);
-    }
-
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.
