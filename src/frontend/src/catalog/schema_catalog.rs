@@ -46,7 +46,9 @@ pub struct SchemaCatalog {
     id: SchemaId,
     pub name: String,
     pub database_id: DatabaseId,
+    /// Contains [all types of "tables"](super::table_catalog::TableType), not only user tables.
     table_by_name: HashMap<String, Arc<TableCatalog>>,
+    /// Contains [all types of "tables"](super::table_catalog::TableType), not only user tables.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     source_by_name: HashMap<String, Arc<SourceCatalog>>,
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
@@ -564,10 +566,10 @@ impl SchemaCatalog {
         self.table_by_name.values()
     }
 
-    pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+    pub fn iter_user_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_table())
+            .filter(|(_, v)| v.is_user_table())
             .map(|(_, v)| v)
     }
 

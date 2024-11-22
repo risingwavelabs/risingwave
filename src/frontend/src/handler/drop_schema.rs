@@ -62,7 +62,7 @@ pub async fn handle_drop_schema(
     };
     match mode {
         Some(DropMode::Restrict) | None => {
-            if let Some(table) = schema.iter_table().next() {
+            if let Some(table) = schema.iter_user_table().next() {
                 return Err(CatalogError::NotEmpty(
                     "schema",
                     schema_name,
