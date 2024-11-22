@@ -18,6 +18,7 @@
 mod cast;
 mod func;
 pub use cast::{
-    align_types, cast, cast_ok, cast_ok_base, cast_sigs, CastContext, CastSig, CAST_TABLE,
+    align_types, bail_cast_error, cast, cast_error, cast_ok, cast_ok_base, cast_sigs, CastContext,
+    CastError, CastErrorInner, CastSig, CAST_TABLE,
 };
 pub use func::{infer_some_all, infer_type, infer_type_name, infer_type_with_sigmap, FuncSign};

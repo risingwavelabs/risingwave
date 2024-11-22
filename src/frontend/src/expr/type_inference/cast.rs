@@ -20,9 +20,10 @@ use itertools::Itertools as _;
 use parse_display::Display;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use thiserror::Error;
+use thiserror_ext::{Box, Macro};
 
 use crate::error::ErrorCode;
-use crate::expr::function_call::{bail_cast_error, cast_error, CastError, CastResult};
 use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
@@ -115,6 +116,17 @@ pub fn align_array_and_element(
     tracing::trace!(?inputs, "align_array_and_element done");
     Ok(array_type)
 }
+
+/// A stack of error messages for the cast operation.
+#[derive(Error, Debug, Box, Macro)]
+#[thiserror_ext(newtype(name = CastError), macro(path = "crate::expr"))]
+#[error("{message}")]
+pub struct CastErrorInner {
+    pub source: Option<CastError>,
+    pub message: Box<str>,
+}
+
+pub type CastResult<T = ()> = Result<T, CastError>;
 
 /// Returns `Ok` if `ok` is true, otherwise returns a placeholder [`CastError`] to be further
 /// wrapped with a more informative context in [`cast`].

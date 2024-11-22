@@ -16,13 +16,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use thiserror::Error;
-use thiserror_ext::{Box, Macro};
 
 use super::type_inference::cast;
-use super::{infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::error::{ErrorCode, Result as RwResult};
-use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
+use super::{infer_some_all, infer_type, CastContext, CastError, Expr, ExprImpl, Literal};
+use crate::error::Result as RwResult;
+use crate::expr::{bail_cast_error, ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -421,22 +419,4 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
         }
     }
     false
-}
-
-/// A stack of error messages for the cast operation.
-#[derive(Error, Debug, Box, Macro)]
-#[thiserror_ext(newtype(name = CastError), macro(path = "crate::expr::function_call"))]
-#[error("{message}")]
-pub struct CastErrorInner {
-    pub source: Option<CastError>,
-    pub message: Box<str>,
-}
-
-pub type CastResult<T = ()> = Result<T, CastError>;
-
-// TODO(error-handling): shall we make it a new variant?
-impl From<CastError> for ErrorCode {
-    fn from(value: CastError) -> Self {
-        ErrorCode::Uncategorized(value.into())
-    }
 }
