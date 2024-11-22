@@ -11627,6 +11627,7 @@ dependencies = [
  "futures",
  "hex",
  "http 1.1.0",
+ "icelake",
  "itertools 0.13.0",
  "jsonbb",
  "madsim-tokio",

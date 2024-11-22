@@ -37,6 +37,7 @@ function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 http = "1"
+icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 maplit = "1.0.2"

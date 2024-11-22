@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
-use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::{SinkCoordinatorPreCommitMetadata, SinkMetadata};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -124,6 +124,30 @@ impl CoordinationHandleManager {
             handle.ack_commit(epoch).map_err(|_| {
                 anyhow!(
                     "fail to ack commit on epoch {} for handle {}",
+                    epoch,
+                    handle_id
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn ack_pre_commit(
+        &mut self,
+        epoch: u64,
+        handle_ids: impl IntoIterator<Item = usize>,
+    ) -> anyhow::Result<()> {
+        for handle_id in handle_ids {
+            let handle = self.writer_handles.get_mut(&handle_id).ok_or_else(|| {
+                anyhow!(
+                    "fail to find handle for {} when ack commit on epoch {}",
+                    handle_id,
+                    epoch
+                )
+            })?;
+            handle.ack_pre_commit(epoch).map_err(|_| {
+                anyhow!(
+                    "fail to ack pre commit on epoch {} for handle {}",
                     epoch,
                     handle_id
                 )

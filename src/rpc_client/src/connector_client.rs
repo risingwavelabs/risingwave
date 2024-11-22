@@ -142,7 +142,10 @@ impl SinkCoordinatorPreCommitStreamHandle {
         })
         .await?;
         match self.next_response().await? {
-            SinkCoordinatorPreCommitResponse { commit_success } => {
+            SinkCoordinatorPreCommitResponse {
+                commit_success,
+                epoch,
+            } => {
                 if commit_success {
                     Ok(())
                 } else {
@@ -152,10 +155,6 @@ impl SinkCoordinatorPreCommitStreamHandle {
                     )))
                 }
             }
-            msg => Err(RpcError::Internal(anyhow!(
-                "should get Commit response but get {:?}",
-                msg
-            ))),
         }
     }
 }

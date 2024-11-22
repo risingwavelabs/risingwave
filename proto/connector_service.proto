@@ -142,7 +142,8 @@ message SinkCoordinatorPreCommitRequest {
 }
 
 message SinkCoordinatorPreCommitResponse {
-  bool commit_success = 1;
+  uint64 epoch = 1;
+  bool commit_success = 2;
 }
 
 
@@ -260,6 +261,11 @@ message CoordinateRequest {
     SinkMetadata metadata = 2;
   }
 
+  message PreCommitRequest {
+    uint64 epoch = 1;
+    SinkCoordinatorPreCommitMetadata pre_commit_metadata = 2;
+  }
+
   message UpdateVnodeBitmapRequest {
     common.Buffer vnode_bitmap = 1;
   }
@@ -269,6 +275,7 @@ message CoordinateRequest {
     CommitRequest commit_request = 2;
     UpdateVnodeBitmapRequest update_vnode_request = 3;
     bool stop = 4;
+    PreCommitRequest pre_commit_request = 5;
   }
 }
 
@@ -279,9 +286,11 @@ message CoordinateResponse {
     uint64 epoch = 1;
   }
 
+
   oneof msg {
     StartCoordinationResponse start_response = 1;
     CommitResponse commit_response = 2;
+    SinkCoordinatorPreCommitResponse pre_commit_response = 3;
   }
 }
 

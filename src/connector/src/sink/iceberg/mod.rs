@@ -225,7 +225,7 @@ impl Debug for IcebergSink {
 }
 
 impl IcebergSink {
-    async fn create_and_validate_table(&self) -> Result<Table> {
+    pub async fn create_and_validate_table(&self) -> Result<Table> {
         if self.config.create_table_if_not_exists {
             self.create_table_if_not_exists().await?;
         }
@@ -762,7 +762,7 @@ const DATA_FILES: &str = "data_files";
 const DELETE_FILES: &str = "delete_files";
 
 #[derive(Default, Debug)]
-struct WriteResult {
+pub struct WriteResult {
     data_files: Vec<DataFile>,
     delete_files: Vec<DataFile>,
 }
@@ -773,6 +773,55 @@ impl WriteResult {
             let mut values = if let serde_json::Value::Object(v) =
                 serde_json::from_slice::<serde_json::Value>(&v.metadata)
                     .context("Can't parse iceberg sink metadata")?
+            {
+                v
+            } else {
+                bail!("iceberg sink metadata should be an object");
+            };
+
+            let data_files: Vec<DataFile>;
+            let delete_files: Vec<DataFile>;
+            if let serde_json::Value::Array(values) = values
+                .remove(DATA_FILES)
+                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+            {
+                data_files = values
+                    .into_iter()
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
+                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                    .unwrap();
+            } else {
+                bail!("iceberg sink metadata should have data_files object");
+            }
+            if let serde_json::Value::Array(values) = values
+                .remove(DELETE_FILES)
+                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+            {
+                delete_files = values
+                    .into_iter()
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
+                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                    .context("Failed to parse data file from json")?;
+            } else {
+                bail!("Iceberg sink metadata should have data_files object");
+            }
+            Ok(Self {
+                data_files,
+                delete_files,
+            })
+        } else {
+            bail!("Can't create iceberg sink write result from empty data!")
+        }
+    }
+
+    pub fn try_from_pre_commit_metadata(
+        value: &SinkCoordinatorPreCommitMetadata,
+        partition_type: &Any,
+    ) -> Result<Self> {
+        if let Some(SerializedPreCommit(v)) = &value.metadata {
+            let mut values = if let serde_json::Value::Object(v) =
+                serde_json::from_slice::<serde_json::Value>(&v.metadata)
+                    .context("Can't parse iceberg sink pre commit metadata")?
             {
                 v
             } else {

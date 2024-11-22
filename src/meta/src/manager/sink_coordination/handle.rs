@@ -18,15 +18,18 @@ use std::task::{Context, Poll};
 use anyhow::anyhow;
 use futures::{Future, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
+use risingwave_connector::sink::iceberg::IcebergSink;
 use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    coordinate_request, coordinate_response, CoordinateResponse, SinkMetadata,
+    coordinate_request, coordinate_response, CoordinateResponse, SinkCoordinatorPreCommitResponse,
+    SinkMetadata,
 };
 use tonic::Status;
 
+use super::exactly_onced_sink_backend::{HandlePreCommit, SinkBackend};
 use crate::manager::sink_coordination::{SinkCoordinatorResponseSender, SinkWriterRequestStream};
 
 pub(super) struct SinkWriterCoordinationHandle {
@@ -85,6 +88,19 @@ impl SinkWriterCoordinationHandle {
             .map_err(|_| anyhow!("fail to send commit response of epoch {}", epoch))
     }
 
+    pub(super) fn ack_pre_commit(&mut self, epoch: u64) -> anyhow::Result<()> {
+        self.response_tx
+            .send(Ok(CoordinateResponse {
+                msg: Some(coordinate_response::Msg::PreCommitResponse(
+                    SinkCoordinatorPreCommitResponse {
+                        epoch,
+                        commit_success: true,
+                    },
+                )),
+            }))
+            .map_err(|_| anyhow!("fail to send pre commit response of epoch {}", epoch))
+    }
+
     pub(super) fn poll_next_commit_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -120,6 +136,29 @@ impl SinkWriterCoordinationHandle {
                     };
                     self.prev_epoch = Some(request.epoch);
                     return Ok(Some((request.epoch, metadata)));
+                }
+
+                coordinate_request::Msg::PreCommitRequest(pre_commit_request) => {
+                    if let Some(prev_epoch) = self.prev_epoch {
+                        if pre_commit_request.epoch < prev_epoch {
+                            return Err(anyhow!(
+                                "invalid commit epoch {}, prev_epoch {}",
+                                pre_commit_request.epoch,
+                                prev_epoch
+                            ));
+                        }
+                    }
+                    let Some(pre_commit_metadata) = pre_commit_request.pre_commit_metadata else {
+                        return Err(anyhow!("empty pre commit metadata"));
+                    };
+                    self.prev_epoch = Some(pre_commit_request.epoch);
+                    // todo(exactly_once): Write pre_commit_metadata into meta store=
+                    let sink_backend = SinkBackend::new(self.param.clone())?;
+                    sink_backend
+                        .persist_pre_commit_metadata(pre_commit_metadata)
+                        .await?;
+                    self.ack_pre_commit(pre_commit_request.epoch)?;
+                    return Ok(None);
                 }
                 coordinate_request::Msg::UpdateVnodeRequest(request) => {
                     let bitmap = Bitmap::from(

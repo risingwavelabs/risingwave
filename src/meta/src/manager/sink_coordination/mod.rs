@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod coordinator_worker;
+mod exactly_onced_sink_backend;
 mod handle;
 mod manager;
 
