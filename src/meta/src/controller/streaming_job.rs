@@ -34,10 +34,10 @@ use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
-    StreamNode, StreamingParallelism, TableId, TableVersion, UserId,
+    StreamNode, StreamingParallelism, UserId,
 };
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
-use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableVersion};
+use risingwave_pb::catalog::table::PbOptionalAssociatedSourceId;
 use risingwave_pb::catalog::{PbCreateType, PbTable};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::relation::{PbRelationInfo, RelationInfo};
@@ -62,7 +62,7 @@ use sea_orm::{
     RelationTrait, TransactionTrait,
 };
 
-use crate::barrier::{ReplaceTablePlan, Reschedule};
+use crate::barrier::{ReplaceStreamJobPlan, Reschedule};
 use crate::controller::catalog::CatalogController;
 use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
@@ -678,7 +678,6 @@ impl CatalogController {
         &self,
         streaming_job: &StreamingJob,
         ctx: &StreamContext,
-        version: &PbTableVersion,
         specified_parallelism: &Option<NonZeroUsize>,
         max_parallelism: usize,
     ) -> MetaResult<ObjectId> {
@@ -687,18 +686,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         // 1. check version.
-        let original_version: Option<TableVersion> = Table::find_by_id(id as TableId)
-            .select_only()
-            .column(table::Column::Version)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
-        let original_version = original_version.expect("version for table should exist");
-        if version.version != original_version.to_protobuf().version + 1 {
-            return Err(MetaError::permission_denied("table version is stale"));
-        }
-
+        streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
         let referring_cnt = ObjectDependency::find()
             .join(
@@ -716,7 +704,7 @@ impl CatalogController {
             .await?;
         if referring_cnt != 0 {
             return Err(MetaError::permission_denied(
-                "table is being altered or referenced by some creating jobs",
+                "job is being altered or referenced by some creating jobs",
             ));
         }
 
@@ -727,14 +715,14 @@ impl CatalogController {
             .into_tuple()
             .one(&txn)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if original_max_parallelism != max_parallelism as i32 {
             // We already override the max parallelism in `StreamFragmentGraph` before entering this function.
             // This should not happen in normal cases.
             bail!(
                 "cannot use a different max parallelism \
-                 when altering or creating/dropping a sink into an existing table, \
+                 when replacing streaming job, \
                  original: {}, new: {}",
                 original_max_parallelism,
                 max_parallelism
@@ -747,13 +735,13 @@ impl CatalogController {
         };
 
         // 4. create streaming object for new replace table.
-        let obj_id = Self::create_streaming_job_obj(
+        let new_obj_id = Self::create_streaming_job_obj(
             &txn,
-            ObjectType::Table,
+            streaming_job.object_type(),
             streaming_job.owner() as _,
             Some(streaming_job.database_id() as _),
             Some(streaming_job.schema_id() as _),
-            PbCreateType::Foreground,
+            streaming_job.create_type(),
             ctx,
             parallelism,
             max_parallelism,
@@ -763,7 +751,7 @@ impl CatalogController {
         // 5. record dependency for new replace table.
         ObjectDependency::insert(object_dependency::ActiveModel {
             oid: Set(id as _),
-            used_by: Set(obj_id as _),
+            used_by: Set(new_obj_id as _),
             ..Default::default()
         })
         .exec(&txn)
@@ -771,14 +759,14 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        Ok(obj_id)
+        Ok(new_obj_id)
     }
 
     /// `finish_streaming_job` marks job related objects as `Created` and notify frontend.
     pub async fn finish_streaming_job(
         &self,
         job_id: ObjectId,
-        replace_table_job_info: Option<ReplaceTablePlan>,
+        replace_stream_job_info: Option<ReplaceStreamJobPlan>,
     ) -> MetaResult<()> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -913,8 +901,8 @@ impl CatalogController {
 
         let fragment_mapping = get_fragment_mappings(&txn, job_id).await?;
 
-        let replace_table_mapping_update = match replace_table_job_info {
-            Some(ReplaceTablePlan {
+        let replace_table_mapping_update = match replace_stream_job_info {
+            Some(ReplaceStreamJobPlan {
                 streaming_job,
                 merge_updates,
                 tmp_id,
@@ -926,9 +914,11 @@ impl CatalogController {
                     tmp_id as ObjectId,
                     merge_updates,
                     None,
-                    Some(incoming_sink_id as _),
-                    None,
-                    vec![],
+                    SinkIntoTableContext {
+                        creating_sink_id: Some(incoming_sink_id as _),
+                        dropping_sink_id: None,
+                        updated_sink_catalogs: vec![],
+                    },
                     &txn,
                     streaming_job,
                 )
@@ -976,9 +966,7 @@ impl CatalogController {
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
-        creating_sink_id: Option<SinkId>,
-        dropping_sink_id: Option<SinkId>,
-        updated_sink_catalogs: Vec<SinkId>,
+        sink_into_table_context: SinkIntoTableContext,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -987,9 +975,7 @@ impl CatalogController {
             tmp_id,
             merge_updates,
             table_col_index_mapping,
-            creating_sink_id,
-            dropping_sink_id,
-            updated_sink_catalogs,
+            sink_into_table_context,
             &txn,
             streaming_job,
         )
@@ -1014,13 +1000,17 @@ impl CatalogController {
         Ok(version)
     }
 
+    /// TODO: make it general for other streaming jobs.
+    /// Currently only for replacing table.
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
-        creating_sink_id: Option<SinkId>,
-        dropping_sink_id: Option<SinkId>,
-        updated_sink_catalogs: Vec<SinkId>,
+        SinkIntoTableContext {
+            creating_sink_id,
+            dropping_sink_id,
+            updated_sink_catalogs,
+        }: SinkIntoTableContext,
         txn: &DatabaseTransaction,
         streaming_job: StreamingJob,
     ) -> MetaResult<(Vec<Relation>, Vec<PbFragmentWorkerSlotMapping>)> {
@@ -1029,15 +1019,15 @@ impl CatalogController {
             unreachable!("unexpected job: {streaming_job:?}")
         };
 
-        let job_id = table.id as ObjectId;
+        let original_job_id = table.id as ObjectId;
 
-        let original_table_catalogs = Table::find_by_id(job_id)
+        let original_table_catalogs = Table::find_by_id(original_job_id)
             .select_only()
             .columns([table::Column::Columns])
             .into_tuple::<ColumnCatalogArray>()
             .one(txn)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
 
         // For sinks created in earlier versions, we need to set the original_target_columns.
         for sink_id in updated_sink_catalogs {
@@ -1090,14 +1080,13 @@ impl CatalogController {
             }
         }
 
-        // let old_fragment_mappings = get_fragment_mappings(&txn, job_id).await?;
         // 1. replace old fragments/actors with new ones.
         Fragment::delete_many()
-            .filter(fragment::Column::JobId.eq(job_id))
+            .filter(fragment::Column::JobId.eq(original_job_id))
             .exec(txn)
             .await?;
         Fragment::update_many()
-            .col_expr(fragment::Column::JobId, SimpleExpr::from(job_id))
+            .col_expr(fragment::Column::JobId, SimpleExpr::from(original_job_id))
             .filter(fragment::Column::JobId.eq(tmp_id))
             .exec(txn)
             .await?;
@@ -1217,7 +1206,7 @@ impl CatalogController {
             let index_items: Vec<(IndexId, ExprNodeArray)> = Index::find()
                 .select_only()
                 .columns([index::Column::IndexId, index::Column::IndexItems])
-                .filter(index::Column::PrimaryTableId.eq(job_id))
+                .filter(index::Column::PrimaryTableId.eq(original_job_id))
                 .into_tuple()
                 .all(txn)
                 .await?;
@@ -1246,15 +1235,15 @@ impl CatalogController {
             }
         }
 
-        let fragment_mapping: Vec<_> = get_fragment_mappings(txn, job_id as _).await?;
+        let fragment_mapping: Vec<_> = get_fragment_mappings(txn, original_job_id as _).await?;
 
         Ok((relations, fragment_mapping))
     }
 
-    /// `try_abort_replacing_streaming_job` is used to abort the replacing streaming job, the input `job_id` is the dummy job id.
-    pub async fn try_abort_replacing_streaming_job(&self, job_id: ObjectId) -> MetaResult<()> {
+    /// Abort the replacing streaming job by deleting the temporary job object.
+    pub async fn try_abort_replacing_streaming_job(&self, tmp_job_id: ObjectId) -> MetaResult<()> {
         let inner = self.inner.write().await;
-        Object::delete_by_id(job_id).exec(&inner.db).await?;
+        Object::delete_by_id(tmp_job_id).exec(&inner.db).await?;
         Ok(())
     }
 
@@ -1890,4 +1879,14 @@ fn bitflag_intersects(column: SimpleExpr, value: i32) -> SimpleExpr {
 
 fn fragment_type_mask_intersects(value: i32) -> SimpleExpr {
     bitflag_intersects(fragment::Column::FragmentTypeMask.into_simple_expr(), value)
+}
+
+pub struct SinkIntoTableContext {
+    /// For creating sink into table, this is `Some`, otherwise `None`.
+    pub creating_sink_id: Option<SinkId>,
+    /// For dropping sink into table, this is `Some`, otherwise `None`.
+    pub dropping_sink_id: Option<SinkId>,
+    /// For alter table (e.g., add column), this is the list of existing sink ids
+    /// otherwise empty.
+    pub updated_sink_catalogs: Vec<SinkId>,
 }
