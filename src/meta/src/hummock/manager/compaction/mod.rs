@@ -1473,7 +1473,8 @@ impl HummockManager {
                 .opts
                 .compact_task_table_size_partition_threshold_high;
             // check latest write throughput
-            let history_table_throughput_guard = self.history_table_throughput.read();
+            let history_table_throughput_guard =
+                self.table_write_throughput_statistic_manager.read();
             let timestamp = chrono::Utc::now().timestamp();
             for (table_id, compact_table_size) in table_size_info {
                 let write_throughput = history_table_throughput_guard

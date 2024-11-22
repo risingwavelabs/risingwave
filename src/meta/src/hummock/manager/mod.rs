@@ -97,7 +97,8 @@ pub struct HummockManager {
     version_checkpoint_path: String,
     version_archive_dir: String,
     pause_version_checkpoint: AtomicBool,
-    history_table_throughput: parking_lot::RwLock<TableWriteThroughputStatisticManager>,
+    table_write_throughput_statistic_manager:
+        parking_lot::RwLock<TableWriteThroughputStatisticManager>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -284,7 +285,7 @@ impl HummockManager {
             version_checkpoint_path,
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
-            history_table_throughput: parking_lot::RwLock::new(
+            table_write_throughput_statistic_manager: parking_lot::RwLock::new(
                 TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
             ),
             compactor_streams_change_tx,

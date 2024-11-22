@@ -87,4 +87,8 @@ impl TableWriteThroughputStatisticManager {
                     .filter(move |statistic| !statistic.is_expired(window_secs, timestamp_secs))
             })
     }
+
+    pub fn remove_table(&mut self, table_id: u32) {
+        self.table_throughput.remove(&table_id);
+    }
 }

@@ -299,7 +299,8 @@ impl HummockManager {
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
 
-        let mut table_throughput_statistic_manager = self.history_table_throughput.write();
+        let mut table_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.write();
         let timestamp = chrono::Utc::now().timestamp();
 
         for (table_id, stat) in table_stats {

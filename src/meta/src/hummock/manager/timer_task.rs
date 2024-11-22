@@ -285,8 +285,10 @@ impl HummockManager {
                                             .compaction_group_count
                                             .set(compaction_group_count as i64);
 
-                                        let tables_throughput =
-                                            hummock_manager.history_table_throughput.read().clone();
+                                        let tables_throughput = hummock_manager
+                                            .table_write_throughput_statistic_manager
+                                            .read()
+                                            .clone();
 
                                         let current_version_levels = &hummock_manager
                                             .versioning
@@ -565,7 +567,7 @@ impl HummockManager {
     /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
-        let table_write_throughput = self.history_table_throughput.read().clone();
+        let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
@@ -607,7 +609,8 @@ impl HummockManager {
                 return;
             }
         };
-        let table_write_throughput_statistic_manager = self.history_table_throughput.read().clone();
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
         group_infos.sort_by_key(|group| {
