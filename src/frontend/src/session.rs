@@ -451,13 +451,13 @@ impl FrontendEnv {
         // Run a background heap profiler
         heap_profiler.start();
 
-        let batch_memory_limit = (total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION);
+        let batch_memory_limit = total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION;
         let mem_context = MemoryContext::root(
             frontend_metrics.batch_total_mem.clone(),
             batch_memory_limit as u64,
         );
 
-        format!(
+        info!(
             "Frontend  total_memory: {} batch_memory: {}",
             convert(total_memory_bytes as _),
             convert(batch_memory_limit as _),
