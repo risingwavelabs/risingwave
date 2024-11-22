@@ -466,9 +466,11 @@ pub mod tests {
 
             let level_table_info = &mut levels.levels[0].table_infos;
             let table_info_1 = &mut level_table_info[1];
-            table_info_1.table_ids.resize(2, 0);
-            table_info_1.table_ids[0] = 1;
-            table_info_1.table_ids[1] = 2;
+            let mut t_inner = table_info_1.get_impl();
+            t_inner.table_ids.resize(2, 0);
+            t_inner.table_ids[0] = 1;
+            t_inner.table_ids[1] = 2;
+            *table_info_1 = t_inner.into();
 
             // test internal_table_id
             let option = ManualCompactionOption {
@@ -500,9 +502,11 @@ pub mod tests {
             // include all table_info
             let level_table_info = &mut levels.levels[0].table_infos;
             for table_info in level_table_info {
-                table_info.table_ids.resize(2, 0);
-                table_info.table_ids[0] = 1;
-                table_info.table_ids[1] = 2;
+                let mut t_inner = table_info.get_impl();
+                t_inner.table_ids.resize(2, 0);
+                t_inner.table_ids[0] = 1;
+                t_inner.table_ids[1] = 2;
+                *table_info = t_inner.into();
             }
 
             // test key range filter first
@@ -576,12 +580,14 @@ pub mod tests {
         for iter in [l0.sub_levels.iter_mut(), levels.iter_mut()] {
             for (idx, l) in iter.enumerate() {
                 for t in &mut l.table_infos {
-                    t.table_ids.clear();
+                    let mut t_inner = t.get_impl();
+                    t_inner.table_ids.clear();
                     if idx == 0 {
-                        t.table_ids.push(((t.sst_id % 2) + 1) as _);
+                        t_inner.table_ids.push(((t.sst_id % 2) + 1) as _);
                     } else {
-                        t.table_ids.push(3);
+                        t_inner.table_ids.push(3);
                     }
+                    *t = t_inner.into();
                 }
             }
         }

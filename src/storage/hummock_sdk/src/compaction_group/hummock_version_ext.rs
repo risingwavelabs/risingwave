@@ -1176,7 +1176,7 @@ fn split_sst_info_for_level(
             .collect_vec();
         if !removed_table_ids.is_empty() {
             let (modified_sst, branch_sst) = split_sst_with_table_ids(
-                &sst_info,
+                sst_info,
                 new_sst_id,
                 sst_info.sst_size / 2,
                 sst_info.sst_size / 2,
@@ -1512,13 +1512,17 @@ mod tests {
     use crate::key::{gen_key_from_str, FullKey};
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels, OverlappingLevel};
-    use crate::sstable_info::SstableInfo;
+    use crate::sstable_info::{SstableInfo, SstableInfoImpl};
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
     use crate::HummockVersionId;
 
     fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+        gen_sstable_info_impl(sst_id, table_ids, epoch).into()
+    }
+
+    fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoImpl {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
         let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
         let full_key_l = FullKey::for_test(
@@ -1531,7 +1535,7 @@ mod tests {
             FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch)
                 .encode();
 
-        SstableInfo {
+        SstableInfoImpl {
             sst_id,
             key_range: KeyRange {
                 left: full_key_l.into(),
@@ -1576,22 +1580,24 @@ mod tests {
             .l0
             .sub_levels
             .push(Level {
-                table_infos: vec![SstableInfo {
+                table_infos: vec![SstableInfoImpl {
                     object_id: 11,
                     sst_id: 11,
                     ..Default::default()
-                }],
+                }
+                .into()],
                 ..Default::default()
             });
         assert_eq!(version.get_object_ids().len(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
-            table_infos: vec![SstableInfo {
+            table_infos: vec![SstableInfoImpl {
                 object_id: 22,
                 sst_id: 22,
                 ..Default::default()
-            }],
+            }
+            .into()],
             ..Default::default()
         });
         assert_eq!(version.get_object_ids().len(), 2);
@@ -1653,11 +1659,12 @@ mod tests {
                             1,
                             0,
                             HashSet::new(),
-                            vec![SstableInfo {
+                            vec![SstableInfoImpl {
                                 object_id: 1,
                                 sst_id: 1,
                                 ..Default::default()
-                            }],
+                            }
+                            .into()],
                             0,
                         ))],
                     },
@@ -1678,11 +1685,12 @@ mod tests {
         cg1.levels[0] = Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping,
-            table_infos: vec![SstableInfo {
+            table_infos: vec![SstableInfoImpl {
                 object_id: 1,
                 sst_id: 1,
                 ..Default::default()
-            }],
+            }
+            .into()],
             ..Default::default()
         };
         assert_eq!(
@@ -1708,7 +1716,16 @@ mod tests {
     }
 
     fn gen_sst_info(object_id: u64, table_ids: Vec<u32>, left: Bytes, right: Bytes) -> SstableInfo {
-        SstableInfo {
+        gen_sst_info_impl(object_id, table_ids, left, right).into()
+    }
+
+    fn gen_sst_info_impl(
+        object_id: u64,
+        table_ids: Vec<u32>,
+        left: Bytes,
+        right: Bytes,
+    ) -> SstableInfoImpl {
+        SstableInfoImpl {
             object_id,
             sst_id: object_id,
             key_range: KeyRange {
@@ -2215,8 +2232,9 @@ mod tests {
 
         {
             // test key_range left = right
-            let mut sst = gen_sstable_info(1, vec![1], epoch);
+            let mut sst = gen_sstable_info_impl(1, vec![1], epoch);
             sst.key_range.right = sst.key_range.left.clone();
+            let sst: SstableInfo = sst.into();
             let split_key = group_split::build_split_key(1, VirtualNode::ZERO);
             let origin_sst = sst.clone();
             let sst_size = origin_sst.sst_size;
