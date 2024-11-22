@@ -118,16 +118,16 @@ pub fn align_array_and_element(
 
 /// Returns `Ok` if `ok` is true, otherwise returns a placeholder [`CastError`] to be further
 /// wrapped with a more informative context in [`cast`].
-fn canmeh(ok: bool) -> CastResult {
+fn canbo(ok: bool) -> CastResult {
     if ok {
         Ok(())
     } else {
         bail_cast_error!()
     }
 }
-/// Equivalent to `canmeh(false)`.
+/// Equivalent to `canbo(false)`.
 fn cannot() -> CastResult {
-    canmeh(false)
+    canbo(false)
 }
 
 /// Checks whether casting from `source` to `target` is ok in `allows` context.
@@ -146,7 +146,7 @@ pub fn cast(source: &DataType, target: &DataType, allows: CastContext) -> Result
     } else if any!(is_map) {
         cast_map(source, target, allows)
     } else {
-        canmeh(cast_ok_base(source, target, allows))
+        canbo(cast_ok_base(source, target, allows))
     }
     .map_err(|inner| {
         // Only show "in .. context" once in the error source chain.
@@ -218,8 +218,8 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::Struct(_)) => canmeh(CastContext::Explicit <= allows),
-        (DataType::Struct(_), DataType::Varchar) => canmeh(CastContext::Assign <= allows),
+        (DataType::Varchar, DataType::Struct(_)) => canbo(CastContext::Explicit <= allows),
+        (DataType::Struct(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
         _ => cannot(),
     }
 }
@@ -232,8 +232,8 @@ fn cast_array(source: &DataType, target: &DataType, allows: CastContext) -> Cast
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::List(_)) => canmeh(CastContext::Explicit <= allows),
-        (DataType::List(_), DataType::Varchar) => canmeh(CastContext::Assign <= allows),
+        (DataType::Varchar, DataType::List(_)) => canbo(CastContext::Explicit <= allows),
+        (DataType::List(_), DataType::Varchar) => canbo(CastContext::Assign <= allows),
         _ => cannot(),
     }
 }
