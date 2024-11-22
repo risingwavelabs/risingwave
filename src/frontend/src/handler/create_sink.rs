@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
+use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
@@ -276,7 +277,7 @@ pub async fn gen_sink_plan(
             }
         }
 
-        let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
+        let table_columns_without_rw_timestamp = table_catalog.columns();
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
