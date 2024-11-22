@@ -72,7 +72,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
-use crate::model::{StreamContext, TableFragments, TableParallelism};
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -410,13 +410,13 @@ impl CatalogController {
     // making them the source of truth and performing a full replacement for those in the meta store?
     pub async fn prepare_streaming_job(
         &self,
-        table_fragments: &TableFragments,
+        stream_job_fragments: &StreamJobFragments,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_table_fragments(table_fragments.to_protobuf())?;
-        let all_tables = table_fragments.all_tables();
+            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments.to_protobuf())?;
+        let all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -608,7 +608,7 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
-    pub async fn post_collect_table_fragments(
+    pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,

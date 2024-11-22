@@ -49,7 +49,7 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{DdlType, StreamingJob};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -88,8 +88,8 @@ pub struct Reschedule {
 /// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
 pub struct ReplaceTablePlan {
-    pub old_table_fragments: TableFragments,
-    pub new_table_fragments: TableFragments,
+    pub old_fragments: StreamJobFragments,
+    pub new_fragments: StreamJobFragments,
     pub merge_updates: Vec<MergeUpdate>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
@@ -107,7 +107,7 @@ pub struct ReplaceTablePlan {
 impl ReplaceTablePlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
-        for fragment in self.new_table_fragments.fragments.values() {
+        for fragment in self.new_fragments.fragments.values() {
             let fragment_change = CommandFragmentChanges::NewFragment(
                 self.streaming_job.id().into(),
                 InflightFragmentInfo {
@@ -117,7 +117,7 @@ impl ReplaceTablePlan {
                         .map(|actor| {
                             (
                                 actor.actor_id,
-                                self.new_table_fragments
+                                self.new_fragments
                                     .actor_status
                                     .get(&actor.actor_id)
                                     .expect("should exist")
@@ -136,7 +136,7 @@ impl ReplaceTablePlan {
                 .insert(fragment.fragment_id, fragment_change)
                 .is_none());
         }
-        for fragment in self.old_table_fragments.fragments.values() {
+        for fragment in self.old_fragments.fragments.values() {
             assert!(fragment_changes
                 .insert(fragment.fragment_id, CommandFragmentChanges::RemoveFragment)
                 .is_none());
@@ -149,7 +149,7 @@ impl ReplaceTablePlan {
 #[educe(Debug)]
 pub struct CreateStreamingJobCommandInfo {
     #[educe(Debug(ignore))]
-    pub table_fragments: TableFragments,
+    pub stream_job_fragments: StreamJobFragments,
     /// Refer to the doc on [`crate::manager::MetadataManager::get_upstream_root_fragments`] for the meaning of "root".
     pub upstream_root_actors: HashMap<TableId, Vec<ActorId>>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
@@ -165,32 +165,36 @@ impl CreateStreamingJobCommandInfo {
     pub(super) fn new_fragment_info(
         &self,
     ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
-        self.table_fragments.fragments.values().map(|fragment| {
-            (
-                fragment.fragment_id,
-                InflightFragmentInfo {
-                    actors: fragment
-                        .actors
-                        .iter()
-                        .map(|actor| {
-                            (
-                                actor.actor_id,
-                                self.table_fragments
-                                    .actor_status
-                                    .get(&actor.actor_id)
-                                    .expect("should exist")
-                                    .worker_id() as WorkerId,
-                            )
-                        })
-                        .collect(),
-                    state_table_ids: fragment
-                        .state_table_ids
-                        .iter()
-                        .map(|table_id| TableId::new(*table_id))
-                        .collect(),
-                },
-            )
-        })
+        self.stream_job_fragments
+            .fragments
+            .values()
+            .map(|fragment| {
+                (
+                    fragment.fragment_id,
+                    InflightFragmentInfo {
+                        actors: fragment
+                            .actors
+                            .iter()
+                            .map(|actor| {
+                                (
+                                    actor.actor_id,
+                                    self.stream_job_fragments
+                                        .actor_status
+                                        .get(&actor.actor_id)
+                                        .expect("should exist")
+                                        .worker_id()
+                                        as WorkerId,
+                                )
+                            })
+                            .collect(),
+                        state_table_ids: fragment
+                            .state_table_ids
+                            .iter()
+                            .map(|table_id| TableId::new(*table_id))
+                            .collect(),
+                    },
+                )
+            })
     }
 }
 
@@ -309,9 +313,9 @@ impl Command {
         Self::Resume(reason)
     }
 
-    pub fn cancel(table_fragments: &TableFragments) -> Self {
+    pub fn cancel(table_fragments: &StreamJobFragments) -> Self {
         Self::DropStreamingJobs {
-            table_fragments_ids: HashSet::from_iter([table_fragments.table_id()]),
+            table_fragments_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
             actors: table_fragments.actor_ids(),
             unregistered_state_table_ids: table_fragments
                 .all_table_ids()
@@ -512,7 +516,7 @@ impl CommandContext {
             &self.command
             && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
         {
-            let table_fragments = &info.table_fragments;
+            let table_fragments = &info.stream_job_fragments;
             let mut table_ids: HashSet<_> = table_fragments
                 .internal_table_ids()
                 .into_iter()
@@ -637,7 +641,7 @@ impl Command {
                 Command::CreateStreamingJob {
                     info:
                         CreateStreamingJobCommandInfo {
-                            table_fragments,
+                            stream_job_fragments: table_fragments,
                             dispatchers,
                             init_split_assignment: split_assignment,
                             ..
@@ -668,7 +672,7 @@ impl Command {
                                 .upstream_mv_table_ids
                                 .iter()
                                 .map(|table_id| SubscriptionUpstreamInfo {
-                                    subscriber_id: table_fragments.table_id().table_id,
+                                    subscriber_id: table_fragments.stream_job_id().table_id,
                                     upstream_mv_table_id: table_id.table_id,
                                 })
                                 .collect()
@@ -685,8 +689,8 @@ impl Command {
                     }));
 
                     if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                        old_table_fragments,
-                        new_table_fragments: _,
+                        old_fragments,
+                        new_fragments: _,
                         merge_updates,
                         dispatchers,
                         init_split_assignment,
@@ -695,7 +699,7 @@ impl Command {
                     {
                         // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
-                            old_table_fragments,
+                            old_fragments,
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
@@ -728,13 +732,13 @@ impl Command {
                 }
 
                 Command::ReplaceTable(ReplaceTablePlan {
-                    old_table_fragments,
+                    old_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
                     ..
                 }) => Self::generate_update_mutation_for_replace_table(
-                    old_table_fragments,
+                    old_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
@@ -916,14 +920,14 @@ impl Command {
                 let mut map = match job_type {
                     CreateStreamingJobType::Normal => HashMap::new(),
                     CreateStreamingJobType::SinkIntoTable(replace_table) => {
-                        replace_table.new_table_fragments.actors_to_create()
+                        replace_table.new_fragments.actors_to_create()
                     }
                     CreateStreamingJobType::SnapshotBackfill(_) => {
                         // for snapshot backfill, the actors to create is measured separately
                         return None;
                     }
                 };
-                for (worker_id, new_actors) in info.table_fragments.actors_to_create() {
+                for (worker_id, new_actors) in info.stream_job_fragments.actors_to_create() {
                     map.entry(worker_id).or_default().extend(new_actors)
                 }
                 Some(map)
@@ -940,19 +944,19 @@ impl Command {
                 Some(map)
             }
             Command::ReplaceTable(replace_table) => {
-                Some(replace_table.new_table_fragments.actors_to_create())
+                Some(replace_table.new_fragments.actors_to_create())
             }
             _ => None,
         }
     }
 
     fn generate_update_mutation_for_replace_table(
-        old_table_fragments: &TableFragments,
+        old_fragments: &StreamJobFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
-        let dropped_actors = old_table_fragments.actor_ids();
+        let dropped_actors = old_fragments.actor_ids();
 
         let actor_new_dispatchers = dispatchers
             .iter()

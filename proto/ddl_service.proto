@@ -354,7 +354,7 @@ message DropIndexResponse {
 }
 
 message ReplaceTablePlan {
-  // The new table catalog, with the correct table ID and a new version.
+  // The new table catalog, with the correct (old) table ID and a new version.
   // If the new version does not match the subsequent version in the meta service's
   // catalog, this request will be rejected.
   catalog.Table table = 1;
