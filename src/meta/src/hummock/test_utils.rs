@@ -25,7 +25,7 @@ use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
@@ -154,7 +154,7 @@ pub fn generate_test_sstables_with_table_id(
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
         sst_info.push(
-            SstableInfoImpl {
+            SstableInfoInner {
                 object_id: sst_id,
                 sst_id,
                 key_range: KeyRange {
@@ -190,7 +190,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
         sst_info.push(
-            SstableInfoImpl {
+            SstableInfoInner {
                 object_id: sst_id,
                 sst_id,
                 key_range: KeyRange {

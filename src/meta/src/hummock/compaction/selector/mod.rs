@@ -129,7 +129,7 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, OverlappingLevel};
-    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_pb::hummock::LevelType;
 
     use super::*;
@@ -188,9 +188,9 @@ pub mod tests {
         left: usize,
         right: usize,
         epoch: u64,
-    ) -> SstableInfoImpl {
+    ) -> SstableInfoInner {
         let object_size = (right - left + 1) as u64;
-        SstableInfoImpl {
+        SstableInfoInner {
             object_id: id,
             sst_id: id,
             key_range: KeyRange {
@@ -219,7 +219,7 @@ pub mod tests {
         max_epoch: u64,
     ) -> SstableInfo {
         let object_size = (right - left + 1) as u64;
-        SstableInfoImpl {
+        SstableInfoInner {
             object_id: id,
             sst_id: id,
             key_range: KeyRange {

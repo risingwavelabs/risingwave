@@ -141,7 +141,7 @@ pub mod group_split {
         left_size: u64,
         right_size: u64,
     ) -> (Option<SstableInfo>, Option<SstableInfo>) {
-        let mut origin_sst_info = origin_sst_info.get_impl();
+        let mut origin_sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         *new_sst_id += 1;
@@ -210,7 +210,7 @@ pub mod group_split {
         new_sst_size: u64,
         new_table_ids: Vec<u32>,
     ) -> (SstableInfo, SstableInfo) {
-        let mut sst_info = origin_sst_info.get_impl();
+        let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         branch_table_info.sst_size = new_sst_size;

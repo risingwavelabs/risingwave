@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfoImpl;
+use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_storage::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
@@ -151,7 +151,7 @@ async fn test_read_version_basic() {
         let dummy_sst = Arc::new(StagingSstableInfo::new(
             vec![
                 LocalSstableInfo::for_test(
-                    SstableInfoImpl {
+                    SstableInfoInner {
                         object_id: 1,
                         sst_id: 1,
                         key_range: KeyRange {
@@ -179,7 +179,7 @@ async fn test_read_version_basic() {
                     .into(),
                 ),
                 LocalSstableInfo::for_test(
-                    SstableInfoImpl {
+                    SstableInfoInner {
                         object_id: 2,
                         sst_id: 2,
                         key_range: KeyRange {

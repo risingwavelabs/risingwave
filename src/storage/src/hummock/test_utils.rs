@@ -27,7 +27,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -108,7 +108,7 @@ pub fn gen_dummy_sst_info(
         }
         file_size += batch.size() as u64;
     }
-    SstableInfoImpl {
+    SstableInfoInner {
         object_id: id,
         sst_id: id,
         key_range: KeyRange {
@@ -204,7 +204,7 @@ pub async fn put_sst(
 
     meta.meta_offset = writer.data_len() as u64;
     meta.bloom_filter = bloom_filter;
-    let sst = SstableInfoImpl {
+    let sst = SstableInfoInner {
         object_id: sst_object_id,
         sst_id: sst_object_id,
         key_range: KeyRange {

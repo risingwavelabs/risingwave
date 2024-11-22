@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compactio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -79,7 +79,7 @@ fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
 }
 
-fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoImpl {
+fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
     let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
     let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
     let full_key_l = FullKey::for_test(
@@ -91,7 +91,7 @@ fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> Sstabl
     let full_key_r =
         FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch).encode();
 
-    SstableInfoImpl {
+    SstableInfoInner {
         sst_id,
         key_range: KeyRange {
             left: full_key_l.into(),
@@ -1291,7 +1291,7 @@ async fn test_version_stats() {
         .into_iter()
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
-            sst_info: SstableInfoImpl {
+            sst_info: SstableInfoInner {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
                 key_range: KeyRange {
@@ -1679,19 +1679,19 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         created_at: u64::MAX,
     };
     let sst_3 = LocalSstableInfo {
-        sst_info: SstableInfoImpl {
+        sst_info: SstableInfoInner {
             sst_id: 8,
             object_id: 8,
-            ..sst_2.sst_info.get_impl()
+            ..sst_2.sst_info.get_inner()
         }
         .into(),
         ..sst_2.clone()
     };
     let sst_4 = LocalSstableInfo {
-        sst_info: SstableInfoImpl {
+        sst_info: SstableInfoInner {
             sst_id: 9,
             object_id: 9,
-            ..sst_1.sst_info.get_impl()
+            ..sst_1.sst_info.get_inner()
         }
         .into(),
         ..sst_1.clone()
@@ -1762,7 +1762,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfoImpl {
+            vec![SstableInfoInner {
                 object_id: 12,
                 sst_id: 12,
                 key_range: KeyRange::default(),
@@ -2450,19 +2450,19 @@ async fn test_merge_compaction_group_task_expired() {
         created_at: u64::MAX,
     };
     let sst_3 = LocalSstableInfo {
-        sst_info: SstableInfoImpl {
+        sst_info: SstableInfoInner {
             sst_id: 3,
             object_id: 3,
-            ..sst_2.sst_info.get_impl()
+            ..sst_2.sst_info.get_inner()
         }
         .into(),
         ..sst_2.clone()
     };
     let sst_4 = LocalSstableInfo {
-        sst_info: SstableInfoImpl {
+        sst_info: SstableInfoInner {
             sst_id: 4,
             object_id: 4,
-            ..sst_1.sst_info.get_impl()
+            ..sst_1.sst_info.get_inner()
         }
         .into(),
         ..sst_1.clone()
@@ -2556,7 +2556,7 @@ async fn test_merge_compaction_group_task_expired() {
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfoImpl {
+            vec![SstableInfoInner {
                 object_id: report_sst_id,
                 sst_id: report_sst_id,
                 key_range: KeyRange::default(),

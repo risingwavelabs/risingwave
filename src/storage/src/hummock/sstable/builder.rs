@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -507,7 +507,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let sst_info: SstableInfo = SstableInfoImpl {
+        let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
             bloom_filter_kind,

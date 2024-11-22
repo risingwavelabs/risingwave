@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
@@ -180,7 +180,7 @@ impl ManualCompactionPicker {
     fn filter_level_by_option(&self, level: &Level) -> bool {
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let tmp_sst_info = SstableInfoImpl {
+        let tmp_sst_info = SstableInfoInner {
             key_range: self.option.key_range.clone(),
             ..Default::default()
         }
@@ -232,7 +232,7 @@ impl CompactionPicker for ManualCompactionPicker {
         }
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let mut tmp_sst_info = SstableInfoImpl::default();
+        let mut tmp_sst_info = SstableInfoInner::default();
         let mut range_overlap_info = RangeOverlapInfo::default();
         tmp_sst_info.key_range = self.option.key_range.clone();
         range_overlap_info.update(&tmp_sst_info.into());
@@ -466,7 +466,7 @@ pub mod tests {
 
             let level_table_info = &mut levels.levels[0].table_infos;
             let table_info_1 = &mut level_table_info[1];
-            let mut t_inner = table_info_1.get_impl();
+            let mut t_inner = table_info_1.get_inner();
             t_inner.table_ids.resize(2, 0);
             t_inner.table_ids[0] = 1;
             t_inner.table_ids[1] = 2;
@@ -502,7 +502,7 @@ pub mod tests {
             // include all table_info
             let level_table_info = &mut levels.levels[0].table_infos;
             for table_info in level_table_info {
-                let mut t_inner = table_info.get_impl();
+                let mut t_inner = table_info.get_inner();
                 t_inner.table_ids.resize(2, 0);
                 t_inner.table_ids[0] = 1;
                 t_inner.table_ids[1] = 2;
@@ -580,7 +580,7 @@ pub mod tests {
         for iter in [l0.sub_levels.iter_mut(), levels.iter_mut()] {
             for (idx, l) in iter.enumerate() {
                 for t in &mut l.table_infos {
-                    let mut t_inner = t.get_impl();
+                    let mut t_inner = t.get_inner();
                     t_inner.table_ids.clear();
                     if idx == 0 {
                         t_inner.table_ids.push(((t.sst_id % 2) + 1) as _);

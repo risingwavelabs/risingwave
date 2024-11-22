@@ -117,7 +117,7 @@ impl TrivialMovePicker {
 pub mod tests {
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
@@ -125,7 +125,7 @@ pub mod tests {
 
     #[test]
     fn test_allowed_trivial_move_min_size() {
-        let sst: SstableInfo = SstableInfoImpl {
+        let sst: SstableInfo = SstableInfoInner {
             sst_id: 1,
             file_size: 100,
             sst_size: 100,

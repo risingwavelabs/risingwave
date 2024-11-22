@@ -1512,7 +1512,7 @@ mod tests {
     use crate::key::{gen_key_from_str, FullKey};
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels, OverlappingLevel};
-    use crate::sstable_info::{SstableInfo, SstableInfoImpl};
+    use crate::sstable_info::{SstableInfo, SstableInfoInner};
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
     };
@@ -1522,7 +1522,7 @@ mod tests {
         gen_sstable_info_impl(sst_id, table_ids, epoch).into()
     }
 
-    fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoImpl {
+    fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
         let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
         let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
         let full_key_l = FullKey::for_test(
@@ -1535,7 +1535,7 @@ mod tests {
             FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch)
                 .encode();
 
-        SstableInfoImpl {
+        SstableInfoInner {
             sst_id,
             key_range: KeyRange {
                 left: full_key_l.into(),
@@ -1580,7 +1580,7 @@ mod tests {
             .l0
             .sub_levels
             .push(Level {
-                table_infos: vec![SstableInfoImpl {
+                table_infos: vec![SstableInfoInner {
                     object_id: 11,
                     sst_id: 11,
                     ..Default::default()
@@ -1592,7 +1592,7 @@ mod tests {
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
-            table_infos: vec![SstableInfoImpl {
+            table_infos: vec![SstableInfoInner {
                 object_id: 22,
                 sst_id: 22,
                 ..Default::default()
@@ -1659,7 +1659,7 @@ mod tests {
                             1,
                             0,
                             HashSet::new(),
-                            vec![SstableInfoImpl {
+                            vec![SstableInfoInner {
                                 object_id: 1,
                                 sst_id: 1,
                                 ..Default::default()
@@ -1685,7 +1685,7 @@ mod tests {
         cg1.levels[0] = Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping,
-            table_infos: vec![SstableInfoImpl {
+            table_infos: vec![SstableInfoInner {
                 object_id: 1,
                 sst_id: 1,
                 ..Default::default()
@@ -1724,8 +1724,8 @@ mod tests {
         table_ids: Vec<u32>,
         left: Bytes,
         right: Bytes,
-    ) -> SstableInfoImpl {
-        SstableInfoImpl {
+    ) -> SstableInfoInner {
+        SstableInfoInner {
             object_id,
             sst_id: object_id,
             key_range: KeyRange {
