@@ -1044,7 +1044,7 @@ impl DdlController {
 
         // create fragment and actor catalogs.
         tracing::debug!(id = streaming_job.id(), "building streaming job");
-        let (ctx, table_fragments) = self
+        let (ctx, stream_job_fragments) = self
             .build_stream_job(
                 ctx,
                 streaming_job,
@@ -1057,7 +1057,7 @@ impl DdlController {
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
-                Self::validate_cdc_table(table, &table_fragments).await?;
+                Self::validate_cdc_table(table, &stream_job_fragments).await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
@@ -1076,7 +1076,7 @@ impl DdlController {
 
         self.metadata_manager
             .catalog_controller
-            .prepare_streaming_job(&table_fragments, streaming_job, false)
+            .prepare_streaming_job(&stream_job_fragments, streaming_job, false)
             .await?;
 
         // create streaming jobs.
@@ -1087,7 +1087,7 @@ impl DdlController {
             // FIXME(kwannoel): Unify background stream's creation path with MV below.
             | (CreateType::Background, StreamingJob::Sink(_, _)) => {
                 let version = self.stream_manager
-                    .create_streaming_job(table_fragments, ctx)
+                    .create_streaming_job(stream_job_fragments, ctx)
                     .await?;
                 Ok(version)
             }
@@ -1096,7 +1096,7 @@ impl DdlController {
                 let fut = async move {
                     let _ = ctrl
                         .stream_manager
-                        .create_streaming_job(table_fragments, ctx)
+                        .create_streaming_job(stream_job_fragments, ctx)
                         .await.inspect_err(|err| {
                         tracing::error!(id = stream_job_id, error = ?err.as_report(), "failed to create background streaming job");
                     });
@@ -1198,7 +1198,7 @@ impl DdlController {
                 )
                 .await? as u32;
 
-            let (ctx, table_fragments) = self
+            let (ctx, stream_job_fragments) = self
                 .inject_replace_table_job_for_table_sink(
                     tmp_id,
                     &self.metadata_manager,
@@ -1216,11 +1216,11 @@ impl DdlController {
 
                 self.metadata_manager
                     .catalog_controller
-                    .prepare_streaming_job(&table_fragments, &streaming_job, true)
+                    .prepare_streaming_job(&stream_job_fragments, &streaming_job, true)
                     .await?;
 
                 self.stream_manager
-                    .replace_table(table_fragments, ctx)
+                    .replace_table(stream_job_fragments, ctx)
                     .await?;
 
                 merge_updates

@@ -348,20 +348,20 @@ impl GlobalStreamManager {
 
         let need_pause = replace_table_job_info.is_some();
 
-        if let Some((streaming_job, context, table_fragments)) = replace_table_job_info {
+        if let Some((streaming_job, context, stream_job_fragments)) = replace_table_job_info {
             self.metadata_manager
                 .catalog_controller
-                .prepare_streaming_job(&table_fragments, &streaming_job, true)
+                .prepare_streaming_job(&stream_job_fragments, &streaming_job, true)
                 .await?;
 
-            let tmp_table_id = table_fragments.stream_job_id();
+            let tmp_table_id = stream_job_fragments.stream_job_id();
             let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
             replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceTablePlan {
                 old_fragments: context.old_fragments,
-                new_fragments: table_fragments,
+                new_fragments: stream_job_fragments,
                 merge_updates: context.merge_updates,
                 dispatchers: context.dispatchers,
                 init_split_assignment,
