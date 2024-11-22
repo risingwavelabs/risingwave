@@ -26,6 +26,14 @@
       ├─LogicalScan { table: t, columns: [] }
       └─LogicalMaxOneRow
         └─LogicalScan { table: t, columns: [t.x] }
+  batch_plan: |-
+    BatchProject { exprs: [t.x, 1:Int32] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchExchange { order: [], dist: Single }
+      │ └─BatchScan { table: t, columns: [], distribution: SomeShard }
+      └─BatchMaxOneRow
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
@@ -76,6 +84,16 @@
       └─LogicalMaxOneRow
         └─LogicalTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
           └─LogicalScan { table: t, columns: [t.x] }
+  batch_plan: |-
+    BatchProject { exprs: [t.x, 1:Int32] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchExchange { order: [], dist: Single }
+      │ └─BatchScan { table: t, columns: [], distribution: SomeShard }
+      └─BatchMaxOneRow
+        └─BatchTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchTopN { order: [t.x ASC], limit: 1, offset: 0, with_ties: true }
+              └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
@@ -92,6 +110,14 @@
       ├─LogicalScan { table: t, columns: [] }
       └─LogicalMaxOneRow
         └─LogicalScan { table: t, columns: [t.x] }
+  batch_plan: |-
+    BatchProject { exprs: [(t.x + 1:Int32) as $expr1] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchExchange { order: [], dist: Single }
+      │ └─BatchScan { table: t, columns: [], distribution: SomeShard }
+      └─BatchMaxOneRow
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
@@ -112,6 +138,14 @@
     │ └─LogicalMaxOneRow
     │   └─LogicalScan { table: t, columns: [t.x] }
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  batch_plan: |-
+    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    ├─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+    │ ├─BatchValues { rows: [[]] }
+    │ └─BatchMaxOneRow
+    │   └─BatchExchange { order: [], dist: Single }
+    │     └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+    └─BatchValues { rows: [[1:Int32]] }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t(x int);
@@ -135,6 +169,19 @@
             ├─LogicalScan { table: t, columns: [t.x] }
             └─LogicalMaxOneRow
               └─LogicalScan { table: t, columns: [t.x] }
+  batch_plan: |-
+    BatchProject { exprs: [(t.x + $expr1) as $expr2] }
+    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+      ├─BatchExchange { order: [], dist: Single }
+      │ └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+      └─BatchMaxOneRow
+        └─BatchProject { exprs: [(t.x + t.x) as $expr1] }
+          └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+            └─BatchMaxOneRow
+              └─BatchExchange { order: [], dist: Single }
+                └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: Scalar subquery might produce more than one row.
 - sql: |
     create table t1 (x int, y int);
