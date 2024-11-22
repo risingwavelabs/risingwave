@@ -168,7 +168,7 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
-    /// The old table fragments to be replaced.
+    /// The old job fragments to be replaced.
     pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
@@ -461,7 +461,7 @@ impl GlobalStreamManager {
         &self,
         stream_job_fragments: StreamJobFragments,
         ReplaceTableContext {
-            old_fragments: old_table_fragments,
+            old_fragments,
             merge_updates,
             dispatchers,
             tmp_id,
@@ -476,7 +476,7 @@ impl GlobalStreamManager {
             .run_config_change_command_with_pause(
                 streaming_job.database_id().into(),
                 Command::ReplaceTable(ReplaceTablePlan {
-                    old_fragments: old_table_fragments,
+                    old_fragments,
                     new_fragments: stream_job_fragments,
                     merge_updates,
                     dispatchers,

@@ -689,7 +689,7 @@ impl Command {
                     }));
 
                     if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                        old_fragments: old_table_fragments,
+                        old_fragments,
                         new_fragments: _,
                         merge_updates,
                         dispatchers,
@@ -699,7 +699,7 @@ impl Command {
                     {
                         // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
-                            old_table_fragments,
+                            old_fragments,
                             merge_updates,
                             dispatchers,
                             init_split_assignment,
@@ -732,13 +732,13 @@ impl Command {
                 }
 
                 Command::ReplaceTable(ReplaceTablePlan {
-                    old_fragments: old_table_fragments,
+                    old_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
                     ..
                 }) => Self::generate_update_mutation_for_replace_table(
-                    old_table_fragments,
+                    old_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
@@ -951,12 +951,12 @@ impl Command {
     }
 
     fn generate_update_mutation_for_replace_table(
-        old_table_fragments: &StreamJobFragments,
+        old_fragments: &StreamJobFragments,
         merge_updates: &[MergeUpdate],
         dispatchers: &HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: &SplitAssignment,
     ) -> Option<Mutation> {
-        let dropped_actors = old_table_fragments.actor_ids();
+        let dropped_actors = old_fragments.actor_ids();
 
         let actor_new_dispatchers = dispatchers
             .iter()

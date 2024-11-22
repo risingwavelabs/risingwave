@@ -1717,11 +1717,11 @@ impl DdlController {
         let id = stream_job.id();
         let expr_context = stream_ctx.to_expr_context();
 
-        let old_table_fragments = self
+        let old_fragments = self
             .metadata_manager
             .get_job_fragments_by_id(&id.into())
             .await?;
-        let old_internal_table_ids = old_table_fragments.internal_table_ids();
+        let old_internal_table_ids = old_fragments.internal_table_ids();
         let old_internal_tables = self
             .metadata_manager
             .get_table_catalog_by_ids(old_internal_table_ids)
@@ -1731,7 +1731,7 @@ impl DdlController {
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
-        let original_table_fragment = old_table_fragments
+        let original_table_fragment = old_fragments
             .mview_fragment()
             .expect("mview fragment not found");
 
@@ -1826,15 +1826,15 @@ impl DdlController {
             graph,
             &building_locations.actor_locations,
             stream_ctx,
-            old_table_fragments.assigned_parallelism,
-            old_table_fragments.max_parallelism,
+            old_fragments.assigned_parallelism,
+            old_fragments.max_parallelism,
         );
 
         // Note: no need to set `vnode_count` as it's already set by the frontend.
         // See `get_replace_table_plan`.
 
         let ctx = ReplaceTableContext {
-            old_fragments: old_table_fragments,
+            old_fragments,
             merge_updates,
             dispatchers,
             building_locations,
