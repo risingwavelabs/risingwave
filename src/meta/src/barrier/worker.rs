@@ -90,7 +90,7 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// Command that has been collected but is still completing.
     completing_tasks: CompletingTasks,
 
-    /// Command that has been completed but is still commiting.
+    /// Command that has been completed but is still committing.
     /// The join handle of the committing future is stored.
     committing_task: CommittingTask,
 
