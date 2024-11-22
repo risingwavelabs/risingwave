@@ -91,7 +91,6 @@ impl MigratorTrait for Migrator {
             Box::new(m20241025_062548_singleton_vnode_count::Migration),
             Box::new(m20241115_085007_remove_function_type::Migration),
             Box::new(m20241120_182555_hummock_add_time_travel_sst_index::Migration),
-            Box::new(m20241022_072553_label::Migration),
             Box::new(m20241022_072553_node_label::Migration),
         ]
     }
