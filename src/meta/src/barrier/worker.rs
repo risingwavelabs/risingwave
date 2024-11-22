@@ -40,7 +40,7 @@ use tracing::{debug, error, info, warn, Instrument};
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CheckpointControl, DatabaseCheckpointControl,
 };
-use crate::barrier::complete_task::{CommittingTask, CompletingTask};
+use crate::barrier::complete_task::{CommittingTask, CompletingTasks};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -88,8 +88,11 @@ pub(super) struct GlobalBarrierWorker<C> {
     checkpoint_control: CheckpointControl,
 
     /// Command that has been collected but is still completing.
-    /// The join handle of the completing future is stored.
-    completing_task: CompletingTask,
+    completing_tasks: CompletingTasks,
+
+    /// Command that has been completed but is still commiting.
+    /// The join handle of the committing future is stored.
+    committing_task: CommittingTask,
 
     request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
 
@@ -148,7 +151,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             context,
             env,
             checkpoint_control: CheckpointControl::default(),
-            completing_task: CompletingTask::new(),
+            completing_tasks: CompletingTasks::new(),
+            committing_task: CommittingTask::None,
             request_rx,
             active_streaming_nodes,
             sink_manager,
@@ -252,7 +256,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                 .next_complete_barrier_task(&mut self.periodic_barriers)
             {
                 if let Err(e) = self
-                    .completing_task
+                    .completing_tasks
                     .push(next_complete_barrier_task, &mut self.control_stream_manager)
                 {
                     self.failure_recovery(e).await;
@@ -313,8 +317,9 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     }
                 }
                 complete_result = self
-                    .completing_task
-                    .next_completed_barrier(
+                    .committing_task
+                    .next_committed_barrier(
+                        &mut self.completing_tasks,
                         &self.context,
                         &self.env,
                 ) => {
@@ -331,7 +336,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     if let Err(e) = resp_result.and_then(|resp| {
                         match resp {
                             Response::CompleteBarrier(resp) => {
-                                self.completing_task.on_barrier_complete_resp(worker_id, resp);
+                                self.completing_tasks.on_barrier_complete_resp(worker_id, resp);
                                 Ok(())
                             },
                             Response::CollectBarrier(resp) => {
@@ -344,7 +349,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     }) {
                         {
 
-                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) || self.completing_task.is_failed_at_worker_err(worker_id) {
+                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) || self.completing_tasks.is_failed_at_worker_err(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 self.report_collect_failure(&err);
@@ -370,14 +375,15 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 }
 
 // TODO: move this method to `complete_task.rs` and mark some structs and fields as private before merge
-impl CompletingTask {
+impl CommittingTask {
     pub(super) async fn clear_on_err(
         &mut self,
+        completing_tasks: &mut CompletingTasks,
         context: &impl GlobalBarrierWorkerContext,
         env: &MetaSrvEnv,
     ) {
         // join spawned completing command to finish no matter it succeeds or not.
-        let is_err = match replace(&mut self.committing_task, CommittingTask::None) {
+        let is_err = match replace(self, CommittingTask::None) {
             CommittingTask::None => false,
             CommittingTask::Committing { join_handle, .. } => {
                 info!("waiting for completing command to finish in recovery");
@@ -397,13 +403,9 @@ impl CompletingTask {
         };
         if !is_err {
             // continue to finish the pending collected barrier.
-            while let Some((_, task)) = self.syncing_tasks.pop_first()
-                && task.is_collected()
-            {
-                let (commit_info, task) = task.into_commit_info();
-                if let Err(e) = task
-                    .complete_barrier(commit_info, context, env.clone())
-                    .await
+            while let Some((commit_info, task)) = completing_tasks.next_completed_task() {
+                if let Err(e) =
+                    CommittingTask::commit_barrier(task, commit_info, context, env.clone()).await
                 {
                     error!(
                         err = ?e.as_report(),
@@ -413,16 +415,16 @@ impl CompletingTask {
                 }
             }
         }
-        *self = Self::new();
     }
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
     pub async fn clear_on_err(&mut self, err: &MetaError) {
-        self.completing_task
-            .clear_on_err(&*self.context, &self.env)
+        self.committing_task
+            .clear_on_err(&mut self.completing_tasks, &*self.context, &self.env)
             .await;
+        self.completing_tasks = CompletingTasks::new();
         self.checkpoint_control.clear_on_err(err);
     }
 

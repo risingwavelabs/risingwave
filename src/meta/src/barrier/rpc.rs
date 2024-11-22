@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::future::poll_fn;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -38,7 +38,6 @@ use risingwave_pb::stream_service::{
     InjectBarrierRequest, StreamingControlStreamRequest,
 };
 use risingwave_rpc_client::StreamingControlHandle;
-use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::time::{sleep, timeout};
 use tokio_retry::strategy::ExponentialBackoff;
@@ -170,16 +169,17 @@ impl ControlStreamManager {
         *self = Self::new(self.env.clone());
     }
 
-    async fn next_response_inner(
+    fn poll_next_response(
         &mut self,
-    ) -> Option<(
+        cx: &mut Context<'_>,
+    ) -> Poll<(
         WorkerId,
         MetaResult<streaming_control_stream_response::Response>,
     )> {
         if self.nodes.is_empty() {
-            return None;
+            return Poll::Pending;
         }
-        let (worker_id, result) = poll_fn(|cx| {
+        let result: Poll<(WorkerId, MetaResult<_>)> = {
             for (worker_id, node) in &mut self.nodes {
                 match node.handle.response_stream.poll_next_unpin(cx) {
                     Poll::Ready(result) => {
@@ -213,18 +213,17 @@ impl ControlStreamManager {
                 }
             }
             Poll::Pending
-        })
-        .await;
+        };
 
-        if let Err(err) = &result {
+        if let Poll::Ready((worker_id, Err(err))) = &result {
             let node = self
                 .nodes
-                .remove(&worker_id)
+                .remove(worker_id)
                 .expect("should exist when get shutdown resp");
             warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
         }
 
-        Some((worker_id, result))
+        result
     }
 
     pub(super) async fn next_response(
@@ -233,7 +232,7 @@ impl ControlStreamManager {
         WorkerId,
         MetaResult<streaming_control_stream_response::Response>,
     ) {
-        pending_on_none(self.next_response_inner()).await
+        poll_fn(|cx| self.poll_next_response(cx)).await
     }
 
     pub(super) async fn collect_errors(
@@ -244,14 +243,17 @@ impl ControlStreamManager {
         let mut errors = vec![(worker_id, first_err)];
         #[cfg(not(madsim))]
         {
-            let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-                while let Some((worker_id, result)) = self.next_response_inner().await {
-                    if let Err(e) = result {
-                        errors.push((worker_id, e));
+            if !self.nodes.is_empty() {
+                let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
+                    loop {
+                        let (worker_id, result) = self.next_response().await;
+                        if let Err(e) = result {
+                            errors.push((worker_id, e));
+                        }
                     }
-                }
-            })
-            .await;
+                })
+                .await;
+            }
         }
         tracing::debug!(?errors, "collected stream errors");
         errors

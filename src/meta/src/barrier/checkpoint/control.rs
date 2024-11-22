@@ -31,7 +31,7 @@ use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamin
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{
-    BarrierCompleteOutput, CompleteBarrierTask, CreatingJobCompleteBarrierTask,
+    BarrierCommitOutput, CompleteBarrierTask, CreatingJobCompleteBarrierTask,
     DatabaseCompleteBarrierTask,
 };
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
@@ -66,7 +66,7 @@ impl CheckpointControl {
 
     pub(crate) fn ack_completed(
         &mut self,
-        output: BarrierCompleteOutput,
+        output: BarrierCommitOutput,
         control_stream_manager: &mut ControlStreamManager,
     ) {
         self.hummock_version_stats = output.hummock_version_stats;
