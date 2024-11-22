@@ -243,9 +243,9 @@ impl ControlStreamManager {
         let mut errors = vec![(worker_id, first_err)];
         #[cfg(not(madsim))]
         {
-            if !self.nodes.is_empty() {
+            {
                 let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-                    loop {
+                    while !self.nodes.is_empty() {
                         let (worker_id, result) = self.next_response().await;
                         if let Err(e) = result {
                             errors.push((worker_id, e));
