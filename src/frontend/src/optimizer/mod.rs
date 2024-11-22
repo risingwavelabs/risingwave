@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 pub mod plan_node;
 
@@ -41,7 +42,7 @@ mod plan_expr_visitor;
 mod rule;
 
 use std::assert_matches::assert_matches;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -51,7 +52,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -83,6 +84,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
+use crate::TableCatalog;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -943,8 +945,9 @@ impl PlanRoot {
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
         without_backfill: bool,
-        target_table: Option<TableId>,
+        target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
+        user_specified_columns: bool,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
@@ -962,12 +965,17 @@ impl PlanRoot {
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
+        let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
+            let columns = t.columns_without_rw_timestamp();
+            self.target_columns_to_plan_mapping(&columns, user_specified_columns)
+        });
         StreamSink::create(
             stream_plan,
             sink_name,
             db_name,
             sink_from_table_name,
             target_table,
+            target_columns_to_plan_mapping,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -996,6 +1004,39 @@ impl PlanRoot {
             .session_ctx()
             .config()
             .streaming_use_snapshot_backfill()
+    }
+
+    /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
+    pub fn target_columns_to_plan_mapping(
+        &self,
+        tar_cols: &[ColumnCatalog],
+        user_specified_columns: bool,
+    ) -> Vec<Option<usize>> {
+        #[allow(clippy::disallowed_methods)]
+        let visible_cols: Vec<(usize, String)> = self
+            .out_fields
+            .ones()
+            .zip_eq(self.out_names.iter().cloned())
+            .collect_vec();
+
+        let visible_col_idxes = visible_cols.iter().map(|(i, _)| *i).collect_vec();
+        let visible_col_idxes_by_name = visible_cols
+            .iter()
+            .map(|(i, name)| (name.as_ref(), *i))
+            .collect::<BTreeMap<_, _>>();
+
+        tar_cols
+            .iter()
+            .enumerate()
+            .filter(|(_, tar_col)| tar_col.can_dml())
+            .map(|(tar_i, tar_col)| {
+                if user_specified_columns {
+                    visible_col_idxes_by_name.get(tar_col.name()).cloned()
+                } else {
+                    (tar_i < visible_col_idxes.len()).then(|| visible_cols[tar_i].0)
+                }
+            })
+            .collect()
     }
 }
 
