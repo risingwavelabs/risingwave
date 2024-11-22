@@ -277,7 +277,6 @@ pub async fn gen_sink_plan(
             }
         }
 
-        let table_columns_without_rw_timestamp = table_catalog.columns();
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
