@@ -72,7 +72,6 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::CastWithTimeZone
             | Type::AddWithTimeZone
             | Type::SubtractWithTimeZone
-            | Type::Timezone
             | Type::Cast
             | Type::Substr
             | Type::Length

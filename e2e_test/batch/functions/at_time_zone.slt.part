@@ -37,3 +37,14 @@ select local AT TIME ZONE tz from t order by 1;
 
 statement ok
 drop table t;
+
+# timezone function
+query T
+select timezone('Europe/Moscow', '2014-10-25 22:00:00 UTC'::timestamptz);
+----
+2014-10-26 01:00:00
+
+query T
+select timezone('Europe/Moscow', '2011-03-26 23:00:00 UTC'::timestamptz);
+----
+2011-03-27 03:00:00

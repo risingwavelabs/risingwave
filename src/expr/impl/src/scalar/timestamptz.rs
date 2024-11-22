@@ -80,16 +80,6 @@ pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Times
     Ok(Timestamptz::from_micros(usec))
 }
 
-#[function("timezone(varchar, timestamp) -> timestamptz")]
-pub fn timezone_timestamp_at_time_zone(time_zone: &str, input: Timestamp) -> Result<Timestamptz> {
-    timestamp_at_time_zone(input, time_zone)
-}
-
-#[function("timezone(varchar, timestamptz) -> timestamp")]
-pub fn timezone_timestamptz_at_time_zone(time_zone: &str, input: Timestamptz) -> Result<Timestamp> {
-    timestamptz_at_time_zone(input, time_zone)
-}
-
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(
     elem: Timestamptz,
@@ -237,12 +227,6 @@ mod tests {
                 .zip_eq_fast(zones)
                 .for_each(|(local, zone)| {
                     let local = local.parse().unwrap();
-
-                    let actual = timezone_timestamptz_at_time_zone(zone, usecs).unwrap();
-                    assert_eq!(local, actual);
-
-                    let actual = timezone_timestamp_at_time_zone(zone, local).unwrap();
-                    assert_eq!(Timestamp::from(usecs.to_datetime_utc().naive_utc()), actual);
 
                     let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
                     assert_eq!(local, actual);

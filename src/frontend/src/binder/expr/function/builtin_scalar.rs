@@ -224,7 +224,14 @@ impl Binder {
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
-                ("timezone", raw_call(ExprType::Timezone)),
+                ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.swap(0, 1);
+                        Ok(inputs)
+                    } else {
+                        Err(ErrorCode::ExprError("unexpected arguments number".into()).into())
+                    }
+                })),
                 ("to_date", raw_call(ExprType::CharToDate)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
