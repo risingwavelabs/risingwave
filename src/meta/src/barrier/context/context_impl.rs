@@ -164,7 +164,7 @@ impl CommandContext {
 
             Command::CreateStreamingJob { info, job_type } => {
                 let CreateStreamingJobCommandInfo {
-                    table_fragments,
+                    stream_job_fragments: table_fragments,
                     dispatchers,
                     init_split_assignment,
                     ..
@@ -181,7 +181,7 @@ impl CommandContext {
                     .await?;
 
                 if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                    new_table_fragments,
+                    new_fragments: new_table_fragments,
                     dispatchers,
                     init_split_assignment,
                     ..
@@ -224,8 +224,8 @@ impl CommandContext {
             }
 
             Command::ReplaceTable(ReplaceTablePlan {
-                old_table_fragments,
-                new_table_fragments,
+                old_fragments: old_table_fragments,
+                new_fragments: new_table_fragments,
                 dispatchers,
                 init_split_assignment,
                 ..

@@ -246,7 +246,7 @@ impl TrackingJob {
 
     pub(crate) fn table_to_create(&self) -> TableId {
         match self {
-            TrackingJob::New(command) => command.info.table_fragments.stream_job_id(),
+            TrackingJob::New(command) => command.info.stream_job_fragments.stream_job_id(),
             TrackingJob::Recovered(recovered) => (recovered.id as u32).into(),
         }
     }
@@ -258,7 +258,7 @@ impl std::fmt::Debug for TrackingJob {
             TrackingJob::New(command) => write!(
                 f,
                 "TrackingJob::New({:?})",
-                command.info.table_fragments.stream_job_id()
+                command.info.stream_job_fragments.stream_job_id()
             ),
             TrackingJob::Recovered(recovered) => {
                 write!(f, "TrackingJob::RecoveredV2({:?})", recovered.id)
@@ -500,7 +500,8 @@ impl CreateMviewProgressTracker {
         tracing::trace!(?info, "add job to track");
         let (info, actors, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
-                table_fragments, ..
+                stream_job_fragments: table_fragments,
+                ..
             } = info;
             let actors = table_fragments.tracking_progress_actor_ids();
             if actors.is_empty() {
@@ -514,7 +515,7 @@ impl CreateMviewProgressTracker {
         };
 
         let CreateStreamingJobCommandInfo {
-            table_fragments,
+            stream_job_fragments: table_fragments,
             upstream_root_actors,
             dispatchers,
             definition,

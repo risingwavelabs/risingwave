@@ -551,10 +551,13 @@ impl MetadataManager {
         })
     }
 
-    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<StreamJobFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<StreamJobFragments> {
         let pb_table_fragments = self
             .catalog_controller
-            .get_job_fragments_by_id(id.table_id as _)
+            .get_job_fragments_by_id(job_id.table_id as _)
             .await?;
         Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
     }

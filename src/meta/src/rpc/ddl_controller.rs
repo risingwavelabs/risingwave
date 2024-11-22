@@ -1834,7 +1834,7 @@ impl DdlController {
         // See `get_replace_table_plan`.
 
         let ctx = ReplaceTableContext {
-            old_table_fragments,
+            old_fragments: old_table_fragments,
             merge_updates,
             dispatchers,
             building_locations,

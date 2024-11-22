@@ -878,11 +878,11 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
-    pub async fn allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
+    pub async fn allocate_splits(&self, job_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
             .metadata_manager
-            .get_job_fragments_by_id(table_id)
+            .get_job_fragments_by_id(job_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();

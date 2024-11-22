@@ -169,7 +169,7 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
     /// The old table fragments to be replaced.
-    pub old_table_fragments: StreamJobFragments,
+    pub old_fragments: StreamJobFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
@@ -234,10 +234,10 @@ impl GlobalStreamManager {
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
         self: &Arc<Self>,
-        table_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragments,
         ctx: CreateStreamingJobContext,
     ) -> MetaResult<NotificationVersion> {
-        let table_id = table_fragments.stream_job_id();
+        let table_id = stream_job_fragments.stream_job_id();
         let database_id = ctx.streaming_job.database_id().into();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
         let execution = StreamingJobExecution::new(table_id, sender.clone());
@@ -246,7 +246,7 @@ impl GlobalStreamManager {
         let stream_manager = self.clone();
         let fut = async move {
             let res = stream_manager
-                .create_streaming_job_impl(table_fragments, ctx)
+                .create_streaming_job_impl(stream_job_fragments, ctx)
                 .await;
             match res {
                 Ok(version) => {
@@ -324,7 +324,7 @@ impl GlobalStreamManager {
 
     async fn create_streaming_job_impl(
         &self,
-        table_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragments,
         CreateStreamingJobContext {
             streaming_job,
             dispatchers,
@@ -342,7 +342,7 @@ impl GlobalStreamManager {
         let mut replace_table_id = None;
 
         tracing::debug!(
-            table_id = %table_fragments.stream_job_id(),
+            table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
         );
 
@@ -360,8 +360,8 @@ impl GlobalStreamManager {
             replace_table_id = Some(tmp_table_id);
 
             replace_table_command = Some(ReplaceTablePlan {
-                old_table_fragments: context.old_table_fragments,
-                new_table_fragments: table_fragments,
+                old_fragments: context.old_fragments,
+                new_fragments: table_fragments,
                 merge_updates: context.merge_updates,
                 dispatchers: context.dispatchers,
                 init_split_assignment,
@@ -370,7 +370,7 @@ impl GlobalStreamManager {
             });
         }
 
-        let table_id = table_fragments.stream_job_id();
+        let table_id = stream_job_fragments.stream_job_id();
 
         // Here we need to consider:
         // - Shared source
@@ -384,7 +384,7 @@ impl GlobalStreamManager {
         );
 
         let info = CreateStreamingJobCommandInfo {
-            table_fragments,
+            stream_job_fragments,
             upstream_root_actors,
             dispatchers,
             init_split_assignment,
@@ -459,9 +459,9 @@ impl GlobalStreamManager {
 
     pub async fn replace_table(
         &self,
-        table_fragments: StreamJobFragments,
+        stream_job_fragments: StreamJobFragments,
         ReplaceTableContext {
-            old_table_fragments,
+            old_fragments: old_table_fragments,
             merge_updates,
             dispatchers,
             tmp_id,
@@ -469,15 +469,15 @@ impl GlobalStreamManager {
             ..
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
-        let tmp_table_id = table_fragments.stream_job_id();
+        let tmp_table_id = stream_job_fragments.stream_job_id();
         let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
                 streaming_job.database_id().into(),
                 Command::ReplaceTable(ReplaceTablePlan {
-                    old_table_fragments,
-                    new_table_fragments: table_fragments,
+                    old_fragments: old_table_fragments,
+                    new_fragments: stream_job_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
