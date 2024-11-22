@@ -232,10 +232,10 @@ impl CompactionPicker for ManualCompactionPicker {
         }
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let mut tmp_sst_info = SstableInfo::default();
+        let mut tmp_sst_info = SstableInfoImpl::default();
         let mut range_overlap_info = RangeOverlapInfo::default();
         tmp_sst_info.key_range = self.option.key_range.clone();
-        range_overlap_info.update(&tmp_sst_info);
+        range_overlap_info.update(&tmp_sst_info.into());
         let level = self.option.level;
         let target_level = self.target_level;
         assert!(

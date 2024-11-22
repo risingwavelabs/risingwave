@@ -380,13 +380,14 @@ impl HummockManager {
                     .sum();
 
                 // TODO(li0k): replace with `split_sst`
-                let branch_sst = split_sst_with_table_ids(
-                    &mut sst.sst_info,
+                let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
+                    &sst.sst_info,
                     &mut new_sst_id,
                     origin_sst_size - new_sst_size,
                     new_sst_size,
                     match_ids,
                 );
+                sst.sst_info = modified_sst_info;
 
                 commit_sstables
                     .entry(group_id)

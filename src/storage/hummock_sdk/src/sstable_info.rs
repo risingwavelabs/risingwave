@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::mem::size_of;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
@@ -215,9 +215,11 @@ impl From<&SstableInfoImpl> for PbSstableInfo {
     }
 }
 
-impl SstableInfoImpl {
+impl SstableInfo {
     pub fn remove_key_range(&mut self) {
-        self.key_range = KeyRange::default();
+        let mut sst = self.get_impl();
+        sst.key_range = KeyRange::default();
+        *self = sst.into()
     }
 }
 
@@ -274,9 +276,9 @@ impl Deref for SstableInfo {
     }
 }
 
-impl DerefMut for SstableInfo {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        todo!()
+impl SstableInfo {
+    pub fn get_impl(&self) -> SstableInfoImpl {
+        (*self.0).clone()
     }
 }
 

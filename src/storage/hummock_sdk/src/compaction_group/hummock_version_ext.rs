@@ -1175,13 +1175,14 @@ fn split_sst_info_for_level(
             .cloned()
             .collect_vec();
         if !removed_table_ids.is_empty() {
-            let branch_sst = split_sst_with_table_ids(
-                sst_info,
+            let (modified_sst, branch_sst) = split_sst_with_table_ids(
+                &sst_info,
                 new_sst_id,
                 sst_info.sst_size / 2,
                 sst_info.sst_size / 2,
                 member_table_ids.iter().cloned().collect_vec(),
             );
+            *sst_info = modified_sst;
             insert_table_infos.push(branch_sst);
         }
     }
