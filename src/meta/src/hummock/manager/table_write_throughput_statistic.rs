@@ -28,7 +28,8 @@ impl AsRef<TableWriteThroughputStatistic> for TableWriteThroughputStatistic {
 
 impl TableWriteThroughputStatistic {
     pub fn is_expired(&self, max_statistic_expired_secs: i64, timestamp_secs: i64) -> bool {
-        timestamp_secs - self.timestamp_secs > max_statistic_expired_secs
+        // max(0) is used to avoid overflow
+        (timestamp_secs - self.timestamp_secs).max(0) > max_statistic_expired_secs
     }
 }
 
@@ -81,11 +82,8 @@ impl TableWriteThroughputStatisticManager {
         self.table_throughput
             .get(&table_id)
             .into_iter()
-            .flat_map(move |statistics| {
-                statistics
-                    .iter()
-                    .filter(move |statistic| !statistic.is_expired(window_secs, timestamp_secs))
-            })
+            .flatten()
+            .skip_while(move |statistic| statistic.is_expired(window_secs, timestamp_secs))
     }
 
     pub fn remove_table(&mut self, table_id: u32) {

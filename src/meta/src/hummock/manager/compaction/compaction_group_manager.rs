@@ -277,8 +277,8 @@ impl HummockManager {
         &self,
         table_ids: impl IntoIterator<Item = TableId> + Send,
     ) -> Result<()> {
-        let mut table_ids = table_ids.into_iter().peekable();
-        if table_ids.peek().is_none() {
+        let table_ids = table_ids.into_iter().collect_vec();
+        if table_ids.is_empty() {
             return Ok(());
         }
 
@@ -288,7 +288,7 @@ impl HummockManager {
             // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
             let mut table_write_throughput_statistic_manager =
                 self.table_write_throughput_statistic_manager.write();
-            for table_id in table_ids.by_ref() {
+            for table_id in table_ids.iter().unique() {
                 table_write_throughput_statistic_manager.remove_table(table_id.table_id);
             }
         }
@@ -305,7 +305,7 @@ impl HummockManager {
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
-        for table_id in table_ids.unique() {
+        for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
