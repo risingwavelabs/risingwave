@@ -22,7 +22,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -109,6 +109,7 @@ pub async fn handle_execute(
             let BoundResult {
                 bound,
                 dependent_relations,
+                dependent_udfs,
                 ..
             } = bound_result;
             let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
@@ -144,6 +145,7 @@ pub async fn handle_execute(
                 name,
                 *query,
                 dependent_relations,
+                dependent_udfs,
                 columns,
                 emit_mode,
             )
@@ -184,6 +186,8 @@ pub struct BoundResult {
     pub(crate) param_types: Vec<DataType>,
     pub(crate) parsed_params: Option<Vec<Datum>>,
     pub(crate) dependent_relations: HashSet<TableId>,
+    /// TODO(rc): merge with `dependent_relations`
+    pub(crate) dependent_udfs: HashSet<FunctionId>,
 }
 
 fn gen_bound(
@@ -207,7 +211,8 @@ fn gen_bound(
         bound,
         param_types: binder.export_param_types()?,
         parsed_params: None,
-        dependent_relations: binder.included_relations(),
+        dependent_relations: binder.included_relations().clone(),
+        dependent_udfs: binder.included_udfs().clone(),
     })
 }
 

@@ -22,10 +22,10 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, TableId, UserId};
+use risingwave_common::bail;
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId, ObjectId, Schema, SchemaId, UserId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
-use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
@@ -47,9 +47,6 @@ use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SinkId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
@@ -75,6 +72,7 @@ pub struct SinkPlanContext {
     pub sink_plan: PlanRef,
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
+    pub dependencies: HashSet<ObjectId>,
 }
 
 pub async fn gen_sink_plan(
@@ -125,10 +123,14 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound,
+        )
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -253,15 +255,24 @@ pub async fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string());
     }
 
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+            .into_iter()
+            .map(|id| id.table_id() as ObjectId)
+            .chain(
+                dependent_udfs
+                    .into_iter()
+                    .map(|id| id.function_id() as ObjectId),
+            )
+            .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
         None, // deprecated: private link connection id
-        dependent_relations.into_iter().collect_vec(),
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -314,6 +325,7 @@ pub async fn gen_sink_plan(
         sink_plan,
         sink_catalog,
         target_table_catalog,
+        dependencies,
     })
 }
 
@@ -428,12 +440,13 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let (mut sink, graph, target_table_catalog) = {
+    let (mut sink, graph, target_table_catalog, dependencies) = {
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
+            dependencies,
         } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -446,14 +459,12 @@ pub async fn handle_create_sink(
 
         let graph = build_graph(plan)?;
 
-        (sink, graph, target_table_catalog)
+        (sink, graph, target_table_catalog, dependencies)
     };
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
-
-        check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
@@ -506,7 +517,12 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(sink.to_proto(), graph, target_table_replace_plan)
+        .create_sink(
+            sink.to_proto(),
+            graph,
+            target_table_replace_plan,
+            dependencies,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
@@ -528,112 +544,6 @@ pub fn fetch_incoming_sinks(
     }
 
     Ok(sinks)
-}
-
-fn check_cycle_for_sink(
-    session: &SessionImpl,
-    sink_catalog: SinkCatalog,
-    table_id: catalog::TableId,
-) -> Result<()> {
-    let reader = session.env().catalog_reader().read_guard();
-
-    let mut sinks = HashMap::new();
-    let mut sources = HashMap::new();
-    let mut views = HashMap::new();
-    let db_name = session.database();
-    for schema in reader.iter_schemas(db_name)? {
-        for sink in schema.iter_sink() {
-            sinks.insert(sink.id.sink_id, sink.as_ref());
-        }
-
-        for source in schema.iter_source() {
-            sources.insert(source.id, source.as_ref());
-        }
-
-        for view in schema.iter_view() {
-            views.insert(view.id, view.as_ref());
-        }
-    }
-
-    struct Context<'a> {
-        reader: &'a CatalogReadGuard,
-        sink_index: &'a HashMap<u32, &'a SinkCatalog>,
-        source_index: &'a HashMap<u32, &'a SourceCatalog>,
-        view_index: &'a HashMap<u32, &'a ViewCatalog>,
-    }
-
-    impl Context<'_> {
-        fn visit_table(
-            &self,
-            table: &TableCatalog,
-            target_table_id: catalog::TableId,
-            path: &mut Vec<String>,
-        ) -> Result<()> {
-            if table.id == target_table_id {
-                path.reverse();
-                path.push(table.name.clone());
-                return Err(RwError::from(ErrorCode::BindError(
-                    format!(
-                        "Creating such a sink will result in circular dependency, path = [{}]",
-                        path.join(", ")
-                    )
-                    .to_string(),
-                )));
-            }
-
-            for sink_id in &table.incoming_sinks {
-                if let Some(sink) = self.sink_index.get(sink_id) {
-                    path.push(sink.name.clone());
-                    self.visit_dependent_jobs(&sink.dependent_relations, target_table_id, path)?;
-                    path.pop();
-                } else {
-                    bail!("sink not found: {:?}", sink_id);
-                }
-            }
-
-            self.visit_dependent_jobs(&table.dependent_relations, target_table_id, path)?;
-
-            Ok(())
-        }
-
-        fn visit_dependent_jobs(
-            &self,
-            dependent_jobs: &[TableId],
-            target_table_id: TableId,
-            path: &mut Vec<String>,
-        ) -> Result<()> {
-            for table_id in dependent_jobs {
-                if let Ok(table) = self.reader.get_any_table_by_id(table_id) {
-                    path.push(table.name.clone());
-                    self.visit_table(table.as_ref(), target_table_id, path)?;
-                    path.pop();
-                } else if self.source_index.contains_key(&table_id.table_id)
-                    || self.view_index.contains_key(&table_id.table_id)
-                {
-                    continue;
-                } else {
-                    bail!("streaming job not found: {:?}", table_id);
-                }
-            }
-
-            Ok(())
-        }
-    }
-
-    let mut path = vec![];
-
-    path.push(sink_catalog.name.clone());
-
-    let ctx = Context {
-        reader: &reader,
-        sink_index: &sinks,
-        source_index: &sources,
-        view_index: &views,
-    };
-
-    ctx.visit_dependent_jobs(&sink_catalog.dependent_relations, table_id, &mut path)?;
-
-    Ok(())
 }
 
 pub(crate) async fn reparse_table_for_sink(
@@ -670,6 +580,7 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        include_column_options,
         ..
     } = definition
     else {
@@ -692,6 +603,7 @@ pub(crate) async fn reparse_table_for_sink(
         with_version_column,
         None,
         None,
+        include_column_options,
     )
     .await?;
 

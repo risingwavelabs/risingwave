@@ -59,11 +59,17 @@ select count(*) from rw_internal_tables where name like '%s0%';
 
 sleep 1s
 
-# SourceExecutor's ingestion does not start (state table is empty), even after sleep
+statement ok
+flush;
+
+# SourceExecutor's starts from latest.
 system ok
 internal_table.mjs --name s0 --type source
 ----
-(empty)
+0,"{""split_info"": {""partition"": 0, ""start_offset"": 0, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+1,"{""split_info"": {""partition"": 1, ""start_offset"": 0, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+2,"{""split_info"": {""partition"": 2, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+3,"{""split_info"": {""partition"": 3, ""start_offset"": 2, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
 
 
 statement ok
@@ -71,12 +77,6 @@ create materialized view mv_1 as select * from s0;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 2s
-
-# SourceExecutor's ingestion started, but it only starts from latest (offset 1).
-system ok
-internal_table.mjs --name s0 --type source
-----
-(empty)
 
 
 # SourceBackfill starts from offset 0, with backfill_info: HasDataToBackfill { latest_offset: "0" } (decided by kafka high watermark).
@@ -144,7 +144,7 @@ EOF
 
 sleep 2s
 
-# SourceExecutor's finally got new data now.
+# SourceExecutor's got new data.
 system ok
 internal_table.mjs --name s0 --type source
 ----
@@ -183,16 +183,6 @@ select v1, v2 from mv_1;
 4	d
 4	d
 4	dd
-
-
-# start_offset changed to 1
-system ok
-internal_table.mjs --name s0 --type source
-----
-0,"{""split_info"": {""partition"": 0, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
-1,"{""split_info"": {""partition"": 1, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
-2,"{""split_info"": {""partition"": 2, ""start_offset"": 2, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
-3,"{""split_info"": {""partition"": 3, ""start_offset"": 3, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
 
 
 # Transition from SourceCachingUp to Finished after consuming one upstream message.
@@ -332,6 +322,47 @@ internal_table.mjs --name s0 --type source
 # # Manual test: change the parallelism of the compute node, kill and restart, and check
 # # risedev ctl meta source-split-info --ignore-id
 # # risedev psql -c "select name, flags, parallelism from rw_fragments JOIN rw_relations ON rw_fragments.table_id = rw_relations.id order by name;"
+
+
+# Test: rate limit and resume won't lose data
+
+statement ok
+alter source s0 set source_rate_limit to 0;
+
+
+system ok
+cat <<EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+EOF
+
+sleep 2s
+
+# no data goes in
+
+query ?? rowsort
+select v1, count(*) from mv_1 group by v1;
+----
+1	12
+2	12
+3	13
+4	14
+
+statement ok
+alter source s0 set source_rate_limit to default;
+
+sleep 3s
+
+# data comes in
+query ?? rowsort
+select v1, count(*) from mv_1 group by v1;
+----
+1	13
+2	13
+3	14
+4	15
 
 
 statement ok

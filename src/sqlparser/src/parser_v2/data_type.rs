@@ -152,8 +152,13 @@ fn data_type_stateful<S>(input: &mut StatefulStream<S>) -> PResult<DataType>
 where
     S: TokenStream,
 {
+    let base = data_type_stateful_inner.parse_next(input)?;
+    // Shall not peek for `Token::LBracket` when `>>` is partially consumed.
+    if *input.state.remaining_close.borrow() {
+        return Ok(base);
+    }
     (
-        data_type_stateful_inner,
+        empty.value(base),
         repeat(0.., (Token::LBracket, cut_err(Token::RBracket))),
     )
         .map(|(mut dt, depth)| {

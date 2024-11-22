@@ -14,11 +14,7 @@
 
 use std::future::Future;
 
-use itertools::Itertools;
-use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::row::{CompactedRow, RowDeserializer};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -28,10 +24,12 @@ use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
+    /// TODO(rc): There can be a 2 times amplification in terms of the chunk size, so we may need to
+    /// allow `apply_chunk` return a stream of chunks. Motivation is not quite strong though.
     fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
-    ) -> impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
+    ) -> impl Future<Output = StreamExecutorResult<Option<StreamChunk>>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
     fn flush_data(
@@ -102,7 +100,9 @@ where
                     }
                 }
                 Message::Chunk(chunk) => {
-                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    if let Some(output_chunk) = self.inner.apply_chunk(chunk).await? {
+                        yield Message::Chunk(output_chunk);
+                    }
                     self.inner.try_flush_data().await?;
                 }
                 Message::Barrier(barrier) => {
@@ -117,33 +117,6 @@ where
                 }
             };
         }
-    }
-}
-
-pub fn generate_output(
-    new_rows: Vec<CompactedRow>,
-    new_ops: Vec<Op>,
-    schema: &Schema,
-) -> StreamExecutorResult<StreamChunk> {
-    if !new_rows.is_empty() {
-        let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
-        let row_deserializer = RowDeserializer::new(schema.data_types());
-        for compacted_row in new_rows {
-            let res = data_chunk_builder
-                .append_one_row(row_deserializer.deserialize(compacted_row.row.as_ref())?);
-            debug_assert!(res.is_none());
-        }
-        // since `new_rows` is not empty, we unwrap directly
-        let new_data_chunk = data_chunk_builder.consume_all().unwrap();
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
-        Ok(new_stream_chunk)
-    } else {
-        let columns = schema
-            .create_array_builders(0)
-            .into_iter()
-            .map(|x| x.finish().into())
-            .collect_vec();
-        Ok(StreamChunk::new(vec![], columns))
     }
 }
 

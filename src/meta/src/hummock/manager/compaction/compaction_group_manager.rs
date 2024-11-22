@@ -138,7 +138,7 @@ impl HummockManager {
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments_vec(
         &self,
-        table_fragments: &[crate::model::TableFragments],
+        table_fragments: &[crate::model::StreamJobFragments],
     ) {
         self.unregister_table_ids(
             table_fragments
@@ -686,7 +686,7 @@ mod tests {
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::model::TableFragments;
+    use crate::model::StreamJobFragments;
 
     #[tokio::test]
     async fn test_inner() {
@@ -755,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
-        let table_fragment_1 = TableFragments::for_test(
+        let table_fragment_1 = StreamJobFragments::for_test(
             TableId::new(10),
             BTreeMap::from([(
                 1,
@@ -766,7 +766,7 @@ mod tests {
                 },
             )]),
         );
-        let table_fragment_2 = TableFragments::for_test(
+        let table_fragment_2 = StreamJobFragments::for_test(
             TableId::new(20),
             BTreeMap::from([(
                 2,
@@ -793,7 +793,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.table_id().table_id),
+                Some(table_fragment_1.stream_job_id().table_id),
                 table_fragment_1.internal_table_ids(),
             )
             .await
@@ -801,7 +801,7 @@ mod tests {
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_2.table_id().table_id),
+                Some(table_fragment_2.stream_job_id().table_id),
                 table_fragment_2.internal_table_ids(),
             )
             .await
@@ -830,7 +830,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.table_id().table_id),
+                Some(table_fragment_1.stream_job_id().table_id),
                 table_fragment_1.internal_table_ids(),
             )
             .await
