@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::mem::size_of;
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
@@ -21,7 +23,7 @@ use crate::version::{ObjectIdReader, SstableIdReader};
 use crate::{HummockSstableId, HummockSstableObjectId};
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct SstableInfo {
+pub struct SstableInfoImpl {
     pub object_id: u64,
     pub sst_id: u64,
     pub key_range: KeyRange,
@@ -38,7 +40,7 @@ pub struct SstableInfo {
     pub sst_size: u64,
 }
 
-impl SstableInfo {
+impl SstableInfoImpl {
     pub fn estimated_encode_len(&self) -> usize {
         let mut basic = size_of::<u64>() // object_id
             + size_of::<u64>() // sstable_id
@@ -63,7 +65,7 @@ impl SstableInfo {
     }
 }
 
-impl From<PbSstableInfo> for SstableInfo {
+impl From<PbSstableInfo> for SstableInfoImpl {
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
@@ -101,7 +103,7 @@ impl From<PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<&PbSstableInfo> for SstableInfo {
+impl From<&PbSstableInfo> for SstableInfoImpl {
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
@@ -138,8 +140,8 @@ impl From<&PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: SstableInfo) -> Self {
+impl From<SstableInfoImpl> for PbSstableInfo {
+    fn from(sstable_info: SstableInfoImpl) -> Self {
         assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
@@ -177,8 +179,8 @@ impl From<SstableInfo> for PbSstableInfo {
     }
 }
 
-impl From<&SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: &SstableInfo) -> Self {
+impl From<&SstableInfoImpl> for PbSstableInfo {
+    fn from(sstable_info: &SstableInfoImpl) -> Self {
         assert!(sstable_info.sst_size > 0);
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
@@ -213,9 +215,68 @@ impl From<&SstableInfo> for PbSstableInfo {
     }
 }
 
-impl SstableInfo {
+impl SstableInfoImpl {
     pub fn remove_key_range(&mut self) {
         self.key_range = KeyRange::default();
+    }
+}
+
+impl SstableIdReader for SstableInfoImpl {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableInfoImpl {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct SstableInfo(Arc<SstableInfoImpl>);
+
+impl From<&PbSstableInfo> for SstableInfo {
+    fn from(s: &PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoImpl::from(s).into())
+    }
+}
+
+impl From<PbSstableInfo> for SstableInfo {
+    fn from(s: PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoImpl::from(s).into())
+    }
+}
+
+impl From<SstableInfo> for PbSstableInfo {
+    fn from(s: SstableInfo) -> Self {
+        (&s).into()
+    }
+}
+
+impl From<SstableInfoImpl> for SstableInfo {
+    fn from(s: SstableInfoImpl) -> Self {
+        Self(s.into())
+    }
+}
+
+impl From<&SstableInfo> for PbSstableInfo {
+    fn from(s: &SstableInfo) -> Self {
+        s.0.as_ref().into()
+    }
+}
+
+impl Deref for SstableInfo {
+    type Target = SstableInfoImpl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SstableInfo {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        todo!()
     }
 }
 

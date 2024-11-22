@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoImpl};
 use risingwave_pb::hummock::LevelType;
 
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
@@ -180,10 +180,11 @@ impl ManualCompactionPicker {
     fn filter_level_by_option(&self, level: &Level) -> bool {
         let mut hint_sst_ids: HashSet<u64> = HashSet::new();
         hint_sst_ids.extend(self.option.sst_ids.iter());
-        let tmp_sst_info = SstableInfo {
+        let tmp_sst_info = SstableInfoImpl {
             key_range: self.option.key_range.clone(),
             ..Default::default()
-        };
+        }
+        .into();
         if self
             .overlap_strategy
             .check_overlap_with_tables(&[tmp_sst_info], &level.table_infos)
