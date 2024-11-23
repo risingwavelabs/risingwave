@@ -745,7 +745,7 @@ impl HummockManager {
         parent_group_id: u64,
     ) {
         let mut table_throughput = table_write_throughput_statistic_manager
-            .get_table_throughput(
+            .get_table_throughput_descending(
                 table_id,
                 self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
             )
@@ -1004,7 +1004,7 @@ fn check_is_low_write_throughput_compaction_group(
     let mut table_with_statistic = Vec::with_capacity(group.table_statistic.len());
     for table_id in group.table_statistic.keys() {
         let mut table_throughput = table_write_throughput_statistic_manager
-            .get_table_throughput(
+            .get_table_throughput_descending(
                 *table_id,
                 opts.table_stat_throuput_window_seconds_for_merge as i64,
             )

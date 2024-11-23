@@ -73,7 +73,9 @@ impl TableWriteThroughputStatisticManager {
         }
     }
 
-    pub fn get_table_throughput(
+    // `get_table_throughput` return the statistics of the table with the given `table_id` within the given `window_secs`.
+    // The statistics are sorted by timestamp in descending order.
+    pub fn get_table_throughput_descending(
         &self,
         table_id: u32,
         window_secs: i64,
@@ -83,10 +85,31 @@ impl TableWriteThroughputStatisticManager {
             .get(&table_id)
             .into_iter()
             .flatten()
-            .skip_while(move |statistic| statistic.is_expired(window_secs, timestamp_secs))
+            .rev()
+            .take_while(move |statistic| !statistic.is_expired(window_secs, timestamp_secs))
     }
 
     pub fn remove_table(&mut self, table_id: u32) {
         self.table_throughput.remove(&table_id);
+    }
+
+    // `avg_write_throughput` returns the average write throughput of the table with the given `table_id` within the given `window_secs`.
+    pub fn avg_write_throughput(&self, table_id: u32, window_secs: i64) -> f64 {
+        let mut total_throughput = 0;
+        let mut total_count = 0;
+        let mut statistic_iter = self
+            .get_table_throughput_descending(table_id, window_secs)
+            .peekable();
+
+        if statistic_iter.peek().is_none() {
+            return 0.0;
+        }
+
+        for statistic in statistic_iter {
+            total_throughput += statistic.throughput;
+            total_count += 1;
+        }
+
+        total_throughput as f64 / total_count as f64
     }
 }

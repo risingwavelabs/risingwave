@@ -285,10 +285,11 @@ impl HummockManager {
                                             .compaction_group_count
                                             .set(compaction_group_count as i64);
 
-                                        let tables_throughput = hummock_manager
-                                            .table_write_throughput_statistic_manager
-                                            .read()
-                                            .clone();
+                                        let table_write_throughput_statistic_manager =
+                                            hummock_manager
+                                                .table_write_throughput_statistic_manager
+                                                .read()
+                                                .clone();
 
                                         let current_version_levels = &hummock_manager
                                             .versioning
@@ -318,23 +319,13 @@ impl HummockManager {
                                                     .table_stat_throuput_window_seconds_for_merge,
                                             );
                                             for table_id in group_info.table_statistic.keys() {
-                                                let statistic_iter = tables_throughput
-                                                    .get_table_throughput(
-                                                        *table_id,
-                                                        max_statistic_expired_time as i64,
-                                                    );
-
-                                                let (sum, count) =
-                                                    statistic_iter.fold((0, 0), |acc, item| {
-                                                        (acc.0 + item.throughput, acc.1 + 1)
-                                                    });
-
-                                                if count == 0 {
-                                                    continue;
-                                                }
-
-                                                let table_avg_throughput = sum / count;
-                                                avg_throuput += table_avg_throughput;
+                                                avg_throuput +=
+                                                    table_write_throughput_statistic_manager
+                                                        .avg_write_throughput(
+                                                            *table_id,
+                                                            max_statistic_expired_time as i64,
+                                                        )
+                                                        as u64;
                                             }
 
                                             hummock_manager

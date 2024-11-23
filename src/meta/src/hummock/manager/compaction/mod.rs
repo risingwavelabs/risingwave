@@ -1473,13 +1473,14 @@ impl HummockManager {
                 .opts
                 .compact_task_table_size_partition_threshold_high;
             // check latest write throughput
-            let history_table_throughput_guard =
+            let table_write_throughput_statistic_manager =
                 self.table_write_throughput_statistic_manager.read();
             let timestamp = chrono::Utc::now().timestamp();
             for (table_id, compact_table_size) in table_size_info {
-                let write_throughput = history_table_throughput_guard
-                    .get_table_throughput(table_id, timestamp)
-                    .last()
+                let write_throughput = table_write_throughput_statistic_manager
+                    .get_table_throughput_descending(table_id, timestamp)
+                    .peekable()
+                    .peek()
                     .map(|item| item.throughput)
                     .unwrap_or(0);
                 if compact_table_size > compact_task_table_size_partition_threshold_high
