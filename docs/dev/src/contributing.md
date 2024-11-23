@@ -24,12 +24,7 @@ Before submitting your code changes, ensure you fully test them and perform nece
 
 ### Ask for Review
 
-Related developers may not directly notice your PR. You can find developers who recently edited
-the same file(s) as you did, and `@` them to review your PR. If you are not sure, you may also
-`@` any active developers and ask them to find related reviewers.
-
-If you got no response after a round of review, always feel free to ping reviewers again.
-This can make it much faster to get your PR merged.
+To get your PR reviewed and merged sooner, you can find and `@` mention developers who recently worked on the same files. If you're not sure who to ask, feel free to reach out to any active developers to help find relevant reviewers. Don't hesitate to follow up politely if you haven't received a response, or ask for help in the RisingWave Community Slack channel. We welcome you to be proactive in finding reviewers for your PR!
 
 ### Pull Request title
 
