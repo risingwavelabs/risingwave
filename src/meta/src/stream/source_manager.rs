@@ -42,7 +42,7 @@ use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetadataManager;
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -763,7 +763,7 @@ impl SourceManager {
     }
 
     /// For dropping MV.
-    pub async fn drop_source_fragments_vec(&self, table_fragments: &[TableFragments]) {
+    pub async fn drop_source_fragments_vec(&self, table_fragments: &[StreamJobFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.
@@ -878,11 +878,11 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
-    pub async fn allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
+    pub async fn allocate_splits(&self, job_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
             .metadata_manager
-            .get_job_fragments_by_id(table_id)
+            .get_job_fragments_by_id(job_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();

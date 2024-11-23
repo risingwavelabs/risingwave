@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -38,7 +39,7 @@ use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, Wor
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, FragmentId, SubscriptionId, TableFragments, TableParallelism,
+    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
 };
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -550,12 +551,15 @@ impl MetadataManager {
         })
     }
 
-    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<TableFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<StreamJobFragments> {
         let pb_table_fragments = self
             .catalog_controller
-            .get_job_fragments_by_id(id.table_id as _)
+            .get_job_fragments_by_id(job_id.table_id as _)
             .await?;
-        Ok(TableFragments::from_protobuf(pb_table_fragments))
+        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -595,14 +599,14 @@ impl MetadataManager {
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
-    ) -> MetaResult<Vec<TableFragments>> {
+    ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
             let pb_table_fragments = self
                 .catalog_controller
                 .get_job_fragments_by_id(id.table_id as _)
                 .await?;
-            table_fragments.push(TableFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
         }
         Ok(table_fragments)
     }
@@ -611,7 +615,7 @@ impl MetadataManager {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
-            let tf = TableFragments::from_protobuf(fragments);
+            let tf = StreamJobFragments::from_protobuf(fragments);
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)
@@ -657,14 +661,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_mv_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -719,6 +723,11 @@ impl MetadataManager {
 
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
+    }
+
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let rate_limits = self.catalog_controller.list_rate_limits().await?;
+        Ok(rate_limits)
     }
 }
 

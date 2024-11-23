@@ -250,6 +250,7 @@ impl CreateMviewProgressReporter {
         if let Some(BackfillState::DoneConsumingUpstreamTableOrSource(_)) = self.state {
             return;
         }
+        tracing::debug!("progress finish");
         self.update_inner(
             epoch,
             BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows),

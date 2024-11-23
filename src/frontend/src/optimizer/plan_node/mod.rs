@@ -27,6 +27,7 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Deref;
@@ -37,6 +38,8 @@ use dyn_clone::DynClone;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
+use petgraph::dot::{Config, Dot};
+use petgraph::graph::{Graph, NodeIndex};
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::recursive::{self, Recurse};
@@ -642,6 +645,9 @@ pub trait Explain {
     /// Write explain the whole plan tree.
     fn explain<'a>(&self) -> Pretty<'a>;
 
+    /// Write explain the whole plan tree with node id.
+    fn explain_with_id<'a>(&self) -> Pretty<'a>;
+
     /// Explain the plan node and return a string.
     fn explain_to_string(&self) -> String;
 
@@ -653,6 +659,9 @@ pub trait Explain {
 
     /// Explain the plan node and return a yaml string.
     fn explain_to_yaml(&self) -> String;
+
+    /// Explain the plan node and return a dot format string.
+    fn explain_to_dot(&self) -> String;
 }
 
 impl Explain for PlanRef {
@@ -662,6 +671,21 @@ impl Explain for PlanRef {
         let inputs = self.inputs();
         for input in inputs.iter().peekable() {
             node.children.push(input.explain());
+        }
+        Pretty::Record(node)
+    }
+
+    /// Write explain the whole plan tree with node id.
+    fn explain_with_id<'a>(&self) -> Pretty<'a> {
+        let node_id = self.id();
+        let mut node = self.distill();
+        // NOTE(kwannoel): Can lead to poor performance if plan is very large,
+        // but we want to show the id first.
+        node.fields
+            .insert(0, ("id".into(), Pretty::display(&node_id.0)));
+        let inputs = self.inputs();
+        for input in inputs.iter().peekable() {
+            node.children.push(input.explain_with_id());
         }
         Pretty::Record(node)
     }
@@ -680,7 +704,7 @@ impl Explain for PlanRef {
     fn explain_to_json(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
         let explain_ir = plan.explain();
-        serde_json::to_string_pretty(&PrettySerde(explain_ir))
+        serde_json::to_string_pretty(&PrettySerde(explain_ir, true))
             .expect("failed to serialize plan to json")
     }
 
@@ -688,14 +712,66 @@ impl Explain for PlanRef {
     fn explain_to_xml(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
         let explain_ir = plan.explain();
-        quick_xml::se::to_string(&PrettySerde(explain_ir)).expect("failed to serialize plan to xml")
+        quick_xml::se::to_string(&PrettySerde(explain_ir, true))
+            .expect("failed to serialize plan to xml")
     }
 
     /// Explain the plan node and return a yaml string.
     fn explain_to_yaml(&self) -> String {
         let plan = reorganize_elements_id(self.clone());
         let explain_ir = plan.explain();
-        serde_yaml::to_string(&PrettySerde(explain_ir)).expect("failed to serialize plan to yaml")
+        serde_yaml::to_string(&PrettySerde(explain_ir, true))
+            .expect("failed to serialize plan to yaml")
+    }
+
+    /// Explain the plan node and return a dot format string.
+    fn explain_to_dot(&self) -> String {
+        let plan = reorganize_elements_id(self.clone());
+        let explain_ir = plan.explain_with_id();
+        let mut graph = Graph::<String, String>::new();
+        let mut nodes = HashMap::new();
+        build_graph_from_pretty(&explain_ir, &mut graph, &mut nodes, None);
+        let dot = Dot::with_config(&graph, &[Config::EdgeNoLabel]);
+        dot.to_string()
+    }
+}
+
+fn build_graph_from_pretty(
+    pretty: &Pretty<'_>,
+    graph: &mut Graph<String, String>,
+    nodes: &mut HashMap<String, NodeIndex>,
+    parent_label: Option<&str>,
+) {
+    if let Pretty::Record(r) = pretty {
+        let mut label = String::new();
+        label.push_str(&r.name);
+        for (k, v) in &r.fields {
+            label.push('\n');
+            label.push_str(k);
+            label.push_str(": ");
+            label.push_str(
+                &serde_json::to_string(&PrettySerde(v.clone(), false))
+                    .expect("failed to serialize plan to dot"),
+            );
+        }
+        // output alignment.
+        if !r.fields.is_empty() {
+            label.push('\n');
+        }
+
+        let current_node = *nodes
+            .entry(label.clone())
+            .or_insert_with(|| graph.add_node(label.clone()));
+
+        if let Some(parent_label) = parent_label {
+            if let Some(&parent_node) = nodes.get(parent_label) {
+                graph.add_edge(parent_node, current_node, "contains".to_string());
+            }
+        }
+
+        for child in &r.children {
+            build_graph_from_pretty(child, graph, nodes, Some(&label));
+        }
     }
 }
 
