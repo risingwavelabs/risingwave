@@ -30,6 +30,7 @@ mod stream_manager;
 
 pub use barrier_manager::*;
 pub use env::*;
+use risingwave_common::catalog::DatabaseId;
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
@@ -40,16 +41,23 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-struct PartialGraphId(u64);
+pub(crate) struct PartialGraphId(u32);
+
+#[cfg(test)]
+pub(crate) const TEST_DATABASE_ID: risingwave_common::catalog::DatabaseId =
+    risingwave_common::catalog::DatabaseId::new(u32::MAX);
+
+#[cfg(test)]
+pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId(u32::MAX);
 
 impl PartialGraphId {
-    fn new(id: u64) -> Self {
+    fn new(id: u32) -> Self {
         Self(id)
     }
 }
 
-impl From<PartialGraphId> for u64 {
-    fn from(val: PartialGraphId) -> u64 {
+impl From<PartialGraphId> for u32 {
+    fn from(val: PartialGraphId) -> u32 {
         val.0
     }
 }
@@ -61,6 +69,8 @@ impl From<PartialGraphId> for u64 {
 /// `SharedContext`, and the original one becomes stale. The new one is shared by actors created after
 /// recovery.
 pub struct SharedContext {
+    pub(crate) database_id: DatabaseId,
+
     /// Stores the senders and receivers for later `Processor`'s usage.
     ///
     /// Each actor has several senders and several receivers. Senders and receivers are created
@@ -96,8 +106,6 @@ pub struct SharedContext {
     pub(crate) compute_client_pool: ComputeClientPoolRef,
 
     pub(crate) config: StreamingConfig,
-
-    pub(super) local_barrier_manager: LocalBarrierManager,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -109,14 +117,14 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(env: &StreamEnvironment, local_barrier_manager: LocalBarrierManager) -> Self {
+    pub fn new(database_id: DatabaseId, env: &StreamEnvironment) -> Self {
         Self {
+            database_id,
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: env.server_address().clone(),
             config: env.config().as_ref().to_owned(),
             compute_client_pool: env.client_pool(),
-            local_barrier_manager,
         }
     }
 
@@ -128,6 +136,7 @@ impl SharedContext {
         use risingwave_rpc_client::ComputeClientPool;
 
         Self {
+            database_id: TEST_DATABASE_ID,
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
@@ -141,7 +150,6 @@ impl SharedContext {
                 ..Default::default()
             },
             compute_client_pool: Arc::new(ComputeClientPool::for_test()),
-            local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }
 
