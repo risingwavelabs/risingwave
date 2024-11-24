@@ -366,8 +366,10 @@ impl PostgresSinkWriter {
                 }
             }
         } else {
+            let mut unmatched_update_insert = 0;
             for chunk in self.buffer.drain() {
                 for (op, row) in chunk.rows() {
+                    let mut expect_update_delete = false;
                     match op {
                         Op::Insert => {
                             self.client
@@ -375,6 +377,7 @@ impl PostgresSinkWriter {
                                 .await?;
                         }
                         Op::UpdateInsert => {
+                            unmatched_update_insert += 1;
                             // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
                             // This is because the downstream db could have cleaned the old record,
                             // in that case it needs to be `INSERTED` rather than UPDATED.
@@ -384,6 +387,7 @@ impl PostgresSinkWriter {
                                 .await?;
                         }
                         Op::Delete => {
+                            unmatched_update_insert -= 1;
                             self.client
                                 .execute_raw(
                                     self.delete_statement.as_ref().unwrap(),
@@ -395,6 +399,7 @@ impl PostgresSinkWriter {
                     }
                 }
             }
+            assert_eq!(unmatched_update_insert, 0);
         }
 
         Ok(())
