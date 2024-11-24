@@ -299,10 +299,10 @@ mod tests {
         };
 
         let table = PostgresExternalTable::connect(
-            &config.host,
-            &config.port,
             &config.username,
             &config.password,
+            &config.host,
+            (&config.port).parse::<u16>().unwrap(),
             &config.database,
             &config.schema,
             &config.table,

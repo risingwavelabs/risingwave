@@ -350,7 +350,7 @@ impl ExternalTableImpl {
                     &config.username,
                     &config.password,
                     &config.host,
-                    &config.port,
+                    config.port.parse::<u16>().unwrap(),
                     &config.database,
                     &config.schema,
                     &config.table,

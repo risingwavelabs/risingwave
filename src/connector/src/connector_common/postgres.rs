@@ -67,7 +67,7 @@ impl PostgresExternalTable {
         username: &str,
         password: &str,
         host: &str,
-        port: &str,
+        port: u16,
         database: &str,
         schema: &str,
         table: &str,
@@ -79,7 +79,7 @@ impl PostgresExternalTable {
             .username(username)
             .password(password)
             .host(host)
-            .port(port.parse::<u16>().unwrap())
+            .port(port)
             .database(database)
             .ssl_mode(match ssl_mode {
                 SslMode::Disabled => PgSslMode::Disable,
