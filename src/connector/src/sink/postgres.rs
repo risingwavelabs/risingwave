@@ -33,13 +33,14 @@ use with_options::WithOptions;
 use super::{
     SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
+use crate::connector_common::{create_pg_client, SslMode};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const POSTGRES_SINK: &str = "postgres";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, WithOptions)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PostgresConfig {
     pub host: String,
     #[serde_as(as = "DisplayFromStr")]
@@ -50,6 +51,10 @@ pub struct PostgresConfig {
     pub table: String,
     #[serde(default = "default_schema")]
     pub schema: String,
+    #[serde(default = "Default::default")]
+    pub ssl_mode: SslMode,
+    #[serde(rename = "ssl.root.cert")]
+    pub ssl_root_cert: Option<String>,
     #[serde(default = "default_max_batch_rows")]
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
@@ -138,23 +143,16 @@ impl Sink for PostgresSink {
 
         // Verify pg table schema matches rw table schema, and pk indices are valid
         let table_name = &self.config.table;
-        let connection_string = format!(
-            "host={} port={} user={} password={} dbname={}",
-            self.config.host,
-            self.config.port,
-            self.config.user,
-            self.config.password,
-            self.config.database
-        );
-        let (client, connection) =
-            tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
-                .await
-                .context("Failed to connect to Postgres for Sinking")?;
-        tokio::spawn(async move {
-            if let Err(error) = connection.await {
-                tracing::error!(error = %error.as_report(), "postgres sink connection error");
-            }
-        });
+        let client = create_pg_client(
+            &self.config.user,
+            &self.config.password,
+            &self.config.host,
+            &self.config.port.to_string(),
+            &self.config.database,
+            &self.config.ssl_mode,
+            &self.config.ssl_root_cert,
+        )
+        .await?;
 
         let result = client
             .query(

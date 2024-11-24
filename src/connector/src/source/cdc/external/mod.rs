@@ -235,7 +235,7 @@ pub struct ExternalTableConfig {
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
     /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
-    #[serde(rename = "ssl.mode", default = "Default::default")]
+    #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
 
@@ -247,6 +247,11 @@ pub struct ExternalTableConfig {
     /// Only "true" means using SSL. All other values are treated as "false".
     #[serde(rename = "database.encrypt", default = "Default::default")]
     pub encrypt: String,
+}
+
+fn postgres_ssl_mode_default() -> SslMode {
+    // NOTE(StrikeW): Default to `disabled` for backward compatibility
+    SslMode::Disabled
 }
 
 impl ExternalTableConfig {
