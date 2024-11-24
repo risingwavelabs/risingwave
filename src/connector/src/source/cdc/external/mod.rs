@@ -17,11 +17,9 @@ pub mod postgres;
 pub mod sql_server;
 
 #[cfg(not(madsim))]
-mod maybe_tls_connector;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 
 use anyhow::anyhow;
 use futures::pin_mut;
@@ -34,6 +32,7 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
+use crate::connector_common::SslMode;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
@@ -260,44 +259,6 @@ impl ExternalTableConfig {
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SslMode {
-    #[serde(alias = "disable")]
-    Disabled,
-    #[serde(alias = "prefer")]
-    Preferred,
-    #[serde(alias = "require")]
-    Required,
-    /// verify that the server is trustworthy by checking the certificate chain
-    /// up to the root certificate stored on the client.
-    #[serde(alias = "verify-ca")]
-    VerifyCa,
-    /// Besides verify the certificate, will also verify that the serverhost name
-    /// matches the name stored in the server certificate.
-    #[serde(alias = "verify-full")]
-    VerifyFull,
-}
-
-impl Default for SslMode {
-    fn default() -> Self {
-        // default to `disabled` for backward compatibility
-        Self::Disabled
-    }
-}
-
-impl fmt::Display for SslMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            SslMode::Disabled => "disabled",
-            SslMode::Preferred => "preferred",
-            SslMode::Required => "required",
-            SslMode::VerifyCa => "verify-ca",
-            SslMode::VerifyFull => "verify-full",
-        })
     }
 }
 

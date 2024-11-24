@@ -20,8 +20,6 @@ use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use postgres_openssl::MakeTlsConnector;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
@@ -33,13 +31,12 @@ use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::PgPool;
 use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
-use tokio_postgres::NoTls;
 
+use crate::connector_common::create_pg_client;
+#[cfg(not(madsim))]
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
-#[cfg(not(madsim))]
-use crate::source::cdc::external::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
     SchemaTableName, SslMode,
@@ -312,76 +309,16 @@ impl PostgresExternalTableReader {
             "create postgres external table reader"
         );
 
-        let mut pg_config = tokio_postgres::Config::new();
-        pg_config
-            .user(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .dbname(&config.database);
-
-        let (_verify_ca, verify_hostname) = match config.ssl_mode {
-            SslMode::VerifyCa => (true, false),
-            SslMode::VerifyFull => (true, true),
-            _ => (false, false),
-        };
-
-        #[cfg(not(madsim))]
-        let connector = match config.ssl_mode {
-            SslMode::Disabled => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
-                MaybeMakeTlsConnector::NoTls(NoTls)
-            }
-            SslMode::Preferred => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Prefer);
-                match SslConnector::builder(SslMethod::tls()) {
-                    Ok(mut builder) => {
-                        // disable certificate verification for `prefer`
-                        builder.set_verify(SslVerifyMode::NONE);
-                        MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "SSL connector error");
-                        MaybeMakeTlsConnector::NoTls(NoTls)
-                    }
-                }
-            }
-            SslMode::Required => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
-                let mut builder = SslConnector::builder(SslMethod::tls())?;
-                // disable certificate verification for `require`
-                builder.set_verify(SslVerifyMode::NONE);
-                MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
-            }
-
-            SslMode::VerifyCa | SslMode::VerifyFull => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
-                let mut builder = SslConnector::builder(SslMethod::tls())?;
-                if let Some(ssl_root_cert) = config.ssl_root_cert {
-                    builder.set_ca_file(ssl_root_cert).map_err(|e| {
-                        anyhow!(format!("bad ssl root cert error: {}", e.to_report_string()))
-                    })?;
-                }
-                let mut connector = MakeTlsConnector::new(builder.build());
-                if !verify_hostname {
-                    connector.set_callback(|config, _| {
-                        config.set_verify_hostname(false);
-                        Ok(())
-                    });
-                }
-                MaybeMakeTlsConnector::Tls(connector)
-            }
-        };
-        #[cfg(madsim)]
-        let connector = NoTls;
-
-        let (client, connection) = pg_config.connect(connector).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::error!(error = %e.as_report(), "postgres connection error");
-            }
-        });
+        let client = create_pg_client(
+            &config.username,
+            &config.password,
+            &config.host,
+            &config.port,
+            &config.database,
+            &config.ssl_mode,
+            &config.ssl_root_cert,
+        )
+        .await?;
 
         let field_names = rw_schema
             .fields
