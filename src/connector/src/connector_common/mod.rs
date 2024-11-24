@@ -26,7 +26,7 @@ pub use common::{
 
 mod iceberg;
 mod maybe_tls_connector;
-mod postgres;
+pub mod postgres;
 
 pub use iceberg::IcebergCommon;
-pub use postgres::{create_pg_client, SslMode};
+pub use postgres::{create_pg_client, PostgresExternalTable, SslMode};

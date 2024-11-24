@@ -34,6 +34,7 @@ use super::{
     SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::connector_common::{create_pg_client, SslMode};
+use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -367,7 +368,16 @@ impl PostgresSinkWriter {
                     match op {
                         Op::Insert => {
                             self.client
-                                .execute_raw(&self.insert_statement, row.iter())
+                                .execute_raw(
+                                    &self.insert_statement,
+                                    row.iter(),
+                                    // row
+                                    //     .iter()
+                                    //     .enumerate()
+                                    //     .map(|(i, d)| d.map(|d| {
+                                    //         ScalarAdapter::from_scalar(d)
+                                    //     })))
+                                )
                                 .await?;
                         }
                         Op::UpdateInsert => {

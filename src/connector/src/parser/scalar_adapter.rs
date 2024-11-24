@@ -17,6 +17,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
@@ -377,3 +378,6 @@ fn rw_numeric_to_pg_numeric(val: Decimal) -> PgNumeric {
         Decimal::NaN => PgNumeric::NaN,
     }
 }
+// pub fn row_to_scalar_iter<'a>(
+//     row: impl Row
+// )
