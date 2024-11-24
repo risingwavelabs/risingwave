@@ -89,3 +89,5 @@ e2e_test/iceberg/metastore_db
 
 # mdbook
 book
+
+dim-amp/

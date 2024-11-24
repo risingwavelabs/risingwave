@@ -1,0 +1,37 @@
+explain CREATE SINK supplier_items_sink2 INTO supplier_items AS
+  SELECT
+    s_suppkey,
+    s_name,
+    s_address,
+    s_nationkey,
+    s_phone,
+    s_acctbal,
+    s_comment,
+    o_orderkey,
+    o_custkey,
+    o_orderstatus,
+    o_totalprice,
+    o_orderdate,
+    o_orderpriority,
+    o_clerk,
+    o_shippriority,
+    o_comment,
+    l_orderkey,
+    l_partkey,
+    l_suppkey,
+    l_linenumber,
+    l_quantity,
+    l_extendedprice,
+    l_discount,
+    l_tax,
+    l_returnflag,
+    l_linestatus,
+    l_shipdate,
+    l_commitdate,
+    l_receiptdate,
+    l_shipinstruct,
+    l_shipmode,
+    l_comment
+    FROM lineitem
+    JOIN orders ON l_orderkey = o_orderkey
+    LEFT JOIN supplier ON o_custkey = s_suppkey;
