@@ -63,15 +63,25 @@ pub struct PostgresExternalTable {
 }
 
 impl PostgresExternalTable {
-    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
+    pub async fn connect(
+        username: &str,
+        password: &str,
+        host: &str,
+        port: &str,
+        database: &str,
+        schema: &str,
+        table: &str,
+        ssl_mode: &SslMode,
+        ssl_root_cert: &Option<String>,
+    ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
         let mut options = PgConnectOptions::new()
-            .username(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
+            .username(username)
+            .password(password)
+            .host(host)
+            .port(port.parse::<u16>().unwrap())
+            .database(database)
+            .ssl_mode(match ssl_mode {
                 SslMode::Disabled => PgSslMode::Disable,
                 SslMode::Preferred => PgSslMode::Prefer,
                 SslMode::Required => PgSslMode::Require,
@@ -79,20 +89,20 @@ impl PostgresExternalTable {
                 SslMode::VerifyFull => PgSslMode::VerifyFull,
             });
 
-        if config.ssl_mode == SslMode::VerifyCa || config.ssl_mode == SslMode::VerifyFull {
-            if let Some(ref root_cert) = config.ssl_root_cert {
+        if *ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull {
+            if let Some(ref root_cert) = ssl_root_cert {
                 options = options.ssl_root_cert(root_cert.as_str());
             }
         }
 
         let connection = PgPool::connect_with(options).await?;
-        let schema_discovery = SchemaDiscovery::new(connection, config.schema.as_str());
+        let schema_discovery = SchemaDiscovery::new(connection, schema);
         // fetch column schema and primary key
         let empty_map = HashMap::new();
         let table_schema = schema_discovery
             .discover_table(
                 TableInfo {
-                    name: config.table.clone(),
+                    name: table.to_string(),
                     of_type: None,
                 },
                 &empty_map,

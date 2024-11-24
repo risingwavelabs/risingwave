@@ -346,7 +346,18 @@ impl ExternalTableImpl {
                 MySqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
-                PostgresExternalTable::connect(config).await?,
+                PostgresExternalTable::connect(
+                    &config.username,
+                    &config.password,
+                    &config.host,
+                    &config.port,
+                    &config.database,
+                    &config.schema,
+                    &config.table,
+                    &config.ssl_mode,
+                    &config.ssl_root_cert,
+                )
+                .await?,
             )),
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,

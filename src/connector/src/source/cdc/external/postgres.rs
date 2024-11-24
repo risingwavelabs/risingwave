@@ -298,7 +298,19 @@ mod tests {
             encrypt: "false".to_string(),
         };
 
-        let table = PostgresExternalTable::connect(config).await.unwrap();
+        let table = PostgresExternalTable::connect(
+            &config.host,
+            &config.port,
+            &config.username,
+            &config.password,
+            &config.database,
+            &config.schema,
+            &config.table,
+            &config.ssl_mode,
+            &config.ssl_root_cert,
+        )
+        .await
+        .unwrap();
 
         println!("columns: {:?}", &table.column_descs);
         println!("primary keys: {:?}", &table.pk_names);
