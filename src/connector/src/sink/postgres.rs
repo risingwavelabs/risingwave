@@ -273,22 +273,16 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = {
-            let connection_string = format!(
-                "host={} port={} user={} password={} dbname={}",
-                config.host, config.port, config.user, config.password, config.database
-            );
-            let (client, connection) =
-                tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
-                    .await
-                    .context("Failed to connect to Postgres for Sinking")?;
-            tokio::spawn(async move {
-                if let Err(error) = connection.await {
-                    tracing::error!(error = %error.as_report(), "postgres sink connection error");
-                }
-            });
-            client
-        };
+        let client = create_pg_client(
+            &config.user,
+            &config.password,
+            &config.host,
+            &config.port.to_string(),
+            &config.database,
+            &config.ssl_mode,
+            &config.ssl_root_cert,
+        )
+        .await?;
 
         let insert_statement = {
             let insert_types = schema
