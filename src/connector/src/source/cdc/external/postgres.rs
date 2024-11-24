@@ -308,6 +308,7 @@ mod tests {
             &config.table,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            false,
         )
         .await
         .unwrap();

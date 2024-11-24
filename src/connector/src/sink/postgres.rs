@@ -166,6 +166,7 @@ impl Sink for PostgresSink {
                 &self.config.table,
                 &self.config.ssl_mode,
                 &self.config.ssl_root_cert,
+                self.is_append_only,
             )
             .await?;
 
@@ -414,7 +415,6 @@ impl PostgresSinkWriter {
                                 .await?;
                         }
                         Op::Delete => {
-                            unmatched_update_insert -= 1;
                             self.client
                                 .execute_raw(
                                     self.delete_statement.as_ref().unwrap(),
@@ -425,7 +425,9 @@ impl PostgresSinkWriter {
                                 )
                                 .await?;
                         }
-                        Op::UpdateDelete => {}
+                        Op::UpdateDelete => {
+                            unmatched_update_insert -= 1;
+                        }
                     }
                 }
             }

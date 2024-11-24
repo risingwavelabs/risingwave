@@ -73,6 +73,7 @@ impl PostgresExternalTable {
         table: &str,
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
+        is_append_only: bool,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
         let mut options = PgConnectOptions::new()
@@ -140,8 +141,8 @@ impl PostgresExternalTable {
             column_descs.push(column_desc);
         }
 
-        if table_schema.primary_key_constraints.is_empty() {
-            return Err(anyhow!("Postgres table doesn't define the primary key").into());
+        if !is_append_only && table_schema.primary_key_constraints.is_empty() {
+            return Err(anyhow!("Postgres table should define the primary key for non-append-only tables").into());
         }
         let mut pk_names = vec![];
         table_schema.primary_key_constraints.iter().for_each(|pk| {
