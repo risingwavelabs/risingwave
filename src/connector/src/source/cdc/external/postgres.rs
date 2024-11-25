@@ -293,7 +293,7 @@ mod tests {
             &config.username,
             &config.password,
             &config.host,
-            (&config.port).parse::<u16>().unwrap(),
+            config.port.parse::<u16>().unwrap(),
             &config.database,
             &config.schema,
             &config.table,

@@ -25,6 +25,7 @@ pub use common::{
 };
 
 mod iceberg;
+#[cfg(not(madsim))]
 mod maybe_tls_connector;
 pub mod postgres;
 

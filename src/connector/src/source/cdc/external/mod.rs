@@ -16,7 +16,6 @@ pub mod mock_external_table;
 pub mod postgres;
 pub mod sql_server;
 
-#[cfg(not(madsim))]
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
