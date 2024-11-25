@@ -190,14 +190,21 @@ impl LocalSecretManager {
     }
 
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
-        let pb_secret = risingwave_pb::secret::Secret::decode(pb_secret_bytes)
-            .context("failed to decode secret")?;
-        let secret_value = match pb_secret.get_secret_backend().unwrap() {
+        let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
             risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
             risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
                 return Err(anyhow!("hashicorp_vault backend is not implemented yet").into())
             }
         };
         Ok(secret_value)
+    }
+
+    /// Get the secret backend from the given decrypted secret bytes.
+    pub fn get_pb_secret_backend(
+        pb_secret_bytes: &[u8]
+    ) -> SecretResult<risingwave_pb::secret::secret::SecretBackend> {
+        let pb_secret = risingwave_pb::secret::Secret::decode(pb_secret_bytes)
+            .context("failed to decode secret")?;
+        Ok(pb_secret.get_secret_backend().unwrap().clone())
     }
 }
