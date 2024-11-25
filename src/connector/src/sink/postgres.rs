@@ -620,9 +620,7 @@ mod tests {
         let sql = create_upsert_sql(&schema, table_name, &[1]);
         check(
             sql,
-            expect![
-                "INSERT INTO test_table (a, b) VALUES ($1, $2) on conflict do update set a = $1"
-            ],
+            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2) on conflict (b) do update set a = $1"],
         );
     }
 }

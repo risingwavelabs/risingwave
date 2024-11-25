@@ -269,9 +269,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use crate::connector_common::PostgresExternalTable;
-    use crate::source::cdc::external::postgres::{
-        PostgresExternalTableReader, PostgresOffset,
-    };
+    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
     #[ignore]
