@@ -446,7 +446,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let graph = make_stream_graph();
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
-        strict_mode: false, // TODO
+        strict_mode: false,
     };
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();

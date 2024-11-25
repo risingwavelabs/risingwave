@@ -147,7 +147,7 @@ impl LocalQueryExecution {
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
-        let strict_mode = false; // todo!
+        let strict_mode = self.session.config().batch_expr_strict_mode();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
 
