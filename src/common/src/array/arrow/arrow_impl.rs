@@ -1482,15 +1482,15 @@ mod tests {
     #[test]
     fn uint16() {
         let array: PrimitiveArray<i32> = I32Array::from_iter([None, Some(7), Some(25)]);
-        let arr = arrow_array::UInt16Array::from(vec![None, Some(7), Some(25)]);
+        let arr = arrow_array::UInt16Array::from(vec![None, Some(7), Some(65535)]);
         let converted: PrimitiveArray<i32> = (&arr).into();
         assert_eq!(converted, array);
     }
 
     #[test]
     fn uint32() {
-        let array: PrimitiveArray<i64> = I64Array::from_iter([None, Some(7), Some(25)]);
-        let arr = arrow_array::UInt32Array::from(vec![None, Some(7), Some(25)]);
+        let array: PrimitiveArray<i64> = I64Array::from_iter([None, Some(7), Some(4294967295)]);
+        let arr = arrow_array::UInt32Array::from(vec![None, Some(7), Some(4294967295)]);
         let converted: PrimitiveArray<i64> = (&arr).into();
         assert_eq!(converted, array);
     }
@@ -1500,9 +1500,9 @@ mod tests {
         let array: PrimitiveArray<Decimal> = DecimalArray::from_iter([
             None,
             Some(Decimal::Normalized("7".parse().unwrap())),
-            Some(Decimal::Normalized("25".parse().unwrap())),
+            Some(Decimal::Normalized("18446744073709551615".parse().unwrap())),
         ]);
-        let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(25)]);
+        let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(18446744073709551615)]);
         let converted: PrimitiveArray<Decimal> = (&arr).try_into().unwrap();
         assert_eq!(converted, array);
     }
