@@ -965,9 +965,9 @@ impl PlanRoot {
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
-        let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
-            self.target_columns_to_plan_mapping(t.columns(), user_specified_columns)
-        });
+        let target_columns_to_plan_mapping = target_table
+            .as_ref()
+            .map(|t| self.target_columns_to_plan_mapping(t.columns(), user_specified_columns));
         StreamSink::create(
             stream_plan,
             sink_name,
