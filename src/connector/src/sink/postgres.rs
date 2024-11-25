@@ -291,7 +291,7 @@ pub struct PostgresSinkWriter {
 impl PostgresSinkWriter {
     async fn new(
         config: PostgresConfig,
-        schema: Schema,
+        mut schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
@@ -306,15 +306,43 @@ impl PostgresSinkWriter {
         )
         .await?;
 
+        // Rewrite schema types for serialization
+        let schema_types = {
+            let pg_table = PostgresExternalTable::connect(
+                &config.user,
+                &config.password,
+                &config.host,
+                config.port,
+                &config.database,
+                &config.schema,
+                &config.table,
+                &config.ssl_mode,
+                &config.ssl_root_cert,
+                is_append_only,
+            )
+            .await?;
+            let name_to_type = pg_table.column_name_to_pg_type();
+            let mut schema_types = Vec::with_capacity(schema.fields.len());
+            for field in &mut schema.fields[..] {
+                let field_name = &field.name;
+                let actual_data_type = name_to_type.get(field_name).map(|t| (*t).clone());
+                let actual_data_type = actual_data_type
+                    .ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Column `{}` not found in sink schema",
+                            field_name
+                        ))
+                    })?
+                    .clone();
+                schema_types.push(actual_data_type);
+            }
+            schema_types
+        };
+
         let insert_statement = {
-            let insert_types = schema
-                .fields()
-                .iter()
-                .map(|field| field.data_type().to_pg_type())
-                .collect_vec();
             let insert_sql = create_insert_sql(&schema, &config.table);
             client
-                .prepare_typed(&insert_sql, &insert_types)
+                .prepare_typed(&insert_sql, &schema_types)
                 .await
                 .context("Failed to prepare insert statement")?
         };
@@ -324,7 +352,7 @@ impl PostgresSinkWriter {
         } else {
             let delete_types = pk_indices
                 .iter()
-                .map(|i| schema.fields()[*i].data_type().to_pg_type())
+                .map(|i| schema_types[*i].clone())
                 .collect_vec();
             let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
             Some(
@@ -338,15 +366,10 @@ impl PostgresSinkWriter {
         let merge_statement = if is_append_only {
             None
         } else {
-            let merge_types = schema
-                .fields
-                .iter()
-                .map(|field| field.data_type().to_pg_type())
-                .collect_vec();
             let merge_sql = create_upsert_sql(&schema, &config.table, &pk_indices);
             Some(
                 client
-                    .prepare_typed(&merge_sql, &merge_types)
+                    .prepare_typed(&merge_sql, &schema_types)
                     .await
                     .context("Failed to prepare merge statement")?,
             )

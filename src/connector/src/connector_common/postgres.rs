@@ -15,12 +15,15 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use tokio_postgres::types::Kind as PgKind;
+
 use anyhow::anyhow;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use sea_schema::postgres::def::{ColumnType, TableInfo};
+use sea_schema::postgres::def::{ColumnType, TableInfo, Type as SeaType};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
@@ -60,6 +63,7 @@ impl Default for SslMode {
 pub struct PostgresExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
+    column_name_to_pg_type: HashMap<String, tokio_postgres::types::Type>,
 }
 
 impl PostgresExternalTable {
@@ -110,6 +114,7 @@ impl PostgresExternalTable {
             )
             .await?;
 
+        let mut column_name_to_pg_type = HashMap::new();
         let mut column_descs = vec![];
         for col in &table_schema.columns {
             let data_type = type_to_rw_type(&col.col_type)?;
@@ -138,6 +143,10 @@ impl PostgresExternalTable {
             } else {
                 ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type)
             };
+            {
+                let pg_type = Self::discovered_type_to_pg_type(&col.col_type)?;
+                column_name_to_pg_type.insert(col.name.clone(), pg_type);
+            }
             column_descs.push(column_desc);
         }
 
@@ -155,6 +164,7 @@ impl PostgresExternalTable {
         Ok(Self {
             column_descs,
             pk_names,
+            column_name_to_pg_type,
         })
     }
 
@@ -164,6 +174,79 @@ impl PostgresExternalTable {
 
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
+    }
+
+    pub fn column_name_to_pg_type(&self) -> &HashMap<String, tokio_postgres::types::Type> {
+        &self.column_name_to_pg_type
+    }
+
+    fn discovered_type_to_pg_type(
+        discovered_type: &SeaType,
+    ) -> anyhow::Result<tokio_postgres::types::Type> {
+        use tokio_postgres::types::Type as PgType;
+        match discovered_type {
+            SeaType::SmallInt => Ok(PgType::INT2),
+            SeaType::Integer => Ok(PgType::INT4),
+            SeaType::BigInt => Ok(PgType::INT8),
+            SeaType::Decimal(_) => Ok(PgType::NUMERIC),
+            SeaType::Numeric(_) => Ok(PgType::NUMERIC),
+            SeaType::Real => Ok(PgType::FLOAT4),
+            SeaType::DoublePrecision => Ok(PgType::FLOAT8),
+            SeaType::Varchar(_) => Ok(PgType::VARCHAR),
+            SeaType::Char(_) => Ok(PgType::CHAR),
+            SeaType::Text => Ok(PgType::TEXT),
+            SeaType::Bytea => Ok(PgType::BYTEA),
+            SeaType::Timestamp(_) => Ok(PgType::TIMESTAMP),
+            SeaType::TimestampWithTimeZone(_) => Ok(PgType::TIMESTAMPTZ),
+            SeaType::Date => Ok(PgType::DATE),
+            SeaType::Time(_) => Ok(PgType::TIME),
+            SeaType::TimeWithTimeZone(_) => Ok(PgType::TIMETZ),
+            SeaType::Interval(_) => Ok(PgType::INTERVAL),
+            SeaType::Boolean => Ok(PgType::BOOL),
+            SeaType::Point => Ok(PgType::POINT),
+            SeaType::Uuid => Ok(PgType::UUID),
+            SeaType::JsonBinary => Ok(PgType::JSONB),
+            SeaType::Array(t) => {
+                let Some(t) = t.col_type.as_ref() else {
+                    bail!("missing array type")
+                };
+                match t.as_ref() {
+                    // RW only supports 1 level of nesting.
+                    SeaType::SmallInt => Ok(PgType::INT2_ARRAY),
+                    SeaType::Integer => Ok(PgType::INT4_ARRAY),
+                    SeaType::BigInt => Ok(PgType::INT8_ARRAY),
+                    SeaType::Decimal(_) => Ok(PgType::NUMERIC_ARRAY),
+                    SeaType::Numeric(_) => Ok(PgType::NUMERIC_ARRAY),
+                    SeaType::Real => Ok(PgType::FLOAT4_ARRAY),
+                    SeaType::DoublePrecision => Ok(PgType::FLOAT8_ARRAY),
+                    SeaType::Varchar(_) => Ok(PgType::VARCHAR_ARRAY),
+                    SeaType::Char(_) => Ok(PgType::CHAR_ARRAY),
+                    SeaType::Text => Ok(PgType::TEXT_ARRAY),
+                    SeaType::Bytea => Ok(PgType::BYTEA_ARRAY),
+                    SeaType::Timestamp(_) => Ok(PgType::TIMESTAMP_ARRAY),
+                    SeaType::TimestampWithTimeZone(_) => Ok(PgType::TIMESTAMPTZ_ARRAY),
+                    SeaType::Date => Ok(PgType::DATE_ARRAY),
+                    SeaType::Time(_) => Ok(PgType::TIME_ARRAY),
+                    SeaType::TimeWithTimeZone(_) => Ok(PgType::TIMETZ_ARRAY),
+                    SeaType::Interval(_) => Ok(PgType::INTERVAL_ARRAY),
+                    SeaType::Boolean => Ok(PgType::BOOL_ARRAY),
+                    SeaType::Point => Ok(PgType::POINT_ARRAY),
+                    SeaType::Uuid => Ok(PgType::UUID_ARRAY),
+                    SeaType::JsonBinary => Ok(PgType::JSONB_ARRAY),
+                    SeaType::Array(_) => bail!("nested array type is not supported"),
+                    SeaType::Unknown(name) => {
+                        // Treat as enum type
+                        Ok(PgType::new(name.clone(), 0, PgKind::Array(PgType::new(name.clone(), 0, PgKind::Enum(vec![]), "".into())), "".into()))
+                    }
+                    _ => bail!("unsupported array type: {:?}", t),
+                }
+            }
+            SeaType::Unknown(name) => {
+                // Treat as enum type
+                Ok(PgType::new(name.clone(), 0, PgKind::Enum(vec![]), "".into()))
+            }
+            _ => bail!("unsupported type: {:?}", discovered_type),
+        }
     }
 }
 
