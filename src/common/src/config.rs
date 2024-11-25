@@ -1822,7 +1822,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            32
+            2
         }
     }
 
@@ -2236,6 +2236,10 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
         }
     }
 

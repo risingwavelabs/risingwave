@@ -117,6 +117,30 @@ IcebergProperties:
     field_type: String
     comments: Full name of table, must include schema name.
     required: true
+  - name: catalog.credential
+    field_type: String
+    comments: |-
+      Credential for accessing iceberg catalog, only applicable in rest catalog.
+      A credential to exchange for a token in the OAuth2 client credentials flow.
+    required: false
+  - name: catalog.token
+    field_type: String
+    comments: |-
+      token for accessing iceberg catalog, only applicable in rest catalog.
+      A Bearer token which will be used for interaction with the server.
+    required: false
+  - name: catalog.oauth2-server-uri
+    field_type: String
+    comments: |-
+      `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+      Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
+    required: false
+  - name: catalog.scope
+    field_type: String
+    comments: |-
+      scope for accessing iceberg catalog, only applicable in rest catalog.
+      Additional scope for OAuth2.
+    required: false
   - name: s3.path.style.access
     field_type: bool
     required: false

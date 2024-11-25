@@ -35,14 +35,12 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 
-/// Includes full information about a table.
+/// `TableCatalog` Includes full information about a table.
 ///
-/// Currently, it can be either:
-/// - a table or a source
-/// - a materialized view
-/// - an index
+/// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+/// It is not the same as a user-side table created by `CREATE TABLE`.
 ///
-/// Use `self.table_type()` to determine the type of the table.
+/// Use [`Self::table_type()`] to determine the [`TableType`] of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -195,6 +193,7 @@ pub enum TableType {
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
+    /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
     /// Internal tables for executors.
     Internal,

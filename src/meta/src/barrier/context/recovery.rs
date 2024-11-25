@@ -33,7 +33,7 @@ use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, TableFragments, TableParallelism};
+use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaResult};
 
@@ -66,7 +66,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn recover_background_mv_progress(
         &self,
-    ) -> MetaResult<HashMap<TableId, (String, TableFragments)>> {
+    ) -> MetaResult<HashMap<TableId, (String, StreamJobFragments)>> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
             .catalog_controller
@@ -80,14 +80,17 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
-            let table_fragments = TableFragments::from_protobuf(table_fragments);
-            if table_fragments.tracking_progress_actor_ids().is_empty() {
+            let stream_job_fragments = StreamJobFragments::from_protobuf(table_fragments);
+            if stream_job_fragments
+                .tracking_progress_actor_ids()
+                .is_empty()
+            {
                 // If there's no tracking actor in the mview, we can finish the job directly.
                 mgr.catalog_controller
                     .finish_streaming_job(mview.table_id, None)
                     .await?;
             } else {
-                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+                mview_map.insert(table_id, (mview.definition.clone(), stream_job_fragments));
             }
         }
 

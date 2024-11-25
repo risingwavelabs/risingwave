@@ -53,7 +53,7 @@ impl HummockManager {
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&sql_store.conn)
             .await?
-            .map(|v| HummockVersion::from_persisted_protobuf(&v.version.to_protobuf()))
+            .map(|v| IncompleteHummockVersion::from_persisted_protobuf(&v.version.to_protobuf()))
         else {
             return Ok(());
         };
@@ -102,7 +102,7 @@ impl HummockManager {
             .order_by_desc(hummock_time_travel_version::Column::VersionId)
             .one(&txn)
             .await?
-            .map(|m| HummockVersion::from_persisted_protobuf(&m.version.to_protobuf()));
+            .map(|m| IncompleteHummockVersion::from_persisted_protobuf(&m.version.to_protobuf()));
         let Some(latest_valid_version) = latest_valid_version else {
             txn.commit().await?;
             return Ok(());
@@ -152,7 +152,7 @@ impl HummockManager {
                         delta_id_to_delete
                     )))
                 })?;
-            let delta_to_delete = HummockVersionDelta::from_persisted_protobuf(
+            let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf(
                 &delta_to_delete.version_delta.to_protobuf(),
             );
             let new_sst_ids = delta_to_delete.newly_added_sst_ids();
@@ -182,7 +182,9 @@ impl HummockManager {
                             prev_version_id
                         )))
                     })?;
-                HummockVersion::from_persisted_protobuf(&prev_version.version.to_protobuf())
+                IncompleteHummockVersion::from_persisted_protobuf(
+                    &prev_version.version.to_protobuf(),
+                )
             };
             let sst_ids = prev_version.get_sst_ids();
             // The SST ids deleted by compaction between the 2 versions.
@@ -488,10 +490,13 @@ impl HummockManager {
     }
 }
 
+/// The `HummockVersion` is actually `InHummockVersion`. It requires `refill_version`.
 fn replay_archive(
     version: PbHummockVersion,
     deltas: impl Iterator<Item = PbHummockVersionDelta>,
 ) -> HummockVersion {
+    // The pb version ann pb version delta are actually written by InHummockVersion and InHummockVersionDelta, respectively.
+    // Using HummockVersion make it easier for `refill_version` later.
     let mut last_version = HummockVersion::from_persisted_protobuf(&version);
     for d in deltas {
         let d = HummockVersionDelta::from_persisted_protobuf(&d);

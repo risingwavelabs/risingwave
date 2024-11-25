@@ -4054,11 +4054,13 @@ impl Parser<'_> {
                             Keyword::JSON,
                             Keyword::XML,
                             Keyword::YAML,
+                            Keyword::DOT,
                         ])? {
                             Keyword::TEXT => ExplainFormat::Text,
                             Keyword::JSON => ExplainFormat::Json,
                             Keyword::XML => ExplainFormat::Xml,
                             Keyword::YAML => ExplainFormat::Yaml,
+                            Keyword::DOT => ExplainFormat::Dot,
                             _ => unreachable!("{}", keyword),
                         }
                     }

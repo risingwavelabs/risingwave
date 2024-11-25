@@ -700,6 +700,9 @@ impl LogicalOptimizer {
                 ExplainFormat::Yaml => {
                     ctx.store_logical(plan.explain_to_yaml());
                 }
+                ExplainFormat::Dot => {
+                    ctx.store_logical(plan.explain_to_dot());
+                }
             }
         }
 
@@ -818,6 +821,9 @@ impl LogicalOptimizer {
                 }
                 ExplainFormat::Yaml => {
                     ctx.store_logical(plan.explain_to_yaml());
+                }
+                ExplainFormat::Dot => {
+                    ctx.store_logical(plan.explain_to_dot());
                 }
             }
         }

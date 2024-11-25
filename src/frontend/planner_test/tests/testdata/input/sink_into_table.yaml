@@ -9,3 +9,15 @@
     explain create sink ss into t from s with (type = 'append-only');
   expected_outputs:
     - explain_output
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 from t2;
+  expected_outputs:
+    - explain_output
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 as select b from t2;
+  expected_outputs:
+    - explain_output
