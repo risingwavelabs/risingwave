@@ -33,7 +33,7 @@ use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
-use risingwave_common::array::arrow::arrow_schema_udf::DataType as ArrowDateType;
+use risingwave_common::array::arrow::arrow_schema_udf::{DataType as ArrowDateType, IntervalUnit};
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
@@ -322,30 +322,55 @@ pub async fn get_parquet_fields(
 }
 
 fn is_data_type_match(arrow_data_type: &ArrowDateType, rw_data_type: &RwDataType) -> bool {
-    match (arrow_data_type, rw_data_type) {
-        (ArrowDateType::Boolean, RwDataType::Boolean) => true,
-        (ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8, RwDataType::Int16) => {
-            true
-        }
-        (ArrowDateType::Int32 | ArrowDateType::UInt16, RwDataType::Int32) => true,
-        (ArrowDateType::Int64 | ArrowDateType::UInt32, RwDataType::Int64) => true,
-        (ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _), RwDataType::Decimal) => true,
-        (ArrowDateType::Decimal256(_, _), RwDataType::Int256) => true,
-
-        (ArrowDateType::Float16 | ArrowDateType::Float32, RwDataType::Float32) => true,
-        (ArrowDateType::Float64, RwDataType::Float64) => true,
-        (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp) => true,
-        (ArrowDateType::Timestamp(_, Some(_)), RwDataType::Timestamptz) => true,
-
-        (ArrowDateType::Date32, RwDataType::Date) => true,
-        (ArrowDateType::Date64, RwDataType::Date) => true,
-        (ArrowDateType::Time32(_) | (ArrowDateType::Time64(_)), RwDataType::Time) => true,
-        (ArrowDateType::Interval(_), RwDataType::Interval) => true,
-        (ArrowDateType::Utf8 | ArrowDateType::LargeUtf8, RwDataType::Varchar) => true,
-        (ArrowDateType::Binary | ArrowDateType::LargeBinary, RwDataType::Bytea) => true,
-        (ArrowDateType::List(_), RwDataType::List(_)) => true,
-        (ArrowDateType::Struct(_), RwDataType::Struct(_)) => true,
-        (ArrowDateType::Map(_, _), RwDataType::Map(_)) => true,
-        _ => false,
-    }
+    matches!(
+        (arrow_data_type, rw_data_type),
+        (ArrowDateType::Boolean, RwDataType::Boolean)
+            | (
+                ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8,
+                RwDataType::Int16
+            )
+            | (
+                ArrowDateType::Int32 | ArrowDateType::UInt16,
+                RwDataType::Int32
+            )
+            | (
+                ArrowDateType::Int64 | ArrowDateType::UInt32,
+                RwDataType::Int64
+            )
+            | (
+                ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _),
+                RwDataType::Decimal
+            )
+            | (ArrowDateType::Decimal256(_, _), RwDataType::Int256)
+            | (
+                ArrowDateType::Float16 | ArrowDateType::Float32,
+                RwDataType::Float32
+            )
+            | (ArrowDateType::Float64, RwDataType::Float64)
+            | (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp)
+            | (
+                ArrowDateType::Timestamp(_, Some(_)),
+                RwDataType::Timestamptz
+            )
+            | (ArrowDateType::Date32, RwDataType::Date)
+            | (
+                ArrowDateType::Time32(_) | ArrowDateType::Time64(_),
+                RwDataType::Time
+            )
+            | (
+                ArrowDateType::Interval(IntervalUnit::MonthDayNano),
+                RwDataType::Interval
+            )
+            | (
+                ArrowDateType::Utf8 | ArrowDateType::LargeUtf8,
+                RwDataType::Varchar
+            )
+            | (
+                ArrowDateType::Binary | ArrowDateType::LargeBinary,
+                RwDataType::Bytea
+            )
+            | (ArrowDateType::List(_), RwDataType::List(_))
+            | (ArrowDateType::Struct(_), RwDataType::Struct(_))
+            | (ArrowDateType::Map(_, _), RwDataType::Map(_))
+    )
 }

@@ -947,28 +947,21 @@ macro_rules! converts {
     };
 }
 
+/// Used to convert different types.
 macro_rules! converts_with_type {
     ($ArrayType:ty, $ArrowType:ty, $FromType:ty, $ToType:ty) => {
         impl From<&$ArrayType> for $ArrowType {
             fn from(array: &$ArrayType) -> Self {
-                let values: Vec<Option<$ToType>> = array
-                    .iter()
-                    .map(|x| {
-                        x.map(|v| v as $ToType) // 类型转换
-                    })
-                    .collect();
+                let values: Vec<Option<$ToType>> =
+                    array.iter().map(|x| x.map(|v| v as $ToType)).collect();
                 <$ArrowType>::from_iter(values)
             }
         }
 
         impl From<&$ArrowType> for $ArrayType {
             fn from(array: &$ArrowType) -> Self {
-                let values: Vec<Option<$FromType>> = array
-                    .iter()
-                    .map(|x| {
-                        x.map(|v| v as $FromType) // 类型转换
-                    })
-                    .collect();
+                let values: Vec<Option<$FromType>> =
+                    array.iter().map(|x| x.map(|v| v as $FromType)).collect();
                 <$ArrayType>::from_iter(values)
             }
         }
@@ -977,9 +970,7 @@ macro_rules! converts_with_type {
             fn from(arrays: &[$ArrowType]) -> Self {
                 let values: Vec<Option<$FromType>> = arrays
                     .iter()
-                    .flat_map(|a| {
-                        a.iter().map(|x| x.map(|v| v as $FromType)) // 类型转换
-                    })
+                    .flat_map(|a| a.iter().map(|x| x.map(|v| v as $FromType)))
                     .collect();
                 <$ArrayType>::from_iter(values)
             }
@@ -1262,7 +1253,7 @@ impl TryFrom<&arrow_array::UInt64Array> for DecimalArray {
     fn try_from(array: &arrow_array::UInt64Array) -> Result<Self, Self::Error> {
         let from_arrow = |value| {
             // Convert the value to a Decimal with scale 0
-            let res = Decimal::try_from(value).map_err(ArrayError::internal)?;
+            let res = Decimal::from(value);
             Ok(res)
         };
 
