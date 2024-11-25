@@ -16,6 +16,7 @@ use std::iter::Peekable;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_expr::expr::LogReport;
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
@@ -46,6 +47,10 @@ pub fn build_non_strict_from_prost(
     ExprBuilder::new_non_strict(error_report)
         .build(prost)
         .map(NonStrictExpression)
+}
+
+pub fn build_non_strict_from_prost_log_report(prost: &ExprNode) -> Result<BoxedExpression> {
+    Ok(ExprBuilder::new_non_strict(LogReport).build(prost)?.boxed())
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
