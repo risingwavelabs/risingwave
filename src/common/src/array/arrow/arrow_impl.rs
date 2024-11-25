@@ -637,7 +637,7 @@ pub trait FromArrow {
             Struct(_) => self.from_struct_array(array.as_any().downcast_ref().unwrap()),
             Map(_, _) => self.from_map_array(array.as_any().downcast_ref().unwrap()),
             t => Err(ArrayError::from_arrow(format!(
-                "sssunsupported arrow data type: {t:?}",
+                "unsupported arrow data type: {t:?}",
             ))),
         }
     }
@@ -1246,7 +1246,7 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
     }
 }
 
-// This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+// Since RisingWave does not support UInt type, convert UInt64Array to Decimal.
 impl TryFrom<&arrow_array::UInt64Array> for DecimalArray {
     type Error = ArrayError;
 
