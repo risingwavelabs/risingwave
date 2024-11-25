@@ -42,7 +42,7 @@ class TestPsycopgExtendedMode(unittest.TestCase):
                 cur.execute("select '\\xDEADBEEF'::bytea", binary=True)
                 self.assertEqual(cur.fetchone(), (b'\xDE\xAD\xBE\xEF',))
 
-                cur.execute("select '\\x'::bytea", binary=True) 
+                cur.execute("select '\\x'::bytea", binary=True)
                 self.assertEqual(cur.fetchone(), (b'',))
 
                 # Array
@@ -118,11 +118,11 @@ class TestPsycopgExtendedMode(unittest.TestCase):
                 cur.execute("select '{\"name\": \"John\", \"age\": 30, \"city\": null}'::jsonb", binary=True)
                 self.assertEqual(cur.fetchone(), ({'name': 'John', 'age': 30, 'city': None},))
 
-                cur.execute("select '{\"scores\": [85.5, 90, null], \"passed\": true}'::jsonb", binary=True) 
+                cur.execute("select '{\"scores\": [85.5, 90, null], \"passed\": true}'::jsonb", binary=True)
                 self.assertEqual(cur.fetchone(), ({'scores': [85.5, 90, None], 'passed': True},))
 
                 cur.execute("select '[{\"id\": 1, \"value\": null}, {\"id\": 2, \"value\": \"test\"}]'::jsonb", binary=True)
                 self.assertEqual(cur.fetchone(), ([{'id': 1, 'value': None}, {'id': 2, 'value': 'test'}],))
-        
+
 if __name__ == '__main__':
     unittest.main()
