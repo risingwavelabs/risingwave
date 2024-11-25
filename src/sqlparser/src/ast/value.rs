@@ -59,10 +59,6 @@ pub enum Value {
     },
     /// `NULL` value
     Null,
-    /// name of the reference to secret
-    SecretRef(SecretRefValue),
-    /// name of the reference to connection
-    ConnectionRef(ConnectionRefValue),
 }
 
 impl fmt::Display for Value {
@@ -117,8 +113,6 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
-            Value::SecretRef(v) => write!(f, "secret {}", v),
-            Value::ConnectionRef(v) => write!(f, "connection {}", v),
         }
     }
 }

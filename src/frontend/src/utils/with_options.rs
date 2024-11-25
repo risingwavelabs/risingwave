@@ -30,7 +30,8 @@ use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, Statement, Value,
+    CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue,
+    Statement, Value,
 };
 
 use super::OverwriteOptions;
@@ -346,7 +347,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
         for option in options {
             let key = option.name.real_value();
             match &option.value {
-                Value::SecretRef(r) => {
+                SqlOptionValue::SecretRef(r) => {
                     if secret_ref.insert(key.clone(), r.clone()).is_some()
                         || inner.contains_key(&key)
                     {
@@ -357,7 +358,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     }
                     continue;
                 }
-                Value::ConnectionRef(r) => {
+                SqlOptionValue::ConnectionRef(r) => {
                     if key != CONNECTION_REF_KEY {
                         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                             "expect 'profile' as the key for connection ref, but got: {}",
@@ -377,10 +378,10 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                 _ => {}
             }
             let value: String = match option.value.clone() {
-                Value::CstyleEscapedString(s) => s.value,
-                Value::SingleQuotedString(s) => s,
-                Value::Number(n) => n,
-                Value::Boolean(b) => b.to_string(),
+                SqlOptionValue::Value(Value::CstyleEscapedString(s)) => s.value,
+                SqlOptionValue::Value(Value::SingleQuotedString(s)) => s,
+                SqlOptionValue::Value(Value::Number(n)) => n,
+                SqlOptionValue::Value(Value::Boolean(b)) => b.to_string(),
                 _ => {
                     return Err(RwError::from(ErrorCode::InvalidParameterValue(
                         "`with options` or `with properties` only support single quoted string value and C style escaped string"
