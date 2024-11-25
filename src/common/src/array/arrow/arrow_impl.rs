@@ -1481,7 +1481,7 @@ mod tests {
 
     #[test]
     fn uint16() {
-        let array: PrimitiveArray<i32> = I32Array::from_iter([None, Some(7), Some(25)]);
+        let array: PrimitiveArray<i32> = I32Array::from_iter([None, Some(7), Some(65535)]);
         let arr = arrow_array::UInt16Array::from(vec![None, Some(7), Some(65535)]);
         let converted: PrimitiveArray<i32> = (&arr).into();
         assert_eq!(converted, array);

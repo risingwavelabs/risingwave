@@ -223,7 +223,7 @@ pub fn extract_valid_column_indices(
                             let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
                             let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
 
-                            if is_data_type_match(arrow_data_type, rw_data_type) {
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
                                 Some(pos)
                             } else {
                                 None
@@ -331,7 +331,10 @@ pub async fn get_parquet_fields(
 ///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
 ///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
 /// - Arrow's `Float16` matches with RisingWave's `Float32`.
-fn is_data_type_match(arrow_data_type: &ArrowDateType, rw_data_type: &RwDataType) -> bool {
+fn is_parquet_schema_match_source_schema(
+    arrow_data_type: &ArrowDateType,
+    rw_data_type: &RwDataType,
+) -> bool {
     matches!(
         (arrow_data_type, rw_data_type),
         (ArrowDateType::Boolean, RwDataType::Boolean)
