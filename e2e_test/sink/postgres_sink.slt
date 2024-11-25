@@ -431,6 +431,16 @@ CREATE SINK rw_types_to_pg_types FROM rw_types_table WITH (
     primary_key='id',
 );
 
+statement ok
+INSERT INTO rw_types_table (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, uuid_column, numeric_column, myenum_column, numeric_decimal_array_column, numeric_utf8_array_column, enum_array_column, int_column) VALUES
+    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', '448be8d9-297f-4514-85c6-a360e82ae331', '123', 'a', ARRAY[1, 2, 3], ARRAY['1', '2', '3'], ARRAY['a', 'b', 'c'], ARRAY[1, 2, 3]),
+    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 'NAN'::decimal, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', '14b4431e-203a-452b-a331-4d8a0d8f952e', '456', 'b', ARRAY[10, 20, 30], ARRAY['10', '20', '30'], ARRAY['a', 'b', 'c'], ARRAY[10, 20, 30]),
+    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, '+INF'::decimal, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', '024d2719-ca29-45e1-bc58-4ed38777f4bf', '789', 'c', ARRAY[100, 200, 300], ARRAY['100', '200', '300'], ARRAY['a', 'b', 'c'], ARRAY[100, 200, 300]);
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column from pg_types_table order by integer_column;');
+----
+
 ################### Drop DB
 
 system ok
