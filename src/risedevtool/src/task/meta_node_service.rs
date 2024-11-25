@@ -16,15 +16,21 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use itertools::Itertools;
+use sqlx::{ConnectOptions, Database};
+use url::Url;
 
 use super::{risingwave_cmd, ExecuteContext, Task};
-use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
+use crate::util::{get_program_args, get_program_env_cmd, get_program_name, is_env_set};
 use crate::{
     add_hummock_backend, add_tempo_endpoint, Application, HummockInMemoryStrategy, MetaBackend,
     MetaNodeConfig,
 };
+
+fn sql_endpoint_from_env() -> Result<String> {
+    env::var("RISEDEV_SQL_ENDPOINT").context("env RISEDEV_SQL_ENDPOINT not set")
+}
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -139,6 +145,15 @@ impl MetaNodeService {
                     .arg("--sql-database")
                     .arg(&mysql_store_config.database);
             }
+            MetaBackend::Env => {
+                let endpoint = sql_endpoint_from_env()?;
+                is_persistent_meta_store = true;
+
+                cmd.arg("--backend")
+                    .arg("sql")
+                    .arg("--sql-endpoint")
+                    .arg(endpoint);
+            }
         }
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
@@ -245,6 +260,18 @@ impl Task for MetaNodeService {
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
 
+        if let MetaBackend::Env = self.config.meta_backend {
+            if is_env_set("RISEDEV_CLEAN_START") {
+                ctx.pb.set_message("initializing meta store from env...");
+                initialize_meta_store()?;
+            }
+        } else if sql_endpoint_from_env().is_ok() {
+            bail!(
+                "should specify `meta-backend: env` for meta-node service \
+                 when env RISEDEV_SQL_ENDPOINT is set"
+            );
+        }
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");
@@ -265,4 +292,70 @@ impl Task for MetaNodeService {
     fn id(&self) -> String {
         self.config.id.clone()
     }
+}
+
+fn initialize_meta_store() -> Result<(), anyhow::Error> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let endpoint: Url = sql_endpoint_from_env()?
+        .parse()
+        .context("invalid url for SQL endpoint")?;
+    let scheme = endpoint.scheme();
+
+    let (db, init_url) = if sqlx::Postgres::URL_SCHEMES.contains(&scheme) {
+        let options = sqlx::postgres::PgConnectOptions::from_url(&endpoint)
+            .context("invalid database url for Postgres meta backend")?;
+
+        let db = options
+            .get_database()
+            .unwrap_or_else(|| options.get_username())
+            .to_owned();
+        let init_options = options.database("template1");
+        let init_url = init_options.to_url_lossy();
+
+        (db, init_url)
+    } else if sqlx::MySql::URL_SCHEMES.contains(&scheme) {
+        let options = sqlx::mysql::MySqlConnectOptions::from_url(&endpoint)
+            .context("invalid database url for MySQL meta backend")?;
+
+        let db = options
+            .get_database()
+            .context("database not specified for MySQL meta backend")?
+            .to_owned();
+        let init_options = options.database("");
+        let init_url = init_options.to_url_lossy();
+
+        (db, init_url)
+    } else {
+        // SQLite does not require database creation.
+        return Ok(());
+    };
+
+    rt.block_on(async move {
+        use sqlx::any::*;
+        install_default_drivers();
+
+        let options = sqlx::any::AnyConnectOptions::from_url(&init_url)?
+            .log_statements(log::LevelFilter::Debug);
+
+        let mut conn = options
+            .connect()
+            .await
+            .context("failed to connect to a template database for meta store")?;
+
+        // Intentionally not executing in a transaction because Postgres does not allow it.
+        sqlx::raw_sql(&format!("DROP DATABASE IF EXISTS {};", db))
+            .execute(&mut conn)
+            .await?;
+        sqlx::raw_sql(&format!("CREATE DATABASE {};", db))
+            .execute(&mut conn)
+            .await?;
+
+        Ok::<_, anyhow::Error>(())
+    })
+    .context("failed to initialize database for meta store")?;
+
+    Ok(())
 }
