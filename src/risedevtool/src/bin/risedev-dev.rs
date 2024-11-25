@@ -379,7 +379,7 @@ fn main() -> Result<()> {
     // Backtraces for RisingWave components are enabled in `Task::execute`.
     std::env::set_var("RUST_BACKTRACE", "0");
 
-    // Init logger from a specific env var.
+    // Init logger from a customized env var.
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_env("RISEDEV_RUST_LOG"))
         .init();

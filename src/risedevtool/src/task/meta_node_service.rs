@@ -304,14 +304,17 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
         .context("invalid url for SQL endpoint")?;
     let scheme = endpoint.scheme();
 
+    // Retrieve the database name to use for the meta store.
+    // Modify the URL to establish a temporary connection to initialize that database.
     let (db, init_url) = if sqlx::Postgres::URL_SCHEMES.contains(&scheme) {
         let options = sqlx::postgres::PgConnectOptions::from_url(&endpoint)
             .context("invalid database url for Postgres meta backend")?;
 
         let db = options
             .get_database()
-            .unwrap_or_else(|| options.get_username())
+            .unwrap_or_else(|| options.get_username()) // PG defaults to username if no database is specified
             .to_owned();
+        // https://www.postgresql.org/docs/current/manage-ag-templatedbs.html
         let init_options = options.database("template1");
         let init_url = init_options.to_url_lossy();
 
@@ -324,12 +327,14 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
             .get_database()
             .context("database not specified for MySQL meta backend")?
             .to_owned();
+        // Effectively unset the database field when converting back to URL, meaning connect to no database.
         let init_options = options.database("");
         let init_url = init_options.to_url_lossy();
 
         (db, init_url)
     } else {
-        // SQLite does not require database creation.
+        // SQLite file itself is the database.
+        // TODO: shall we empty the file?
         return Ok(());
     };
 
