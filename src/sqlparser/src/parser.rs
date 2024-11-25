@@ -3594,15 +3594,15 @@ impl Parser<'_> {
 
     pub fn ensure_parse_value(&mut self) -> PResult<Value> {
         match self.parse_value_and_obj_ref::<true>()? {
-            ValueAndObjRef::Value(value) => Ok(value),
-            ValueAndObjRef::SecretRef(_) | ValueAndObjRef::ConnectionRef(_) => unreachable!(),
+            SqlOptionValue::Value(value) => Ok(value),
+            SqlOptionValue::SecretRef(_) | SqlOptionValue::ConnectionRef(_) => unreachable!(),
         }
     }
 
     /// Parse a literal value (numbers, strings, date/time, booleans)
     pub fn parse_value_and_obj_ref<const FORBID_OBJ_REF: bool>(
         &mut self,
-    ) -> PResult<ValueAndObjRef> {
+    ) -> PResult<SqlOptionValue> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
@@ -3628,7 +3628,7 @@ impl Parser<'_> {
                     } else {
                         SecretRefAsType::Text
                     };
-                    Ok(ValueAndObjRef::SecretRef(SecretRefValue {
+                    Ok(SqlOptionValue::SecretRef(SecretRefValue {
                         secret_name,
                         ref_as,
                     }))
@@ -3641,7 +3641,7 @@ impl Parser<'_> {
                         );
                     }
                     let connection_name = self.parse_object_name()?;
-                    Ok(ValueAndObjRef::ConnectionRef(ConnectionRefValue {
+                    Ok(SqlOptionValue::ConnectionRef(ConnectionRefValue {
                         connection_name,
                     }))
                 }

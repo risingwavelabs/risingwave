@@ -2736,7 +2736,7 @@ impl ParseTo for ObjectType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
     pub name: ObjectName,
-    pub value: ValueAndObjRef,
+    pub value: SqlOptionValue,
 }
 
 impl fmt::Display for SqlOption {
@@ -2757,39 +2757,39 @@ impl fmt::Display for SqlOption {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ValueAndObjRef {
+pub enum SqlOptionValue {
     Value(Value),
     SecretRef(SecretRefValue),
     ConnectionRef(ConnectionRefValue),
 }
 
-impl fmt::Debug for ValueAndObjRef {
+impl fmt::Debug for SqlOptionValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ValueAndObjRef::Value(value) => write!(f, "{:?}", value),
-            ValueAndObjRef::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
-            ValueAndObjRef::ConnectionRef(connection_ref) => {
+            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
                 write!(f, "connection {:?}", connection_ref)
             }
         }
     }
 }
 
-impl fmt::Display for ValueAndObjRef {
+impl fmt::Display for SqlOptionValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ValueAndObjRef::Value(value) => write!(f, "{}", value),
-            ValueAndObjRef::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
-            ValueAndObjRef::ConnectionRef(connection_ref) => {
+            SqlOptionValue::Value(value) => write!(f, "{}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
                 write!(f, "connection {}", connection_ref)
             }
         }
     }
 }
 
-impl From<Value> for ValueAndObjRef {
+impl From<Value> for SqlOptionValue {
     fn from(value: Value) -> Self {
-        ValueAndObjRef::Value(value)
+        SqlOptionValue::Value(value)
     }
 }
 
@@ -3188,7 +3188,7 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
                 always_retry_on_network_error = Some(matches!(
                     option.value,
-                    ValueAndObjRef::Value(Value::Boolean(true))
+                    SqlOptionValue::Value(Value::Boolean(true))
                 ));
             } else {
                 return Err(StrError(format!("Unsupported option: {}", option.name)));
