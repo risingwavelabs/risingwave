@@ -194,6 +194,8 @@ impl WebhookService {
         let listener = TcpListener::bind(&srv.webhook_addr)
             .await
             .context("Failed to bind dashboard address")?;
+
+        #[cfg(not(madsim))]
         axum::serve(listener, app)
             .await
             .context("Failed to serve dashboard service")?;
