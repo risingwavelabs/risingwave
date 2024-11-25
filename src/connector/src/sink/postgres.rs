@@ -284,7 +284,7 @@ pub struct PostgresSinkWriter {
     buffer: Buffer,
     insert_statement: Statement,
     delete_statement: Option<Statement>,
-    merge_statement: Option<Statement>,
+    upsert_statement: Option<Statement>,
 }
 
 impl PostgresSinkWriter {
@@ -362,15 +362,15 @@ impl PostgresSinkWriter {
             )
         };
 
-        let merge_statement = if is_append_only {
+        let upsert_statement = if is_append_only {
             None
         } else {
-            let merge_sql = create_upsert_sql(&schema, &config.table, &pk_indices);
+            let upsert_sql = create_upsert_sql(&schema, &config.table, &pk_indices);
             Some(
                 client
-                    .prepare_typed(&merge_sql, &schema_types)
+                    .prepare_typed(&upsert_sql, &schema_types)
                     .await
-                    .context("Failed to prepare merge statement")?,
+                    .context("Failed to prepare upsert statement")?,
             )
         };
 
@@ -382,7 +382,7 @@ impl PostgresSinkWriter {
             buffer: Buffer::new(),
             insert_statement,
             delete_statement,
-            merge_statement,
+            upsert_statement,
         };
         Ok(writer)
     }
@@ -421,16 +421,12 @@ impl PostgresSinkWriter {
                         }
                         Op::UpdateInsert => {
                             unmatched_update_insert += 1;
-                            // NOTE(kwannoel): Here we use `MERGE` rather than `UPDATE/INSERT` directly.
-                            // This is because the downstream db could have cleaned the old record,
-                            // in that case it needs to be `INSERTED` rather than UPDATED.
-                            // On the other hand, if the record is there, it should be `UPDATED`.
                             self.client
                                 .execute_raw(
-                                    self.merge_statement.as_ref().unwrap(),
+                                    self.upsert_statement.as_ref().unwrap(),
                                     rw_row_to_pg_values!(
                                         row,
-                                        self.merge_statement.as_ref().unwrap()
+                                        self.upsert_statement.as_ref().unwrap()
                                     ),
                                 )
                                 .await?;

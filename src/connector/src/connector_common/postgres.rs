@@ -179,6 +179,9 @@ impl PostgresExternalTable {
         &self.column_name_to_pg_type
     }
 
+    // We use `sea-schema` for table schema discovery.
+    // So we have to map `sea-schema` pg types
+    // to `tokio-postgres` pg types (which we use for query binding).
     fn discovered_type_to_pg_type(
         discovered_type: &SeaType,
     ) -> anyhow::Result<tokio_postgres::types::Type> {
