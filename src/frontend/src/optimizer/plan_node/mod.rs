@@ -39,7 +39,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use paste::paste;
 use petgraph::dot::{Config, Dot};
-use petgraph::graph::{Graph, NodeIndex};
+use petgraph::graph::Graph;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::recursive::{self, Recurse};
@@ -56,7 +56,7 @@ use super::property::{Distribution, FunctionalDependencySet, MonotonicityMap, Or
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::session::current::notice_to_user;
-use crate::utils::PrettySerde;
+use crate::utils::{build_graph_from_pretty, PrettySerde};
 
 /// A marker trait for different conventions, used for enforcing type safety.
 ///
@@ -733,45 +733,6 @@ impl Explain for PlanRef {
         build_graph_from_pretty(&explain_ir, &mut graph, &mut nodes, None);
         let dot = Dot::with_config(&graph, &[Config::EdgeNoLabel]);
         dot.to_string()
-    }
-}
-
-fn build_graph_from_pretty(
-    pretty: &Pretty<'_>,
-    graph: &mut Graph<String, String>,
-    nodes: &mut HashMap<String, NodeIndex>,
-    parent_label: Option<&str>,
-) {
-    if let Pretty::Record(r) = pretty {
-        let mut label = String::new();
-        label.push_str(&r.name);
-        for (k, v) in &r.fields {
-            label.push('\n');
-            label.push_str(k);
-            label.push_str(": ");
-            label.push_str(
-                &serde_json::to_string(&PrettySerde(v.clone(), false))
-                    .expect("failed to serialize plan to dot"),
-            );
-        }
-        // output alignment.
-        if !r.fields.is_empty() {
-            label.push('\n');
-        }
-
-        let current_node = *nodes
-            .entry(label.clone())
-            .or_insert_with(|| graph.add_node(label.clone()));
-
-        if let Some(parent_label) = parent_label {
-            if let Some(&parent_node) = nodes.get(parent_label) {
-                graph.add_edge(parent_node, current_node, "contains".to_string());
-            }
-        }
-
-        for child in &r.children {
-            build_graph_from_pretty(child, graph, nodes, Some(&label));
-        }
     }
 }
 
