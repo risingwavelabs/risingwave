@@ -360,10 +360,9 @@ impl MetaSrvEnv {
         let cluster_first_launch = meta_store_impl.up().await.context(
             "Failed to initialize the meta store, \
             this may happen if there's existing metadata incompatible with the current version of RisingWave, \
-            like downgrading from a newer release or a nightly build to an older one. \
+            e.g., downgrading from a newer release or a nightly build to an older one. \
             For a single-node deployment, you may want to reset all data by deleting the data directory, \
-            typically located at `~/.risingwave`.
-            ",
+            typically located at `~/.risingwave`.",
         )?;
 
         let notification_manager =
