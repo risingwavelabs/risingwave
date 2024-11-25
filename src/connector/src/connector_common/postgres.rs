@@ -142,7 +142,10 @@ impl PostgresExternalTable {
         }
 
         if !is_append_only && table_schema.primary_key_constraints.is_empty() {
-            return Err(anyhow!("Postgres table should define the primary key for non-append-only tables").into());
+            return Err(anyhow!(
+                "Postgres table should define the primary key for non-append-only tables"
+            )
+            .into());
         }
         let mut pk_names = vec![];
         table_schema.primary_key_constraints.iter().for_each(|pk| {

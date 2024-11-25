@@ -36,7 +36,7 @@ use super::{
     SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
-use crate::parser::scalar_adapter::ScalarAdapter;
+use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
@@ -197,7 +197,7 @@ impl Sink for PostgresSink {
                             )))
                         }
                         Some(pg_column) => {
-                            if pg_column != &sink_column.data_type() {
+                            if !validate_pg_type_to_rw_type(pg_column, &sink_column.data_type()) {
                                 return Err(SinkError::Config(anyhow!(
                                 "Column `{}` in Postgres table `{}` has type `{}`, but sink schema defines it as type `{}`",
                                 sink_column.name,

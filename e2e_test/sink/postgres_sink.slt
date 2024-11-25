@@ -359,4 +359,79 @@ statement ok
 DROP TABLE rw_types_table_append_only;
 
 system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table"
+
+################### Test pg special types
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TYPE MY_ENUM AS ENUM ('a', 'b', 'c');"
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    uuid_column UUID,
+    numeric_column NUMERIC,
+    myenum_column MY_ENUM,
+    numeric_decimal_array_column NUMERIC[],
+    numeric_utf8_array_column NUMERIC[],
+    enum_array_column MY_ENUM[],
+    int_column int[]
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    uuid_column VARCHAR,
+    numeric_column VARCHAR,
+    myenum_column VARCHAR,
+    numeric_decimal_array_column DECIMAL[],
+    numeric_utf8_array_column VARCHAR[],
+    enum_array_column VARCHAR[],
+    int_column int[]
+)
+
+statement ok
+CREATE SINK rw_types_to_pg_types FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+################### Drop DB
+
+system ok
 PGDATABASE=postgres psql -c "DROP DATABASE sink_test"
