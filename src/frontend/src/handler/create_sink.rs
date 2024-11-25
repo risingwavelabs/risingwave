@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_common::{bail, catalog};
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
