@@ -321,6 +321,16 @@ pub async fn get_parquet_fields(
     Ok(fields)
 }
 
+/// This function checks whether the schema of a Parquet file matches the user defined schema.
+/// It handles the following special cases:
+/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
+/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
+/// - Since RisingWave does not have an `UInt` type:
+///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
+///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
+///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
+///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
+/// - Arrow's `Float16` matches with RisingWave's `Float32`.
 fn is_data_type_match(arrow_data_type: &ArrowDateType, rw_data_type: &RwDataType) -> bool {
     matches!(
         (arrow_data_type, rw_data_type),

@@ -68,6 +68,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
@@ -143,6 +148,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
@@ -178,6 +188,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
@@ -215,7 +230,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     stmt = f'select count(*), sum(id) from test_parquet_sink_table'
     print(f'Execute reading sink files: {stmt}')
 
-    print(f'Create snowflake s3 sink ')
+    print(f'Create s3 sink json format')
     # Execute a SELECT statement
     cur.execute(f'''CREATE sink test_file_sink_json as select
         id,
@@ -223,6 +238,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
@@ -258,6 +278,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
