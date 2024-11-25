@@ -17,10 +17,7 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_expr::expr::{
-    build_from_prost, build_non_strict_from_prost_log_report, BoxedExpression,
-};
-use risingwave_expr::expr_context::strict_mode;
+use risingwave_expr::expr::{build_batch_expr_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -92,13 +89,8 @@ impl BoxedExecutorBuilder for FilterExecutor {
             NodeBody::Filter
         )?;
 
-        let build_expr_fn = if strict_mode()? {
-            build_from_prost
-        } else {
-            build_non_strict_from_prost_log_report
-        };
         let expr_node = filter_node.get_search_condition()?;
-        let expr = build_expr_fn(expr_node)?;
+        let expr = build_batch_expr_from_prost(expr_node)?;
         Ok(Box::new(Self::new(
             expr,
             input,
