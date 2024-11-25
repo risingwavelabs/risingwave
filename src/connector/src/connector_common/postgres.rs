@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use tokio_postgres::types::Kind as PgKind;
-
 use anyhow::anyhow;
 use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
@@ -29,11 +27,11 @@ use serde_derive::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::PgPool;
 use thiserror_ext::AsReport;
+use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
 
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
-use crate::source::cdc::external::ExternalTableConfig;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -236,14 +234,29 @@ impl PostgresExternalTable {
                     SeaType::Array(_) => bail!("nested array type is not supported"),
                     SeaType::Unknown(name) => {
                         // Treat as enum type
-                        Ok(PgType::new(name.clone(), 0, PgKind::Array(PgType::new(name.clone(), 0, PgKind::Enum(vec![]), "".into())), "".into()))
+                        Ok(PgType::new(
+                            name.clone(),
+                            0,
+                            PgKind::Array(PgType::new(
+                                name.clone(),
+                                0,
+                                PgKind::Enum(vec![]),
+                                "".into(),
+                            )),
+                            "".into(),
+                        ))
                     }
                     _ => bail!("unsupported array type: {:?}", t),
                 }
             }
             SeaType::Unknown(name) => {
                 // Treat as enum type
-                Ok(PgType::new(name.clone(), 0, PgKind::Enum(vec![]), "".into()))
+                Ok(PgType::new(
+                    name.clone(),
+                    0,
+                    PgKind::Enum(vec![]),
+                    "".into(),
+                ))
             }
             _ => bail!("unsupported type: {:?}", discovered_type),
         }

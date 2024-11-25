@@ -18,19 +18,15 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::data_chunk_iter::RowRefIter;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::Statement;
-use with_options::WithOptions;
 
 use super::{
     SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -49,7 +45,10 @@ macro_rules! rw_row_to_pg_values {
                 let ty = &$statement.params()[i];
                 match ScalarAdapter::from_scalar(d, ty) {
                     Ok(scalar) => Some(scalar),
-                    Err(e) => None,
+                    Err(e) => {
+                        tracing::error!(error=%e.as_report(), scalar=?d, "Failed to convert scalar to pg value");
+                        None
+                    }
                 }
             })
         })
@@ -411,7 +410,6 @@ impl PostgresSinkWriter {
             let mut unmatched_update_insert = 0;
             for chunk in self.buffer.drain() {
                 for (op, row) in chunk.rows() {
-                    let mut expect_update_delete = false;
                     match op {
                         Op::Insert => {
                             self.client
@@ -488,37 +486,6 @@ impl SinkWriter for PostgresSinkWriter {
 
     async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
         Ok(())
-    }
-}
-
-fn data_type_not_supported(data_type_name: &str) -> SinkError {
-    SinkError::Postgres(anyhow!(format!(
-        "{data_type_name} is not supported in SQL Server"
-    )))
-}
-
-fn check_data_type_compatibility(data_type: DataType) -> Result<()> {
-    match data_type {
-        DataType::Boolean
-        | DataType::Int16
-        | DataType::Int32
-        | DataType::Int64
-        | DataType::Float32
-        | DataType::Float64
-        | DataType::Decimal
-        | DataType::Date
-        | DataType::Varchar
-        | DataType::Time
-        | DataType::Timestamp
-        | DataType::Timestamptz
-        | DataType::Jsonb
-        | DataType::Interval
-        | DataType::Bytea => Ok(()),
-        DataType::Struct(_) => Err(data_type_not_supported("Struct")),
-        DataType::List(_) => Err(data_type_not_supported("List")),
-        DataType::Serial => Err(data_type_not_supported("Serial")),
-        DataType::Int256 => Err(data_type_not_supported("Int256")),
-        DataType::Map(_) => Err(data_type_not_supported("Map")),
     }
 }
 

@@ -13,34 +13,26 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::postgres::def::{ColumnType, TableInfo};
-use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::{Deserialize, Serialize};
-use sqlx::postgres::{PgConnectOptions, PgSslMode};
-use sqlx::PgPool;
-use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
 
-use crate::connector_common::postgres::type_to_rw_type;
-use crate::connector_common::{create_pg_client, PostgresExternalTable};
+use crate::connector_common::create_pg_client;
 #[cfg(not(madsim))]
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
