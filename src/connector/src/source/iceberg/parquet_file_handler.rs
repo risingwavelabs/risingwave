@@ -33,9 +33,11 @@ use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataReader};
+use risingwave_common::array::arrow::arrow_schema_udf::DataType as ArrowDateType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
+use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use url::Url;
 
@@ -218,10 +220,10 @@ pub fn extract_valid_column_indices(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_field = IcebergArrowConvert
-                                .to_arrow_field(&column.name, &column.data_type)
-                                .ok()?;
-                            if &arrow_field == converted_arrow_schema.field(pos) {
+                            let arrow_data_type: &risingwave_common::array::arrow::arrow_schema_udf::DataType = converted_arrow_schema.field(pos).data_type();
+                            let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+
+                            if is_data_type_match(arrow_data_type, rw_data_type) {
                                 Some(pos)
                             } else {
                                 None
@@ -317,4 +319,33 @@ pub async fn get_parquet_fields(
     let fields: risingwave_common::array::arrow::arrow_schema_udf::Fields =
         converted_arrow_schema.fields;
     Ok(fields)
+}
+
+fn is_data_type_match(arrow_data_type: &ArrowDateType, rw_data_type: &RwDataType) -> bool {
+    match (arrow_data_type, rw_data_type) {
+        (ArrowDateType::Boolean, RwDataType::Boolean) => true,
+        (ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8, RwDataType::Int16) => {
+            true
+        }
+        (ArrowDateType::Int32 | ArrowDateType::UInt16, RwDataType::Int32) => true,
+        (ArrowDateType::Int64 | ArrowDateType::UInt32, RwDataType::Int64) => true,
+        (ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _), RwDataType::Decimal) => true,
+        (ArrowDateType::Decimal256(_, _), RwDataType::Int256) => true,
+
+        (ArrowDateType::Float16 | ArrowDateType::Float32, RwDataType::Float32) => true,
+        (ArrowDateType::Float64, RwDataType::Float64) => true,
+        (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp) => true,
+        (ArrowDateType::Timestamp(_, Some(_)), RwDataType::Timestamptz) => true,
+
+        (ArrowDateType::Date32, RwDataType::Date) => true,
+        (ArrowDateType::Date64, RwDataType::Date) => true,
+        (ArrowDateType::Time32(_) | (ArrowDateType::Time64(_)), RwDataType::Time) => true,
+        (ArrowDateType::Interval(_), RwDataType::Interval) => true,
+        (ArrowDateType::Utf8 | ArrowDateType::LargeUtf8, RwDataType::Varchar) => true,
+        (ArrowDateType::Binary | ArrowDateType::LargeBinary, RwDataType::Bytea) => true,
+        (ArrowDateType::List(_), RwDataType::List(_)) => true,
+        (ArrowDateType::Struct(_), RwDataType::Struct(_)) => true,
+        (ArrowDateType::Map(_, _), RwDataType::Map(_)) => true,
+        _ => false,
+    }
 }

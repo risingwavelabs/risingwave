@@ -505,6 +505,11 @@ pub trait FromArrow {
             Int16 => DataType::Int16,
             Int32 => DataType::Int32,
             Int64 => DataType::Int64,
+            UInt8 => DataType::Int16,
+            UInt16 => DataType::Int32,
+            UInt32 => DataType::Int64,
+            UInt64 => DataType::Decimal,
+            Float16 => DataType::Float32,
             Float32 => DataType::Float32,
             Float64 => DataType::Float64,
             Decimal128(_, _) => DataType::Decimal,
@@ -581,11 +586,18 @@ pub trait FromArrow {
         }
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
+            Int8 => self.from_int8_array(array.as_any().downcast_ref().unwrap()),
             Int16 => self.from_int16_array(array.as_any().downcast_ref().unwrap()),
             Int32 => self.from_int32_array(array.as_any().downcast_ref().unwrap()),
             Int64 => self.from_int64_array(array.as_any().downcast_ref().unwrap()),
+            UInt8 => self.from_uint8_array(array.as_any().downcast_ref().unwrap()),
+            UInt16 => self.from_uint16_array(array.as_any().downcast_ref().unwrap()),
+            UInt32 => self.from_uint32_array(array.as_any().downcast_ref().unwrap()),
+
+            UInt64 => self.from_uint64_array(array.as_any().downcast_ref().unwrap()),
             Decimal128(_, _) => self.from_decimal128_array(array.as_any().downcast_ref().unwrap()),
             Decimal256(_, _) => self.from_int256_array(array.as_any().downcast_ref().unwrap()),
+            Float16 => self.from_float16_array(array.as_any().downcast_ref().unwrap()),
             Float32 => self.from_float32_array(array.as_any().downcast_ref().unwrap()),
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
             Date32 => self.from_date32_array(array.as_any().downcast_ref().unwrap()),
@@ -625,7 +637,7 @@ pub trait FromArrow {
             Struct(_) => self.from_struct_array(array.as_any().downcast_ref().unwrap()),
             Map(_, _) => self.from_map_array(array.as_any().downcast_ref().unwrap()),
             t => Err(ArrayError::from_arrow(format!(
-                "unsupported arrow data type: {t:?}",
+                "sssunsupported arrow data type: {t:?}",
             ))),
         }
     }
@@ -669,6 +681,22 @@ pub trait FromArrow {
         Ok(ArrayImpl::Int16(array.into()))
     }
 
+    fn from_int8_array(&self, array: &arrow_array::Int8Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int16(array.into()))
+    }
+
+    fn from_uint8_array(&self, array: &arrow_array::UInt8Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int16(array.into()))
+    }
+
+    fn from_uint16_array(&self, array: &arrow_array::UInt16Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int32(array.into()))
+    }
+
+    fn from_uint32_array(&self, array: &arrow_array::UInt32Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int64(array.into()))
+    }
+
     fn from_int32_array(&self, array: &arrow_array::Int32Array) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Int32(array.into()))
     }
@@ -689,6 +717,17 @@ pub trait FromArrow {
         array: &arrow_array::Decimal128Array,
     ) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Decimal(array.try_into()?))
+    }
+
+    fn from_uint64_array(&self, array: &arrow_array::UInt64Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Decimal(array.try_into()?))
+    }
+
+    fn from_float16_array(
+        &self,
+        array: &arrow_array::Float16Array,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Float32(array.try_into()?))
     }
 
     fn from_float32_array(
@@ -908,6 +947,46 @@ macro_rules! converts {
     };
 }
 
+macro_rules! converts_with_type {
+    ($ArrayType:ty, $ArrowType:ty, $FromType:ty, $ToType:ty) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                let values: Vec<Option<$ToType>> = array
+                    .iter()
+                    .map(|x| {
+                        x.map(|v| v as $ToType) // 类型转换
+                    })
+                    .collect();
+                <$ArrowType>::from_iter(values)
+            }
+        }
+
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                let values: Vec<Option<$FromType>> = array
+                    .iter()
+                    .map(|x| {
+                        x.map(|v| v as $FromType) // 类型转换
+                    })
+                    .collect();
+                <$ArrayType>::from_iter(values)
+            }
+        }
+
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                let values: Vec<Option<$FromType>> = arrays
+                    .iter()
+                    .flat_map(|a| {
+                        a.iter().map(|x| x.map(|v| v as $FromType)) // 类型转换
+                    })
+                    .collect();
+                <$ArrayType>::from_iter(values)
+            }
+        }
+    };
+}
+
 macro_rules! converts_with_timeunit {
     ($ArrayType:ty, $ArrowType:ty, $time_unit:expr, @map) => {
 
@@ -959,6 +1038,11 @@ converts!(DateArray, arrow_array::Date32Array, @map);
 converts!(TimeArray, arrow_array::Time64MicrosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
+
+converts_with_type!(I16Array, arrow_array::Int8Array, i16, i8);
+converts_with_type!(I16Array, arrow_array::UInt8Array, i16, u8);
+converts_with_type!(I32Array, arrow_array::UInt16Array, i32, u16);
+converts_with_type!(I64Array, arrow_array::UInt32Array, i64, u32);
 
 converts_with_timeunit!(TimestampArray, arrow_array::TimestampSecondArray, TimeUnit::Second, @map);
 converts_with_timeunit!(TimestampArray, arrow_array::TimestampMillisecondArray, TimeUnit::Millisecond, @map);
@@ -1164,6 +1248,38 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
             };
             Ok(res)
         };
+        array
+            .iter()
+            .map(|o| o.map(from_arrow).transpose())
+            .collect::<Result<Self, Self::Error>>()
+    }
+}
+
+// This arrow decimal type is used by iceberg source to read iceberg decimal into RW decimal.
+impl TryFrom<&arrow_array::UInt64Array> for DecimalArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::UInt64Array) -> Result<Self, Self::Error> {
+        let from_arrow = |value| {
+            // Convert the value to a Decimal with scale 0
+            let res = Decimal::try_from(value).map_err(ArrayError::internal)?;
+            Ok(res)
+        };
+
+        // Map over the array and convert each value
+        array
+            .iter()
+            .map(|o| o.map(from_arrow).transpose())
+            .collect::<Result<Self, Self::Error>>()
+    }
+}
+
+impl TryFrom<&arrow_array::Float16Array> for F32Array {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::Float16Array) -> Result<Self, Self::Error> {
+        let from_arrow = |value| Ok(f32::from(value));
+
         array
             .iter()
             .map(|o| o.map(from_arrow).transpose())
