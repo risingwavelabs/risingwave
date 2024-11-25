@@ -2237,6 +2237,10 @@ pub mod default {
         pub fn disable_auto_group_scheduling() -> bool {
             false
         }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
+        }
     }
 
     pub mod object_store_config {
