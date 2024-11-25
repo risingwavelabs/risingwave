@@ -546,6 +546,7 @@ mod tests {
 
     use expect_test::{expect, Expect};
     use risingwave_common::catalog::Field;
+    use risingwave_common::types::DataType;
 
     use super::*;
 

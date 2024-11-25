@@ -905,33 +905,6 @@ NatsConfig:
   - name: r#type
     field_type: String
     required: true
-PostgresConfig:
-  fields:
-  - name: host
-    field_type: String
-    required: true
-  - name: port
-    field_type: u16
-    required: true
-  - name: user
-    field_type: String
-    required: true
-  - name: password
-    field_type: String
-    required: true
-  - name: database
-    field_type: String
-    required: true
-  - name: table
-    field_type: String
-    required: true
-  - name: max_batch_rows
-    field_type: usize
-    required: false
-    default: '1024'
-  - name: r#type
-    field_type: String
-    required: true
 PulsarConfig:
   fields:
   - name: properties.retry.max

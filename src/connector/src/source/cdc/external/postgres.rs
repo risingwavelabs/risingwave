@@ -268,8 +268,9 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
+    use crate::connector_common::PostgresExternalTable;
     use crate::source::cdc::external::postgres::{
-        PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
+        PostgresExternalTableReader, PostgresOffset,
     };
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
@@ -305,8 +306,8 @@ mod tests {
         .await
         .unwrap();
 
-        println!("columns: {:?}", &table.column_descs);
-        println!("primary keys: {:?}", &table.pk_names);
+        println!("columns: {:?}", &table.column_descs());
+        println!("primary keys: {:?}", &table.pk_names());
     }
 
     #[test]
