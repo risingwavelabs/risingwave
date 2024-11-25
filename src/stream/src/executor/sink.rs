@@ -200,6 +200,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let input = input.inspect_ok(move |msg| {
             if let Message::Chunk(c) = msg {
                 metrics.sink_input_row_count.inc_by(c.capacity() as u64);
+                metrics.sink_input_size.inc_by(c.estimated_size() as u64);
             }
         });
 

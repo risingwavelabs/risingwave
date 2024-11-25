@@ -970,6 +970,26 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytesps(
+                    "Sink Throughput(MB/s)",
+                    "The figure shows the number of bytes written each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_size')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Sink Throughput(MB/s) per Partition *",
+                    "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_size')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_rowsps(
                     "Materialized View Throughput(rows/s)",
                     "The figure shows the number of rows written into each materialized view per second.",
