@@ -2736,7 +2736,7 @@ impl ParseTo for ObjectType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
     pub name: ObjectName,
-    pub value: Value,
+    pub value: ValueAndObjRef,
 }
 
 impl fmt::Display for SqlOption {
@@ -2752,6 +2752,44 @@ impl fmt::Display for SqlOption {
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ValueAndObjRef {
+    Value(Value),
+    SecretRef(SecretRefValue),
+    ConnectionRef(ConnectionRefValue),
+}
+
+impl fmt::Debug for ValueAndObjRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValueAndObjRef::Value(value) => write!(f, "{:?}", value),
+            ValueAndObjRef::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
+            ValueAndObjRef::ConnectionRef(connection_ref) => {
+                write!(f, "connection {:?}", connection_ref)
+            }
+        }
+    }
+}
+
+impl fmt::Display for ValueAndObjRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValueAndObjRef::Value(value) => write!(f, "{}", value),
+            ValueAndObjRef::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
+            ValueAndObjRef::ConnectionRef(connection_ref) => {
+                write!(f, "connection {}", connection_ref)
+            }
+        }
+    }
+}
+
+impl From<Value> for ValueAndObjRef {
+    fn from(value: Value) -> Self {
+        ValueAndObjRef::Value(value)
     }
 }
 
@@ -3148,7 +3186,10 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
         let mut always_retry_on_network_error = None;
         for option in with_options {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
-                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+                always_retry_on_network_error = Some(matches!(
+                    option.value,
+                    ValueAndObjRef::Value(Value::Boolean(true))
+                ));
             } else {
                 return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
