@@ -224,6 +224,8 @@ message StreamFsFetchNode {
   StreamFsFetch node_inner = 1;
 }
 
+/// It's input must be a `MergeNode`, which connects to the upstream source job.
+/// See `StreamSourceScan::adhoc_to_stream_prost` for the plan.
 message SourceBackfillNode {
   uint32 upstream_source_id = 1;
   optional uint32 row_id_index = 2;
@@ -541,6 +543,8 @@ message HopWindowNode {
 }
 
 message MergeNode {
+  // Note: `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
+  // See `compose_fragment`.
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;
   // Type of the upstream dispatcher. If there's always one upstream according to this

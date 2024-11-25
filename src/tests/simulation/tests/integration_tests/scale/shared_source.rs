@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use anyhow::Result;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
@@ -29,11 +27,16 @@ CREATE SOURCE s(v1 int, v2 varchar) WITH (
     topic='shared_source'
 ) FORMAT PLAIN ENCODE JSON;"#;
 
-fn actor_upstream(fragment: &Fragment) -> Vec<(u32, Vec<u32>)> {
+fn source_backfill_upstream(fragment: &Fragment) -> Vec<(u32, u32)> {
     fragment
         .actors
         .iter()
-        .map(|actor| (actor.actor_id, actor.upstream_actor_id.clone()))
+        .map(|actor| {
+            let (_, _source_fragment_id, source_actor_id) =
+                actor.get_nodes().unwrap().find_source_backfill().unwrap();
+            assert!(source_actor_id.len() == 1);
+            (actor.actor_id, source_actor_id[0])
+        })
         .collect_vec()
 }
 
@@ -43,7 +46,7 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
         .await?;
     // The result of scaling is non-deterministic.
     // So we just print the result here, instead of asserting with a fixed value.
-    let actor_upstream = actor_upstream(&source_backfill_fragment.inner);
+    let actor_upstream = source_backfill_upstream(&source_backfill_fragment.inner);
     tracing::info!(
         "{}",
         actor_upstream
@@ -53,18 +56,12 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
                 actor_id, upstream
             )))
     );
-    let splits = cluster.list_source_splits().await?;
-    tracing::info!("{:#?}", splits);
-    let actor_splits: BTreeMap<u32, String> = splits
-        .values()
-        .flat_map(|m| m.clone().into_iter())
-        .collect();
+    let actor_splits = cluster.list_source_splits().await?;
+    tracing::info!("{:#?}", actor_splits);
     for (actor, upstream) in actor_upstream {
-        assert!(upstream.len() == 1, "invalid upstream: {:?}", upstream);
-        let upstream_actor = upstream[0];
         assert_eq!(
             actor_splits.get(&actor).unwrap(),
-            actor_splits.get(&upstream_actor).unwrap()
+            actor_splits.get(&upstream).unwrap()
         );
     }
     Ok(())
@@ -112,10 +109,10 @@ async fn test_shared_source() -> Result<()> {
         .collect_vec();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 6 HASH {7} {} {SOURCE} 6 256
-        2 8 HASH {9,8} {3} {MVIEW} 6 256
-        3 8 HASH {10} {1} {SOURCE_SCAN} 6 256"#]]
-    .assert_eq(&cluster.run("select * from rw_fragments;").await?);
+        1 6 HASH {SOURCE} 6 256
+        2 8 HASH {MVIEW} 6 256
+        3 8 HASH {SOURCE_SCAN} 6 256"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
         6 CREATED ADAPTIVE 256
         8 CREATED ADAPTIVE 256"#]]
@@ -137,10 +134,10 @@ async fn test_shared_source() -> Result<()> {
         .await
         .unwrap();
     expect_test::expect![[r#"
-        1 6 HASH {7} {} {SOURCE} 6 256
-        2 8 HASH {9,8} {3} {MVIEW} 5 256
-        3 8 HASH {10} {1} {SOURCE_SCAN} 6 256"#]]
-    .assert_eq(&cluster.run("select * from rw_fragments;").await?);
+        1 6 HASH {SOURCE} 6 256
+        2 8 HASH {MVIEW} 5 256
+        3 8 HASH {SOURCE_SCAN} 6 256"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
 
     // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill will be scaled together.
     cluster
@@ -156,10 +153,10 @@ async fn test_shared_source() -> Result<()> {
         .unwrap();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 6 HASH {7} {} {SOURCE} 3 256
-        2 8 HASH {9,8} {3} {MVIEW} 5 256
-        3 8 HASH {10} {1} {SOURCE_SCAN} 3 256"#]]
-    .assert_eq(&cluster.run("select * from rw_fragments;").await?);
+        1 6 HASH {SOURCE} 3 256
+        2 8 HASH {MVIEW} 5 256
+        3 8 HASH {SOURCE_SCAN} 3 256"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED CUSTOM 256"#]]
@@ -180,13 +177,131 @@ async fn test_shared_source() -> Result<()> {
         .unwrap();
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 6 HASH {7} {} {SOURCE} 7 256
-        2 8 HASH {9,8} {3} {MVIEW} 5 256
-        3 8 HASH {10} {1} {SOURCE_SCAN} 7 256"#]]
-    .assert_eq(&cluster.run("select * from rw_fragments;").await?);
+        1 6 HASH {SOURCE} 7 256
+        2 8 HASH {MVIEW} 5 256
+        3 8 HASH {SOURCE_SCAN} 7 256"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
         6 CREATED CUSTOM 256
         8 CREATED CUSTOM 256"#]]
+    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_issue_19563() -> Result<()> {
+    tracing_subscriber::fmt::Subscriber::builder()
+        .with_max_level(tracing::Level::ERROR)
+        .with_env_filter("risingwave_stream::executor::source::source_backfill_executor=DEBUG,integration_tests=DEBUG")
+        .init();
+
+    let mut cluster = Cluster::start(Configuration::for_scale_shared_source()).await?;
+    cluster.create_kafka_topics(convert_args!(hashmap!(
+        "shared_source" => 4,
+    )));
+    let mut session = cluster.start_session();
+
+    session.run("set rw_implicit_flush = true;").await?;
+
+    session
+        .run(
+            r#"
+CREATE SOURCE s(v1 timestamp with time zone) WITH (
+    connector='kafka',
+    properties.bootstrap.server='192.168.11.1:29092',
+    topic='shared_source'
+) FORMAT PLAIN ENCODE JSON;"#,
+        )
+        .await?;
+    session
+        .run("create materialized view mv1 as select v1 from s where v1 between now() and now() + interval '1 day' * 365 * 2000;")
+        .await?;
+    let source_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("Source"),
+            no_identity_contains("StreamSourceScan"),
+        ])
+        .await?;
+    let source_workers = source_fragment.all_worker_count().into_keys().collect_vec();
+    let source_backfill_dynamic_filter_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("StreamSourceScan"),
+            identity_contains("StreamDynamicFilter"),
+        ])
+        .await?;
+    let source_backfill_workers = source_backfill_dynamic_filter_fragment
+        .all_worker_count()
+        .into_keys()
+        .collect_vec();
+    validate_splits_aligned(&mut cluster).await?;
+    expect_test::expect![[r#"
+        1 6 HASH {SOURCE} 6 256
+        2 8 HASH {MVIEW,SOURCE_SCAN} 6 256
+        3 8 SINGLE {NOW} 1 1
+        4 8 SINGLE {NOW} 1 1"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
+    expect_test::expect![[r#"
+        6 CREATED ADAPTIVE 256
+        8 CREATED ADAPTIVE 256"#]]
+    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+
+    // SourceBackfill/DynamicFilter cannot be scaled because of NoShuffle.
+    assert!(
+        &cluster
+            .reschedule(
+                source_backfill_dynamic_filter_fragment
+                    .reschedule([WorkerSlotId::new(source_backfill_workers[0], 0)], []),
+            )
+            .await.unwrap_err().to_string().contains("rescheduling NoShuffle downstream fragment (maybe Chain fragment) is forbidden, please use NoShuffle upstream fragment (like Materialized fragment) to scale"),
+    );
+
+    // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill/DynamicFilter will be scaled together.
+    cluster
+        .reschedule(source_fragment.reschedule(
+            [
+                WorkerSlotId::new(source_workers[0], 0),
+                WorkerSlotId::new(source_workers[0], 1),
+                WorkerSlotId::new(source_workers[2], 0),
+            ],
+            [],
+        ))
+        .await
+        .unwrap();
+    validate_splits_aligned(&mut cluster).await?;
+    expect_test::expect![[r#"
+        1 6 HASH {SOURCE} 3 256
+        2 8 HASH {MVIEW,SOURCE_SCAN} 3 256
+        3 8 SINGLE {NOW} 1 1
+        4 8 SINGLE {NOW} 1 1"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
+    expect_test::expect![[r#"
+        6 CREATED CUSTOM 256
+        8 CREATED ADAPTIVE 256"#]]
+    .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
+
+    // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
+    cluster
+        .reschedule_resolve_no_shuffle(source_backfill_dynamic_filter_fragment.reschedule(
+            [],
+            [
+                WorkerSlotId::new(source_workers[0], 0),
+                WorkerSlotId::new(source_workers[0], 1),
+                WorkerSlotId::new(source_workers[2], 0),
+                WorkerSlotId::new(source_workers[2], 1),
+            ],
+        ))
+        .await
+        .unwrap();
+    validate_splits_aligned(&mut cluster).await?;
+    expect_test::expect![[r#"
+        1 6 HASH {SOURCE} 7 256
+        2 8 HASH {MVIEW,SOURCE_SCAN} 7 256
+        3 8 SINGLE {NOW} 1 1
+        4 8 SINGLE {NOW} 1 1"#]]
+    .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
+    expect_test::expect![[r#"
+        6 CREATED CUSTOM 256
+        8 CREATED ADAPTIVE 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
 }
