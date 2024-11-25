@@ -26,7 +26,6 @@ use serde_derive::{Deserialize, Serialize};
 use tokio_postgres::types::PgLsn;
 
 use crate::connector_common::create_pg_client;
-#[cfg(not(madsim))]
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
