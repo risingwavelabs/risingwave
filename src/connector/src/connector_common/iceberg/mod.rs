@@ -104,154 +104,11 @@ impl IcebergCommon {
             .unwrap_or_else(|| "risingwave".to_string())
     }
 
-    fn build_jni_catalog_configs_for_config_load(
-        &self,
-        path_style_access: &Option<bool>,
-        java_catalog_props: &HashMap<String, String>,
-    ) -> ConnectorResult<(BaseCatalogConfig, HashMap<String, String>)> {
-        if self.catalog_type.as_deref() != Some("jdbc") {
-            bail!("enable_config_load only support jdbc catalog right now");
-        }
-
-        let mut iceberg_configs = HashMap::new();
-
-        let base_catalog_config = {
-            let catalog_type = self.catalog_type().to_string();
-
-            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
-            iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
-
-            let Ok(s3_region) = std::env::var("AWS_REGION") else {
-                bail!("To create an iceberg engine table, AWS_REGION needed to be set");
-            };
-
-            // icelake
-            iceberg_configs.insert(
-                "iceberg.table.io.region".to_string(),
-                s3_region.clone().to_string(),
-            );
-            // iceberg-rust
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + S3_REGION).to_string(),
-                s3_region.clone().to_string(),
-            );
-
-            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
-                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
-            };
-
-            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
-                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
-            };
-            let warehouse_path = format!(
-                "s3://{}/{}/iceberg/{}",
-                s3_bucket,
-                data_directory,
-                self.database_name.clone().unwrap()
-            );
-
-            let (bucket, _) = {
-                let url = Url::parse(&warehouse_path)
-                    .with_context(|| format!("Invalid warehouse path: {}", warehouse_path))?;
-                let bucket = url
-                    .host_str()
-                    .with_context(|| {
-                        format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
-                    })?
-                    .to_string();
-                let root = url.path().trim_start_matches('/').to_string();
-                (bucket, root)
-            };
-
-            iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
-
-            load_iceberg_base_catalog_config(&iceberg_configs)?
-        };
-
-        // Prepare jni configs, for details please see https://iceberg.apache.org/docs/latest/aws/
-        let mut java_catalog_configs = HashMap::new();
-        {
-            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
-                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
-            };
-
-            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
-                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
-            };
-
-            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
-                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
-            };
-            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-                bail!("failed to parse meta backend: {}", meta_store_backend);
-            };
-
-            let catalog_uri = match meta_backend {
-                MetaBackend::Postgres => format!(
-                    "jdbc:postgresql://{}/{}",
-                    meta_store_endpoint.clone(),
-                    meta_store_database.clone()
-                ),
-                MetaBackend::Mysql => format!(
-                    "jdbc:mysql://{}/{}",
-                    meta_store_endpoint.clone(),
-                    meta_store_database.clone()
-                ),
-                MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-                    bail!(
-                        "Unsupported meta backend for iceberg engine table: {}",
-                        meta_store_backend
-                    );
-                }
-            };
-
-            java_catalog_configs.insert("uri".to_string(), catalog_uri.to_string());
-
-            if let Some(warehouse_path) = &self.warehouse_path {
-                java_catalog_configs.insert("warehouse".to_string(), warehouse_path.clone());
-            }
-            java_catalog_configs.extend(java_catalog_props.clone());
-
-            // Currently we only support s3, so let's set it to s3
-            java_catalog_configs.insert(
-                "io-impl".to_string(),
-                "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
-            );
-
-            if let Some(path_style_access) = path_style_access {
-                java_catalog_configs.insert(
-                    "s3.path-style-access".to_string(),
-                    path_style_access.to_string(),
-                );
-            }
-
-            let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
-                bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
-            };
-
-            let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
-                bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
-            };
-            java_catalog_configs.insert("jdbc.user".to_string(), meta_store_user);
-            java_catalog_configs.insert("jdbc.password".to_string(), meta_store_password);
-        }
-
-        Ok((base_catalog_config, java_catalog_configs))
-    }
-
     /// For both V1 and V2.
     fn build_jni_catalog_configs(
         &self,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<(BaseCatalogConfig, HashMap<String, String>)> {
-        if let Some(enable_config_load) = self.enable_config_load
-            && enable_config_load
-        {
-            return self.build_jni_catalog_configs_for_config_load(
-                &self.path_style_access,
-                java_catalog_props,
-            );
-        }
         let mut iceberg_configs = HashMap::new();
 
         let base_catalog_config = {
@@ -350,12 +207,14 @@ impl IcebergCommon {
                     }
                 }
             }
-
-            // #TODO
-            // Support load config file
+            let enable_config_load = if let Some(enable_config_load) = self.enable_config_load {
+                enable_config_load
+            } else {
+                false
+            };
             iceberg_configs.insert(
                 "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
+                enable_config_load.to_string(),
             );
 
             load_iceberg_base_catalog_config(&iceberg_configs)?
@@ -432,16 +291,16 @@ impl IcebergCommon {
                     // Use S3 ak/sk and region as glue ak/sk and region by default.
                     // TODO: use different ak/sk and region for s3 and glue.
                     if let Some(access_key) = &self.access_key {
-                    java_catalog_configs.insert(
-                        "client.credentials-provider.glue.access-key-id".to_string(),
-                        access_key.clone().to_string(),
-                    );
-                }
-                if let Some(secret_key) = &self.secret_key {
-                    java_catalog_configs.insert(
-                        "client.credentials-provider.glue.secret-access-key".to_string(),
-                        secret_key.clone().to_string(),
-                    );
+                        java_catalog_configs.insert(
+                            "client.credentials-provider.glue.access-key-id".to_string(),
+                            access_key.clone().to_string(),
+                        );
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        java_catalog_configs.insert(
+                            "client.credentials-provider.glue.secret-access-key".to_string(),
+                            secret_key.clone().to_string(),
+                        );
                     }
                     if let Some(region) = &self.region {
                         java_catalog_configs
@@ -705,10 +564,8 @@ mod v2 {
                             .insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
                     }
                     if let Some(access_key) = &self.access_key {
-                        iceberg_configs.insert(
-                            S3_ACCESS_KEY_ID.to_string(),
-                            access_key.clone().to_string(),
-                        );
+                        iceberg_configs
+                            .insert(S3_ACCESS_KEY_ID.to_string(), access_key.clone().to_string());
                     }
                     if let Some(secret_key) = &self.secret_key {
                         iceberg_configs.insert(
@@ -773,10 +630,8 @@ mod v2 {
                             .insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
                     }
                     if let Some(access_key) = &self.access_key {
-                        iceberg_configs.insert(
-                            S3_ACCESS_KEY_ID.to_string(),
-                            access_key.clone().to_string(),
-                        );
+                        iceberg_configs
+                            .insert(S3_ACCESS_KEY_ID.to_string(), access_key.clone().to_string());
                     }
                     if let Some(secret_key) = &self.secret_key {
                         iceberg_configs.insert(

@@ -1297,21 +1297,6 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            let iceberg_enable_config_load = if let Ok(iceberg_enable_config_load) =
-                std::env::var("ICEBERG_ENABLE_CONFIG_LOAD")
-            {
-                iceberg_enable_config_load
-                    .parse()
-                    .map_err(|e: ParseBoolError| {
-                        RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "ICEBERG_ENABLE_CONFIG_LOAD must be a boolean value, got {}",
-                            e.as_report()
-                        )))
-                    })?
-            } else {
-                true
-            };
-
             let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
                 Some(s3_endpoint)
             } else {
@@ -1332,18 +1317,14 @@ pub async fn handle_create_table(
 
             let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
                 Some(s3_ak)
-            } else if iceberg_enable_config_load {
-                None
             } else {
-                bail!("To create an iceberg engine table in dev mode, AWS_ACCESS_KEY_ID needed to be set")
+                None
             };
 
             let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
                 Some(s3_sk)
-            } else if iceberg_enable_config_load {
-                None
             } else {
-                bail!("To create an iceberg engine table in dev mode, AWS_SECRET_ACCESS_KEY needed to be set")
+                None
             };
 
             let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
@@ -1516,9 +1497,7 @@ pub async fn handle_create_table(
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
             with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
             with.insert("create_table_if_not_exists".to_string(), "true".to_string());
-            if iceberg_enable_config_load {
-                with.insert("enable_config_load".to_string(), "true".to_string());
-            }
+            with.insert("enable_config_load".to_string(), "true".to_string());
             sink_handler_args.with_options = WithOptions::new_with_options(with);
 
             let mut source_name = table_name.clone();
@@ -1563,9 +1542,7 @@ pub async fn handle_create_table(
             with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
             with.insert("database.name".to_string(), iceberg_database_name.clone());
             with.insert("table.name".to_string(), iceberg_table_name.to_string());
-            if iceberg_enable_config_load {
-                with.insert("enable_config_load".to_string(), "true".to_string());
-            }
+            with.insert("enable_config_load".to_string(), "true".to_string());
             source_handler_args.with_options = WithOptions::new_with_options(with);
 
             catalog_writer
