@@ -966,8 +966,7 @@ impl PlanRoot {
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
-            let columns = t.columns_without_rw_timestamp();
-            self.target_columns_to_plan_mapping(&columns, user_specified_columns)
+            self.target_columns_to_plan_mapping(t.columns(), user_specified_columns)
         });
         StreamSink::create(
             stream_plan,
@@ -1028,7 +1027,7 @@ impl PlanRoot {
         tar_cols
             .iter()
             .enumerate()
-            .filter(|(_, tar_col)| tar_col.can_dml())
+            .filter(|(_, tar_col)| !tar_col.is_generated())
             .map(|(tar_i, tar_col)| {
                 if user_specified_columns {
                     visible_col_idxes_by_name.get(tar_col.name()).cloned()
