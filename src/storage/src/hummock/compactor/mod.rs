@@ -276,6 +276,7 @@ impl Compactor {
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
+#[must_use]
 pub fn start_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -611,6 +612,7 @@ pub fn start_compactor(
 /// The background compaction thread that receives compaction tasks from hummock compaction
 /// manager and runs compaction tasks.
 #[cfg_attr(coverage, coverage(off))]
+#[must_use]
 pub fn start_shared_compactor(
     grpc_proxy_client: GrpcCompactorProxyClient,
     mut receiver: mpsc::UnboundedReceiver<Request<DispatchCompactionTaskRequest>>,

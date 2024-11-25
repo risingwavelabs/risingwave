@@ -24,6 +24,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
@@ -242,6 +243,7 @@ impl DdlService for DdlServiceImpl {
                         fragment_graph,
                         CreateType::Foreground,
                         None,
+                        HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -281,6 +283,11 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let affected_table_change = req.get_affected_table_change().cloned().ok();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
 
         let stream_job = match &affected_table_change {
             None => StreamingJob::Sink(sink, None),
@@ -296,6 +303,7 @@ impl DdlService for DdlServiceImpl {
             fragment_graph,
             CreateType::Foreground,
             affected_table_change.map(Self::extract_replace_table_info),
+            dependencies,
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -381,6 +389,11 @@ impl DdlService for DdlServiceImpl {
         let mview = req.get_materialized_view()?.clone();
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let dependencies = req
+            .get_dependencies()
+            .iter()
+            .map(|id| *id as ObjectId)
+            .collect();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -390,6 +403,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 create_type,
                 None,
+                dependencies,
             ))
             .await?;
 
@@ -443,6 +457,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 CreateType::Foreground,
                 None,
+                HashSet::new(),
             ))
             .await?;
 
@@ -529,6 +544,7 @@ impl DdlService for DdlServiceImpl {
                 fragment_graph,
                 CreateType::Foreground,
                 None,
+                HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
             ))
             .await?;
 

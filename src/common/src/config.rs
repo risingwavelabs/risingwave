@@ -1100,6 +1100,9 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_eviction_factor_stable")]
     pub memory_controller_eviction_factor_stable: f64,
 
+    #[serde(default = "default::developer::memory_controller_update_interval_ms")]
+    pub memory_controller_update_interval_ms: usize,
+
     #[serde(default = "default::developer::memory_controller_sequence_tls_step")]
     pub memory_controller_sequence_tls_step: u64,
 
@@ -1203,11 +1206,11 @@ pub struct ObjectStoreConfig {
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default)]
     pub opendal_writer_abort_on_err: bool,
 
@@ -1819,7 +1822,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            32
+            2
         }
     }
 
@@ -2056,6 +2059,10 @@ pub mod default {
             1.0
         }
 
+        pub fn memory_controller_update_interval_ms() -> usize {
+            100
+        }
+
         pub fn memory_controller_sequence_tls_step() -> u64 {
             128
         }
@@ -2229,6 +2236,10 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
         }
     }
 

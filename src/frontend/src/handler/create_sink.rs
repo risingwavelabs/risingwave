@@ -24,11 +24,11 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowData
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, DatabaseId, Schema, SchemaId, UserId,
+    ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
 };
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
@@ -94,6 +94,7 @@ pub struct SinkPlanContext {
     pub sink_plan: PlanRef,
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
+    pub dependencies: HashSet<ObjectId>,
 }
 
 pub async fn gen_sink_plan(
@@ -152,10 +153,14 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound,
+        )
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -254,8 +259,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let target_table = target_table_catalog.as_ref().map(|catalog| catalog.id());
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -265,8 +268,9 @@ pub async fn gen_sink_plan(
         sink_from_table_name,
         format_desc,
         without_backfill,
-        target_table,
+        target_table_catalog.clone(),
         partition_info,
+        user_specified_columns,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -280,15 +284,24 @@ pub async fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string());
     }
 
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+            .into_iter()
+            .map(|id| id.table_id() as ObjectId)
+            .chain(
+                dependent_udfs
+                    .into_iter()
+                    .map(|id| id.function_id() as ObjectId),
+            )
+            .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
         connector_conn_ref.map(ConnectionId::from),
-        dependent_relations.into_iter().collect_vec(),
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -296,22 +309,6 @@ pub async fn gen_sink_plan(
             if !column.can_dml() {
                 unreachable!("can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one");
             }
-        }
-
-        let user_defined_primary_key_table = table_catalog.row_id_index.is_none();
-        let sink_is_append_only = sink_catalog.sink_type == SinkType::AppendOnly
-            || sink_catalog.sink_type == SinkType::ForceAppendOnly;
-
-        if !user_defined_primary_key_table && !sink_is_append_only {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
-            )));
-        }
-
-        if table_catalog.append_only && !sink_is_append_only {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
-            )));
         }
 
         let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
@@ -341,6 +338,7 @@ pub async fn gen_sink_plan(
         sink_plan,
         sink_catalog,
         target_table_catalog,
+        dependencies,
     })
 }
 
@@ -455,12 +453,13 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let (mut sink, graph, target_table_catalog) = {
+    let (mut sink, graph, target_table_catalog, dependencies) = {
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
+            dependencies,
         } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -473,7 +472,7 @@ pub async fn handle_create_sink(
 
         let graph = build_graph(plan)?;
 
-        (sink, graph, target_table_catalog)
+        (sink, graph, target_table_catalog, dependencies)
     };
 
     let mut target_table_replace_plan = None;
@@ -531,7 +530,12 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(sink.to_proto(), graph, target_table_replace_plan)
+        .create_sink(
+            sink.to_proto(),
+            graph,
+            target_table_replace_plan,
+            dependencies,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))

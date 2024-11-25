@@ -302,13 +302,14 @@ impl StreamingJob {
         }
     }
 
-    // TODO: record all objects instead.
+    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
     pub fn dependent_relations(&self) -> Vec<u32> {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
             StreamingJob::Index(index, index_table) => {
+                // TODO(rc): record index dependencies via `dependencies` field
                 assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
                 vec![]
             }

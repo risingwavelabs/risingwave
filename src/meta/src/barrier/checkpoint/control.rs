@@ -232,7 +232,11 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(
-                    creating_job.info.table_fragments.table_id().table_id,
+                    creating_job
+                        .info
+                        .stream_job_fragments
+                        .stream_job_id()
+                        .table_id,
                     creating_job.gen_ddl_progress(),
                 )]);
             }
@@ -676,7 +680,7 @@ impl DatabaseCheckpointControl {
                     resps,
                     self.creating_streaming_job_controls[&table_id]
                         .info
-                        .table_fragments
+                        .stream_job_fragments
                         .all_table_ids()
                         .map(TableId::new),
                     is_first_time,
@@ -830,7 +834,7 @@ impl DatabaseCheckpointControl {
                 .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
-            let job_id = info.table_fragments.table_id();
+            let job_id = info.stream_job_fragments.stream_job_id();
             control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
             self.creating_streaming_job_controls.insert(
                 job_id,

@@ -46,22 +46,22 @@ echo "--- Setting up cluster config"
 full-without-monitoring:
   steps:
     - use: minio
-    - use: etcd
+    - use: sqlite
     - use: meta-node
     - use: compute-node
     - use: frontend
     - use: compactor
 EOF
   else
-     # For versions >= 1.9.0, the default config will default to sql backend,
-     # breaking backwards compat, so we must specify meta-backend: etcd
+     # For versions >= 1.9.0, we have support for different sql meta-backend,
+     # so we need to specify the meta-backend: sqlite
      cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
  steps:
    - use: minio
-   - use: etcd
+   - use: sqlite
    - use: meta-node
-     meta-backend: etcd
+     meta-backend: sqlite
    - use: compute-node
    - use: frontend
    - use: compactor

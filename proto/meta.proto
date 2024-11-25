@@ -36,7 +36,9 @@ service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-// Fragments of a Streaming Job
+// Fragments of a Streaming Job.
+// It's for all kinds of streaming jobs, and ideally should be called `StreamingJobFragments`.
+// It's not the same as a storage table correlated with a `TableCatalog`.
 message TableFragments {
   // The state of the fragments of this table
   enum State {
@@ -96,6 +98,7 @@ message TableFragments {
     // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
   }
+  // The id of the streaming job.
   uint32 table_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;

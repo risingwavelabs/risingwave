@@ -72,7 +72,7 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob};
-use crate::model::{StreamContext, TableFragments, TableParallelism};
+use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
@@ -113,6 +113,7 @@ impl CatalogController {
         ctx: &StreamContext,
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
+        mut dependencies: HashSet<ObjectId>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -134,9 +135,16 @@ impl CatalogController {
         )
         .await?;
 
-        // check if any dependent relation is in altering status.
-        let dependent_relations = streaming_job.dependent_relations();
-        if !dependent_relations.is_empty() {
+        // TODO(rc): pass all dependencies uniformly, deprecate `dependent_relations` and `dependent_secret_ids`.
+        dependencies.extend(
+            streaming_job
+                .dependent_relations()
+                .into_iter()
+                .map(|id| id as ObjectId),
+        );
+
+        // check if any dependency is in altering status.
+        if !dependencies.is_empty() {
             let altering_cnt = ObjectDependency::find()
                 .join(
                     JoinType::InnerJoin,
@@ -145,7 +153,7 @@ impl CatalogController {
                 .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
                 .filter(
                     object_dependency::Column::Oid
-                        .is_in(dependent_relations.iter().map(|id| *id as ObjectId))
+                        .is_in(dependencies.clone())
                         .and(object::Column::ObjType.eq(ObjectType::Table))
                         .and(streaming_job::Column::JobStatus.ne(JobStatus::Created))
                         .and(
@@ -195,10 +203,7 @@ impl CatalogController {
                 if let Some(target_table_id) = sink.target_table {
                     if check_sink_into_table_cycle(
                         target_table_id as ObjectId,
-                        sink.dependent_relations
-                            .iter()
-                            .map(|id| *id as ObjectId)
-                            .collect(),
+                        dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await?
@@ -309,22 +314,26 @@ impl CatalogController {
             }
         }
 
-        // get dependent secrets.
-        let dependent_secret_ids = streaming_job.dependent_secret_ids()?;
-        let dependent_connection_ids = streaming_job.dependent_connection_ids()?;
+        // collect dependent secrets.
+        dependencies.extend(
+            streaming_job
+                .dependent_secret_ids()?
+                .into_iter()
+                .map(|secret_id| secret_id as ObjectId),
+        );
+        // collect dependent connection
+        dependencies.extend(
+            streaming_job
+                .dependent_connection_ids()?
+                .into_iter()
+                .map(|conn_id| conn_id as ObjectId),
+        );
 
-        let dependent_objs = dependent_relations
-            .iter()
-            .chain(dependent_secret_ids.iter())
-            .chain(dependent_connection_ids.iter());
         // record object dependency.
-        if !dependent_secret_ids.is_empty()
-            || !dependent_relations.is_empty()
-            || !dependent_connection_ids.is_empty()
-        {
-            ObjectDependency::insert_many(dependent_objs.map(|id| {
+        if !dependencies.is_empty() {
+            ObjectDependency::insert_many(dependencies.into_iter().map(|oid| {
                 object_dependency::ActiveModel {
-                    oid: Set(*id as _),
+                    oid: Set(oid),
                     used_by: Set(streaming_job.id() as _),
                     ..Default::default()
                 }
@@ -408,13 +417,13 @@ impl CatalogController {
     // making them the source of truth and performing a full replacement for those in the meta store?
     pub async fn prepare_streaming_job(
         &self,
-        table_fragments: &TableFragments,
+        stream_job_fragments: &StreamJobFragments,
         streaming_job: &StreamingJob,
         for_replace: bool,
     ) -> MetaResult<()> {
         let fragment_actors =
-            Self::extract_fragment_and_actors_from_table_fragments(table_fragments.to_protobuf())?;
-        let all_tables = table_fragments.all_tables();
+            Self::extract_fragment_and_actors_from_fragments(stream_job_fragments.to_protobuf())?;
+        let all_tables = stream_job_fragments.all_tables();
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -606,7 +615,7 @@ impl CatalogController {
         Ok((true, Some(database_id)))
     }
 
-    pub async fn post_collect_table_fragments(
+    pub async fn post_collect_job_fragments(
         &self,
         job_id: ObjectId,
         actor_ids: Vec<crate::model::ActorId>,
@@ -915,13 +924,13 @@ impl CatalogController {
             Some(ReplaceTablePlan {
                 streaming_job,
                 merge_updates,
-                dummy_id,
+                tmp_id,
                 ..
             }) => {
                 let incoming_sink_id = job_id;
 
                 let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-                    dummy_id as ObjectId,
+                    tmp_id as ObjectId,
                     merge_updates,
                     None,
                     Some(incoming_sink_id as _),
@@ -970,7 +979,7 @@ impl CatalogController {
 
     pub async fn finish_replace_streaming_job(
         &self,
-        dummy_id: ObjectId,
+        tmp_id: ObjectId,
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
@@ -982,7 +991,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
-            dummy_id,
+            tmp_id,
             merge_updates,
             table_col_index_mapping,
             creating_sink_id,
@@ -1013,7 +1022,7 @@ impl CatalogController {
     }
 
     pub async fn finish_replace_streaming_job_inner(
-        dummy_id: ObjectId,
+        tmp_id: ObjectId,
         merge_updates: Vec<PbMergeUpdate>,
         table_col_index_mapping: Option<ColIndexMapping>,
         creating_sink_id: Option<SinkId>,
@@ -1071,7 +1080,7 @@ impl CatalogController {
                 fragment::Column::FragmentId,
                 fragment::Column::StateTableIds,
             ])
-            .filter(fragment::Column::JobId.eq(dummy_id))
+            .filter(fragment::Column::JobId.eq(tmp_id))
             .into_tuple()
             .all(txn)
             .await?;
@@ -1096,7 +1105,7 @@ impl CatalogController {
             .await?;
         Fragment::update_many()
             .col_expr(fragment::Column::JobId, SimpleExpr::from(job_id))
-            .filter(fragment::Column::JobId.eq(dummy_id))
+            .filter(fragment::Column::JobId.eq(tmp_id))
             .exec(txn)
             .await?;
 
@@ -1195,7 +1204,7 @@ impl CatalogController {
         }
 
         // 3. remove dummy object.
-        Object::delete_by_id(dummy_id).exec(txn).await?;
+        Object::delete_by_id(tmp_id).exec(txn).await?;
 
         // 4. update catalogs and notify.
         let mut relations = vec![];

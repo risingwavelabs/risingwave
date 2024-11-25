@@ -1141,6 +1141,7 @@ pub enum ExplainFormat {
     Json,
     Xml,
     Yaml,
+    Dot,
 }
 
 impl fmt::Display for ExplainFormat {
@@ -1150,6 +1151,7 @@ impl fmt::Display for ExplainFormat {
             ExplainFormat::Json => f.write_str("JSON"),
             ExplainFormat::Xml => f.write_str("XML"),
             ExplainFormat::Yaml => f.write_str("YAML"),
+            ExplainFormat::Dot => f.write_str("DOT"),
         }
     }
 }
