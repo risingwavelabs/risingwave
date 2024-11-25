@@ -70,11 +70,12 @@ async fn test_merger_sum_aggr() {
         let actor_future = async move {
             let input = Executor::new(
                 ExecutorInfo {
-                    schema: input_schema,
+                    schema: input_schema.clone(),
                     pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_string(),
+                    identity: "MergeExecutor".to_string(),
                 },
-                ReceiverExecutor::for_test(actor_id, input_rx, shared_context.clone()).boxed(),
+                MergeExecutor::for_test(actor_id, input_rx, shared_context.clone(), input_schema)
+                    .boxed(),
             );
             let agg_calls = vec![
                 AggCall::from_pretty("(count:int8)"),
@@ -117,7 +118,7 @@ async fn test_merger_sum_aggr() {
     // create 17 local aggregation actors
     for _ in 0..17 {
         let (tx, rx) = channel_for_test();
-        let (actor_future, channel) = make_actor(rx);
+        let (actor_future, channel) = make_actor(vec![rx]);
         outputs.push(channel);
         actor_futures.push(actor_future);
         inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
@@ -131,14 +132,15 @@ async fn test_merger_sum_aggr() {
         let shared_context = barrier_test_env.shared_context.clone();
         let expr_context = expr_context.clone();
         async move {
+            let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
             let receiver_op = Executor::new(
                 ExecutorInfo {
                     // input schema of local simple agg
-                    schema: Schema::new(vec![Field::unnamed(DataType::Int64)]),
+                    schema: schema.clone(),
                     pk_indices: PkIndices::new(),
-                    identity: "ReceiverExecutor".to_string(),
+                    identity: "MergeExecutor".to_string(),
                 },
-                ReceiverExecutor::for_test(actor_id, rx, shared_context.clone()).boxed(),
+                MergeExecutor::for_test(actor_id, vec![rx], shared_context.clone(), schema).boxed(),
             );
             let dispatcher = DispatchExecutor::new(
                 receiver_op,
