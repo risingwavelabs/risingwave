@@ -24,6 +24,7 @@ def gen_data(file_num, item_num_per_file):
             'sex': item_id % 2,
             'mark': (-1) ** (item_id % 2),
             'test_int': pa.scalar(1, type=pa.int32()),
+            'test_int8': pa.scalar(1, type=pa.int8()),
             'test_uint8': pa.scalar(item_id % 256, type=pa.uint8()),  # UInt8
             'test_uint16': pa.scalar(item_id % 65536, type=pa.uint16()),  # UInt16
             'test_uint32': pa.scalar(item_id % (2**32), type=pa.uint32()),  # UInt32

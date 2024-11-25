@@ -1418,6 +1418,7 @@ impl From<&arrow_array::Decimal256Array> for Int256Array {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -1460,6 +1461,50 @@ mod tests {
         let array = F64Array::from_iter([None, Some(-7.0), Some(25.0)]);
         let arrow = arrow_array::Float64Array::from(&array);
         assert_eq!(F64Array::from(&arrow), array);
+    }
+
+    #[test]
+    fn int8() {
+        let array: PrimitiveArray<i16> = I16Array::from_iter([None, Some(7), Some(25)]);
+        let arr = arrow_array::Int8Array::from(vec![None, Some(7), Some(25)]);
+        let converted: PrimitiveArray<i16> = (&arr).into();
+        assert_eq!(converted, array);
+    }
+
+    #[test]
+    fn uint8() {
+        let array: PrimitiveArray<i16> = I16Array::from_iter([None, Some(7), Some(25)]);
+        let arr = arrow_array::UInt8Array::from(vec![None, Some(7), Some(25)]);
+        let converted: PrimitiveArray<i16> = (&arr).into();
+        assert_eq!(converted, array);
+    }
+
+    #[test]
+    fn uint16() {
+        let array: PrimitiveArray<i32> = I32Array::from_iter([None, Some(7), Some(25)]);
+        let arr = arrow_array::UInt16Array::from(vec![None, Some(7), Some(25)]);
+        let converted: PrimitiveArray<i32> = (&arr).into();
+        assert_eq!(converted, array);
+    }
+
+    #[test]
+    fn uint32() {
+        let array: PrimitiveArray<i64> = I64Array::from_iter([None, Some(7), Some(25)]);
+        let arr = arrow_array::UInt32Array::from(vec![None, Some(7), Some(25)]);
+        let converted: PrimitiveArray<i64> = (&arr).into();
+        assert_eq!(converted, array);
+    }
+
+    #[test]
+    fn uint64() {
+        let array: PrimitiveArray<Decimal> = DecimalArray::from_iter([
+            None,
+            Some(Decimal::Normalized("7".parse().unwrap())),
+            Some(Decimal::Normalized("25".parse().unwrap())),
+        ]);
+        let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(25)]);
+        let converted: PrimitiveArray<Decimal> = (&arr).try_into().unwrap();
+        assert_eq!(converted, array);
     }
 
     #[test]
