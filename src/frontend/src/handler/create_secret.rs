@@ -69,7 +69,7 @@ pub async fn handle_create_secret(
     Ok(PgResponse::empty_result(StatementType::CREATE_SECRET))
 }
 
-fn secret_to_str(value: &Value) -> Result<String> {
+pub fn secret_to_str(value: &Value) -> Result<String> {
     match value {
         Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.to_string()),
         _ => Err(ErrorCode::InvalidInputSyntax(

@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use pgwire::pg_response::StatementType;
+use prost::Message;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::license::Feature;
+use risingwave_common::secret::LocalSecretManager;
+use risingwave_pb::secret::secret;
 use risingwave_sqlparser::ast::{AlterSecretOperation, ObjectName, SqlOption};
 
-use super::create_secret::get_secret_payload;
+use super::create_secret::{get_secret_payload, secret_to_str};
 use super::drop_secret::fetch_secret_catalog_with_db_schema_id;
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
@@ -39,15 +44,43 @@ pub async fn handle_alter_secret(
     {
         let AlterSecretOperation::ChangeCredential { new_credential } = operation;
 
-        let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
-
-        let secret_payload = get_secret_payload(new_credential, with_options)?;
+        let secret_id = secret_catalog.id.secret_id();
+        let secret_payload = if sql_options.is_empty() {
+            let original_pb_secret_bytes = LocalSecretManager::global()
+                .get_secret(secret_id)
+                .ok_or(anyhow!(
+                    "Failed to get secret in secret manager, secret_id: {}",
+                    secret_id
+                ))?;
+            let original_secret_backend =
+                LocalSecretManager::get_pb_secret_backend(&original_pb_secret_bytes)?;
+            match original_secret_backend {
+                secret::SecretBackend::Meta(_) => {
+                    let new_secret_value_bytes =
+                        secret_to_str(&new_credential)?.as_bytes().to_vec();
+                    let secret_payload = risingwave_pb::secret::Secret {
+                        secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
+                            risingwave_pb::secret::SecretMetaBackend {
+                                value: new_secret_value_bytes,
+                            },
+                        )),
+                    };
+                    secret_payload.encode_to_vec()
+                }
+                secret::SecretBackend::HashicorpVault(_) => {
+                    bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+                }
+            }
+        } else {
+            let with_options = WithOptions::try_from(sql_options.as_ref() as &[SqlOption])?;
+            get_secret_payload(new_credential, with_options)?
+        };
 
         let catalog_writer = session.catalog_writer()?;
 
         catalog_writer
             .alter_secret(
-                secret_catalog.id.secret_id(),
+                secret_id,
                 secret_catalog.name.clone(),
                 secret_catalog.database_id,
                 secret_catalog.schema_id,

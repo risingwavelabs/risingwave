@@ -46,9 +46,7 @@ create source mysql_mytest with (
 #   5: Internal error: Access denied for user 'rwcdc'@'172.17.0.1' (using password: YES)
 
 statement ok
-alter secret mysql_pwd with (
-  backend = 'meta'
-) as '${MYSQL_PWD:}';
+alter secret mysql_pwd as '${MYSQL_PWD:}';
 
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
@@ -620,9 +618,7 @@ select * from upper_orders_shared order by id;
 ### BEGIN reset the password to the original one
 onlyif can-use-recover
 statement ok
-alter secret mysql_pwd with (
-  backend = 'meta'
-) as '${MYSQL_PWD:}';
+alter secret mysql_pwd as '${MYSQL_PWD:}';
 
 onlyif can-use-recover
 system ok
