@@ -206,22 +206,13 @@ fn cast_struct(source: &DataType, target: &DataType, allows: CastContext) -> Cas
                         Ok(())
                     } else {
                         cast(src_ty, dst_ty, allows).map_err(|inner| {
-                            if src_name.is_empty() {
-                                inner
-                            } else if dst_name.is_empty() {
-                                cast_error!(
-                                    source = inner,
-                                    "cannot cast struct field \"{}\"",
-                                    src_name
-                                )
-                            } else {
-                                cast_error!(
-                                    source = inner,
-                                    "cannot cast struct field \"{}\" to struct field \"{}\"",
-                                    src_name,
-                                    dst_name
-                                )
-                            }
+                            let cast_from = (!src_name.is_empty())
+                                .then(|| format!(" struct field \"{}\"", src_name))
+                                .unwrap_or_default();
+                            let cast_to = (!dst_name.is_empty())
+                                .then(|| format!(" to struct field \"{}\"", dst_name))
+                                .unwrap_or_default();
+                            cast_error!(source = inner, "cannot cast{}{}", cast_from, cast_to)
                         })
                     }
                 },

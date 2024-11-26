@@ -99,8 +99,21 @@ update t set (v1, v2) = (select '888.88', 999);
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: cannot cast type "record" to "record"
-  2: cannot cast type "character varying" to "integer" in Assign context
+  1: cannot cast type "record" to "struct<v1 integer, v2 integer>"
+  2: cannot cast to struct field "v1"
+  3: cannot cast type "character varying" to "integer" in Assign context
+
+
+# Multiple assignments, to subquery (with column name) with cast failure.
+statement error
+update t set (v1, v2) = (select '888.88' s1, 999 s2);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: cannot cast type "struct<s1 character varying, s2 integer>" to "struct<v1 integer, v2 integer>"
+  2: cannot cast struct field "s1" to struct field "v1"
+  3: cannot cast type "character varying" to "integer" in Assign context
 
 
 # Multiple assignments, to subquery with mismatched column count.
