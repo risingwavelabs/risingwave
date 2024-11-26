@@ -64,8 +64,8 @@ updates:
     - dependency-name: "com.google.protobuf:*"
       update-types:
         ["version-update:semver-major"]
-    # Don't upgrade Flink to 2.0-preview
-    - dependency-name: "org.apache.flink:*"
+    # Let's do major version updates manually
+    - dependency-name: "*"
       update-types:
         ["version-update:semver-major"]
   groups:
