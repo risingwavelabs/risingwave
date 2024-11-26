@@ -31,6 +31,8 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
+PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
+
 echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
 risedev ci-start ci-iceberg-engine

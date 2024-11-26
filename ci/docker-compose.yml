@@ -121,6 +121,13 @@ services:
     volumes:
       - ..:/risingwave
 
+  iceberg-engine-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    depends_on:
+      - db
+    volumes:
+      - ..:/risingwave
+
   ci-flamegraph-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     # NOTE(kwannoel): This is used in order to permit
