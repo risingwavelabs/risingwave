@@ -1465,8 +1465,8 @@ mod tests {
 
     #[test]
     fn int8() {
-        let array: PrimitiveArray<i16> = I16Array::from_iter([None, Some(7), Some(25)]);
-        let arr = arrow_array::Int8Array::from(vec![None, Some(7), Some(25)]);
+        let array: PrimitiveArray<i16> = I16Array::from_iter([None, Some(-128), Some(127)]);
+        let arr = arrow_array::Int8Array::from(vec![None, Some(-128), Some(127)]);
         let converted: PrimitiveArray<i16> = (&arr).into();
         assert_eq!(converted, array);
     }
