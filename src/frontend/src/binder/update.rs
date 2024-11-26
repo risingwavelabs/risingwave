@@ -161,8 +161,8 @@ impl Binder {
 
         for Assignment { id, value } in assignments {
             let ids: Vec<_> = id
-                .into_iter()
-                .map(|id| self.bind_expr(Expr::Identifier(id)))
+                .iter()
+                .map(|id| self.bind_expr(Expr::Identifier(id.clone())))
                 .try_collect()?;
 
             match (ids.as_slice(), value) {
@@ -206,8 +206,9 @@ impl Binder {
                         bail_bind_error!("number of columns does not match number of values");
                     }
 
-                    let target_type = DataType::new_unnamed_struct(
+                    let target_type = DataType::new_struct(
                         ids.iter().map(|id| id.return_type()).collect(),
+                        id.iter().map(|id| id.real_value()).collect(),
                     );
                     let expr = expr.cast_assign(target_type)?;
 

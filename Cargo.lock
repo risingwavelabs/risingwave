@@ -14300,9 +14300,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c19760dc47062bca5c1b3699b032111c93802d51ac47660db11b08afc6bad2"
+checksum = "ef4323942237f7cc071061f2c5f0db919e6053c2cdf58c6bc974883073429737"
 dependencies = [
  "thiserror 1.0.63",
  "thiserror-ext-derive",
@@ -14310,9 +14310,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "667c8c48f68021098038115926c64d9950b0582062ae63f7d30638b1168daf03"
+checksum = "96541747c50e6c73e094737938f4f5dfaf50c48a31adff4197a3e2a481371674"
 dependencies = [
  "either",
  "proc-macro2",

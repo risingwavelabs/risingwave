@@ -84,12 +84,14 @@ pub struct Reschedule {
     pub newly_created_actors: Vec<(StreamActor, PbActorStatus)>,
 }
 
-/// Replacing an old table with a new one. All actors in the table job will be rebuilt.
-/// Used for `ALTER TABLE` ([`Command::ReplaceTable`]) and sink into table ([`Command::CreateStreamingJob`]).
+/// Replacing an old job with a new one. All actors in the job will be rebuilt.
+/// Used for `ALTER TABLE` ([`Command::ReplaceStreamJob`]) and sink into table ([`Command::CreateStreamingJob`]).
 #[derive(Debug, Clone)]
-pub struct ReplaceTablePlan {
+pub struct ReplaceStreamJobPlan {
     pub old_fragments: StreamJobFragments,
     pub new_fragments: StreamJobFragments,
+    /// Downstream jobs of the replaced job need to update their `Merge` node to
+    /// connect to the new fragment.
     pub merge_updates: Vec<MergeUpdate>,
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// For a table with connector, the `SourceExecutor` actor will also be rebuilt with new actor ids.
@@ -104,7 +106,7 @@ pub struct ReplaceTablePlan {
     pub tmp_id: u32,
 }
 
-impl ReplaceTablePlan {
+impl ReplaceStreamJobPlan {
     fn fragment_changes(&self) -> HashMap<FragmentId, CommandFragmentChanges> {
         let mut fragment_changes = HashMap::new();
         for fragment in self.new_fragments.fragments.values() {
@@ -206,7 +208,7 @@ pub struct SnapshotBackfillInfo {
 #[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
-    SinkIntoTable(ReplaceTablePlan),
+    SinkIntoTable(ReplaceStreamJobPlan),
     SnapshotBackfill(SnapshotBackfillInfo),
 }
 
@@ -271,13 +273,13 @@ pub enum Command {
         fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
     },
 
-    /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
+    /// `ReplaceStreamJob` command generates a `Update` barrier with the given `merge_updates`. This is
     /// essentially switching the downstream of the old table fragments to the new ones, and
     /// dropping the old table fragments. Used for table schema change.
     ///
     /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
     /// of the Merge executors are changed additionally.
-    ReplaceTable(ReplaceTablePlan),
+    ReplaceStreamJob(ReplaceStreamJobPlan),
 
     /// `SourceSplitAssignment` generates a `Splits` barrier for pushing initialized splits or
     /// changed splits.
@@ -384,7 +386,7 @@ impl Command {
                     })
                     .collect(),
             ),
-            Command::ReplaceTable(plan) => Some(plan.fragment_changes()),
+            Command::ReplaceStreamJob(plan) => Some(plan.fragment_changes()),
             Command::MergeSnapshotBackfillStreamingJobs(_) => None,
             Command::SourceSplitAssignment(_) => None,
             Command::Throttle(_) => None,
@@ -688,7 +690,7 @@ impl Command {
                         subscriptions_to_add,
                     }));
 
-                    if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
+                    if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
                         old_fragments,
                         new_fragments: _,
                         merge_updates,
@@ -731,7 +733,7 @@ impl Command {
                     }))
                 }
 
-                Command::ReplaceTable(ReplaceTablePlan {
+                Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,
                     merge_updates,
                     dispatchers,
@@ -943,7 +945,7 @@ impl Command {
                 }
                 Some(map)
             }
-            Command::ReplaceTable(replace_table) => {
+            Command::ReplaceStreamJob(replace_table) => {
                 Some(replace_table.new_fragments.actors_to_create())
             }
             _ => None,

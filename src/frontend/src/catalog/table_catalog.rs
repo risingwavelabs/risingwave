@@ -793,10 +793,11 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::new_struct(
-                                vec![DataType::Varchar, DataType::Varchar],
-                                vec!["address".to_string(), "zipcode".to_string()]
-                            ),
+                            data_type: StructType::new(vec![
+                                ("address", DataType::Varchar),
+                                ("zipcode", DataType::Varchar)
+                            ],)
+                            .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![

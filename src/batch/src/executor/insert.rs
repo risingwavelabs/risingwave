@@ -290,10 +290,9 @@ mod tests {
         let store = MemoryStateStore::new();
 
         // Make struct field
-        let struct_field = Field::unnamed(DataType::new_struct(
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            vec![],
-        ));
+        let struct_field = Field::unnamed(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
+        );
 
         // Schema for mock executor.
         let mut schema = schema_test_utils::ii();

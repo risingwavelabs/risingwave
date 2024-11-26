@@ -60,8 +60,24 @@ updates:
     - dependency-name: "io.debezium:*"
       update-types:
         ["version-update:semver-minor", "version-update:semver-major"]
+    # Don't upgrade protobuf to 4.x now. See https://github.com/grpc/grpc-java/issues/11015
+    - dependency-name: "com.google.protobuf:*"
+      update-types:
+        ["version-update:semver-major"]
+    # Let's do major version updates manually
+    - dependency-name: "*"
+      update-types:
+        ["version-update:semver-major"]
   groups:
     # Group all dependenies together because Java libraries are quite stable
     all:
       patterns:
         - "*"
+
+# Don't touch risingwave-sink-deltalake-test. It's too complicated and it's only for testing
+- package-ecosystem: maven
+  directory: /java/connector-node/risingwave-sink-deltalake-test/
+  schedule:
+    interval: "weekly"
+  ignore:
+    - dependency-name: "*"

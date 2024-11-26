@@ -1782,7 +1782,7 @@ pub mod tests {
         CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
         ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::source_catalog::SourceCatalog;
@@ -1822,19 +1822,19 @@ pub mod tests {
 
         let columns = GET_COLUMN_FROM_CATALOG(source);
 
-        let city_type = DataType::new_struct(
-            vec![DataType::Varchar, DataType::Varchar],
-            vec!["address".to_string(), "zipcode".to_string()],
-        );
+        let city_type = StructType::new(vec![
+            ("address", DataType::Varchar),
+            ("zipcode", DataType::Varchar),
+        ])
+        .into();
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
-            "country" => DataType::new_struct(
-                vec![DataType::Varchar,city_type,DataType::Varchar],
-                vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
-            ),
+            "country" => StructType::new(
+                vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
+            ).into(),
         };
         assert_eq!(columns, expected_columns);
     }
