@@ -505,6 +505,7 @@ pub trait FromArrow {
             Int16 => DataType::Int16,
             Int32 => DataType::Int32,
             Int64 => DataType::Int64,
+            Int8 => DataType::Int16,
             UInt8 => DataType::Int16,
             UInt16 => DataType::Int32,
             UInt32 => DataType::Int64,
