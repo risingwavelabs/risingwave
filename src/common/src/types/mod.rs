@@ -1158,10 +1158,8 @@ mod tests {
 
     #[test]
     fn test_data_type_display() {
-        let d: DataType = DataType::new_struct(
-            vec![DataType::Int32, DataType::Varchar],
-            vec!["i".to_string(), "j".to_string()],
-        );
+        let d: DataType =
+            StructType::new(vec![("i", DataType::Int32), ("j", DataType::Varchar)]).into();
         assert_eq!(
             format!("{}", d),
             "struct<i integer, j character varying>".to_string()
