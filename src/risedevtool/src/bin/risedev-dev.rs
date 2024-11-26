@@ -32,6 +32,7 @@ use risedev::{
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 use yaml_rust::YamlEmitter;
 
@@ -381,7 +382,12 @@ fn main() -> Result<()> {
 
     // Init logger from a customized env var.
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("RISEDEV_RUST_LOG"))
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::WARN.into())
+                .with_env_var("RISEDEV_RUST_LOG")
+                .from_env_lossy(),
+        )
         .init();
 
     preflight_check()?;
