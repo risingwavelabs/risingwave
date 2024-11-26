@@ -86,8 +86,12 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 .sstable_store
                 .sstable(&self.tables[idx], &mut self.stats)
                 .await?;
-            let mut sstable_iter =
-                TI::create(table, self.sstable_store.clone(), self.read_options.clone());
+            let mut sstable_iter = TI::create(
+                table,
+                self.sstable_store.clone(),
+                self.read_options.clone(),
+                self.tables[idx].key_range.clone(),
+            );
 
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;

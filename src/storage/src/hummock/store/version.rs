@@ -877,6 +877,7 @@ impl HummockVersionReader {
                 table_holder,
                 self.sstable_store.clone(),
                 sst_read_options.clone(),
+                sstable_info.key_range.clone(),
             ));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -889,19 +890,17 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping {
-                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
-                let sstables = table_infos
-                    .filter(|sstable_info| {
-                        sstable_info
-                            .table_ids
-                            .binary_search(&read_options.table_id.table_id)
-                            .is_ok()
-                    })
-                    .cloned()
-                    .collect_vec();
-                if sstables.is_empty() {
+                let mut table_infos = prune_nonoverlapping_ssts(
+                    &level.table_infos,
+                    user_key_range_ref,
+                    read_options.table_id.table_id(),
+                )
+                .peekable();
+
+                if table_infos.peek().is_none() {
                     continue;
                 }
+                let sstables = table_infos.cloned().collect_vec();
                 if sstables.len() > 1 {
                     factory.add_concat_sst_iter(
                         sstables,
@@ -934,6 +933,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        sstables[0].key_range.clone(),
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -968,6 +968,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        sstable_info.key_range.clone(),
                     ));
                     local_stats.overlapping_iter_count += 1;
                 }
@@ -1029,7 +1030,12 @@ impl HummockVersionReader {
                     let mut local_stat = StoreLocalStatistic::default();
                     let table_holder = sstable_store.sstable(sst, &mut local_stat).await?;
                     Ok::<_, HummockError>((
-                        SstableIterator::new(table_holder, sstable_store, read_options),
+                        SstableIterator::new(
+                            table_holder,
+                            sstable_store,
+                            read_options,
+                            sst.key_range.clone(),
+                        ),
                         local_stat,
                     ))
                 }

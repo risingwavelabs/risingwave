@@ -538,16 +538,16 @@ impl SstableStore {
     /// Returns `table_holder`
     pub fn sstable(
         &self,
-        sst: &SstableInfo,
+        sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.object_id;
+        let object_id = sstable_info_ref.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..;
+            let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;
@@ -716,6 +716,7 @@ mod tests {
             holder,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            info.key_range.clone(),
         );
         iter.rewind().await.unwrap();
         for i in x_range {

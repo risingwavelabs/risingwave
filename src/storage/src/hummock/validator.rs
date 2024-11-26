@@ -59,6 +59,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 max_preload_retry_times: 0,
                 prefetch_for_large_query: false,
             }),
+            sst.key_range.clone(),
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(_err) = iter.rewind().await {

@@ -17,7 +17,9 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
@@ -32,6 +34,7 @@ pub trait SstableIteratorType: HummockIterator + 'static {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
+        key_range: KeyRange,
     ) -> Self;
 }
 
@@ -52,6 +55,14 @@ pub struct SstableIterator {
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
+
+    is_current_block_valid: bool,
+    // The key range of the iterator
+    key_range: KeyRange,
+
+    // used for checking if the block is valid
+    // it's a light weight check only when the table id changes
+    last_table_id: StateTableId,
 }
 
 impl SstableIterator {
@@ -59,6 +70,7 @@ impl SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
+        key_range: KeyRange,
     ) -> Self {
         Self {
             block_iter: None,
@@ -70,6 +82,9 @@ impl SstableIterator {
             options,
             preload_end_block_idx: 0,
             preload_retry_times: 0,
+            is_current_block_valid: true,
+            key_range,
+            last_table_id: StateTableId::default(),
         }
     }
 
@@ -225,7 +240,28 @@ impl SstableIterator {
         }
 
         self.cur_idx = idx;
+        let new_table_id = block_iter.table_id().table_id();
+        if self.last_table_id != new_table_id {
+            self.last_table_id = new_table_id;
+            self.is_current_block_valid = block_iter.is_valid()
+                && block_iter.key().le(&FullKey::decode(&self.key_range.right)); // block_iter is not None
+        }
+
         Ok(())
+    }
+
+    fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
+        self.sst
+            .meta
+            .block_metas
+            .partition_point(|block_meta| {
+                // compare by version comparator
+                // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                // partition point should be `prev(<=)` instead of `<`.
+                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                ord == Less || ord == Equal
+            })
+            .saturating_sub(1) // considering the boundary of 0
     }
 }
 
@@ -238,7 +274,17 @@ impl HummockIterator for SstableIterator {
         if !block_iter.try_next() {
             // seek to next block
             self.seek_idx(self.cur_idx + 1, None).await?;
+        } else {
+            // block_iter try_next success, update the current block state
+            let new_table_id = block_iter.table_id().table_id();
+            if self.last_table_id != new_table_id {
+                // light weight check
+                self.last_table_id = new_table_id;
+                self.is_current_block_valid = block_iter.is_valid()
+                    && block_iter.key().le(&FullKey::decode(&self.key_range.right));
+            }
         }
+
         Ok(())
     }
 
@@ -253,28 +299,20 @@ impl HummockIterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.as_ref().map_or(false, |i| i.is_valid()) && self.is_current_block_valid
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
         self.init_block_prefetch_range(0);
-        self.seek_idx(0, None).await?;
+        let start_seek_idx = self.calculate_block_idx_by_key(FullKey::decode(&self.key_range.left));
+
+        // seek_idx will update the current block iter state
+        self.seek_idx(start_seek_idx, None).await?;
         Ok(())
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+        let block_idx = self.calculate_block_idx_by_key(key);
         self.init_block_prefetch_range(block_idx);
 
         self.seek_idx(block_idx, Some(key)).await?;
@@ -302,8 +340,9 @@ impl SstableIteratorType for SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
+        key_range: KeyRange,
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options)
+        SstableIterator::new(sstable, sstable_store, options, key_range)
     }
 }
 
@@ -319,6 +358,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -329,13 +369,18 @@ mod tests {
     };
     use crate::hummock::CachePolicy;
 
-    async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
+    async fn inner_test_forward_iterator(
+        sstable_store: SstableStoreRef,
+        handle: TableHolder,
+        sstable_info: SstableInfo,
+    ) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         let mut sstable_iter = SstableIterator::create(
             handle,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            sstable_info.key_range,
         );
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
@@ -356,20 +401,20 @@ mod tests {
     async fn test_table_iterator() {
         // Build remote sstable
         let sstable_store = mock_sstable_store().await;
-        let sstable =
+        let (sstable, sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
 
-        inner_test_forward_iterator(sstable_store.clone(), sstable).await;
+        inner_test_forward_iterator(sstable_store.clone(), sstable, sstable_info).await;
     }
 
     #[tokio::test]
     async fn test_table_seek() {
         let sstable_store = mock_sstable_store().await;
-        let sstable =
+        let (sstable, sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -379,6 +424,7 @@ mod tests {
             sstable,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            sstable_info.key_range,
         );
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -487,6 +533,7 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store.clone(),
             options.clone(),
+            KeyRange::inf(),
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
@@ -509,6 +556,7 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store,
             options.clone(),
+            KeyRange::inf(),
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();

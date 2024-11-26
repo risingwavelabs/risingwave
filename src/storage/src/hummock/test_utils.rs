@@ -278,7 +278,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -287,10 +287,14 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         CachePolicy::NotFill,
     )
     .await;
-    sstable_store
-        .sstable(&sst_info, &mut StoreLocalStatistic::default())
-        .await
-        .unwrap()
+
+    (
+        sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap(),
+        sst_info,
+    )
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -365,7 +369,7 @@ pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     sstable_store: SstableStoreRef,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,
