@@ -462,7 +462,10 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
 static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Rewrite Source For Batch",
-        vec![SourceToKafkaScanRule::create()],
+        vec![
+            SourceToKafkaScanRule::create(),
+            SourceToIcebergScanRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
