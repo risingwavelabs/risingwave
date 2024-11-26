@@ -19,7 +19,7 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/cache"
     - ".cargo/git"
 
-sql-backend: &sql-backend
+other-sql-backend: &other-sql-backend
   setup:
     label: [""]
     endpoint: [""]
@@ -811,7 +811,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test ({{matrix.label}} backend)"
-    matrix: *sql-backend
+    matrix: *other-sql-backend
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
