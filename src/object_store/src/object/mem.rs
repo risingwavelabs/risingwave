@@ -28,8 +28,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 
 use super::{
-    BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, StreamingUploader,
+    ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
 };
 use crate::object::{ObjectDataStream, ObjectMetadataIter};
 
@@ -64,7 +63,6 @@ pub struct InMemStreamingUploader {
     objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
 }
 
-#[async_trait::async_trait]
 impl StreamingUploader for InMemStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         fail_point!("mem_write_bytes_err", |_| Err(ObjectError::internal(
@@ -74,7 +72,7 @@ impl StreamingUploader for InMemStreamingUploader {
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         fail_point!("mem_finish_streaming_upload_err", |_| Err(
             ObjectError::internal("mem finish streaming upload error")
         ));
@@ -101,7 +99,9 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
+    type StreamingUploader = InMemStreamingUploader;
+
+    fn get_object_prefix(&self, _obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         String::default()
     }
 
@@ -121,12 +121,12 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(InMemStreamingUploader {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
             objects: self.objects.clone(),
-        }))
+        })
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -182,19 +182,30 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
         let list_result = self
             .objects
             .lock()
             .await
             .iter()
             .filter_map(|(path, (metadata, _))| {
+                if let Some(ref start_after) = start_after
+                    && metadata.key.le(start_after)
+                {
+                    return None;
+                }
                 if path.starts_with(prefix) {
                     return Some(metadata.clone());
                 }
                 None
             })
             .sorted_by(|a, b| Ord::cmp(&a.key, &b.key))
+            .take(limit.unwrap_or(usize::MAX))
             .collect_vec();
         Ok(Box::pin(InMemObjectIter::new(list_result)))
     }
@@ -307,7 +318,6 @@ impl Stream for InMemObjectIter {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use futures::TryStreamExt;
     use itertools::enumerate;
 
@@ -377,7 +387,7 @@ mod tests {
 
     async fn list_all(prefix: &str, store: &InMemObjectStore) -> Vec<ObjectMetadata> {
         store
-            .list(prefix)
+            .list(prefix, None, None)
             .await
             .unwrap()
             .try_collect::<Vec<_>>()

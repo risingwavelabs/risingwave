@@ -34,9 +34,10 @@ impl Planner {
             BoundSetExpr::SetOperation {
                 op,
                 all,
+                corresponding_col_indices,
                 left,
                 right,
-            } => self.plan_set_operation(op, all, *left, *right),
+            } => self.plan_set_operation(op, all, corresponding_col_indices, *left, *right),
         }
     }
 }

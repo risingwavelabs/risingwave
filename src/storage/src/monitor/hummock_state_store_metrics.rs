@@ -75,6 +75,7 @@ pub struct HummockStateStoreMetrics {
     // uploading task
     pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
     pub uploader_uploading_task_count: IntGauge,
+    pub uploader_imm_size: GenericGauge<AtomicU64>,
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
@@ -84,10 +85,13 @@ pub struct HummockStateStoreMetrics {
     pub old_value_size: IntGauge,
 
     // block statistics
-    pub block_efficiency_histogram: RelabeledHistogramVec,
+    pub block_efficiency_histogram: Histogram,
 
     pub event_handler_pending_event: IntGauge,
     pub event_handler_latency: HistogramVec,
+
+    pub safe_version_hit: GenericCounter<AtomicU64>,
+    pub safe_version_miss: GenericCounter<AtomicU64>,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -324,6 +328,15 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_imm_size = GenericGauge::new(
+            "state_store_uploader_imm_size",
+            "Total size of imms tracked by uploader",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(uploader_imm_size.clone()))
+            .unwrap();
+
         let opts = histogram_opts!(
             "state_store_uploader_upload_task_latency",
             "Latency of uploader uploading tasks",
@@ -417,13 +430,7 @@ impl HummockStateStoreMetrics {
             "Access ratio of in-memory block.",
             exponential_buckets(0.001, 2.0, 11).unwrap(),
         );
-        let block_efficiency_histogram =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let block_efficiency_histogram = RelabeledHistogramVec::with_metric_level(
-            MetricLevel::Info,
-            block_efficiency_histogram,
-            metric_level,
-        );
+        let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
         let event_handler_pending_event = register_int_gauge_with_registry!(
             "state_store_event_handler_pending_event",
@@ -440,6 +447,24 @@ impl HummockStateStoreMetrics {
 
         let event_handler_latency =
             register_histogram_vec_with_registry!(opts, &["event_type"], registry).unwrap();
+
+        let safe_version_hit = GenericCounter::new(
+            "state_store_safe_version_hit",
+            "The total count of a safe version that can be retrieved successfully",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(safe_version_hit.clone()))
+            .unwrap();
+
+        let safe_version_miss = GenericCounter::new(
+            "state_store_safe_version_miss",
+            "The total count of a safe version that cannot be retrieved",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(safe_version_miss.clone()))
+            .unwrap();
 
         Self {
             bloom_filter_true_negative_counts,
@@ -466,6 +491,7 @@ impl HummockStateStoreMetrics {
             spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
             uploader_uploading_task_size,
             uploader_uploading_task_count,
+            uploader_imm_size,
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
@@ -475,6 +501,8 @@ impl HummockStateStoreMetrics {
             block_efficiency_histogram,
             event_handler_pending_event,
             event_handler_latency,
+            safe_version_hit,
+            safe_version_miss,
         }
     }
 

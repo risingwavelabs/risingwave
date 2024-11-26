@@ -2,7 +2,13 @@ CREATE SOURCE ad_impression (
     bid_id BIGINT,
     ad_id BIGINT,
     impression_timestamp TIMESTAMPTZ
-) WITH (
+)
+INCLUDE key
+INCLUDE partition
+INCLUDE offset
+INCLUDE timestamp
+INCLUDE payload
+WITH (
     connector = 'kinesis',
     stream = 'ad-impression',
     aws.region='us-east-1',
@@ -16,7 +22,7 @@ CREATE SOURCE ad_click (
     bid_id BIGINT,
     click_timestamp TIMESTAMPTZ
 ) WITH (
-    connector = 's3_v2',
+    connector = 's3',
     s3.region_name = 'us-east-1',
     s3.bucket_name = 'ad-click',
     s3.credentials.access = 'test',

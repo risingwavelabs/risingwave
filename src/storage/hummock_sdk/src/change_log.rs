@@ -15,15 +15,83 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::ChangeLogDelta;
-use risingwave_pb::hummock::{EpochNewChangeLog, SstableInfo, TableChangeLog as PbTableChangeLog};
+use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
+use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct TableChangeLog(pub Vec<EpochNewChangeLog>);
+use crate::sstable_info::SstableInfo;
 
-impl TableChangeLog {
-    pub fn filter_epoch(&self, (min_epoch, max_epoch): (u64, u64)) -> &[EpochNewChangeLog] {
+#[derive(Debug, Clone, PartialEq)]
+pub struct TableChangeLogCommon<T>(pub Vec<EpochNewChangeLogCommon<T>>);
+
+pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EpochNewChangeLogCommon<T> {
+    pub new_value: Vec<T>,
+    pub old_value: Vec<T>,
+    pub epochs: Vec<u64>,
+}
+
+pub type EpochNewChangeLog = EpochNewChangeLogCommon<SstableInfo>;
+
+impl<T> From<&EpochNewChangeLogCommon<T>> for PbEpochNewChangeLog
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(val: &EpochNewChangeLogCommon<T>) -> Self {
+        Self {
+            new_value: val.new_value.iter().map(|a| a.into()).collect(),
+            old_value: val.old_value.iter().map(|a| a.into()).collect(),
+            epochs: val.epochs.clone(),
+        }
+    }
+}
+
+impl<T> From<&PbEpochNewChangeLog> for EpochNewChangeLogCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
+    fn from(value: &PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.iter().map(|a| a.into()).collect(),
+            epochs: value.epochs.clone(),
+        }
+    }
+}
+
+impl<T> From<EpochNewChangeLogCommon<T>> for PbEpochNewChangeLog
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(val: EpochNewChangeLogCommon<T>) -> Self {
+        Self {
+            new_value: val.new_value.into_iter().map(|a| a.into()).collect(),
+            old_value: val.old_value.into_iter().map(|a| a.into()).collect(),
+            epochs: val.epochs,
+        }
+    }
+}
+
+impl<T> From<PbEpochNewChangeLog> for EpochNewChangeLogCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
+    fn from(value: PbEpochNewChangeLog) -> Self {
+        Self {
+            new_value: value.new_value.into_iter().map(|a| a.into()).collect(),
+            old_value: value.old_value.into_iter().map(|a| a.into()).collect(),
+            epochs: value.epochs,
+        }
+    }
+}
+
+impl<T> TableChangeLogCommon<T> {
+    pub fn filter_epoch(
+        &self,
+        (min_epoch, max_epoch): (u64, u64),
+    ) -> &[EpochNewChangeLogCommon<T>] {
         let start = self.0.partition_point(|epoch_change_log| {
             epoch_change_log.epochs.last().expect("non-empty") < &min_epoch
         });
@@ -33,9 +101,16 @@ impl TableChangeLog {
         &self.0[start..end]
     }
 
-    pub fn get_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
+    /// Returns epochs where value is non-null and >= `min_epoch`.
+    pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
         self.filter_epoch((min_epoch, u64::MAX))
             .iter()
+            .filter(|epoch_change_log| {
+                // Filter out empty change logs
+                let new_value_empty = epoch_change_log.new_value.is_empty();
+                let old_value_empty = epoch_change_log.old_value.is_empty();
+                !new_value_empty || !old_value_empty
+            })
             .flat_map(|epoch_change_log| epoch_change_log.epochs.iter().cloned())
             .filter(|a| a >= &min_epoch)
             .clone()
@@ -53,15 +128,23 @@ impl TableChangeLog {
     }
 }
 
-impl TableChangeLog {
+impl<T> TableChangeLogCommon<T>
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
     pub fn to_protobuf(&self) -> PbTableChangeLog {
         PbTableChangeLog {
-            change_logs: self.0.clone(),
+            change_logs: self.0.iter().map(|a| a.into()).collect(),
         }
     }
+}
 
+impl<T> TableChangeLogCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
     pub fn from_protobuf(val: &PbTableChangeLog) -> Self {
-        Self(val.change_logs.clone())
+        Self(val.change_logs.iter().map(|a| a.into()).collect())
     }
 }
 
@@ -108,15 +191,72 @@ pub fn build_table_change_log_delta<'a>(
     table_change_log
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct ChangeLogDeltaCommon<T> {
+    pub truncate_epoch: u64,
+    pub new_log: Option<EpochNewChangeLogCommon<T>>,
+}
+
+pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
+
+impl<T> From<&ChangeLogDeltaCommon<T>> for PbChangeLogDelta
+where
+    PbSstableInfo: for<'a> From<&'a T>,
+{
+    fn from(val: &ChangeLogDeltaCommon<T>) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl<T> From<&PbChangeLogDelta> for ChangeLogDeltaCommon<T>
+where
+    T: for<'a> From<&'a PbSstableInfo>,
+{
+    fn from(val: &PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.as_ref().map(|a| a.into()),
+        }
+    }
+}
+
+impl<T> From<ChangeLogDeltaCommon<T>> for PbChangeLogDelta
+where
+    PbSstableInfo: From<T>,
+{
+    fn from(val: ChangeLogDeltaCommon<T>) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
+}
+
+impl<T> From<PbChangeLogDelta> for ChangeLogDeltaCommon<T>
+where
+    T: From<PbSstableInfo>,
+{
+    fn from(val: PbChangeLogDelta) -> Self {
+        Self {
+            truncate_epoch: val.truncate_epoch,
+            new_log: val.new_log.map(|a| a.into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
 
-    use crate::change_log::{EpochNewChangeLog, TableChangeLog};
+    use crate::change_log::{EpochNewChangeLog, TableChangeLogCommon};
+    use crate::sstable_info::SstableInfo;
 
     #[test]
     fn test_filter_epoch() {
-        let table_change_log = TableChangeLog(vec![
+        let table_change_log = TableChangeLogCommon::<SstableInfo>(vec![
             EpochNewChangeLog {
                 new_value: vec![],
                 old_value: vec![],
@@ -156,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_truncate() {
-        let mut table_change_log = TableChangeLog(vec![
+        let mut table_change_log = TableChangeLogCommon::<SstableInfo>(vec![
             EpochNewChangeLog {
                 new_value: vec![],
                 old_value: vec![],
@@ -182,7 +322,7 @@ mod tests {
         table_change_log.truncate(1);
         assert_eq!(
             table_change_log,
-            TableChangeLog(vec![
+            TableChangeLogCommon::<SstableInfo>(vec![
                 EpochNewChangeLog {
                     new_value: vec![],
                     old_value: vec![],
@@ -204,7 +344,7 @@ mod tests {
         table_change_log.truncate(3);
         assert_eq!(
             table_change_log,
-            TableChangeLog(vec![
+            TableChangeLogCommon::<SstableInfo>(vec![
                 EpochNewChangeLog {
                     new_value: vec![],
                     old_value: vec![],

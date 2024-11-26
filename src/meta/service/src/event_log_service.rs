@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta::manager::event_log::EventLogMangerRef;
+use risingwave_meta::manager::event_log::EventLogManagerRef;
 use risingwave_pb::meta::event_log_service_server::EventLogService;
 use risingwave_pb::meta::{
     AddEventLogRequest, AddEventLogResponse, ListEventLogRequest, ListEventLogResponse,
@@ -20,11 +20,11 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 pub struct EventLogServiceImpl {
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
 }
 
 impl EventLogServiceImpl {
-    pub fn new(event_log_manager: EventLogMangerRef) -> Self {
+    pub fn new(event_log_manager: EventLogManagerRef) -> Self {
         Self { event_log_manager }
     }
 }
@@ -49,6 +49,9 @@ impl EventLogService for EventLogServiceImpl {
         let e = match event {
             risingwave_pb::meta::add_event_log_request::Event::WorkerNodePanic(e) => {
                 risingwave_pb::meta::event_log::Event::WorkerNodePanic(e)
+            }
+            risingwave_pb::meta::add_event_log_request::Event::SinkFail(e) => {
+                risingwave_pb::meta::event_log::Event::SinkFail(e)
             }
         };
         self.event_log_manager.add_event_logs(vec![e]);

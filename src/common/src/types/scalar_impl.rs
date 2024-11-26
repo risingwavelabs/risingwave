@@ -15,8 +15,6 @@
 use std::hash::Hasher;
 
 use super::*;
-use crate::array::list_array::{ListRef, ListValue};
-use crate::array::struct_array::{StructRef, StructValue};
 use crate::{dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_native_types};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
@@ -29,7 +27,7 @@ pub trait ScalarPartialOrd: Scalar {
 /// Implement `Scalar` and `ScalarRef` for native type.
 /// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
-    ($({ $scalar_type:ty, $variant_name:ident } ),*) => {
+    ($({ $scalar_type:ty, $_variant_name:ident, $_read_fn:ident } ),*) => {
         $(
             impl Scalar for $scalar_type {
                 type ScalarRefType<'a> = Self;
@@ -147,7 +145,7 @@ impl Scalar for bool {
 }
 
 /// Implement `ScalarRef` for `bool`.
-impl<'a> ScalarRef<'a> for bool {
+impl ScalarRef<'_> for bool {
     type ScalarType = bool;
 
     fn to_owned_scalar(&self) -> bool {
@@ -169,7 +167,7 @@ impl Scalar for Decimal {
 }
 
 /// Implement `ScalarRef` for `Decimal`.
-impl<'a> ScalarRef<'a> for Decimal {
+impl ScalarRef<'_> for Decimal {
     type ScalarType = Decimal;
 
     fn to_owned_scalar(&self) -> Decimal {
@@ -191,7 +189,7 @@ impl Scalar for Interval {
 }
 
 /// Implement `ScalarRef` for `Interval`.
-impl<'a> ScalarRef<'a> for Interval {
+impl ScalarRef<'_> for Interval {
     type ScalarType = Interval;
 
     fn to_owned_scalar(&self) -> Interval {
@@ -213,7 +211,7 @@ impl Scalar for Date {
 }
 
 /// Implement `ScalarRef` for `Date`.
-impl<'a> ScalarRef<'a> for Date {
+impl ScalarRef<'_> for Date {
     type ScalarType = Date;
 
     fn to_owned_scalar(&self) -> Date {
@@ -235,7 +233,7 @@ impl Scalar for Timestamp {
 }
 
 /// Implement `ScalarRef` for `Timestamp`.
-impl<'a> ScalarRef<'a> for Timestamp {
+impl ScalarRef<'_> for Timestamp {
     type ScalarType = Timestamp;
 
     fn to_owned_scalar(&self) -> Timestamp {
@@ -257,7 +255,7 @@ impl Scalar for Time {
 }
 
 /// Implement `ScalarRef` for `Time`.
-impl<'a> ScalarRef<'a> for Time {
+impl ScalarRef<'_> for Time {
     type ScalarType = Time;
 
     fn to_owned_scalar(&self) -> Time {
@@ -279,7 +277,7 @@ impl Scalar for Timestamptz {
 }
 
 /// Implement `ScalarRef` for `Timestamptz`.
-impl<'a> ScalarRef<'a> for Timestamptz {
+impl ScalarRef<'_> for Timestamptz {
     type ScalarType = Timestamptz;
 
     fn to_owned_scalar(&self) -> Timestamptz {
@@ -324,7 +322,7 @@ impl ScalarImpl {
     }
 }
 
-impl<'scalar> ScalarRefImpl<'scalar> {
+impl ScalarRefImpl<'_> {
     pub fn get_ident(&self) -> &'static str {
         dispatch_scalar_ref_variants!(self, [I = VARIANT_NAME], { I })
     }

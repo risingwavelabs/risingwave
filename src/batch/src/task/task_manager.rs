@@ -137,12 +137,12 @@ impl BatchManager {
         tid: &PbTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+        use risingwave_hummock_sdk::test_batch_query_epoch;
 
         self.fire_task(
             tid,
             plan,
-            to_committed_batch_query_epoch(0),
+            test_batch_query_epoch(),
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
@@ -297,8 +297,8 @@ mod tests {
     use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, TaskId};
 
-    #[test]
-    fn test_task_not_found() {
+    #[tokio::test]
+    async fn test_task_not_found() {
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),

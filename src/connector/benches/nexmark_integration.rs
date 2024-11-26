@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
+//! Integration benchmark for parsing Nexmark events.
+//!
+//! To cover the code path in real-world scenarios, the parser is created through
+//! `ByteStreamSourceParserImpl::create` based on the given configuration, rather
+//! than depending on a specific internal implementation.
 
 use std::sync::LazyLock;
 
@@ -20,27 +24,23 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    ByteStreamSourceParser, JsonParser, SourceParserIntoStreamExt, SpecificParserConfig,
+    ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceContext, SourceMessage,
-    SourceMeta,
+    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 
-static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(make_batch);
+static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(|| make_batch(false));
+static STRUCT_BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(|| make_batch(true));
 
-fn make_batch() -> Vec<SourceMessage> {
+fn make_batch(use_struct: bool) -> Vec<SourceMessage> {
     let mut generator = nexmark::EventGenerator::default()
         .with_type_filter(nexmark::event::EventType::Bid)
-        .map(|e| match e {
-            nexmark::event::Event::Bid(bid) => bid, // extract the bid event
-            _ => unreachable!(),
-        })
         .enumerate();
 
     let message_base = SourceMessage {
@@ -53,9 +53,16 @@ fn make_batch() -> Vec<SourceMessage> {
 
     generator
         .by_ref()
-        .take(1024)
-        .map(|(i, e)| {
-            let payload = serde_json::to_vec(&e).unwrap();
+        .take(16384)
+        .map(|(i, event)| {
+            let payload = if use_struct {
+                serde_json::to_vec(&event).unwrap()
+            } else {
+                let nexmark::event::Event::Bid(bid) = event else {
+                    unreachable!()
+                };
+                serde_json::to_vec(&bid).unwrap()
+            };
             SourceMessage {
                 payload: Some(payload),
                 offset: i.to_string(),
@@ -65,14 +72,18 @@ fn make_batch() -> Vec<SourceMessage> {
         .collect_vec()
 }
 
-fn make_data_stream() -> BoxSourceStream {
-    futures::future::ready(Ok(BATCH.clone()))
-        .into_stream()
-        .boxed()
+fn make_data_stream(use_struct: bool) -> BoxSourceStream {
+    futures::future::ready(Ok(if use_struct {
+        STRUCT_BATCH.clone()
+    } else {
+        BATCH.clone()
+    }))
+    .into_stream()
+    .boxed()
 }
 
-fn make_parser() -> impl ByteStreamSourceParser {
-    let columns = [
+fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
+    let fields = vec![
         ("auction", DataType::Int64),
         ("bidder", DataType::Int64),
         ("price", DataType::Int64),
@@ -80,19 +91,36 @@ fn make_parser() -> impl ByteStreamSourceParser {
         ("url", DataType::Varchar),
         ("date_time", DataType::Timestamp),
         ("extra", DataType::Varchar),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(i, (n, t))| SourceColumnDesc::simple(n, t, ColumnId::new(i as _)))
-    .collect_vec();
+    ];
 
-    let props = SpecificParserConfig::DEFAULT_PLAIN_JSON;
+    let rw_columns = if use_struct {
+        let fields = fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (n, t))| ColumnDesc::named(n, ColumnId::new(i as _), t))
+            .collect();
+        let struct_col = ColumnDesc::new_struct("bid", 114514, "bid", fields);
+        vec![(&struct_col).into()]
+    } else {
+        fields
+            .into_iter()
+            .enumerate()
+            .map(|(i, (n, t))| SourceColumnDesc::simple(n, t, ColumnId::new(i as _)))
+            .collect_vec()
+    };
 
-    JsonParser::new(props, columns, SourceContext::dummy().into()).unwrap()
+    let config = ParserConfig {
+        common: CommonParserConfig { rw_columns },
+        specific: SpecificParserConfig::DEFAULT_PLAIN_JSON,
+    };
+
+    ByteStreamSourceParserImpl::create_for_test(config).unwrap()
 }
 
-fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxChunkSourceStream = make_parser().into_stream(make_data_stream()).boxed();
+fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
+    let mut stream: BoxChunkSourceStream = make_parser(use_struct)
+        .into_stream(make_data_stream(use_struct))
+        .boxed();
 
     std::iter::from_fn(move || {
         stream
@@ -108,7 +136,7 @@ fn make_stream_iter() -> impl Iterator<Item = StreamChunk> {
 fn bench(c: &mut Criterion) {
     c.bench_function("parse_nexmark", |b| {
         b.iter_batched(
-            make_stream_iter,
+            || make_stream_iter(false),
             |mut iter| iter.next().unwrap(),
             BatchSize::SmallInput,
         )
@@ -127,8 +155,16 @@ fn bench(c: &mut Criterion) {
             .into();
 
         b.iter_batched(
-            make_stream_iter,
+            || make_stream_iter(false),
             |mut iter| tracing::dispatcher::with_default(&dispatch, || iter.next().unwrap()),
+            BatchSize::SmallInput,
+        )
+    });
+
+    c.bench_function("parse_nexmark_struct_type", |b| {
+        b.iter_batched(
+            || make_stream_iter(true),
+            |mut iter| iter.next().unwrap(),
             BatchSize::SmallInput,
         )
     });

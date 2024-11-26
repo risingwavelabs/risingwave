@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::plan_common::ExternalTableDesc;
+use risingwave_pb::secret::PbSecretRef;
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::util::sort_util::ColumnOrder;
@@ -40,10 +41,10 @@ pub struct CdcTableDesc {
     /// Column indices for primary keys.
     pub stream_key: Vec<usize>,
 
-    pub value_indices: Vec<usize>,
-
     /// properties will be passed into the `StreamScanNode`
     pub connect_properties: BTreeMap<String, String>,
+    /// Secret refs
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
 }
 
 impl CdcTableDesc {
@@ -67,6 +68,7 @@ impl CdcTableDesc {
             table_name: self.external_table_name.clone(),
             stream_key: self.stream_key.iter().map(|k| *k as _).collect(),
             connect_properties: self.connect_properties.clone(),
+            secret_refs: self.secret_refs.clone(),
         }
     }
 

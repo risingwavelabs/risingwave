@@ -31,6 +31,7 @@ use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
+use crate::executor::monitor::LookupExecutorMetrics;
 use crate::executor::prelude::*;
 
 /// Parameters for [`LookupExecutor`].
@@ -238,6 +239,12 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
+        let metrics = self.ctx.streaming_metrics.new_lookup_executor_metrics(
+            self.arrangement.storage_table.table_id(),
+            self.ctx.id,
+            self.ctx.fragment_id,
+        );
+
         let (stream_to_output, arrange_to_output) = JoinStreamChunkBuilder::get_i2o_mapping(
             &self.column_mapping,
             self.stream.col_types.len(),
@@ -293,7 +300,11 @@ impl<S: StateStore> LookupExecutor<S> {
 
                     for (op, row) in ops.iter().zip_eq_debug(chunk.rows()) {
                         for matched_row in self
-                            .lookup_one_row(&row, self.last_barrier.as_ref().unwrap().epoch)
+                            .lookup_one_row(
+                                &row,
+                                self.last_barrier.as_ref().unwrap().epoch,
+                                &metrics,
+                            )
                             .await?
                         {
                             tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
@@ -328,7 +339,6 @@ impl<S: StateStore> LookupExecutor<S> {
         }
 
         // Use the new stream barrier epoch as new cache epoch
-        self.lookup_cache.update_epoch(barrier.epoch.curr);
         self.last_barrier = Some(barrier.clone());
     }
 
@@ -337,30 +347,21 @@ impl<S: StateStore> LookupExecutor<S> {
         &mut self,
         stream_row: &RowRef<'_>,
         epoch_pair: EpochPair,
+        metrics: &LookupExecutorMetrics,
     ) -> StreamExecutorResult<Vec<OwnedRow>> {
         // stream_row is the row from stream side, we need to transform into the correct order of
         // the arrangement side.
         let lookup_row = stream_row
             .project(&self.key_indices_mapping)
             .into_owned_row();
-        let table_id_str = self.arrangement.storage_table.table_id().to_string();
-        let actor_id_str = self.ctx.id.to_string();
-        let fragment_id_str = self.ctx.fragment_id.to_string();
-        self.ctx
-            .streaming_metrics
-            .lookup_total_query_cache_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-            .inc();
+
+        metrics.lookup_total_query_cache_count.inc();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }
 
         // cache miss
-        self.ctx
-            .streaming_metrics
-            .lookup_cache_miss_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
-            .inc();
+        metrics.lookup_cache_miss_count.inc();
 
         tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
@@ -405,10 +406,8 @@ impl<S: StateStore> LookupExecutor<S> {
 
         self.lookup_cache.batch_update(lookup_row, all_rows.clone());
 
-        self.ctx
-            .streaming_metrics
+        metrics
             .lookup_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.lookup_cache.len() as i64);
 
         Ok(all_rows.into_inner())

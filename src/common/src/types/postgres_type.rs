@@ -54,6 +54,12 @@ pub struct UnsupportedOid(i32);
 
 /// Get type information compatible with Postgres type, such as oid, type length.
 impl DataType {
+    /// For a fixed-size type, typlen is the number of bytes in the internal representation of the type.
+    /// But for a variable-length type, typlen is negative.
+    /// -1 indicates a “varlena” type (one that has a length word),
+    /// -2 indicates a null-terminated C string.
+    ///
+    /// <https://www.postgresql.org/docs/15/catalog-pg-type.html#:~:text=of%20the%20type-,typlen,-int2>
     pub fn type_len(&self) -> i16 {
         macro_rules! impl_type_len {
             ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
@@ -63,7 +69,7 @@ impl DataType {
                     )*
                     DataType::Serial => 8,
                     DataType::Int256 => -1,
-                    DataType::List(_) | DataType::Struct(_) => -1,
+                    DataType::List(_) | DataType::Struct(_) | DataType::Map(_) => -1,
                 }
             }
         }
@@ -96,6 +102,7 @@ impl DataType {
         for_all_base_types! { impl_from_oid }
     }
 
+    /// Refer to [`Self::from_oid`]
     pub fn to_oid(&self) -> i32 {
         macro_rules! impl_to_oid {
             ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
@@ -109,13 +116,16 @@ impl DataType {
                         )*
                         DataType::Int256 => 1302,
                         DataType::Serial => 1016,
-                        DataType::Struct(_) => -1,
+                        DataType::Struct(_) => 2287, // pseudo-type of array[struct] (see `pg_type.dat`)
                         DataType::List { .. } => unreachable!("Never reach here!"),
+                        DataType::Map(_) => 1304,
                     }
                     DataType::Serial => 20,
+                    // XXX: what does the oid mean here? Why we don't have from_oid for them?
                     DataType::Int256 => 1301,
+                    DataType::Map(_) => 1303,
                     // TODO: Support to give a new oid for custom struct type. #9434
-                    DataType::Struct(_) => 1043,
+                    DataType::Struct(_) => 2249,  // pseudo-type of struct (see `pg_type.dat`)
                 }
             }
         }
@@ -133,6 +143,7 @@ impl DataType {
                     DataType::List(_) => "list",
                     DataType::Serial => "serial",
                     DataType::Int256 => "rw_int256",
+                    DataType::Map(_) => "map",
                 }
             }
         }

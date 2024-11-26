@@ -15,6 +15,7 @@
  *
  */
 
+import { Expose, plainToInstance } from "class-transformer"
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
@@ -22,23 +23,35 @@ import {
   Schema,
   Sink,
   Source,
+  Subscription,
   Table,
   View,
 } from "../../proto/gen/catalog"
 import {
+  FragmentVertexToRelationMap,
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
+  RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
 import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import { UserInfo } from "../../proto/gen/user"
 import api from "./api"
 
-export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
-    TableFragments.fromJSON
+// NOTE(kwannoel): This can be optimized further, instead of fetching the entire TableFragments struct,
+// We can fetch the fields we need from TableFragments, in a truncated struct.
+export async function getFragmentsByJobId(
+  jobId: number
+): Promise<TableFragments> {
+  let route = "/fragments/job_id/" + jobId.toString()
+  let tableFragments: TableFragments = TableFragments.fromJSON(
+    await api.get(route)
   )
-  fragmentList = sortBy(fragmentList, (x) => x.tableId)
-  return fragmentList
+  return tableFragments
+}
+
+export async function getRelationIdInfos(): Promise<RelationIdInfos> {
+  let fragmentIds: RelationIdInfos = await api.get("/relation_id_infos")
+  return fragmentIds
 }
 
 export interface Relation {
@@ -47,15 +60,51 @@ export interface Relation {
   owner: number
   schemaId: number
   databaseId: number
-  columns: (ColumnCatalog | Field)[]
 
   // For display
+  columns?: (ColumnCatalog | Field)[]
   ownerName?: string
   schemaName?: string
   databaseName?: string
 }
 
-export interface StreamingJob extends Relation {
+export class StreamingJob {
+  @Expose({ name: "jobId" })
+  id!: number
+  @Expose({ name: "objType" })
+  _objType!: string
+  name!: string
+  jobStatus!: string
+  @Expose({ name: "parallelism" })
+  _parallelism!: any
+  maxParallelism!: number
+
+  get parallelism() {
+    const parallelism = this._parallelism
+    if (typeof parallelism === "string") {
+      // `Adaptive`
+      return parallelism
+    } else if (typeof parallelism === "object") {
+      // `Fixed (64)`
+      let key = Object.keys(parallelism)[0]
+      let value = parallelism[key]
+      return `${key} (${value})`
+    } else {
+      // fallback
+      return JSON.stringify(parallelism)
+    }
+  }
+
+  get type() {
+    if (this._objType == "Table") {
+      return "Table / MV"
+    } else {
+      return this._objType
+    }
+  }
+}
+
+export interface StreamingRelation extends Relation {
   dependentRelations: number[]
 }
 
@@ -66,6 +115,8 @@ export function relationType(x: Relation) {
     return "SINK"
   } else if ((x as Source).info !== undefined) {
     return "SOURCE"
+  } else if ((x as Subscription).dependentTableId !== undefined) {
+    return "SUBSCRIPTION"
   } else {
     return "UNKNOWN"
   }
@@ -76,17 +127,15 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingJob {
+export function relationIsStreamingJob(x: Relation): x is StreamingRelation {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
-  let jobs = _.concat<StreamingJob>(
-    await getMaterializedViews(),
-    await getTables(),
-    await getIndexes(),
-    await getSinks()
+  let jobs = plainToInstance(
+    StreamingJob,
+    (await api.get("/streaming_jobs")) as any[]
   )
   jobs = sortBy(jobs, (x) => x.id)
   return jobs
@@ -98,7 +147,8 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getSources()
+    await getSources(),
+    await getSubscriptions()
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -106,6 +156,13 @@ export async function getRelations() {
 
 export async function getRelationDependencies() {
   return await getObjectDependencies()
+}
+
+export async function getFragmentVertexToRelationMap() {
+  let res = await api.get("/fragment_vertex_to_relation_id_map")
+  let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
+    FragmentVertexToRelationMap.fromJSON(res)
+  return fragmentVertexToRelationMap
 }
 
 async function getTableCatalogsInner(
@@ -150,6 +207,14 @@ export async function getViews() {
   return views
 }
 
+export async function getSubscriptions() {
+  let subscriptions: Subscription[] = (await api.get("/subscriptions")).map(
+    Subscription.fromJSON
+  )
+  subscriptions = sortBy(subscriptions, (x) => x.id)
+  return subscriptions
+}
+
 export async function getUsers() {
   let users: UserInfo[] = (await api.get("/users")).map(UserInfo.fromJSON)
   users = sortBy(users, (x) => x.id)
@@ -170,6 +235,7 @@ export async function getSchemas() {
   return schemas
 }
 
+// Returns a map of object id to a list of object ids that it depends on
 export async function getObjectDependencies() {
   let objDependencies: ObjectDependencies[] = (
     await api.get("/object_dependencies")

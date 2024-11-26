@@ -30,7 +30,7 @@ use governor::{Quota, RateLimiter};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};
@@ -41,10 +41,11 @@ use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTableInner;
+use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
@@ -336,10 +337,11 @@ pub(crate) fn mark_cdc_chunk(
 /// For each row of the chunk, forward it to downstream if its pk <= `current_pos` for the
 /// corresponding `vnode`, otherwise ignore it.
 /// We implement it by changing the visibility bitmap.
-pub(crate) fn mark_chunk_ref_by_vnode(
+pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
     pk_in_output_indices: PkIndicesRef<'_>,
+    upstream_table: &ReplicatedStateTable<S, SD>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.clone();
@@ -347,7 +349,8 @@ pub(crate) fn mark_chunk_ref_by_vnode(
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
     // Use project to avoid allocation.
     for row in data.rows() {
-        let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
+        let pk = row.project(pk_in_output_indices);
+        let vnode = upstream_table.compute_vnode_by_pk(pk);
         let v = match backfill_state.get_progress(&vnode)? {
             // We want to just forward the row, if the vnode has finished backfill.
             BackfillProgressPerVnode::Completed { .. } => true,
@@ -355,10 +358,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress { current_pos, .. } => {
-                let lhs = row.project(pk_in_output_indices);
-                let rhs = current_pos;
-                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                match order {
+                match cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()) {
                     Ordering::Less | Ordering::Equal => true,
                     Ordering::Greater => false,
                 }
@@ -716,6 +716,7 @@ where
 /// - Format: | vnode | pk | true | `row_count` |
 /// - If previous state is `InProgress` / `NotStarted`: Persist.
 /// - If previous state is Completed: Do not persist.
+///
 /// TODO(kwannoel): we should check committed state to be all `finished` in the tests.
 /// TODO(kwannoel): Instead of persisting state per vnode each time,
 /// we can optimize by persisting state for a subset of vnodes which were updated.

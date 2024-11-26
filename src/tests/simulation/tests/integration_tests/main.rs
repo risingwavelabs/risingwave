@@ -18,7 +18,6 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
-#![feature(lazy_cell)]
 #![feature(extract_if)]
 
 mod backfill_tests;
@@ -29,4 +28,5 @@ mod sink;
 mod storage;
 mod throttle;
 
+mod compaction;
 mod utils;

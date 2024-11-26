@@ -23,7 +23,7 @@ use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -46,6 +46,7 @@ impl StreamOverWindow {
             false, // general over window cannot be append-only
             false,
             watermark_columns,
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         StreamOverWindow { base, core }
     }

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use foyer::HybridCacheBuilder;
+use foyer::{Engine, HybridCacheBuilder};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
@@ -35,6 +35,8 @@ use tokio::task::JoinHandle;
 pub struct HummockServiceOpts {
     pub hummock_url: String,
     pub data_dir: Option<String>,
+
+    use_new_object_prefix_strategy: bool,
 
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
@@ -55,7 +57,10 @@ impl HummockServiceOpts {
     /// Currently, we will read these variables for meta:
     ///
     /// * `RW_HUMMOCK_URL`: hummock store address
-    pub fn from_env(data_dir: Option<String>) -> Result<Self> {
+    pub fn from_env(
+        data_dir: Option<String>,
+        use_new_object_prefix_strategy: bool,
+    ) -> Result<Self> {
         let hummock_url = match env::var("RW_HUMMOCK_URL") {
             Ok(url) => {
                 if !url.starts_with("hummock+") {
@@ -80,11 +85,13 @@ impl HummockServiceOpts {
                 bail!(MESSAGE);
             }
         };
+
         Ok(Self {
             hummock_url,
             data_dir,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
+            use_new_object_prefix_strategy,
         })
     }
 
@@ -109,11 +116,8 @@ impl HummockServiceOpts {
         &mut self,
         meta_client: &MetaClient,
     ) -> Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
-        let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
-            meta_client.clone(),
-            Duration::from_millis(1000),
-            vec![],
-        );
+        let (heartbeat_handle, heartbeat_shutdown_sender) =
+            MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000));
         self.heartbeat_handle = Some(heartbeat_handle);
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
@@ -142,6 +146,7 @@ impl HummockServiceOpts {
             metrics.storage_metrics.clone(),
             metrics.compactor_metrics.clone(),
             None,
+            self.use_new_object_prefix_strategy,
         )
         .await?;
 
@@ -157,7 +162,10 @@ impl HummockServiceOpts {
         }
     }
 
-    pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
+    pub async fn create_sstable_store(
+        &self,
+        use_new_object_prefix_strategy: bool,
+    ) -> Result<Arc<SstableStore>> {
         let object_store = build_remote_object_store(
             self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
@@ -168,16 +176,16 @@ impl HummockServiceOpts {
 
         let opts = self.get_storage_opts();
 
-        let meta_cache_v2 = HybridCacheBuilder::new()
+        let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await?;
-        let block_cache_v2 = HybridCacheBuilder::new()
+        let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
             .with_shards(opts.block_cache_shard_num)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await?;
 
@@ -190,8 +198,9 @@ impl HummockServiceOpts {
             state_store_metrics: Arc::new(global_hummock_state_store_metrics(
                 MetricLevel::Disabled,
             )),
-            meta_cache_v2,
-            block_cache_v2,
+            use_new_object_prefix_strategy,
+            meta_cache,
+            block_cache,
         })))
     }
 }

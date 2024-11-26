@@ -30,4 +30,5 @@ struct PgProc {
     proargdefaults: i32,
     // Data type of the return value, refer to pg_type.
     prorettype: i32,
+    prokind: String,
 }

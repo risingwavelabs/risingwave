@@ -1,0 +1,41 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement error time_travel_retention_ms cannot be less than 600000
+ALTER SYSTEM SET time_travel_retention_ms to 10;
+
+statement ok
+CREATE TABLE t (k INT);
+
+query I
+SELECT *  FROM t;
+----
+
+sleep 5s
+
+statement ok
+INSERT INTO t VALUES (1);
+
+query I
+SELECT *  FROM t;
+----
+1
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now();
+----
+1
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second;
+----
+
+sleep 5s
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second;
+----
+1
+
+statement ok
+DROP TABLE t;

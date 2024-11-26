@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::env;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::BufWriter;
@@ -23,7 +24,8 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{
@@ -35,7 +37,7 @@ use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
     TracedInitOptions, TracedNewLocalOptions, TracedReadOptions, TracedSealCurrentEpochOptions,
-    TracedSubResp, UniqueIdGenerator,
+    TracedSubResp, TracedTryWaitEpochOptions, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -214,22 +216,14 @@ impl TraceSpan {
         Self::new_global_op(Operation::SealCurrentEpoch { epoch, opts }, storage_type)
     }
 
-    pub fn new_clear_shared_buffer_span(prev_epoch: u64) -> MayTraceSpan {
+    pub fn new_try_wait_epoch_span(
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> MayTraceSpan {
         Self::new_global_op(
-            Operation::ClearSharedBuffer(prev_epoch),
+            Operation::TryWaitEpoch(epoch.into(), options),
             StorageType::Global,
         )
-    }
-
-    pub fn new_validate_read_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(
-            Operation::ValidateReadEpoch(epoch.into()),
-            StorageType::Global,
-        )
-    }
-
-    pub fn new_try_wait_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(Operation::TryWaitEpoch(epoch.into()), StorageType::Global)
     }
 
     pub fn new_get_span(
@@ -286,16 +280,24 @@ impl TraceSpan {
         )
     }
 
-    pub fn new_sync_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::Sync(epoch), storage_type)
-    }
-
-    pub fn new_seal_span(
-        epoch: u64,
-        is_checkpoint: bool,
+    pub fn new_sync_span(
+        sync_table_epochs: &Vec<(HummockEpoch, HashSet<TableId>)>,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global_op(Operation::Seal(epoch, is_checkpoint), storage_type)
+        Self::new_global_op(
+            Operation::Sync(
+                sync_table_epochs
+                    .iter()
+                    .map(|(epoch, table_ids)| {
+                        (
+                            *epoch,
+                            table_ids.iter().map(|table_id| table_id.table_id).collect(),
+                        )
+                    })
+                    .collect(),
+            ),
+            storage_type,
+        )
     }
 
     pub fn new_local_storage_span(

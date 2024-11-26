@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 
 use super::{DefaultBehavior, Merge};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{PlanNode, *};
+use crate::optimizer::plan_node::*;
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]

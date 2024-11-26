@@ -1,0 +1,23 @@
+- id: create sink into table having default expression with now()
+  sql: |
+    create table t(
+        x int,
+        y timestamptz default now(),
+        z timestamptz default now() - interval '1 minute'
+    ) append only;
+    create table s(x int) append only;
+    explain create sink ss into t from s with (type = 'append-only');
+  expected_outputs:
+    - explain_output
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 from t2;
+  expected_outputs:
+    - explain_output
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 as select b from t2;
+  expected_outputs:
+    - explain_output

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
 use async_trait::async_trait;
 use icelake::io_v2::{IcebergWriter, IcebergWriterBuilder};
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 
 #[derive(Clone)]
@@ -28,6 +28,7 @@ pub struct MonitoredWriteWriterBuilder<B: IcebergWriterBuilder> {
 
 impl<B: IcebergWriterBuilder> MonitoredWriteWriterBuilder<B> {
     /// Create writer context.
+    #[expect(dead_code)]
     pub fn new(
         inner: B,
         write_qps: LabelGuardedIntCounter<2>,

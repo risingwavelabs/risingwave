@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use itertools::Itertools;
+use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{ParallelTestError, QueryExpect, Record, StatementExpect};
+use sqllogictest::{Condition, ParallelTestError, QueryExpect, Record, StatementExpect};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
 // retry a maximum times until it succeed
-const MAX_RETRY: usize = 5;
+const MAX_RETRY: usize = 10;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
@@ -83,6 +85,15 @@ impl SqlCmd {
         // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
         // are not transactional, we can't kill during `alter table add/drop columns` for now, will
         // remove it until transactional commit of table fragment and catalog is supported.
+    }
+
+    fn is_create(&self) -> bool {
+        matches!(
+            self,
+            SqlCmd::Create { .. }
+                | SqlCmd::CreateSink { .. }
+                | SqlCmd::CreateMaterializedView { .. }
+        )
     }
 }
 
@@ -188,13 +199,23 @@ async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
     }
 }
 
+pub struct Opts {
+    pub kill_opts: KillOpts,
+    /// Probability of `background_ddl` being set to true per ddl record.
+    pub background_ddl_rate: f64,
+    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+    pub random_vnode_count: bool,
+}
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(
     cluster: Arc<Cluster>,
     glob: &str,
-    opts: &KillOpts,
-    // Probability of background_ddl being set to true per ddl record.
-    background_ddl_rate: f64,
+    Opts {
+        kill_opts,
+        background_ddl_rate,
+        random_vnode_count,
+    }: Opts,
 ) {
     tracing::info!("background_ddl_rate: {}", background_ddl_rate);
     let seed = std::env::var("MADSIM_TEST_SEED")
@@ -202,12 +223,16 @@ pub async fn run_slt_task(
         .parse::<u64>()
         .unwrap();
     let mut rng = ChaChaRng::seed_from_u64(seed);
-    let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
+    let kill = kill_opts.kill_compute
+        || kill_opts.kill_meta
+        || kill_opts.kill_frontend
+        || kill_opts.kill_compactor;
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
         let mut tester =
             sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+        tester.add_label("madsim");
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -227,7 +252,22 @@ pub async fn run_slt_task(
         // We can revert it back to false only if we encounter a record that sets background_ddl to false.
         let mut manual_background_ddl_enabled = false;
 
-        for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+        let records = sqllogictest::parse_file(path).expect("failed to parse file");
+        let random_vnode_count = random_vnode_count
+            // Skip using random vnode count if the test case cares about parallelism, including
+            // setting parallelism manually or checking the parallelism with system tables.
+            && records.iter().all(|record| {
+                if let Record::Statement { sql, .. } | Record::Query { sql, .. } = record
+                    && sql.to_lowercase().contains("parallelism")
+                {
+                    println!("[RANDOM VNODE COUNT] skip: {}", path.display());
+                    false
+                } else {
+                    true
+                }
+            });
+
+        for record in records {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
             // println!("{:#?}", metrics);
@@ -236,8 +276,42 @@ pub async fn run_slt_task(
                 break;
             }
 
+            let cmd = match &record {
+                sqllogictest::Record::Statement { sql, .. }
+                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
+                _ => SqlCmd::Others,
+            };
+
             // For normal records.
             if !kill {
+                // Set random vnode count if needed.
+                if random_vnode_count
+                    && cmd.is_create()
+                    && let Record::Statement {
+                        loc,
+                        conditions,
+                        connection,
+                        ..
+                    } = &record
+                {
+                    let vnode_count = (2..=64) // small
+                        .chain(224..=288) // normal
+                        .chain(992..=1056) // 1024 affects row id gen behavior
+                        .choose(&mut thread_rng())
+                        .unwrap();
+                    let sql = format!("SET STREAMING_MAX_PARALLELISM = {vnode_count};");
+                    println!("[RANDOM VNODE COUNT] set: {vnode_count}");
+                    let set_random_vnode_count = Record::Statement {
+                        loc: loc.clone(),
+                        conditions: conditions.clone(),
+                        connection: connection.clone(),
+                        sql,
+                        expected: StatementExpect::Ok,
+                    };
+                    tester.run_async(set_random_vnode_count).await.unwrap();
+                    println!("[RANDOM VNODE COUNT] run: {record}");
+                }
+
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
@@ -251,11 +325,6 @@ pub async fn run_slt_task(
             }
 
             // For kill enabled.
-            let cmd = match &record {
-                sqllogictest::Record::Statement { sql, .. }
-                | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
-                _ => SqlCmd::Others,
-            };
             tracing::debug!(?cmd, "Running");
 
             if background_ddl_rate > 0.0
@@ -273,6 +342,11 @@ pub async fn run_slt_task(
             } = &record
                 && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
                 && !manual_background_ddl_enabled
+                && conditions.iter().all(|c| {
+                    *c != Condition::SkipIf {
+                        label: "madsim".to_string(),
+                    }
+                })
             {
                 let background_ddl_setting = rng.gen_bool(background_ddl_rate);
                 let set_background_ddl = Record::Statement {
@@ -299,10 +373,17 @@ pub async fn run_slt_task(
                         let err_string = err.to_string();
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
-                        let should_retry = (err_string.contains("no reader for dml in table")
-                            || err_string
-                                .contains("error reading a body from connection: broken pipe"))
-                            || err_string.contains("failed to inject barrier") && i < MAX_RETRY;
+                        let allowed_errs = [
+                            "no reader for dml in table",
+                            "error reading a body from connection: broken pipe",
+                            "failed to inject barrier",
+                            "get error from control stream",
+                            "cluster is under recovering",
+                        ];
+                        let should_retry = i < MAX_RETRY
+                            && allowed_errs
+                                .iter()
+                                .any(|allowed_err| err_string.contains(allowed_err));
                         if !should_retry {
                             panic!("{}", err);
                         }
@@ -315,11 +396,11 @@ pub async fn run_slt_task(
                 continue;
             }
 
-            let should_kill = thread_rng().gen_bool(opts.kill_rate as f64);
+            let should_kill = thread_rng().gen_bool(kill_opts.kill_rate as f64);
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
-                let opts = *opts;
+                let opts = kill_opts;
                 Some(tokio::spawn(async move {
                     let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;
@@ -332,7 +413,7 @@ pub async fn run_slt_task(
 
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
-                let delay = Duration::from_secs(1 << i);
+                let delay = Duration::from_secs(min(1 << i, 10));
                 if i > 0 {
                     tokio::time::sleep(delay).await;
                 }
@@ -394,6 +475,9 @@ pub async fn run_slt_task(
                             }
                             | SqlCmd::CreateMaterializedView { .. }
                                 if i != 0
+                                    // It should not be a gRPC request to meta error,
+                                    // otherwise it means that the catalog is not yet populated to fe.
+                                    && !e.to_string().contains("gRPC request to meta service failed")
                                     && e.to_string().contains("exists")
                                     && e.to_string().contains("Catalog error") =>
                             {
@@ -461,6 +545,8 @@ pub async fn run_slt_task(
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
     let mut tester =
         sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
+    tester.add_label("madsim");
+
     tester
         .run_parallel_async(
             glob,
@@ -481,8 +567,6 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let complex_avsc_full_path =
         std::fs::canonicalize("src/connector/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
-    let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
-        .expect("failed to get schema path");
     let json_schema_full_path =
         std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
             .expect("failed to get schema path");
@@ -496,10 +580,6 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/avro-complex-schema.avsc",
             complex_avsc_full_path.to_str().unwrap(),
-        )
-        .replace(
-            "/risingwave/proto-complex-schema",
-            proto_full_path.to_str().unwrap(),
         )
         .replace(
             "/risingwave/json-complex-schema",

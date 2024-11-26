@@ -2,11 +2,11 @@ name: Connector Node Integration Tests
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
   merge_group:
-    types: [checks_requested]
+    types: [ checks_requested ]
 
 jobs:
   build:
@@ -16,8 +16,8 @@ jobs:
         java: [ '11', '17' ]
     name: Java ${{ matrix.java }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
@@ -42,4 +42,8 @@ jobs:
           echo "--- build connector node"
           cd ${RISINGWAVE_ROOT}/java
           # run unit test
-          mvn --batch-mode --update-snapshots clean package -Dno-build-rust
+          # WARN: `testOnNext_writeValidation` is skipped because it relies on Rust code to decode message,
+          #       while we don't build Rust code (`-Dno-build-rust`) here to save time
+          mvn --batch-mode --update-snapshots clean package -Dno-build-rust \
+            '-Dtest=!com.risingwave.connector.sink.SinkStreamObserverTest#testOnNext_writeValidation' \
+            -Dsurefire.failIfNoSpecifiedTests=false

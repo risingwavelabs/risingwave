@@ -59,6 +59,7 @@ impl Index<usize> for Row {
     }
 }
 
+/// <https://www.postgresql.org/docs/current/protocol-overview.html#PROTOCOL-FORMAT-CODES>
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Binary,
@@ -93,7 +94,7 @@ where
     default_format: Format,
 }
 
-impl<'a, 'b> FormatIterator<'a, 'b> {
+impl<'a> FormatIterator<'a, '_> {
     pub fn new(provided_formats: &'a [Format], actual_len: usize) -> Result<Self, String> {
         if !provided_formats.is_empty()
             && provided_formats.len() != 1

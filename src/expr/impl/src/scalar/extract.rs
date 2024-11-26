@@ -65,7 +65,7 @@ fn extract_from_timelike(time: impl Timelike, unit: Unit) -> Decimal {
 fn extract_from_date(date: Date, unit: &Unit) -> Decimal {
     match unit {
         Epoch => {
-            let epoch = date.0.and_time(NaiveTime::default()).timestamp();
+            let epoch = date.0.and_time(NaiveTime::default()).and_utc().timestamp();
             epoch.into()
         }
         Julian => {
@@ -92,11 +92,12 @@ fn extract_from_time(time: Time, unit: &Unit) -> Decimal {
 fn extract_from_timestamp(timestamp: Timestamp, unit: &Unit) -> Decimal {
     match unit {
         Epoch => {
-            let epoch = timestamp.0.timestamp_micros();
+            let epoch = timestamp.0.and_utc().timestamp_micros();
             Decimal::from_i128_with_scale(epoch as i128, 6)
         }
         Julian => {
-            let epoch = Decimal::from_i128_with_scale(timestamp.0.timestamp_micros() as i128, 6);
+            let epoch =
+                Decimal::from_i128_with_scale(timestamp.0.and_utc().timestamp_micros() as i128, 6);
             epoch / (24 * 60 * 60).into() + 2_440_588.into()
         }
         _ if unit.is_date_unit() => extract_from_datelike(timestamp.0.date(), *unit),

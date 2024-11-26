@@ -16,9 +16,7 @@
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
@@ -38,6 +36,8 @@ use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConf
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -76,10 +76,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: MetaAddressStrategy,
 
-    /// Payload format of connector sink rpc
-    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
-    pub connector_rpc_sink_payload_format: Option<String>,
-
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -91,24 +87,36 @@ pub struct ComputeNodeOpts {
     pub total_memory_bytes: usize,
 
     /// Reserved memory for the compute node in bytes.
-    /// If not set, a portion (default to 30%) for the total_memory_bytes will be used as the reserved memory.
+    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
     ///
     /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
     pub reserved_memory_bytes: Option<usize>,
+
+    /// Target memory usage for Memory Manager.
+    /// If not set, the default value is `total_memory_bytes` - `reserved_memory_bytes`
+    ///
+    /// It's strongly recommended to set it for standalone deployment.
+    #[clap(long, env = "RW_MEMORY_MANAGER_TARGET_BYTES")]
+    pub memory_manager_target_bytes: Option<usize>,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
 
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[clap(long, env = "RW_NODE_LABEL", default_value_t = default_node_label())]
+    pub node_label: String,
+
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
     pub role: Role,
 
     /// Used for control the metrics level, similar to log level.
-    /// 0 = disable metrics
-    /// >0 = enable metrics
+    ///
+    /// level = 0: disable metrics
+    /// level > 0: enable metrics
     #[clap(long, hide = true, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
@@ -139,6 +147,15 @@ pub struct ComputeNodeOpts {
     #[deprecated = "connector node has been deprecated."]
     #[clap(long, hide = true, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// The path of the temp secret file directory.
+    #[clap(
+        long,
+        hide = true,
+        env = "RW_TEMP_SECRET_FILE_DIR",
+        default_value = "./secrets"
+    )]
+    pub temp_secret_file_dir: String,
 }
 
 impl risingwave_common::opts::Opts for ComputeNodeOpts {
@@ -202,7 +219,10 @@ fn validate_opts(opts: &ComputeNodeOpts) {
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -222,14 +242,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
-        let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
-
-        tracing::info!("Server listening at {}", listen_addr);
-
-        for join_handle in join_handle_vec {
-            join_handle.await.unwrap();
-        }
+        compute_node_serve(listen_addr, advertise_addr, opts, shutdown).await;
     })
 }
 
@@ -239,6 +252,10 @@ pub fn default_total_memory_bytes() -> usize {
 
 pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+pub fn default_node_label() -> String {
+    DEFAULT_COMPUTE_NODE_LABEL.to_string()
 }
 
 pub fn default_role() -> Role {

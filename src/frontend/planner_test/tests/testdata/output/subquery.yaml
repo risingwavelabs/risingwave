@@ -6,7 +6,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: merge and then eliminate
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -14,7 +14,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, columns: [t.v1, t.v2] }'
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -31,7 +31,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: consecutive projects are merged
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -39,7 +39,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -49,7 +49,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, columns: [t.v1, t.v2] }'
 - name: joins
   sql: |
@@ -59,8 +59,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: true, output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: table alias
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -69,8 +69,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: alias less columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -79,8 +79,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: alias more columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -168,8 +168,8 @@
           ├─LogicalProject { exprs: [sum(distinct 1:Int32)] }
           │ └─LogicalAgg { aggs: [sum(distinct 1:Int32)] }
           │   └─LogicalProject { exprs: [1:Int32] }
-          │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
@@ -223,11 +223,11 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |-
-    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, PgGetUserbyid(rw_tables.owner) as $expr4] }
+    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr4, PgGetUserbyid(rw_tables.owner) as $expr5] }
     └─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
       └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
         ├─LogicalShare { id: 18 }
-        │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, 'p':Varchar, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2, false:Boolean, null:Varchar] }
+        │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, 'p':Varchar, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32::Int16 as $expr2, 0:Int32, 0:Int32, Array as $expr3, false:Boolean, null:Varchar] }
         │   └─LogicalShare { id: 16 }
         │     └─LogicalUnion { all: true }
         │       ├─LogicalUnion { all: true }
@@ -237,11 +237,11 @@
         │       │ │ │ │ ├─LogicalUnion { all: true }
         │       │ │ │ │ │ ├─LogicalUnion { all: true }
         │       │ │ │ │ │ │ ├─LogicalProject { exprs: [rw_tables.id, rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl] }
-        │       │ │ │ │ │ │ │ └─LogicalSysScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl, rw_tables.initialized_at, rw_tables.created_at, rw_tables.initialized_at_cluster_version, rw_tables.created_at_cluster_version] }
+        │       │ │ │ │ │ │ │ └─LogicalSysScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.append_only, rw_tables.acl, rw_tables.initialized_at, rw_tables.created_at, rw_tables.initialized_at_cluster_version, rw_tables.created_at_cluster_version] }
         │       │ │ │ │ │ │ └─LogicalProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
         │       │ │ │ │ │ │   └─LogicalSysScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
         │       │ │ │ │ │ └─LogicalProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner, rw_sources.definition, rw_sources.acl] }
-        │       │ │ │ │ │   └─LogicalSysScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at, rw_sources.initialized_at_cluster_version, rw_sources.created_at_cluster_version] }
+        │       │ │ │ │ │   └─LogicalSysScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.associated_table_id, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at, rw_sources.initialized_at_cluster_version, rw_sources.created_at_cluster_version, rw_sources.is_shared] }
         │       │ │ │ │ └─LogicalProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl] }
         │       │ │ │ │   └─LogicalSysScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.primary_table_id, rw_indexes.key_columns, rw_indexes.include_columns, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl, rw_indexes.initialized_at, rw_indexes.created_at, rw_indexes.initialized_at_cluster_version, rw_indexes.created_at_cluster_version] }
         │       │ │ │ └─LogicalProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.definition, rw_sinks.acl] }
@@ -249,7 +249,7 @@
         │       │ │ └─LogicalProject { exprs: [rw_subscriptions.id, rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl] }
         │       │ │   └─LogicalSysScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl, rw_subscriptions.initialized_at, rw_subscriptions.created_at, rw_subscriptions.initialized_at_cluster_version, rw_subscriptions.created_at_cluster_version] }
         │       │ └─LogicalProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl] }
-        │       │   └─LogicalSysScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl, rw_materialized_views.initialized_at, rw_materialized_views.created_at, rw_materialized_views.initialized_at_cluster_version, rw_materialized_views.created_at_cluster_version] }
+        │       │   └─LogicalSysScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.append_only, rw_materialized_views.acl, rw_materialized_views.initialized_at, rw_materialized_views.created_at, rw_materialized_views.initialized_at_cluster_version, rw_materialized_views.created_at_cluster_version, rw_materialized_views.background_ddl] }
         │       └─LogicalProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
         │         └─LogicalSysScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
         └─LogicalShare { id: 20 }
@@ -294,7 +294,7 @@
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
       │ └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
-      │   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
+      │   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id, auction._rw_timestamp] }
       └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
         └─LogicalAgg { group_key: [$expr1], aggs: [] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
@@ -331,9 +331,9 @@
         │   └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
         │     └─StreamFilter { predicate: IsNotNull(auction.date_time) }
         │       └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
-        └─StreamProject { exprs: [auction.date_time] }
+        └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
           └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
-            └─StreamProject { exprs: [auction.date_time] }
+            └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
               └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
                 └─StreamExchange { dist: HashShard(auction.date_time) }
                   └─StreamShare { id: 3 }
@@ -346,7 +346,7 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.v, t._row_id] }
+      ├─LogicalScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > 1:Int32) }
           └─LogicalAgg { aggs: [] }
@@ -365,14 +365,14 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+      ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id, a._rw_timestamp] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
           ├─LogicalAgg { aggs: [] }
           │ └─LogicalProject { exprs: [] }
-          │   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+          │   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
-            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
+            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id, c._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
@@ -395,19 +395,19 @@
     LogicalProject { exprs: [a.a1, a.a2] }
     └─LogicalFilter { predicate: (a.a1 = min(b.b1)) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+        ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id, a._rw_timestamp] }
         └─LogicalProject { exprs: [min(b.b1)] }
           └─LogicalAgg { aggs: [min(b.b1)] }
             └─LogicalProject { exprs: [b.b1] }
               └─LogicalFilter { predicate: (b.b2 = min(b.b1)) }
                 └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-                  ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+                  ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
                   └─LogicalProject { exprs: [min(b.b1)] }
                     └─LogicalAgg { aggs: [min(b.b1)] }
                       └─LogicalProject { exprs: [b.b1] }
                         └─LogicalProject { exprs: [b.b1] }
                           └─LogicalFilter { predicate: (b.b1 = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
-                            └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+                            └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
     ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
@@ -457,12 +457,12 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.a, count] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [count] }
         └─LogicalAgg { aggs: [count] }
           └─LogicalProject { exprs: [] }
             └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, count(1:Int32)] }
     ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
@@ -529,13 +529,13 @@
         └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
           └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
-              ├─StreamProject { exprs: [t.x] }
+              ├─StreamProject { exprs: [t.x], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(t.x) }
               │     └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
               └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
                 └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-                  └─StreamProject { exprs: [t.x] }
+                  └─StreamProject { exprs: [t.x], noop_update_hint: true }
                     └─StreamHashAgg { group_key: [t.x], aggs: [count] }
                       └─StreamExchange { dist: HashShard(t.x) }
                         └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
@@ -817,7 +817,7 @@
         └─StreamProject { exprs: [integers.correlated_col, (count(distinct rows.k) + count(distinct rows.v)) as $expr1] }
           └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
             └─StreamHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, rows._row_id] }
-              ├─StreamProject { exprs: [integers.correlated_col] }
+              ├─StreamProject { exprs: [integers.correlated_col], noop_update_hint: true }
               │ └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count] }
               │   └─StreamExchange { dist: HashShard(integers.correlated_col) }
               │     └─StreamTableScan { table: integers, columns: [integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }

@@ -15,17 +15,14 @@ bytes = "1"
 cfg-or-panic = "0.2"
 chrono = { version = "0.4", default-features = false }
 foyer ={ workspace = true }
-fs-err = "2"
+fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jni = { version = "0.21.1", features = ["invocation"] }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
-risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

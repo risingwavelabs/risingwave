@@ -30,6 +30,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::hash::VirtualNode;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -54,7 +55,8 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
 // NOTE(kwannoel): We declare it separately as a constant,
 // otherwise seems like it can't infer the type of -1 when written inline.
-const DISABLE_STREAMING_RATE_LIMIT: i32 = -1;
+const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
+const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 
 #[serde_as]
 /// This is the Session Config of RisingWave.
@@ -63,7 +65,7 @@ pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[parameter(default = false, rename = "rw_implicit_flush")]
+    #[parameter(default = false, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
@@ -75,7 +77,7 @@ pub struct SessionConfig {
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
+    #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
 
     /// Sets the number of digits displayed for floating-point values.
@@ -94,12 +96,12 @@ pub struct SessionConfig {
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
-    #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
+    #[parameter(default = true, alias = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
-    #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
+    #[parameter(default = true, alias = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
     /// Enable distributed DML, so an insert, delete, and update statement can be executed in a distributed way (e.g. running in multiple compute nodes).
@@ -138,51 +140,61 @@ pub struct SessionConfig {
     #[parameter(default = "UTC", check_hook = check_timezone)]
     timezone: String,
 
-    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
-    /// streaming parallelism.
+    /// The execution parallelism for streaming queries, including tables, materialized views, indexes,
+    /// and sinks. Defaults to 0, which means they will be scheduled adaptively based on the cluster size.
+    ///
+    /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
+    /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
     #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
-    #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
+    #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
-    #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
+    #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
-    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    /// Enable arrangement backfill for streaming queries. Defaults to true.
+    /// When set to true, the parallelism of the upstream fragment will be
+    /// decoupled from the parallelism of the downstream scan fragment.
+    /// Or more generally, the parallelism of the upstream table / index / mv
+    /// will be decoupled from the parallelism of the downstream table / index / mv / sink.
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
+    #[parameter(default = false)]
+    streaming_use_snapshot_backfill: bool,
+
     /// Allow `jsonb` in stream key
-    #[parameter(default = false, rename = "rw_streaming_allow_jsonb_in_stream_key")]
+    #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
-    #[parameter(default = true, rename = "rw_enable_join_ordering")]
+    #[parameter(default = true, alias = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
+    #[parameter(default = true, flags = "SETTER", alias = "rw_enable_two_phase_agg")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
-    #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
+    #[parameter(default = false, flags = "SETTER", alias = "rw_force_two_phase_agg")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
-    #[parameter(default = true, rename = "rw_enable_share_plan")]
+    #[parameter(default = true, alias = "rw_enable_share_plan")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
-    #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
+    #[parameter(default = false, alias = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
@@ -249,16 +261,22 @@ pub struct SessionConfig {
     #[parameter(default = STANDARD_CONFORMING_STRINGS)]
     standard_conforming_strings: String,
 
+    /// Set streaming rate limit (rows per second) for each parallelism for mv / source / sink backfilling
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the snapshot read / source read.
+    #[parameter(default = DISABLE_BACKFILL_RATE_LIMIT)]
+    backfill_rate_limit: i32,
+
     /// Set streaming rate limit (rows per second) for each parallelism for mv / source backfilling, source reads.
     /// If set to -1, disable rate limit.
     /// If set to 0, this pauses the snapshot read / source read.
-    #[parameter(default = DISABLE_STREAMING_RATE_LIMIT)]
-    streaming_rate_limit: i32,
+    #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
+    source_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
     #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
+    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     /// Run DDL statements in background
@@ -269,8 +287,8 @@ pub struct SessionConfig {
     ///
     /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
     /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
-    #[parameter(default = false)]
-    rw_enable_shared_source: bool,
+    #[parameter(default = true)]
+    streaming_use_shared_source: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
@@ -278,6 +296,24 @@ pub struct SessionConfig {
 
     #[parameter(default = "hex", check_hook = check_bytea_output)]
     bytea_output: String,
+
+    /// Bypass checks on cluster limits
+    ///
+    /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
+    #[parameter(default = false)]
+    bypass_cluster_limits: bool,
+
+    /// The maximum number of parallelism a streaming query can use. Defaults to 256.
+    ///
+    /// Compared to `STREAMING_PARALLELISM`, which configures the initial parallelism, this configures
+    /// the maximum parallelism a streaming query can use in the future, if the cluster size changes or
+    /// users manually change the parallelism with `ALTER .. SET PARALLELISM`.
+    ///
+    /// It's not always a good idea to set this to a very large number, as it may cause performance
+    /// degradation when performing range scans on the table or the materialized view.
+    // a.k.a. vnode count
+    #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_streaming_max_parallelism)]
+    streaming_max_parallelism: usize,
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
@@ -301,6 +337,20 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+    }
+}
+
+/// Check if the provided value is a valid max parallelism.
+fn check_streaming_max_parallelism(val: &usize) -> Result<(), String> {
+    match val {
+        // TODO(var-vnode): this is to prevent confusion with singletons, after we distinguish
+        // them better, we may allow 1 as the max parallelism (though not much point).
+        0 | 1 => Err("STREAMING_MAX_PARALLELISM must be greater than 1".to_owned()),
+        2..=VirtualNode::MAX_COUNT => Ok(()),
+        _ => Err(format!(
+            "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
+            VirtualNode::MAX_COUNT
+        )),
     }
 }
 

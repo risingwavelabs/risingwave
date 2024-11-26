@@ -31,7 +31,7 @@ use risingwave_expr::window_function::{
 };
 use risingwave_storage::store::PrefetchOptions;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::prelude::*;
 
@@ -100,7 +100,7 @@ struct ExecutorInner<S: StateStore> {
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
     state_table_schema_len: usize,
-    watermark_epoch: AtomicU64Ref,
+    watermark_sequence: AtomicU64Ref,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -142,7 +142,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
                 state_table_schema_len: input_info.schema.len(),
-                watermark_epoch: args.watermark_epoch,
+                watermark_sequence: args.watermark_epoch,
             },
         }
     }
@@ -341,16 +341,15 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         );
 
         let mut vars = ExecutionVars {
-            partitions: new_unbounded(this.watermark_epoch.clone(), metrics_info),
+            partitions: ManagedLruCache::unbounded(this.watermark_sequence.clone(), metrics_info),
             _phantom: PhantomData::<S>,
         };
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        this.state_table.init_epoch(barrier.epoch);
-        vars.partitions.update_epoch(barrier.epoch.curr);
-
+        let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        this.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -377,8 +376,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             vars.partitions.clear();
                         }
                     }
-
-                    vars.partitions.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }

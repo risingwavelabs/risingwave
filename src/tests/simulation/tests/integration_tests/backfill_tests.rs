@@ -167,7 +167,7 @@ async fn test_arrangement_backfill_replication() -> Result<()> {
     session
         .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL=true")
         .await?;
-    session.run("SET STREAMING_RATE_LIMIT=30").await?;
+    session.run("SET BACKFILL_RATE_LIMIT=30").await?;
     session
         .run("create materialized view m1 as select * from t")
         .await?;
@@ -251,20 +251,21 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     // Create arrangement backfill with rate limit
     session.run("SET STREAMING_PARALLELISM=1").await?;
     session.run("SET BACKGROUND_DDL=true").await?;
-    session.run("SET STREAMING_RATE_LIMIT=1").await?;
+    session.run("SET BACKFILL_RATE_LIMIT=1").await?;
     session
         .run("CREATE MATERIALIZED VIEW m1 AS SELECT * FROM t")
         .await?;
 
-    // Verify arrangement backfill progress after 10s, it should be 1% at least.
+    // Verify arrangement backfill progress after 10s, it should be around 1%,
+    // since 10s = 10 records processed.
     sleep(Duration::from_secs(10)).await;
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
-        (1.0..10.0).contains(&progress),
+        (0.5..1.5).contains(&progress),
         "progress not within bounds {}",
         progress
     );
@@ -275,7 +276,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
         (prev_progress - 0.5..prev_progress + 1.5).contains(&progress),
@@ -310,7 +311,7 @@ async fn test_enable_arrangement_backfill() -> Result<()> {
 async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::enable_arrangement_backfill()).await?;
     let mut session = cluster.start_session();
-    session.run("SET STREAMING_RATE_LIMIT=1").await?;
+    session.run("SET BACKFILL_RATE_LIMIT=1").await?;
     session.run("CREATE TABLE t(v1 int);").await?;
     session
         .run("INSERT INTO t select * from generate_series(1, 100000);")

@@ -17,8 +17,22 @@ done
 
 source ci/scripts/common.sh
 
+echo "--- Set openssl static link env vars"
+configure_static_openssl
+
 echo "--- Run trailing spaces check"
 scripts/check/check-trailing-spaces.sh
+
+echo "--- Rust cargo-sort check"
+cargo sort --check --workspace --grouped
+
+# Disable hakari until we make sure it's useful
+# echo "--- Rust cargo-hakari check"
+# cargo hakari generate --diff
+# cargo hakari verify
+
+echo "--- Rust format check"
+cargo fmt --all -- --check
 
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings

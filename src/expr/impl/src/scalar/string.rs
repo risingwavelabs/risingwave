@@ -472,6 +472,74 @@ pub fn right(s: &str, n: i32, writer: &mut impl Write) {
         .for_each(|c| writer.write_char(c).unwrap());
 }
 
+/// `quote_literal(string text)`
+/// `quote_literal(value anyelement)`
+///
+/// Return the given string suitably quoted to be used as a string literal in an SQL statement
+/// string. Embedded single-quotes and backslashes are properly doubled.
+/// Note that `quote_literal` returns null on null input; if the argument might be null,
+/// `quote_nullable` is often more suitable.
+///
+/// # Example
+///
+/// Note that the quotes are part of the output string.
+///
+/// ```slt
+/// query T
+/// select quote_literal(E'O\'Reilly')
+/// ----
+/// 'O''Reilly'
+///
+/// query T
+/// select quote_literal(E'C:\\Windows\\')
+/// ----
+/// E'C:\\Windows\\'
+///
+/// query T
+/// select quote_literal(42.5)
+/// ----
+/// '42.5'
+///
+/// query T
+/// select quote_literal('hello'::bytea);
+/// ----
+/// E'\\x68656c6c6f'
+///
+/// query T
+/// select quote_literal('{"hello":"world","foo":233}'::jsonb);
+/// ----
+/// '{"foo": 233, "hello": "world"}'
+/// ```
+#[function("quote_literal(varchar) -> varchar")]
+pub fn quote_literal(s: &str, writer: &mut impl Write) {
+    if s.contains('\\') {
+        // use escape format: E'...'
+        write!(writer, "E").unwrap();
+    }
+    write!(writer, "'").unwrap();
+    for c in s.chars() {
+        match c {
+            '\'' => write!(writer, "''").unwrap(),
+            '\\' => write!(writer, "\\\\").unwrap(),
+            _ => write!(writer, "{}", c).unwrap(),
+        }
+    }
+    write!(writer, "'").unwrap();
+}
+
+/// `quote_nullable(string text)`
+///
+/// Return the given string suitably quoted to be used as a string literal in an SQL statement
+/// string; or, if the argument is null, return NULL.
+/// Embedded single-quotes and backslashes are properly doubled.
+#[function("quote_nullable(varchar) -> varchar")]
+pub fn quote_nullable(s: Option<&str>, writer: &mut impl Write) {
+    match s {
+        Some(s) => quote_literal(s, writer),
+        None => write!(writer, "NULL").unwrap(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

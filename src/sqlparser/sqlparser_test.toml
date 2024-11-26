@@ -1,0 +1,8 @@
+[tasks.update-parser-test]
+description = "Update parser test data"
+private = true
+script = '''
+#!/usr/bin/env bash
+set -e
+UPDATE_PARSER_TEST=1 cargo test --test parser_test
+'''

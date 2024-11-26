@@ -14,8 +14,11 @@
 
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
+use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_common::enable_jemalloc;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
@@ -57,10 +60,12 @@ fn create_order_by_executor(
 
     Box::new(SortExecutor::new(
         child,
-        column_orders,
+        Arc::new(column_orders),
         "SortExecutor".into(),
         CHUNK_SIZE,
         MemoryContext::none(),
+        None,
+        BatchSpillMetrics::for_test(),
     ))
 }
 

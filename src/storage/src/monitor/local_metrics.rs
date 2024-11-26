@@ -51,7 +51,6 @@ pub struct StoreLocalStatistic {
     pub staging_sst_iter_count: u64,
     pub overlapping_iter_count: u64,
     pub non_overlapping_iter_count: u64,
-    pub may_exist_check_sstable_count: u64,
     pub sub_iter_count: u64,
     pub found_key: bool,
 
@@ -104,6 +103,13 @@ impl StoreLocalStatistic {
         #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
             tracing::error!("double reported\n{:#?}", self);
+        }
+    }
+
+    pub fn discard(self) {
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
+        {
+            self.reported.fetch_or(true, Ordering::Relaxed);
         }
     }
 
@@ -233,11 +239,9 @@ struct LocalStoreMetrics {
     staging_sst_iter_count: LocalHistogram,
     overlapping_iter_count: LocalHistogram,
     non_overlapping_iter_count: LocalHistogram,
-    may_exist_check_sstable_count: LocalHistogram,
     sub_iter_count: LocalHistogram,
     iter_filter_metrics: BloomFilterLocalMetrics,
     get_filter_metrics: BloomFilterLocalMetrics,
-    may_exist_filter_metrics: BloomFilterLocalMetrics,
     collect_count: usize,
 
     staging_imm_get_count: LocalHistogram,
@@ -252,30 +256,30 @@ impl LocalStoreMetrics {
     pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str) -> Self {
         let cache_data_block_total = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "data_total"])
+            .with_guarded_label_values(&[table_id_label, "data_total"])
             .local();
 
         let cache_data_block_miss = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "data_miss"])
+            .with_guarded_label_values(&[table_id_label, "data_miss"])
             .local();
 
         let cache_meta_block_total = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "meta_total"])
+            .with_guarded_label_values(&[table_id_label, "meta_total"])
             .local();
         let cache_data_prefetch_count = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "prefetch_count"])
+            .with_guarded_label_values(&[table_id_label, "prefetch_count"])
             .local();
         let cache_data_prefetch_block_count = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "prefetch_data_count"])
+            .with_guarded_label_values(&[table_id_label, "prefetch_data_count"])
             .local();
 
         let cache_meta_block_miss = metrics
             .sst_store_block_request_counts
-            .with_label_values(&[table_id_label, "meta_miss"])
+            .with_guarded_label_values(&[table_id_label, "meta_miss"])
             .local();
 
         let remote_io_time = metrics
@@ -285,22 +289,22 @@ impl LocalStoreMetrics {
 
         let processed_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "processed"])
+            .with_guarded_label_values(&[table_id_label, "processed"])
             .local();
 
         let skip_multi_version_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "skip_multi_version"])
+            .with_guarded_label_values(&[table_id_label, "skip_multi_version"])
             .local();
 
         let skip_delete_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "skip_delete"])
+            .with_guarded_label_values(&[table_id_label, "skip_delete"])
             .local();
 
         let total_key_count = metrics
             .iter_scan_key_counts
-            .with_label_values(&[table_id_label, "total"])
+            .with_guarded_label_values(&[table_id_label, "total"])
             .local();
 
         let get_shared_buffer_hit_counts = metrics
@@ -324,18 +328,12 @@ impl LocalStoreMetrics {
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "committed-non-overlapping-iter"])
             .local();
-        let may_exist_check_sstable_count = metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "may-exist-check-sstable"])
-            .local();
         let sub_iter_count = metrics
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "sub-iter"])
             .local();
         let get_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "get");
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
-        let may_exist_filter_metrics =
-            BloomFilterLocalMetrics::new(metrics, table_id_label, "may_exist");
 
         let staging_imm_get_count = metrics
             .iter_merge_sstable_counts
@@ -372,10 +370,8 @@ impl LocalStoreMetrics {
             overlapping_iter_count,
             sub_iter_count,
             non_overlapping_iter_count,
-            may_exist_check_sstable_count,
             get_filter_metrics,
             iter_filter_metrics,
-            may_exist_filter_metrics,
             collect_count: 0,
             staging_imm_get_count,
             staging_sst_get_count,
@@ -425,7 +421,6 @@ add_local_metrics_histogram!(
     overlapping_iter_count,
     non_overlapping_iter_count,
     sub_iter_count,
-    may_exist_check_sstable_count,
     staging_imm_get_count,
     staging_sst_get_count,
     overlapping_get_count,
@@ -482,7 +477,7 @@ macro_rules! define_bloom_filter_metrics {
             pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str, oper_type: &str) -> Self {
                 // checks SST bloom filters
                 Self {
-                    $($x: metrics.$x.with_label_values(&[table_id_label, oper_type]).local(),)*
+                    $($x: metrics.$x.with_guarded_label_values(&[table_id_label, oper_type]).local(),)*
                 }
             }
 
@@ -571,40 +566,6 @@ impl Drop for IterLocalMetricsGuard {
             self.local_stats.report(table_metrics);
             self.local_stats
                 .report_bloom_filter_metrics(&table_metrics.iter_filter_metrics);
-        });
-    }
-}
-
-pub struct MayExistLocalMetricsGuard {
-    metrics: Arc<HummockStateStoreMetrics>,
-    table_id: TableId,
-    pub local_stats: StoreLocalStatistic,
-}
-
-impl MayExistLocalMetricsGuard {
-    pub fn new(metrics: Arc<HummockStateStoreMetrics>, table_id: TableId) -> Self {
-        Self {
-            metrics,
-            table_id,
-            local_stats: StoreLocalStatistic::default(),
-        }
-    }
-}
-
-impl Drop for MayExistLocalMetricsGuard {
-    fn drop(&mut self) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            let table_metrics = local_metrics
-                .entry(self.table_id.table_id)
-                .or_insert_with(|| {
-                    LocalStoreMetrics::new(
-                        self.metrics.as_ref(),
-                        self.table_id.to_string().as_str(),
-                    )
-                });
-            self.local_stats.report(table_metrics);
-            self.local_stats
-                .report_bloom_filter_metrics(&table_metrics.may_exist_filter_metrics);
         });
     }
 }

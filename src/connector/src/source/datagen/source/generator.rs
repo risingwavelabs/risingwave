@@ -278,7 +278,6 @@ mod tests {
                     use_schema_registry: false,
                     timestamptz_handling: None,
                 }),
-                key_encoding_config: None,
             },
             data_types,
             rows_per_second,

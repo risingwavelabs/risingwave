@@ -1,0 +1,55 @@
+[package]
+name = "risingwave_connector_codec"
+description = "Encoding and decoding between external data formats and RisingWave datum"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+anyhow = "1"
+apache-avro = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
+easy-ext = "1"
+itertools = { workspace = true }
+jsonbb = { workspace = true }
+jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
+num-bigint = "0.4"
+prost = { workspace = true, features = ["no-recursion-limit"] }
+prost-reflect = { version = "0.14", features = ["serde"] }
+prost-types = "0.13"
+protox = "0.7"
+risingwave_common = { workspace = true }
+risingwave_pb = { workspace = true }
+rust_decimal = "1"
+serde_json = "1.0"
+thiserror = "1"
+thiserror-ext = { workspace = true }
+time = "0.3.30"
+tracing = "0.1"
+
+[dev-dependencies]
+expect-test = "1"
+fs-err = "3"
+hex = "0.4"
+tokio = { version = "0.2", package = "madsim-tokio" }
+
+[build-dependencies]
+prost-build = "0.13"
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
+[lints]
+workspace = true

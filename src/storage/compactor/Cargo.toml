@@ -18,6 +18,7 @@ normal = ["workspace-hack"]
 async-trait = "0.1"
 await-tree = { workspace = true }
 clap = { workspace = true }
+jsonbb = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
@@ -29,13 +30,13 @@ risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
+  "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
 ] }
 tonic = { workspace = true }
 tracing = "0.1"

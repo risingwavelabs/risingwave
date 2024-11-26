@@ -17,8 +17,11 @@
 use std::sync::Arc;
 
 pub use anyhow::anyhow;
+use iceberg::Error as IcebergError;
+use mysql_async::Error as MySqlError;
+use parquet::errors::ParquetError;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::BoxedError;
+use risingwave_common::error::{def_anyhow_newtype, def_anyhow_variant, BoxedError};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_dml::error::DmlError;
@@ -28,6 +31,7 @@ use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use thiserror_ext::Construct;
+use tokio_postgres::Error as PostgresError;
 use tonic::Status;
 
 use crate::worker_manager::worker_node_manager::FragmentId;
@@ -112,11 +116,11 @@ pub enum BatchError {
         DmlError,
     ),
 
-    #[error(transparent)]
-    Iceberg(
+    #[error("External system error: {0}")]
+    ExternalSystemError(
         #[from]
         #[backtrace]
-        icelake::Error,
+        BatchExternalSystemError,
     ),
 
     // Make the ref-counted type to be a variant for easier code structuring.
@@ -139,6 +143,20 @@ pub enum BatchError {
 
     #[error("Not enough memory to run this query, batch memory limit is {0} bytes")]
     OutOfMemory(u64),
+
+    #[error("Failed to spill out to disk")]
+    Spill(
+        #[from]
+        #[backtrace]
+        opendal::Error,
+    ),
+
+    #[error("Failed to execute time travel query")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 // Serialize/deserialize error.
@@ -169,4 +187,15 @@ impl From<ConnectorError> for BatchError {
     fn from(value: ConnectorError) -> Self {
         Self::Connector(value.into())
     }
+}
+
+// Define a external system error
+def_anyhow_variant! {
+    pub BatchExternalSystemError,
+    BatchError ExternalSystemError,
+
+    PostgresError => "Postgres error",
+    IcebergError => "Iceberg error",
+    ParquetError => "Parquet error",
+    MySqlError => "MySQL error",
 }

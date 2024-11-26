@@ -16,50 +16,34 @@ use std::io::{Cursor, Read};
 
 use anyhow::Context;
 use byteorder::{BigEndian, ReadBytesExt};
-use paste::paste;
-use risingwave_pb::data::{PbArray, PbArrayType};
+use risingwave_pb::data::PbArrayType;
 
 use super::*;
-use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
-use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayResult, BoolArray, DateArrayBuilder, IntervalArrayBuilder,
-    PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder, TimestampArrayBuilder,
-};
-use crate::buffer::Bitmap;
-use crate::types::{Date, Interval, Time, Timestamp};
 
 impl ArrayImpl {
     pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {
-        use crate::array::value_reader::*;
         let array = match array.array_type() {
-            PbArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
-            PbArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
-            PbArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
-            PbArrayType::Serial => {
-                read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
-            }
-            PbArrayType::Float32 => read_numeric_array::<F32, F32ValueReader>(array, cardinality)?,
-            PbArrayType::Float64 => read_numeric_array::<F64, F64ValueReader>(array, cardinality)?,
+            PbArrayType::Unspecified => unreachable!(),
+            PbArrayType::Int16 => read_primitive_array::<i16>(array, cardinality)?,
+            PbArrayType::Int32 => read_primitive_array::<i32>(array, cardinality)?,
+            PbArrayType::Int64 => read_primitive_array::<i64>(array, cardinality)?,
+            PbArrayType::Serial => read_primitive_array::<Serial>(array, cardinality)?,
+            PbArrayType::Float32 => read_primitive_array::<F32>(array, cardinality)?,
+            PbArrayType::Float64 => read_primitive_array::<F64>(array, cardinality)?,
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
-            PbArrayType::Utf8 => {
-                read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
-            }
-            PbArrayType::Decimal => {
-                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
-            }
-            PbArrayType::Date => read_date_array(array, cardinality)?,
-            PbArrayType::Time => read_time_array(array, cardinality)?,
-            PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
-            PbArrayType::Timestamptz => read_timestamptz_array(array, cardinality)?,
-            PbArrayType::Interval => read_interval_array(array, cardinality)?,
+            PbArrayType::Utf8 => read_string_array::<Utf8ValueReader>(array, cardinality)?,
+            PbArrayType::Decimal => read_primitive_array::<Decimal>(array, cardinality)?,
+            PbArrayType::Date => read_primitive_array::<Date>(array, cardinality)?,
+            PbArrayType::Time => read_primitive_array::<Time>(array, cardinality)?,
+            PbArrayType::Timestamp => read_primitive_array::<Timestamp>(array, cardinality)?,
+            PbArrayType::Timestamptz => read_primitive_array::<Timestamptz>(array, cardinality)?,
+            PbArrayType::Interval => read_primitive_array::<Interval>(array, cardinality)?,
             PbArrayType::Jsonb => JsonbArray::from_protobuf(array)?,
             PbArrayType::Struct => StructArray::from_protobuf(array)?,
             PbArrayType::List => ListArray::from_protobuf(array)?,
-            PbArrayType::Unspecified => unreachable!(),
-            PbArrayType::Bytea => {
-                read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
-            }
+            PbArrayType::Bytea => read_string_array::<BytesValueReader>(array, cardinality)?,
             PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
+            PbArrayType::Map => MapArray::from_protobuf(array)?,
         };
         Ok(array)
     }
@@ -68,7 +52,7 @@ impl ArrayImpl {
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
 
-fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
+fn read_primitive_array<T: PrimitiveArrayItemType>(
     array: &PbArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
@@ -84,7 +68,7 @@ fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
-            let v = R::read(&mut cursor)?;
+            let v = T::from_protobuf(&mut cursor)?;
             builder.append(Some(v));
         } else {
             builder.append(None);
@@ -111,90 +95,6 @@ fn read_bool_array(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl
     Ok(arr.into())
 }
 
-fn read_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
-    let days = cursor
-        .read_i32::<BigEndian>()
-        .context("failed to read i32 from Date buffer")?;
-
-    Ok(Date::with_days(days)?)
-}
-
-fn read_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
-    let nano = cursor
-        .read_u64::<BigEndian>()
-        .context("failed to read u64 from Time buffer")?;
-
-    Ok(Time::with_nano(nano)?)
-}
-
-fn read_timestamp(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-    let micros = cursor
-        .read_i64::<BigEndian>()
-        .context("failed to read i64 from Timestamp buffer")?;
-
-    Ok(Timestamp::with_micros(micros)?)
-}
-
-fn read_timestamptz(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestamptz> {
-    let micros = cursor
-        .read_i64::<BigEndian>()
-        .context("failed to read i64 from Timestamptz buffer")?;
-
-    Timestamptz::from_protobuf(micros)
-}
-
-fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
-    let mut read = || {
-        let months = cursor.read_i32::<BigEndian>()?;
-        let days = cursor.read_i32::<BigEndian>()?;
-        let usecs = cursor.read_i64::<BigEndian>()?;
-
-        Ok::<_, std::io::Error>(Interval::from_month_day_usec(months, days, usecs))
-    };
-
-    Ok(read().context("failed to read Interval from buffer")?)
-}
-
-macro_rules! read_one_value_array {
-    ($({ $type:ident, $builder:ty }),*) => {
-        paste! {
-            $(
-            fn [<read_ $type:snake _array>](array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
-                ensure!(
-                    array.get_values().len() == 1,
-                    "Must have only 1 buffer in a {} array", stringify!($type)
-                );
-
-                let buf = array.get_values()[0].get_body().as_slice();
-
-                let mut builder = $builder::new(cardinality);
-                let bitmap: Bitmap = array.get_null_bitmap()?.into();
-                let mut cursor = Cursor::new(buf);
-                for not_null in bitmap.iter() {
-                    if not_null {
-                        builder.append(Some([<read_ $type:snake>](&mut cursor)?));
-                    } else {
-                        builder.append(None);
-                    }
-                }
-                let arr = builder.finish();
-                ensure_eq!(arr.len(), cardinality);
-
-                Ok(arr.into())
-            }
-            )*
-        }
-    };
-}
-
-read_one_value_array! {
-    { Interval, IntervalArrayBuilder },
-    { Date, DateArrayBuilder },
-    { Time, TimeArrayBuilder },
-    { Timestamp, TimestampArrayBuilder },
-    { Timestamptz, TimestamptzArrayBuilder }
-}
-
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
     let offset = offset_cursor
         .read_i64::<BigEndian>()
@@ -203,7 +103,44 @@ fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
     Ok(offset)
 }
 
-fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
+trait VarSizedValueReader {
+    type AB: ArrayBuilder;
+    fn new_builder(capacity: usize) -> Self::AB;
+    fn read(buf: &[u8], builder: &mut Self::AB) -> ArrayResult<()>;
+}
+
+struct Utf8ValueReader;
+
+impl VarSizedValueReader for Utf8ValueReader {
+    type AB = Utf8ArrayBuilder;
+
+    fn new_builder(capacity: usize) -> Self::AB {
+        Utf8ArrayBuilder::new(capacity)
+    }
+
+    fn read(buf: &[u8], builder: &mut Utf8ArrayBuilder) -> ArrayResult<()> {
+        let s = std::str::from_utf8(buf).context("failed to read utf8 string from bytes")?;
+        builder.append(Some(s));
+        Ok(())
+    }
+}
+
+struct BytesValueReader;
+
+impl VarSizedValueReader for BytesValueReader {
+    type AB = BytesArrayBuilder;
+
+    fn new_builder(capacity: usize) -> Self::AB {
+        BytesArrayBuilder::new(capacity)
+    }
+
+    fn read(buf: &[u8], builder: &mut BytesArrayBuilder) -> ArrayResult<()> {
+        builder.append(Some(buf));
+        Ok(())
+    }
+}
+
+fn read_string_array<R: VarSizedValueReader>(
     array: &PbArray,
     cardinality: usize,
 ) -> ArrayResult<ArrayImpl> {
@@ -214,7 +151,7 @@ fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let offset_buff = array.get_values()[0].get_body().as_slice();
     let data_buf = array.get_values()[1].get_body().as_slice();
 
-    let mut builder = B::new(cardinality);
+    let mut builder = R::new_builder(cardinality);
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
@@ -252,12 +189,6 @@ fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
-        DecimalArray, DecimalArrayBuilder, I32Array, I32ArrayBuilder, TimeArray, TimeArrayBuilder,
-        TimestampArray, TimestampArrayBuilder, Utf8Array, Utf8ArrayBuilder,
-    };
-    use crate::types::{Date, Decimal, Time, Timestamp};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -360,7 +291,7 @@ mod tests {
         let mut builder = DateArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Date::with_days(i as i32).ok());
+                builder.append(Date::with_days_since_ce(i as i32).ok());
             } else {
                 builder.append(None);
             }
@@ -371,7 +302,7 @@ mod tests {
         let arr: &DateArray = new_col.as_date();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(Date::with_days(i as i32).ok().unwrap(), x.unwrap());
+                assert_eq!(Date::with_days_since_ce(i as i32).ok().unwrap(), x.unwrap());
             } else {
                 assert!(x.is_none());
             }

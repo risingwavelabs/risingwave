@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -24,7 +24,6 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef
 use crate::optimizer::plan_expr_visitor::Strong;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
-use crate::optimizer::PlanRef;
 use crate::utils::{Condition, IndexSet};
 
 /// Pull up correlated predicates from the right agg side of Apply to the `on` clause of Join.
@@ -60,7 +59,6 @@ use crate::utils::{Condition, IndexSet};
 ///                 |
 ///               Filter
 /// ```
-
 pub struct PullUpCorrelatedPredicateAggRule {}
 impl Rule for PullUpCorrelatedPredicateAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -163,13 +161,15 @@ impl Rule for PullUpCorrelatedPredicateAggRule {
         // sum is null, so avg is null. And null-rejected expression will be false, so we can still apply this rule and we don't need to generate a 0 value for count.
         let count_exists = agg_calls
             .iter()
-            .any(|agg_call| agg_call.agg_kind == AggKind::Count);
+            .any(|agg_call| matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count)));
 
         if count_exists {
             // When group input is empty, not count agg would return null.
             let null_agg_pos = agg_calls
                 .iter()
-                .positions(|agg_call| agg_call.agg_kind != AggKind::Count)
+                .positions(|agg_call| {
+                    !matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Count))
+                })
                 .collect_vec();
 
             // If no null agg, bail out.

@@ -17,11 +17,9 @@
 #![feature(type_alias_impl_trait)]
 #![feature(extract_if)]
 #![feature(custom_test_frameworks)]
-#![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_extract_if)]
 #![feature(btree_extract_if)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
@@ -32,10 +30,12 @@ pub mod meta_snapshot_v1;
 pub mod meta_snapshot_v2;
 pub mod storage;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hasher;
 
 use itertools::Itertools;
+use risingwave_common::RW_VERSION;
+use risingwave_hummock_sdk::state_table_info::StateTableInfo;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
@@ -52,11 +52,12 @@ pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
     pub ssts: HashSet<HummockSstableObjectId>,
-    pub max_committed_epoch: u64,
-    pub safe_epoch: u64,
     #[serde(default)]
     pub format_version: u32,
     pub remarks: Option<String>,
+    #[serde(default)]
+    pub state_table_info: HashMap<u32, StateTableInfo>,
+    pub rw_version: Option<String>,
 }
 
 impl MetaSnapshotMetadata {
@@ -70,10 +71,15 @@ impl MetaSnapshotMetadata {
             id,
             hummock_version_id: v.id,
             ssts: v.get_object_ids(),
-            max_committed_epoch: v.max_committed_epoch,
-            safe_epoch: v.safe_epoch,
             format_version,
             remarks,
+            state_table_info: v
+                .state_table_info
+                .info()
+                .iter()
+                .map(|(id, info)| (id.table_id, info.into()))
+                .collect(),
+            rw_version: Some(RW_VERSION.to_owned()),
         }
     }
 }
@@ -85,7 +91,6 @@ pub struct MetaSnapshotManifest {
     pub snapshot_metadata: Vec<MetaSnapshotMetadata>,
 }
 
-// Code is copied from storage crate. TODO #6482: extract method.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
@@ -107,11 +112,15 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
-            hummock_version_id: m.hummock_version_id,
-            max_committed_epoch: m.max_committed_epoch,
-            safe_epoch: m.safe_epoch,
+            hummock_version_id: m.hummock_version_id.to_u64(),
             format_version: Some(m.format_version),
             remarks: m.remarks.clone(),
+            state_table_info: m
+                .state_table_info
+                .iter()
+                .map(|(t, i)| (*t, i.into()))
+                .collect(),
+            rw_version: m.rw_version.clone(),
         }
     }
 }

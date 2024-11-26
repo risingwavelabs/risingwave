@@ -57,7 +57,7 @@ impl Rule for ApplyDedupTransposeRule {
             return None;
         }
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             dedup_input,
             JoinType::Inner,
@@ -65,8 +65,7 @@ impl Rule for ApplyDedupTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_dedup = {
             let mut new_dedup_cols: Vec<usize> = (0..apply_left_len).collect();

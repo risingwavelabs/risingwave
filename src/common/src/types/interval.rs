@@ -16,21 +16,19 @@ use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::ops::{Add, Neg, Sub};
 use std::sync::LazyLock;
 
+use anyhow::Context;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
-use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
-use postgres_types::{to_sql_checked, FromSql};
+use postgres_types::to_sql_checked;
 use regex::Regex;
-use risingwave_common_estimate_size::ZeroHeapSize;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
-use super::to_binary::ToBinary;
 use super::*;
 
 /// Every interval can be represented by a `Interval`.
@@ -230,6 +228,18 @@ impl Interval {
             * (SECS_PER_DAY / 4) as i64;
 
         secs_from_day_month as i128 * USECS_PER_SEC as i128 + self.usecs as i128
+    }
+
+    pub fn from_protobuf(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
+        let mut read = || {
+            let months = cursor.read_i32::<BigEndian>()?;
+            let days = cursor.read_i32::<BigEndian>()?;
+            let usecs = cursor.read_i64::<BigEndian>()?;
+
+            Ok::<_, std::io::Error>(Interval::from_month_day_usec(months, days, usecs))
+        };
+
+        Ok(read().context("failed to read Interval from buffer")?)
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -1181,19 +1191,6 @@ impl<'a> FromSql<'a> for Interval {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::INTERVAL)
-    }
-}
-
-impl ToBinary for Interval {
-    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
-        match ty {
-            DataType::Interval => {
-                let mut output = BytesMut::new();
-                self.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
     }
 }
 

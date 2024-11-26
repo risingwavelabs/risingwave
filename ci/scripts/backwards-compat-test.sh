@@ -32,7 +32,7 @@ else
     exit 1
 fi
 
-source backwards-compat-tests/scripts/utils.sh
+source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 
@@ -41,28 +41,45 @@ VERSION="$1"
 ENABLE_BUILD="$2"
 
 echo "--- Setting up cluster config"
-cat <<EOF > risedev-profiles.user.yml
+  if version_le "$VERSION" "1.8.9"; then
+    cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
     - use: minio
-    - use: etcd
+    - use: sqlite
     - use: meta-node
     - use: compute-node
     - use: frontend
     - use: compactor
 EOF
+  else
+     # For versions >= 1.9.0, we have support for different sql meta-backend,
+     # so we need to specify the meta-backend: sqlite
+     cat <<EOF > risedev-profiles.user.yml
+full-without-monitoring:
+ steps:
+   - use: minio
+   - use: sqlite
+   - use: meta-node
+     meta-backend: sqlite
+   - use: compute-node
+   - use: frontend
+   - use: compactor
+EOF
+  fi
 
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
 
 ENABLE_MINIO=true
-ENABLE_ETCD=true
 
 # Whether to build or directly fetch binary from release.
 ENABLE_BUILD_RUST=$ENABLE_BUILD
 
 # Use target/debug for simplicity.
 ENABLE_RELEASE_PROFILE=false
+ENABLE_PYTHON_UDF=true
+ENABLE_JS_UDF=true
 EOF
 
 # See https://github.com/risingwavelabs/risingwave/pull/15448
@@ -79,10 +96,14 @@ setup_old_cluster() {
   echo "--- Get RisingWave binary for $OLD_VERSION"
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   set +e
-  wget "$OLD_URL"
+  wget --no-verbose "$OLD_URL"
   if [[ "$?" -ne 0 ]]; then
     set -e
     echo "Failed to download ${OLD_VERSION} from github releases, build from source later during \`risedev d\`"
+    configure_rw "$OLD_VERSION" true
+  elif [[ $OLD_VERSION = '1.10.0' || $OLD_VERSION = '1.10.1' || $OLD_VERSION = '1.10.2' || $OLD_VERSION = '2.0.0' ]]; then
+    set -e
+    echo "1.10.x, 2.0.0 have dynamically linked openssl, build from source later during \`risedev d\`"
     configure_rw "$OLD_VERSION" true
   else
     set -e
@@ -97,7 +118,7 @@ setup_old_cluster() {
 
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
-  git checkout -
+  git checkout "$RW_COMMIT"
   download_and_prepare_rw "$profile" common
   # Make sure we always start w/o old config
   rm -r .risingwave/config

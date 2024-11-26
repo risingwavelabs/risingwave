@@ -32,11 +32,6 @@ public class JniSinkValidationHandler {
         try {
             var request =
                     ConnectorServiceProto.ValidateSinkRequest.parseFrom(validateSinkRequestBytes);
-
-            // For jni.rs
-            java.lang.Thread.currentThread()
-                    .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
-
             ConnectorServiceProto.SinkParam sinkParam = request.getSinkParam();
             TableSchema tableSchema = TableSchema.fromProto(sinkParam.getTableSchema());
             String connectorName = getConnectorName(request.getSinkParam());

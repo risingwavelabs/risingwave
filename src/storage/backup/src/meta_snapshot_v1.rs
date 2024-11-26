@@ -20,17 +20,16 @@ use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, Schema, Sink, Source, Subscription, Table, View,
+    Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
 };
-use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats};
+use risingwave_pb::hummock::{CompactionGroup, HummockVersionStats, PbHummockVersion};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
 
 use crate::error::{BackupError, BackupResult};
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 
-/// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
-
+// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
 
 impl Display for ClusterMetadata {
@@ -72,6 +71,10 @@ impl Display for ClusterMetadata {
         writeln!(f, "{:#?}", self.system_param)?;
         writeln!(f, "cluster_id:")?;
         writeln!(f, "{:#?}", self.cluster_id)?;
+        writeln!(f, "subscription:")?;
+        writeln!(f, "{:#?}", self.subscription)?;
+        writeln!(f, "secret:")?;
+        writeln!(f, "{:#?}", self.secret)?;
         Ok(())
     }
 }
@@ -121,6 +124,7 @@ pub struct ClusterMetadata {
     pub system_param: SystemParams,
     pub cluster_id: String,
     pub subscription: Vec<Subscription>,
+    pub secret: Vec<Secret>,
 }
 
 impl ClusterMetadata {
@@ -129,7 +133,7 @@ impl ClusterMetadata {
         let default_cf_values = self.default_cf.values().collect_vec();
         Self::encode_prost_message_list(&default_cf_keys, buf);
         Self::encode_prost_message_list(&default_cf_values, buf);
-        Self::encode_prost_message(&self.hummock_version.to_protobuf(), buf);
+        Self::encode_prost_message(&PbHummockVersion::from(&self.hummock_version), buf);
         Self::encode_prost_message(&self.version_stats, buf);
         Self::encode_prost_message_list(&self.compaction_groups.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.table_fragments.iter().collect_vec(), buf);
@@ -146,6 +150,7 @@ impl ClusterMetadata {
         Self::encode_prost_message(&self.system_param, buf);
         Self::encode_prost_message(&self.cluster_id, buf);
         Self::encode_prost_message_list(&self.subscription.iter().collect_vec(), buf);
+        Self::encode_prost_message_list(&self.secret.iter().collect_vec(), buf);
         Ok(())
     }
 
@@ -175,6 +180,8 @@ impl ClusterMetadata {
         let cluster_id: String = Self::decode_prost_message(&mut buf)?;
         let subscription: Vec<Subscription> =
             Self::try_decode_prost_message_list(&mut buf).unwrap_or_else(|| Ok(vec![]))?;
+        let secret: Vec<Secret> =
+            Self::try_decode_prost_message_list(&mut buf).unwrap_or_else(|| Ok(vec![]))?;
 
         Ok(Self {
             default_cf,
@@ -195,6 +202,7 @@ impl ClusterMetadata {
             system_param,
             cluster_id,
             subscription,
+            secret,
         })
     }
 
@@ -247,6 +255,7 @@ impl ClusterMetadata {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_hummock_sdk::HummockVersionId;
     use risingwave_pb::hummock::{CompactionGroup, TableStats};
 
     use crate::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
@@ -256,7 +265,7 @@ mod tests {
     #[test]
     fn test_snapshot_encoding_decoding() {
         let mut metadata = ClusterMetadata::default();
-        metadata.hummock_version.id = 321;
+        metadata.hummock_version.id = HummockVersionId::new(321);
         let raw = MetaSnapshot {
             format_version: 0,
             id: 123,
@@ -272,7 +281,7 @@ mod tests {
         let mut buf = vec![];
         let mut raw = ClusterMetadata::default();
         raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
-        raw.hummock_version.id = 1;
+        raw.hummock_version.id = HummockVersionId::new(1);
         raw.version_stats.hummock_version_id = 10;
         raw.version_stats.table_stats.insert(
             200,

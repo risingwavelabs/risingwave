@@ -115,6 +115,13 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
             objects.push(object);
         }
         BoundStatement::Query(ref query) => objects.extend(resolve_query_privileges(query)),
+        BoundStatement::DeclareCursor(ref declare_cursor) => {
+            objects.extend(resolve_query_privileges(&declare_cursor.query))
+        }
+        BoundStatement::FetchCursor(_) => unimplemented!(),
+        BoundStatement::CreateView(ref create_view) => {
+            objects.extend(resolve_query_privileges(&create_view.query))
+        }
     };
     objects
 }

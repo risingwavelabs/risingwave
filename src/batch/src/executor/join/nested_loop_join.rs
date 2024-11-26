@@ -15,7 +15,7 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
@@ -529,8 +529,6 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     struct TestFixture {
-        left_types: Vec<DataType>,
-        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -551,11 +549,7 @@ mod tests {
     /// ```
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
-            Self {
-                left_types: vec![DataType::Int32, DataType::Float32],
-                right_types: vec![DataType::Int32, DataType::Float64],
-                join_type,
-            }
+            Self { join_type }
         }
 
         fn create_left_executor(&self) -> BoxedExecutor {

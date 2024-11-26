@@ -14,6 +14,7 @@
 
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
@@ -52,23 +53,22 @@ pub fn print_table_catalog(table: &TableCatalog) {
     println!("{:#?}", table);
 }
 
+// TODO: shall we work on `TableDesc` instead?
 pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
-    StateTable::new_with_distribution(
+    StateTable::from_table_catalog(
+        &table.to_internal_table_prost(),
         hummock,
-        table.id,
-        table
-            .columns()
-            .iter()
-            .map(|x| x.column_desc.clone())
-            .collect(),
-        table.pk().iter().map(|x| x.order_type).collect(),
-        table.pk().iter().map(|x| x.column_index).collect(),
-        TableDistribution::all(table.distribution_key().to_vec()), // scan all vnodes
-        Some(table.value_indices.clone()),
+        Some(
+            // scan all vnodes
+            TableDistribution::all(table.distribution_key().to_vec(), table.vnode_count())
+                .vnodes()
+                .clone(),
+        ),
     )
     .await
 }
 
+// TODO: shall we work on `TableDesc` instead?
 pub fn make_storage_table<S: StateStore>(
     hummock: S,
     table: &TableCatalog,
@@ -81,24 +81,40 @@ pub fn make_storage_table<S: StateStore>(
     Ok(StorageTable::new_partial(
         hummock,
         output_columns_ids,
-        Some(TableDistribution::all_vnodes()),
+        Some(Bitmap::ones(table.vnode_count()).into()),
         &table.table_desc().try_to_protobuf()?,
     ))
 }
 
-pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
+pub async fn scan(
+    context: &CtlContext,
+    mv_name: String,
+    data_dir: Option<String>,
+    use_new_object_prefix_strategy: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
-        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .hummock_store(HummockServiceOpts::from_env(
+            data_dir,
+            use_new_object_prefix_strategy,
+        )?)
         .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
     do_scan(table, hummock).await
 }
 
-pub async fn scan_id(context: &CtlContext, table_id: u32, data_dir: Option<String>) -> Result<()> {
+pub async fn scan_id(
+    context: &CtlContext,
+    table_id: u32,
+    data_dir: Option<String>,
+    use_new_object_prefix_strategy: bool,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
     let hummock = context
-        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .hummock_store(HummockServiceOpts::from_env(
+            data_dir,
+            use_new_object_prefix_strategy,
+        )?)
         .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
     do_scan(table, hummock).await
@@ -108,7 +124,17 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
     print_table_catalog(&table);
 
     println!("Rows:");
-    let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
+    let read_epoch = hummock
+        .inner()
+        .get_pinned_version()
+        .table_committed_epoch(table.id);
+    let Some(read_epoch) = read_epoch else {
+        println!(
+            "table {} with id {} not exist in the latest version",
+            table.name, table.id
+        );
+        return Ok(());
+    };
     let storage_table = make_storage_table(hummock, &table)?;
     let stream = storage_table
         .batch_iter(

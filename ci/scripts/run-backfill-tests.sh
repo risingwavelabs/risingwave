@@ -23,16 +23,16 @@ TEST_DIR=$PWD/e2e_test
 BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
-CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
+CLUSTER_PROFILE='ci-1cn-1fe-user-kafka-with-recovery'
 echo "--- Configuring cluster profiles"
 if [[ -n "${BUILDKITE:-}" ]]; then
   echo "Running in buildkite"
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe'
-  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-minio-rate-limit'
+  RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-minio-rate-limit'
 else
   echo "Running locally"
-  RUNTIME_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring'
-  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-3cn-1fe-with-monitoring-and-minio-rate-limit'
+  RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring'
+  MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
 export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 
@@ -185,16 +185,19 @@ test_sink_backfill_recovery() {
   # Check progress
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/create_sink.slt'
 
+  # Sleep before restart cluster, to ensure the downstream sink actually gets created.
+  sleep 5
+
   # Restart
   restart_cluster
-  sleep 3
+  sleep 5
 
   # Sink back into rw
   run_sql "CREATE TABLE table_kafka (v1 int primary key)
     WITH (
       connector = 'kafka',
       topic = 's_kafka',
-      properties.bootstrap.server = 'localhost:29092',
+      properties.bootstrap.server = 'message_queue:29092',
   ) FORMAT DEBEZIUM ENCODE JSON;"
 
   sleep 10
@@ -278,12 +281,30 @@ test_backfill_snapshot_with_wider_rows() {
   kill_cluster
 }
 
+test_snapshot_backfill() {
+  echo "--- e2e, snapshot backfill test, $RUNTIME_CLUSTER_PROFILE"
+
+  risedev ci-start $RUNTIME_CLUSTER_PROFILE
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt'
+
+  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt' &
+  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q7.slt' &
+
+  wait
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt'
+
+  kill_cluster
+}
+
 main() {
   set -euo pipefail
   test_snapshot_and_upstream_read
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+  test_snapshot_backfill
 
   # Only if profile is "ci-release", run it.
   if [[ ${profile:-} == "ci-release" ]]; then

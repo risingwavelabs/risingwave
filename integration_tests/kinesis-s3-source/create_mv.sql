@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW ad_ctr_mv AS
+CREATE MATERIALIZED VIEW ad_ctr AS
 SELECT
     ad_clicks.ad_id AS ad_id,
     ad_clicks.clicks_count :: NUMERIC / ad_impressions.impressions_count AS ctr
@@ -23,7 +23,14 @@ FROM
             ai.ad_id
     ) AS ad_clicks ON ad_impressions.ad_id = ad_clicks.ad_id;
 
-CREATE MATERIALIZED VIEW ad_ctr_5min_mv AS
+CREATE MATERIALIZED VIEW kinesis_timestamp AS
+SELECT
+    ad_impression._rw_kinesis_timestamp AS timestamp
+FROM
+    ad_impression
+WHERE ad_impression._rw_kinesis_timestamp IS NOT NULL AND ad_impression._rw_kinesis_timestamp >= '2024-01-01 00:00:00+00'::TIMESTAMPTZ;
+
+CREATE MATERIALIZED VIEW ad_ctr_5min AS
 SELECT
     ac.ad_id AS ad_id,
     ac.clicks_count :: NUMERIC / ai.impressions_count AS ctr,

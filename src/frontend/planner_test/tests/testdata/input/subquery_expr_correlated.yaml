@@ -508,3 +508,87 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: improve multi scalar subqueries optimization time. issue 16952. case 1.
+  sql: |
+    create table t1(a int, b int);
+    create table t2(c int primary key, d int);
+    select
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col1,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col2,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col3,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col4,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col5,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col6,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col7,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col8,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col9,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col10,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col11,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col12,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col13,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col14,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col15,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col16,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col17,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col18
+    from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: improve multi scalar subqueries optimization time. issue 16952. case 2.
+  sql: |
+    create table t1(a int, b int);
+    create table t2(c int primary key, d int);
+    create table t3(e int, f int);
+    create table t4(g int, h int);
+    create table t5(i int, j int);
+    create table t6(k int, l int);
+    select
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col1,
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col2,
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col3,
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col4,
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col5,
+    COALESCE((SELECT sum(d) FROM t2 left join t3 on e = a and f = c left join t4 on g = a and h = c left join t5 on i = a and j = c WHERE t1.a = t2.c and t1.a = t2.c and j in (select k from t6 where b = l) ), 0) col6
+    from t1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: improve join transpose rule to handle join with output indices
+  sql: |
+    with rawdata as (
+      select 'first' as w, '{"x":{"value":123},"y":{"value":[1,2,3]},"z":{"value":[{"a":4,"b":5},{"a":6,"b":7}]}}'::jsonb as rawjson
+      union all
+      select 'second', '{"x":{"value":456},"y":{"value":[7,8,9]},"z":{"value":[{"a":0,"b":1},{"a":2,"b":3}]}}'::jsonb
+    )
+    select
+      array(
+        select
+          array(
+            select 1
+            from jsonb_array_elements(
+              case
+                when jsonb_typeof(o.value->'value') = 'array' then o.value->'value'
+                else '[]'::jsonb
+              end
+            ) with ordinality as x(v, i), jsonb_each (
+              case
+                when jsonb_typeof(v) = 'object' then v
+                else '{}'::jsonb
+              end
+            ) as j
+        )
+        from jsonb_each(rawjson) AS o
+        where jsonb_typeof(o.value) = 'object' and o.value ? 'value'
+      ) as kv
+    from rawdata
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: subquery with CTE
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1 where t1.x = ( with cte as (select * from t2 where t2.y = t1.y)  select x from cte limit 1);
+  expected_outputs:
+    - batch_plan
+    - stream_plan

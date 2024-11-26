@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
-use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
+use risingwave_pb::expr::PbTableFunction;
 
 use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
@@ -33,20 +31,21 @@ pub use self::empty::*;
 pub use self::repeat::*;
 use self::user_defined::*;
 
-/// Instance of a table function.
+/// A table function takes a row as input and returns multiple rows as output.
 ///
-/// A table function takes a row as input and returns a table. It is also known as Set-Returning
-/// Function.
+/// It is also known as Set-Returning Function.
 #[async_trait::async_trait]
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
+    /// The data type of the output.
     fn return_type(&self) -> DataType;
 
     /// # Contract of the output
     ///
-    /// The returned `DataChunk` contains exact two columns:
+    /// The returned `DataChunk` contains two or three columns:
     /// - The first column is an I32Array containing row indices of input chunk. It should be
     ///   monotonically increasing.
     /// - The second column is the output values. The data type of the column is `return_type`.
+    /// - (Optional) If any error occurs, the error message is stored in the third column.
     ///
     /// i.e., for the `i`-th input row, the output rows are `(i, output_1)`, `(i, output_2)`, ...
     ///
@@ -107,9 +106,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
 pub fn build_from_prost(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
-    use risingwave_pb::expr::table_function::Type::*;
-
-    if prost.get_function_type().unwrap() == Udtf {
+    if prost.get_function_type().unwrap() == PbType::UserDefined {
         return new_user_defined(prost, chunk_size);
     }
 
@@ -130,64 +127,8 @@ pub fn build(
 ) -> Result<BoxedTableFunction> {
     use itertools::Itertools;
     let args = children.iter().map(|t| t.return_type()).collect_vec();
-    let desc = crate::sig::FUNCTION_REGISTRY
-        .get(func, &args, &return_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
-                "{}({}) -> setof {}",
-                func.as_str_name().to_ascii_lowercase(),
-                args.iter().format(", "),
-                return_type,
-            ))
-        })?;
+    let desc = crate::sig::FUNCTION_REGISTRY.get(func, &args, &return_type)?;
     desc.build_table(return_type, chunk_size, children)
-}
-
-/// See also [`PbProjectSetSelectItem`]
-#[derive(Debug)]
-pub enum ProjectSetSelectItem {
-    TableFunction(BoxedTableFunction),
-    Expr(BoxedExpression),
-}
-
-impl From<BoxedTableFunction> for ProjectSetSelectItem {
-    fn from(table_function: BoxedTableFunction) -> Self {
-        ProjectSetSelectItem::TableFunction(table_function)
-    }
-}
-
-impl From<BoxedExpression> for ProjectSetSelectItem {
-    fn from(expr: BoxedExpression) -> Self {
-        ProjectSetSelectItem::Expr(expr)
-    }
-}
-
-impl ProjectSetSelectItem {
-    pub fn from_prost(prost: &PbProjectSetSelectItem, chunk_size: usize) -> Result<Self> {
-        match prost.select_item.as_ref().unwrap() {
-            SelectItem::Expr(expr) => expr_build_from_prost(expr).map(Into::into),
-            SelectItem::TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
-        }
-    }
-
-    pub fn return_type(&self) -> DataType {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.return_type(),
-            ProjectSetSelectItem::Expr(expr) => expr.return_type(),
-        }
-    }
-
-    pub async fn eval<'a>(
-        &'a self,
-        input: &'a DataChunk,
-    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
-        match self {
-            Self::TableFunction(tf) => Ok(Either::Left(
-                TableFunctionOutputIter::new(tf.eval(input).await).await?,
-            )),
-            Self::Expr(expr) => expr.eval(input).await.map(Either::Right),
-        }
-    }
 }
 
 /// A wrapper over the output of table function that allows iteration by rows.
@@ -224,7 +165,7 @@ impl ProjectSetSelectItem {
 /// for i in 0..4 {
 ///     let (index, value) = iter.peek().unwrap();
 ///     assert_eq!(index, i);
-///     assert_eq!(value, Some((i as i64).into()));
+///     assert_eq!(value.unwrap(), Some((i as i64).into()));
 ///     iter.next().await.unwrap();
 /// }
 /// assert!(iter.peek().is_none());
@@ -250,11 +191,19 @@ impl<'a> TableFunctionOutputIter<'a> {
     }
 
     /// Gets the current row.
-    pub fn peek(&'a self) -> Option<(usize, DatumRef<'a>)> {
+    pub fn peek(&'a self) -> Option<(usize, Result<DatumRef<'a>>)> {
         let chunk = self.chunk.as_ref()?;
         let index = chunk.column_at(0).as_int32().value_at(self.index).unwrap() as usize;
-        let value = chunk.column_at(1).value_at(self.index);
-        Some((index, value))
+        let result = if let Some(msg) = chunk
+            .columns()
+            .get(2)
+            .and_then(|errors| errors.as_utf8().value_at(self.index))
+        {
+            Err(ExprError::Custom(msg.into()))
+        } else {
+            Ok(chunk.column_at(1).value_at(self.index))
+        };
+        Some((index, result))
     }
 
     /// Moves to the next row.
@@ -279,4 +228,21 @@ impl<'a> TableFunctionOutputIter<'a> {
         self.chunk = self.stream.next().await.transpose()?;
         Ok(())
     }
+}
+
+/// Checks if the output chunk returned by `TableFunction::eval` contains any error.
+pub fn check_error(chunk: &DataChunk) -> Result<()> {
+    if let Some(errors) = chunk.columns().get(2) {
+        if errors.null_bitmap().any() {
+            return Err(ExprError::Custom(
+                errors
+                    .as_utf8()
+                    .iter()
+                    .find_map(|s| s)
+                    .expect("no error message")
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
 }

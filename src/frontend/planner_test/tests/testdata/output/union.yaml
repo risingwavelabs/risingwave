@@ -41,7 +41,7 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -49,14 +49,19 @@
     └── vnode column idx: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c, t1._row_id, $src ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 3, 4 ], read pk prefix len hint: 2 }
+    Table 4294967294
+    ├── columns: [ a, b, c, t1._row_id, $src, _rw_timestamp ]
+    ├── primary key: [ $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 3, 4 ]
+    └── read pk prefix len hint: 2
 
 - sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -78,7 +83,7 @@
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
@@ -92,7 +97,7 @@
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
@@ -115,10 +120,10 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ t1_a, t1_b, t1_c, count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ t1_a, t1_b, t1_c, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -126,14 +131,14 @@
     └── vnode column idx: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ a, b, c, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
@@ -155,7 +160,7 @@
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: UpstreamHashShard(t2.a) }
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
@@ -169,7 +174,7 @@
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
     ├── tables: [ Materialize: 4294967294 ]
-    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
@@ -193,14 +198,14 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t1_a, t1_b, t1_c, count ]
+    ├── columns: [ t1_a, t1_b, t1_c, count, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 1
-    ├── columns: [ vnode, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -208,7 +213,7 @@
     └── vnode column idx: 0
 
     Table 2
-    ├── columns: [ vnode, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -216,7 +221,7 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ a, b, c ]
+    ├── columns: [ a, b, c, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1, 2 ]
@@ -375,7 +380,7 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -383,7 +388,7 @@
     └── vnode column idx: 0
 
     Table 1
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -391,7 +396,7 @@
     └── vnode column idx: 0
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -399,7 +404,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -407,14 +412,19 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c, t1._row_id, $src ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 3, 4 ], read pk prefix len hint: 2 }
+    Table 4294967294
+    ├── columns: [ a, b, c, t1._row_id, $src, _rw_timestamp ]
+    ├── primary key: [ $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 3, 4 ]
+    └── read pk prefix len hint: 2
 
 - name: test merged union stream key (5 columns, row_id + src_col + a + b + c)
   sql: |
@@ -465,17 +475,17 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, a, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, b, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, b, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 2 { columns: [ vnode, c, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 2 { columns: [ vnode, c, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 3 { columns: [ vnode, _row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4 { columns: [ vnode, a, b, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, a, b, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ a, b, c, t1.a, null:Int64, null:Decimal, null:Serial, $src ], primary key: [ $3 ASC, $5 ASC, $4 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3, 5, 4, 6, 7 ], read pk prefix len hint: 5 }
+    Table 4294967294 { columns: [ a, b, c, t1.a, null:Int64, null:Decimal, null:Serial, $src, _rw_timestamp ], primary key: [ $3 ASC, $5 ASC, $4 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 3, 5, 4, 6, 7 ], read pk prefix len hint: 5 }
 
 - name: test merged union stream key (4 columns, row_id + src_col + a + b)
   sql: |
@@ -526,17 +536,22 @@
         ├── Upstream
         └── BatchPlanNode
 
-    Table 0 { columns: [ vnode, a, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, b, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, b, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 2 { columns: [ vnode, _row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 2 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 3 { columns: [ vnode, _row_id, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 3 { columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4 { columns: [ vnode, a, b, backfill_finished, row_count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ vnode, a, b, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ a, b, c, t1.a, null:Decimal, null:Serial, $src ], primary key: [ $3 ASC, $4 ASC, $5 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 3, 4, 5, 6 ], read pk prefix len hint: 4 }
+    Table 4294967294
+    ├── columns: [ a, b, c, t1.a, null:Decimal, null:Serial, $src, _rw_timestamp ]
+    ├── primary key: [ $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
+    ├── distribution key: [ 3, 4, 5, 6 ]
+    └── read pk prefix len hint: 4
 
 - name: test merged union stream key (3 columns, src_col + a + b)
   sql: |
@@ -593,7 +608,7 @@
         └── BatchPlanNode
 
     Table 0
-    ├── columns: [ vnode, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -601,7 +616,7 @@
     └── vnode column idx: 0
 
     Table 1
-    ├── columns: [ vnode, b, backfill_finished, row_count ]
+    ├── columns: [ vnode, b, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -609,7 +624,7 @@
     └── vnode column idx: 0
 
     Table 2
-    ├── columns: [ vnode, b, backfill_finished, row_count ]
+    ├── columns: [ vnode, b, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -617,7 +632,7 @@
     └── vnode column idx: 0
 
     Table 3
-    ├── columns: [ vnode, b, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, b, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -625,7 +640,7 @@
     └── vnode column idx: 0
 
     Table 4
-    ├── columns: [ vnode, a, b, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, b, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
@@ -633,9 +648,130 @@
     └── vnode column idx: 0
 
     Table 4294967294
-    ├── columns: [ a, b, c, $src ]
+    ├── columns: [ a, b, c, $src, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1, 3 ]
     └── read pk prefix len hint: 3
 
+- name: test corresponding union
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, y bigint);
+    create table t3 (x int, b numeric, c bigint);
+    select * from t1 union corresponding select * from t2 union all corresponding by (b) select * from t3;
+  batch_plan: |-
+    BatchUnion { all: true }
+    ├─BatchExchange { order: [], dist: Single }
+    │ └─BatchProject { exprs: [t1.b] }
+    │   └─BatchHashAgg { group_key: [t1.a, t1.b], aggs: [] }
+    │     └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b) }
+    │       └─BatchUnion { all: true }
+    │         ├─BatchExchange { order: [], dist: Single }
+    │         │ └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }
+    │         └─BatchExchange { order: [], dist: Single }
+    │           └─BatchScan { table: t2, columns: [t2.a, t2.b], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t3, columns: [t3.b], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [b, t1.a(hidden), t1.b(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, t1.b, null:Serial, $src], pk_columns: [t1.a, t1.b, null:Serial, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1.a, t1.b, null:Serial, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.b, t1.a, t1.b, null:Serial, 0:Int32], noop_update_hint: true }
+      │   └─StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] }
+      │     └─StreamExchange { dist: HashShard(t1.a, t1.b) }
+      │       └─StreamUnion { all: true }
+      │         ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │         │ └─StreamProject { exprs: [t1.a, t1.b, t1._row_id, 0:Int32] }
+      │         │   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │         └─StreamExchange { dist: HashShard(t2._row_id, 1:Int32) }
+      │           └─StreamProject { exprs: [t2.a, t2.b, t2._row_id, 1:Int32] }
+      │             └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+      └─StreamExchange { dist: HashShard(null:Int32, null:Decimal, t3._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t3.b, null:Int32, null:Decimal, t3._row_id, 1:Int32] }
+          └─StreamTableScan { table: t3, columns: [t3.b, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [b, t1.a(hidden), t1.b(hidden), null:Serial(hidden), $src(hidden)], stream_key: [t1.a, t1.b, null:Serial, $src], pk_columns: [t1.a, t1.b, null:Serial, $src], pk_conflict: NoCheck }
+    ├── tables: [ Materialize: 4294967294 ]
+    └── StreamUnion { all: true }
+        ├── StreamExchange Hash([1, 2, 3, 4]) from 1
+        └── StreamExchange Hash([1, 2, 3, 4]) from 5
+
+    Fragment 1
+    StreamProject { exprs: [t1.b, t1.a, t1.b, null:Serial, 0:Int32], noop_update_hint: true }
+    └── StreamHashAgg { group_key: [t1.a, t1.b], aggs: [count] } { tables: [ HashAggState: 0 ] }
+        └── StreamExchange Hash([0, 1]) from 2
+
+    Fragment 2
+    StreamUnion { all: true }
+    ├── StreamExchange Hash([2, 3]) from 3
+    └── StreamExchange Hash([2, 3]) from 4
+
+    Fragment 3
+    StreamProject { exprs: [t1.a, t1.b, t1._row_id, 0:Int32] }
+    └── StreamTableScan { table: t1, columns: [t1.a, t1.b, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├── tables: [ StreamScan: 1 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 4
+    StreamProject { exprs: [t2.a, t2.b, t2._row_id, 1:Int32] }
+    └── StreamTableScan { table: t2, columns: [t2.a, t2.b, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        ├── tables: [ StreamScan: 2 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Fragment 5
+    StreamProject { exprs: [t3.b, null:Int32, null:Decimal, t3._row_id, 1:Int32] }
+    └── StreamTableScan { table: t3, columns: [t3.b, t3._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t3._row_id], pk: [_row_id], dist: UpstreamHashShard(t3._row_id) }
+        ├── tables: [ StreamScan: 3 ]
+        ├── Upstream
+        └── BatchPlanNode
+
+    Table 0 { columns: [ t1_a, t1_b, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
+
+    Table 1
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 2
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 3
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ b, t1.a, t1.b, null:Serial, $src, _rw_timestamp ]
+    ├── primary key: [ $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
+    ├── distribution key: [ 1, 2, 3, 4 ]
+    └── read pk prefix len hint: 4
+
+- name: test corresponding union error - corresponding list
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, y bigint);
+    create table t3 (x int, b numeric, c bigint);
+    select * from t1 union corresponding select * from t2 union all corresponding by (c) select * from t3;
+  binder_error: 'Invalid input syntax: Column name `c` in CORRESPONDING BY is not found in a side of the UNION operation. It shall be included in both sides.'
+- name: test corresponding union error - duplicate names
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, y bigint);
+    select a, b as a from t1 union corresponding select * from t2;
+  binder_error: 'Invalid input syntax: Duplicated column name `a` in a column list of the query in a UNION operation. Column list of the query: ("a", "a").'

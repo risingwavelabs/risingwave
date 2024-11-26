@@ -22,7 +22,6 @@ use std::sync::{Arc, LazyLock};
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::acl::AclMode;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{
@@ -102,8 +101,6 @@ pub struct SysCatalogReaderImpl {
     catalog_reader: CatalogReader,
     // Read user info.
     user_info_reader: UserInfoReader,
-    // Read cluster info.
-    worker_node_manager: WorkerNodeManagerRef,
     // Read from meta.
     meta_client: Arc<dyn FrontendMetaClient>,
     // Read auth context.
@@ -118,7 +115,6 @@ impl SysCatalogReaderImpl {
     pub fn new(
         catalog_reader: CatalogReader,
         user_info_reader: UserInfoReader,
-        worker_node_manager: WorkerNodeManagerRef,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<SessionConfig>>,
@@ -127,7 +123,6 @@ impl SysCatalogReaderImpl {
         Self {
             catalog_reader,
             user_info_reader,
-            worker_node_manager,
             meta_client,
             auth_context,
             config,
@@ -242,10 +237,9 @@ fn get_acl_items(
     for_dml_table: bool,
     users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
-) -> String {
-    let mut res = String::from("{");
-    let mut empty_flag = true;
-    let super_privilege = available_prost_privilege(object.clone(), for_dml_table);
+) -> Vec<String> {
+    let mut res = vec![];
+    let super_privilege = available_prost_privilege(*object, for_dml_table);
     for user in users {
         let privileges = if user.is_super {
             vec![&super_privilege]
@@ -268,25 +262,21 @@ fn get_acl_items(
             })
         });
         for (granted_by, actions) in grantor_map {
-            if empty_flag {
-                empty_flag = false;
-            } else {
-                res.push(',');
-            }
-            res.push_str(&user.name);
-            res.push('=');
+            let mut aclitem = String::new();
+            aclitem.push_str(&user.name);
+            aclitem.push('=');
             for (action, option) in actions {
-                res.push_str(&AclMode::from(action).to_string());
+                aclitem.push_str(&AclMode::from(action).to_string());
                 if option {
-                    res.push('*');
+                    aclitem.push('*');
                 }
             }
-            res.push('/');
+            aclitem.push('/');
             // should be able to query grantor's name
-            res.push_str(username_map.get(&granted_by).unwrap());
+            aclitem.push_str(username_map.get(&granted_by).unwrap());
+            res.push(aclitem);
         }
     }
-    res.push('}');
     res
 }
 

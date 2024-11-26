@@ -35,8 +35,11 @@ cluster_start() {
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
     risedev pre-start-dev
+    risedev dev standalone-minio-sqlite &
+    PID=$!
+    sleep 1
     start_standalone "$PREFIX_LOG"/standalone.log &
-    risedev dev standalone-minio-etcd
+    wait $PID
   elif [[ $mode == "single-node" ]]; then
     mkdir -p "$PREFIX_LOG"
     risedev clean-data
@@ -45,6 +48,13 @@ cluster_start() {
     # Give it a while to make sure the single-node is ready.
     sleep 10
   else
+    # Initialize backends.
+    if [[ $mode == *"mysql-backend" ]]; then
+      mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
+    elif [[ $mode == *"pg-backend" ]]; then
+      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
+    fi
+
     risedev ci-start "$mode"
   fi
 }
@@ -76,10 +86,11 @@ mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/rising
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -87,14 +98,20 @@ cluster_stop
 echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
-sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-if [[ "$mode" != "single-node" ]]; then
-  sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
+sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
+
+if [[ $mode != "single-node" ]]; then
+  sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 fi
-sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
+
 sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
+
+echo "--- e2e, $mode, python_client"
+python3 -m pip install --break-system-packages psycopg
+python3 ./e2e_test/python_client/main.py
 
 echo "--- e2e, $mode, subscription"
 python3 -m pip install --break-system-packages psycopg2-binary
@@ -113,23 +130,20 @@ pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/always_retry_python.slt'
 # FIXME: flaky test
 # sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, external java udf"
-java -jar udf.jar &
+java --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED -jar udf.jar &
 sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
-python3 -m pip install --break-system-packages flask waitress
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/python_udf.slt'
-sqllogictest -p 4566 -d dev './e2e_test/udf/deno_udf.slt'
 
 echo "--- Kill cluster"
 cluster_stop
@@ -254,8 +268,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite-compactor &
+  PID=$!
+  sleep 1
   start_standalone_without_compactor "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-etcd-compactor
+  wait $PID
   wait_standalone
   if compactor_is_online
   then
@@ -271,8 +288,11 @@ if [[ "$mode" == "standalone" ]]; then
   mkdir -p "$PREFIX_LOG"
   risedev clean-data
   risedev pre-start-dev
+  risedev dev standalone-minio-sqlite &
+  PID=$!
+  sleep 1
   start_standalone "$PREFIX_LOG"/standalone.log &
-  risedev dev standalone-minio-etcd
+  wait $PID
   wait_standalone
   if ! compactor_is_online
   then
@@ -285,3 +305,6 @@ if [[ "$mode" == "standalone" ]]; then
   # Make sure any remaining background task exits.
   wait
 fi
+
+echo "--- Upload JUnit test results"
+buildkite-agent artifact upload "*-junit.xml"

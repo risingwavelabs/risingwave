@@ -14,7 +14,6 @@
 
 #![feature(rustc_private)]
 #![feature(let_chains)]
-#![feature(lazy_cell)]
 #![warn(unused_extern_crates)]
 
 extern crate rustc_ast;
@@ -36,13 +35,19 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
     // -- Begin lint registration --
 
     // Preparation steps.
-    lint_store.register_early_pass(|| {
-        Box::<utils::format_args_collector::FormatArgsCollector>::default()
+    let format_args_storage = clippy_utils::macros::FormatArgsStorage::default();
+    let format_args = format_args_storage.clone();
+    lint_store.register_early_pass(move || {
+        Box::new(utils::format_args_collector::FormatArgsCollector::new(
+            format_args.clone(),
+        ))
     });
 
     // Actual lints.
     lint_store.register_lints(&[format_error::FORMAT_ERROR]);
-    lint_store.register_late_pass(|_| Box::<format_error::FormatError>::default());
+    let format_args = format_args_storage.clone();
+    lint_store
+        .register_late_pass(move |_| Box::new(format_error::FormatError::new(format_args.clone())));
 
     // --  End lint registration  --
 

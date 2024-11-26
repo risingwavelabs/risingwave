@@ -5,6 +5,7 @@ package plan_common;
 import "common.proto";
 import "data.proto";
 import "expr.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -95,6 +96,28 @@ message StorageTableDesc {
   repeated uint32 stream_key = 9;
   optional uint32 vnode_col_idx_in_pk = 10;
   optional uint32 retention_seconds = 11;
+
+  // Total vnode count of the table.
+  //
+  // Can be unset if the table is created in older versions where variable vnode count is not
+  // supported, in which case a default value of 256 (or 1 for singleton) should be used.
+  // Use `VnodeCountCompat::vnode_count` to access it.
+  optional uint32 maybe_vnode_count = 12;
+}
+
+message AsOf {
+  message ProcessTime {}
+  message Timestamp {
+    int64 timestamp = 1;
+  }
+  message Version {
+    int64 version = 1;
+  }
+  oneof as_of_type {
+    ProcessTime process_time = 1;
+    Timestamp timestamp = 2;
+    Version version = 3;
+  }
 }
 
 // Represents a table in external database for CDC scenario
@@ -108,6 +131,7 @@ message ExternalTableDesc {
   map<string, string> connect_properties = 6;
   // upstream cdc source job id
   uint32 source_id = 7;
+  map<string, secret.SecretRef> secret_refs = 8;
 }
 
 enum JoinType {
@@ -122,6 +146,31 @@ enum JoinType {
   JOIN_TYPE_LEFT_ANTI = 6;
   JOIN_TYPE_RIGHT_SEMI = 7;
   JOIN_TYPE_RIGHT_ANTI = 8;
+  JOIN_TYPE_ASOF_INNER = 9;
+  JOIN_TYPE_ASOF_LEFT_OUTER = 10;
+}
+
+enum AsOfJoinType {
+  AS_OF_JOIN_TYPE_UNSPECIFIED = 0;
+  AS_OF_JOIN_TYPE_INNER = 1;
+  AS_OF_JOIN_TYPE_LEFT_OUTER = 2;
+}
+
+enum AsOfJoinInequalityType {
+  AS_OF_INEQUALITY_TYPE_UNSPECIFIED = 0;
+  AS_OF_INEQUALITY_TYPE_GT = 1;
+  AS_OF_INEQUALITY_TYPE_GE = 2;
+  AS_OF_INEQUALITY_TYPE_LT = 3;
+  AS_OF_INEQUALITY_TYPE_LE = 4;
+}
+
+message AsOfJoinDesc {
+  // The index of the right side's as of column.
+  uint32 right_idx = 1;
+  // The index of the left side's as of column.
+  uint32 left_idx = 2;
+  // The type of the inequality.
+  AsOfJoinInequalityType inequality_type = 3;
 }
 
 // https://github.com/tokio-rs/prost/issues/80
@@ -148,6 +197,7 @@ enum EncodeType {
   ENCODE_TYPE_TEMPLATE = 7;
   ENCODE_TYPE_NONE = 8;
   ENCODE_TYPE_TEXT = 9;
+  ENCODE_TYPE_PARQUET = 10;
 }
 
 enum RowFormatType {
@@ -203,6 +253,17 @@ message AdditionalColumnHeader {
   data.DataType data_type = 2;
 }
 
+// metadata column for cdc table
+message AdditionalDatabaseName {}
+
+message AdditionalSchemaName {}
+
+message AdditionalTableName {}
+
+message AdditionalCollectionName {}
+
+message AdditionalColumnPayload {}
+
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
@@ -215,6 +276,11 @@ message AdditionalColumn {
     AdditionalColumnHeader header_inner = 5;
     AdditionalColumnFilename filename = 6;
     AdditionalColumnHeaders headers = 7;
+    AdditionalDatabaseName database_name = 8;
+    AdditionalSchemaName schema_name = 9;
+    AdditionalTableName table_name = 10;
+    AdditionalCollectionName collection_name = 11;
+    AdditionalColumnPayload payload = 12;
   }
 }
 
@@ -227,4 +293,5 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_HEADER = 5;
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
+  ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
 }

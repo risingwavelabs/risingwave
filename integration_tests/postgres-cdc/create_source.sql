@@ -1,3 +1,5 @@
+create secret postgres_pwd with (backend = 'meta') as '123456';
+
 create table person (
     "id" int,
     "name" varchar,
@@ -10,7 +12,7 @@ create table person (
     hostname = 'postgres',
     port = '5432',
     username = 'myuser',
-    password = '123456',
+    password = secret postgres_pwd,
     database.name = 'mydb',
     schema.name = 'public',
     table.name = 'person',
@@ -56,7 +58,7 @@ CREATE TABLE orders_rw (
     hostname = 'postgres',
     port = '5432',
     username = 'myuser',
-    password = '123456',
+    password = secret postgres_pwd,
     database.name = 'mydb',
     schema.name = 'public',
     table.name = 'orders',

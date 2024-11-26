@@ -25,6 +25,9 @@ import java.util.Properties;
 
 public abstract class JdbcUtils {
 
+    static final int CONNECTION_TIMEOUT = 30;
+    static final int SOCKET_TIMEOUT = 300;
+
     public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
         if (jdbcUrl.startsWith("jdbc:mysql")) {
             return Optional.of(new MySqlDialectFactory());
@@ -43,6 +46,16 @@ public abstract class JdbcUtils {
         // https://jdbc.postgresql.org/documentation/use/
         // https://dev.mysql.com/doc/connectors/en/connector-j-connp-props-networking.html#cj-conn-prop_tcpKeepAlive
         props.setProperty("tcpKeepAlive", "true");
+
+        // default timeout in seconds
+        boolean isPg = jdbcUrl.startsWith("jdbc:postgresql");
+
+        // postgres use seconds and mysql use milliseconds
+        int connectTimeout = isPg ? CONNECTION_TIMEOUT : CONNECTION_TIMEOUT * 1000;
+        int socketTimeout = isPg ? SOCKET_TIMEOUT : SOCKET_TIMEOUT * 1000;
+        props.setProperty("connectTimeout", String.valueOf(connectTimeout));
+        props.setProperty("socketTimeout", String.valueOf(socketTimeout));
+
         var conn = DriverManager.getConnection(jdbcUrl, props);
         // disable auto commit can improve performance
         conn.setAutoCommit(false);

@@ -22,10 +22,11 @@ use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::ParameterStatus;
 use crate::pg_server::BoxedError;
-use crate::types::Row;
+use crate::types::{Format, Row};
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
+
 pub trait ValuesStream = Stream<Item = RowSetResult> + Unpin + Send;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -53,8 +54,10 @@ pub enum StatementType {
     CREATE_SCHEMA,
     CREATE_USER,
     CREATE_INDEX,
+    CREATE_AGGREGATE,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    CREATE_SECRET,
     COMMENT,
     DECLARE_CURSOR,
     DESCRIBE,
@@ -65,6 +68,7 @@ pub enum StatementType {
     DROP_VIEW,
     DROP_INDEX,
     DROP_FUNCTION,
+    DROP_AGGREGATE,
     DROP_SOURCE,
     DROP_SINK,
     DROP_SUBSCRIPTION,
@@ -72,6 +76,7 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    DROP_SECRET,
     ALTER_DATABASE,
     ALTER_SCHEMA,
     ALTER_INDEX,
@@ -116,6 +121,7 @@ impl std::fmt::Display for StatementType {
 }
 
 pub trait Callback = Future<Output = Result<(), BoxedError>> + Send;
+
 pub type BoxedCallback = Pin<Box<dyn Callback>>;
 
 pub struct PgResponse<VS> {
@@ -123,6 +129,8 @@ pub struct PgResponse<VS> {
     // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
+    // Used for INSERT, UPDATE, DELETE to specify the format of the affected row count.
+    row_cnt_format: Option<Format>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
@@ -135,6 +143,8 @@ pub struct PgResponseBuilder<VS> {
     // row count of affected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
+    // Used for INSERT, UPDATE, DELETE to specify the format of the affected row count.
+    row_cnt_format: Option<Format>,
     notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
@@ -147,6 +157,7 @@ impl<VS> From<PgResponseBuilder<VS>> for PgResponse<VS> {
         Self {
             stmt_type: builder.stmt_type,
             row_cnt: builder.row_cnt,
+            row_cnt_format: builder.row_cnt_format,
             notices: builder.notices,
             values_stream: builder.values_stream,
             callback: builder.callback,
@@ -162,6 +173,7 @@ impl<VS> PgResponseBuilder<VS> {
         Self {
             stmt_type,
             row_cnt,
+            row_cnt_format: None,
             notices: vec![],
             values_stream: None,
             callback: None,
@@ -179,6 +191,13 @@ impl<VS> PgResponseBuilder<VS> {
 
     pub fn row_cnt_opt(self, row_cnt: Option<i32>) -> Self {
         Self { row_cnt, ..self }
+    }
+
+    pub fn row_cnt_format_opt(self, row_cnt_format: Option<Format>) -> Self {
+        Self {
+            row_cnt_format,
+            ..self
+        }
     }
 
     pub fn values(self, values_stream: VS, row_desc: Vec<PgFieldDescriptor>) -> Self {
@@ -291,6 +310,7 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)
                 }
+                risingwave_sqlparser::ast::ObjectType::Secret => Ok(StatementType::DROP_SECRET),
                 risingwave_sqlparser::ast::ObjectType::Subscription => {
                     Ok(StatementType::DROP_SUBSCRIPTION)
                 }
@@ -385,6 +405,10 @@ where
 
     pub fn affected_rows_cnt(&self) -> Option<i32> {
         self.row_cnt
+    }
+
+    pub fn row_cnt_format(&self) -> Option<Format> {
+        self.row_cnt_format
     }
 
     pub fn is_query(&self) -> bool {

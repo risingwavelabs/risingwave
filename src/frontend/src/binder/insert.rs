@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
@@ -27,6 +28,7 @@ use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
+use crate::utils::ordinal;
 
 #[derive(Debug, Clone)]
 pub struct BoundInsert {
@@ -175,14 +177,14 @@ impl Binder {
         // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
         // For example, the following is valid:
         //
-        // ```
+        // ```sql
         //   create table t (v1 time);
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         // ```
         //
         // But the followings are not:
         //
-        // ```
+        // ```sql
         //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
         //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
         // ```
@@ -197,7 +199,7 @@ impl Binder {
         let bound_query;
         let cast_exprs;
 
-        let bounded_column_nums = match source.as_simple_values() {
+        let bound_column_nums = match source.as_simple_values() {
             None => {
                 bound_query = self.bind_query(source)?;
                 let actual_types = bound_query.data_types();
@@ -234,7 +236,7 @@ impl Binder {
             cols_to_insert_in_table.len()
         };
 
-        let (err_msg, default_column_indices) = match num_target_cols.cmp(&bounded_column_nums) {
+        let (err_msg, default_column_indices) = match num_target_cols.cmp(&bound_column_nums) {
             std::cmp::Ordering::Equal => (None, default_column_indices),
             std::cmp::Ordering::Greater => {
                 if has_user_specified_columns {
@@ -248,7 +250,7 @@ impl Binder {
                     //      insert into t values (7)
                     // this kind of usage is fine, null values will be provided
                     // implicitly.
-                    (None, col_indices_to_insert.split_off(bounded_column_nums))
+                    (None, col_indices_to_insert.split_off(bound_column_nums))
                 }
             }
             std::cmp::Ordering::Less => {
@@ -303,7 +305,6 @@ impl Binder {
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
-
     pub(super) fn cast_on_insert(
         expected_types: &Vec<DataType>,
         exprs: Vec<ExprImpl>,
@@ -312,10 +313,22 @@ impl Binder {
         let msg = match expected_types.len().cmp(&exprs.len()) {
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
             _ => {
+                let expr_len = exprs.len();
                 return exprs
                     .into_iter()
                     .zip_eq_fast(expected_types.iter().take(expr_num))
-                    .map(|(e, t)| e.cast_assign(t.clone()).map_err(Into::into))
+                    .enumerate()
+                    .map(|(i, (e, t))| {
+                        let res = e.cast_assign(t.clone());
+                        if expr_len > 1 {
+                            res.with_context(|| {
+                                format!("failed to cast the {} column", ordinal(i + 1))
+                            })
+                            .map_err(Into::into)
+                        } else {
+                            res.map_err(Into::into)
+                        }
+                    })
                     .try_collect();
             }
         };

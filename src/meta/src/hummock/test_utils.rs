@@ -12,47 +12,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(any(test, feature = "test"))]
+
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
+use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::test_epoch;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::version::HummockVersion;
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
+use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-#[cfg(test)]
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::worker_node::Property;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactionConfig, HummockSnapshot, KeyRange, SstableInfo};
-use risingwave_pb::meta::add_worker_node_request::Property;
+use risingwave_pb::hummock::CompactionConfig;
+use risingwave_rpc_client::HummockMetaClient;
 
+use crate::controller::catalog::CatalogController;
+use crate::controller::cluster::{ClusterController, ClusterControllerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-#[cfg(test)]
-use crate::hummock::compaction::selector::default_compaction_selector;
-use crate::hummock::{CommitEpochInfo, CompactorManager, HummockManager, HummockManagerRef};
-use crate::manager::{
-    ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
-};
+use crate::hummock::compaction::selector::{default_compaction_selector, LocalSelectorStatistic};
+use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionSelectorContext};
+use crate::hummock::level_handler::LevelHandler;
+pub use crate::hummock::manager::CommitEpochInfo;
+use crate::hummock::model::CompactionGroup;
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn to_local_sstable_info(ssts: &[SstableInfo]) -> Vec<LocalSstableInfo> {
     ssts.iter()
-        .map(|sst| {
-            LocalSstableInfo::with_compaction_group(
-                StaticCompactionGroupId::StateDefault.into(),
-                sst.clone(),
-            )
-        })
+        .map(|sst| LocalSstableInfo::for_test(sst.clone()))
         .collect_vec()
 }
 
-#[cfg(test)]
+// This function has 3 phases:
+// 1. add 3 ssts to
+// 2. trigger a compaction and replace the input from phase 1 with the 1 new sst
+// 3. add 1 new sst
+// Please make sure the function do what you want before using it.
 pub async fn add_test_tables(
     hummock_manager: &HummockManager,
-    context_id: HummockContextId,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    compaction_group_id: CompactionGroupId,
 ) -> Vec<Vec<SstableInfo>> {
     // Increase version by 2.
 
@@ -61,43 +73,31 @@ pub async fn add_test_tables(
     let mut epoch = test_epoch(1);
     let sstable_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager,
-        &test_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+    register_sstable_infos_to_compaction_group(hummock_manager, &test_tables, compaction_group_id)
+        .await;
+    let test_local_tables = to_local_sstable_info(&test_tables);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: test_local_tables,
+                ..Default::default()
+            },
+            false,
+        )
         .await
         .unwrap();
+
     // Simulate a compaction and increase version by 1.
-    let mut temp_compactor = false;
-    if hummock_manager
-        .compactor_manager_ref_for_test()
-        .compactor_num()
-        == 0
-    {
-        hummock_manager
-            .compactor_manager_ref_for_test()
-            .add_compactor(context_id);
-        temp_compactor = true;
-    }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables_2,
-        StaticCompactionGroupId::StateDefault.into(),
+        compaction_group_id,
     )
     .await;
-    let mut selector = default_compaction_selector();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
+        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -109,15 +109,8 @@ pub async fn add_test_tables(
             .sum::<usize>(),
         3
     );
-    compact_task.target_level = 6;
-    if temp_compactor {
-        let compactor = hummock_manager
-            .compactor_manager_ref_for_test()
-            .next_compactor()
-            .unwrap();
-        assert_eq!(compactor.context_id(), context_id);
-    }
 
+    compact_task.target_level = 6;
     hummock_manager
         .report_compact_task_for_test(
             compact_task.task_id,
@@ -128,27 +121,25 @@ pub async fn add_test_tables(
         )
         .await
         .unwrap();
-    if temp_compactor {
-        hummock_manager
-            .compactor_manager_ref_for_test()
-            .remove_compactor(context_id);
-    }
     // Increase version by 1.
     epoch.inc_epoch();
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables_3,
-        StaticCompactionGroupId::StateDefault.into(),
+        compaction_group_id,
     )
     .await;
-    let ssts = to_local_sstable_info(&test_tables_3);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+    let test_local_tables_3 = to_local_sstable_info(&test_tables_3);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: test_local_tables_3,
+                ..Default::default()
+            },
+            false,
+        )
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -161,28 +152,30 @@ pub fn generate_test_sstables_with_table_id(
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
-                left: key_with_epoch(
+            key_range: KeyRange {
+                left: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
-                right: key_with_epoch(
+                )),
+                right: Bytes::from(key_with_epoch(
                     format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
                         .as_bytes()
                         .to_vec(),
                     epoch,
-                ),
+                )),
                 right_exclusive: false,
-            }),
-            file_size: 2,
+            },
+            file_size: object_size,
             table_ids: vec![table_id],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }
@@ -192,18 +185,20 @@ pub fn generate_test_sstables_with_table_id(
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        let object_size = 2;
         sst_info.push(SstableInfo {
             object_id: sst_id,
             sst_id,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
+            key_range: KeyRange {
+                left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
+                right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
                 right_exclusive: false,
-            }),
-            file_size: 2,
+            },
+            file_size: object_size,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            uncompressed_file_size: 2,
+            uncompressed_file_size: object_size,
             max_epoch: epoch,
+            sst_size: object_size,
             ..Default::default()
         });
     }
@@ -236,7 +231,7 @@ pub async fn register_table_ids_to_compaction_group(
     compaction_group_id: CompactionGroupId,
 ) {
     hummock_manager_ref
-        .register_table_ids(
+        .register_table_ids_for_test(
             &table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id))
@@ -251,8 +246,9 @@ pub async fn unregister_table_ids_from_compaction_group(
     table_ids: &[u32],
 ) {
     hummock_manager_ref
-        .unregister_table_ids_fail_fast(table_ids)
-        .await;
+        .unregister_table_ids(table_ids.iter().map(|table_id| TableId::new(*table_id)))
+        .await
+        .unwrap();
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
@@ -273,26 +269,24 @@ pub fn iterator_test_key_of_epoch(
 pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {
     sstables
         .iter()
-        .map(|table| table.get_object_id())
+        .map(|table| table.object_id)
         .sorted()
         .collect_vec()
 }
 
 pub fn get_sorted_committed_object_ids(
     hummock_version: &HummockVersion,
+    compaction_group_id: CompactionGroupId,
 ) -> Vec<HummockSstableObjectId> {
-    let levels = match hummock_version
-        .levels
-        .get(&StaticCompactionGroupId::StateDefault.into())
-    {
+    let levels = match hummock_version.levels.get(&compaction_group_id) {
         Some(levels) => levels,
         None => return vec![],
     };
     levels
         .levels
         .iter()
-        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.get_object_id()))
+        .chain(levels.l0.sub_levels.iter())
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.object_id))
         .sorted()
         .collect_vec()
 }
@@ -300,7 +294,12 @@ pub fn get_sorted_committed_object_ids(
 pub async fn setup_compute_env_with_config(
     port: i32,
     config: CompactionConfig,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     setup_compute_env_with_metric(port, config, None).await
 }
 
@@ -308,14 +307,19 @@ pub async fn setup_compute_env_with_metric(
     port: i32,
     config: CompactionConfig,
     meta_metric: Option<MetaMetrics>,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     let env = MetaSrvEnv::for_test().await;
-    let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
+    let cluster_ctl = Arc::new(
+        ClusterController::new(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
+    let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
 
     let compactor_manager = Arc::new(CompactorManager::for_test());
 
@@ -324,39 +328,46 @@ pub async fn setup_compute_env_with_metric(
 
     let hummock_manager = HummockManager::with_config(
         env.clone(),
-        cluster_manager.clone(),
-        fragment_manager,
+        cluster_ctl.clone(),
+        catalog_ctl,
         Arc::new(meta_metric.unwrap_or_default()),
         compactor_manager,
         config,
         compactor_streams_change_tx,
     )
     .await;
+
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,
     };
     let fake_parallelism = 4;
-    let worker_node = cluster_manager
-        .add_worker_node(
+    let worker_id = cluster_ctl
+        .add_worker(
             WorkerType::ComputeNode,
             fake_host_address,
             Property {
-                worker_node_parallelism: fake_parallelism as _,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
+                parallelism: fake_parallelism as _,
+                ..Default::default()
             },
             Default::default(),
         )
         .await
         .unwrap();
-    (env, hummock_manager, cluster_manager, worker_node)
+    (env, hummock_manager, cluster_ctl, worker_id)
 }
 
 pub async fn setup_compute_env(
     port: i32,
-) -> (MetaSrvEnv, HummockManagerRef, ClusterManagerRef, WorkerNode) {
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    ClusterControllerRef,
+    WorkerId,
+) {
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
         .level0_max_compact_file_number(130)
@@ -374,35 +385,57 @@ pub async fn get_sst_ids(
     (range.start_id..range.end_id).collect_vec()
 }
 
-pub async fn commit_from_meta_node(
-    hummock_manager_ref: &HummockManager,
-    epoch: HummockEpoch,
-    ssts: Vec<LocalSstableInfo>,
-) -> crate::hummock::error::Result<Option<HummockSnapshot>> {
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
-        .collect();
-    hummock_manager_ref
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
-        .await
-}
-
 pub async fn add_ssts(
     epoch: HummockEpoch,
     hummock_manager: &HummockManager,
-    context_id: HummockContextId,
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
 ) -> Vec<SstableInfo> {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
     let test_tables = generate_test_sstables_with_table_id(test_epoch(epoch), 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
-    let sst_to_worker = ssts
-        .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
-        .collect();
-    hummock_manager
-        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts,
+                ..Default::default()
+            },
+            false,
+        )
         .await
         .unwrap();
     test_tables
+}
+
+pub fn compaction_selector_context<'a>(
+    group: &'a CompactionGroup,
+    levels: &'a Levels,
+    member_table_ids: &'a BTreeSet<TableId>,
+    level_handlers: &'a mut [LevelHandler],
+    selector_stats: &'a mut LocalSelectorStatistic,
+    table_id_to_options: &'a HashMap<u32, TableOption>,
+    developer_config: Arc<CompactionDeveloperConfig>,
+    table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
+    state_table_info: &'a HummockVersionStateTableInfo,
+) -> CompactionSelectorContext<'a> {
+    CompactionSelectorContext {
+        group,
+        levels,
+        member_table_ids,
+        level_handlers,
+        selector_stats,
+        table_id_to_options,
+        developer_config,
+        table_watermarks,
+        state_table_info,
+    }
+}
+
+pub async fn get_compaction_group_id_by_table_id(
+    hummock_manager_ref: HummockManagerRef,
+    table_id: u32,
+) -> u64 {
+    let version = hummock_manager_ref.get_current_version().await;
+    let mapping = version.state_table_info.build_table_compaction_group_id();
+    *mapping.get(&(table_id.into())).unwrap()
 }

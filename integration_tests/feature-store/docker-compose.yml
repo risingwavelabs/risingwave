@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   kafka:
     image: confluentinc/cp-kafka:7.1.0
@@ -73,10 +72,10 @@ services:
       [kafka,meta-node-0,frontend-node-0]
     volumes:
       - ".log:/opt/feature-store/.log"
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../docker/docker-compose-distributed.yml
-      service: etcd-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose-distributed.yml
@@ -98,7 +97,7 @@ services:
       file: ../../docker/docker-compose-distributed.yml
       service: prometheus-0
 volumes:
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

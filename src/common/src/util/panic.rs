@@ -71,8 +71,8 @@ pub fn is_catching_unwind() -> bool {
 }
 
 #[cfg(all(test, not(madsim)))]
+#[expect(clippy::disallowed_methods)]
 mod tests {
-    #![allow(clippy::disallowed_methods)]
 
     use rusty_fork::rusty_fork_test;
 

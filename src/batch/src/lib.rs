@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
@@ -21,19 +20,15 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
-#![feature(lint_reasons)]
-#![feature(is_sorted)]
 #![recursion_limit = "256"]
 #![feature(let_chains)]
-#![feature(bound_map)]
 #![feature(int_roundings)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(assert_matches)]
-#![feature(lazy_cell)]
-#![feature(array_methods)]
 #![feature(error_generic_member_access)]
 #![feature(map_try_insert)]
+#![feature(iter_from_coroutine)]
 
 pub mod error;
 pub mod exchange_source;
@@ -41,6 +36,7 @@ pub mod execution;
 pub mod executor;
 pub mod monitor;
 pub mod rpc;
+pub mod spill;
 pub mod task;
 pub mod worker_manager;
 

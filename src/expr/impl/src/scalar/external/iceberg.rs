@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use icelake::types::{
     create_transform_function, Any as IcelakeDataType, BoxedTransformFunction, Transform,
 };
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert, ToArrow};
+use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
@@ -34,8 +34,8 @@ use thiserror_ext::AsReport;
 pub struct IcebergTransform {
     child: BoxedExpression,
     transform: BoxedTransformFunction,
-    input_arrow_type: arrow_schema::DataType,
-    output_arrow_field: arrow_schema::Field,
+    input_arrow_type: arrow_schema_iceberg::DataType,
+    output_arrow_field: arrow_schema_iceberg::Field,
     return_type: DataType,
 }
 
@@ -58,13 +58,14 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
         // Get the child array
         let array = self.child.eval(data_chunk).await?;
         // Convert to arrow array
-        let arrow_array = IcebergArrowConvert.to_array(&self.input_arrow_type, &array)?;
+        let arrow_array = IcebergArrowConvert.to_arrow_array(&self.input_arrow_type, &array)?;
         // Transform
         let res_array = self.transform.transform(arrow_array).unwrap();
         // Convert back to array ref and return it
-        Ok(Arc::new(
-            IcebergArrowConvert.from_array(&self.output_arrow_field, &res_array)?,
-        ))
+        Ok(Arc::new(IcebergArrowConvert.array_from_arrow_array(
+            &self.output_arrow_field,
+            &res_array,
+        )?))
     }
 
     async fn eval_row(&self, _row: &OwnedRow) -> Result<Datum> {
@@ -74,7 +75,7 @@ impl risingwave_expr::expr::Expression for IcebergTransform {
     }
 }
 
-#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "panic")]
+#[build_function("iceberg_transform(varchar, any) -> any", type_infer = "unreachable")]
 fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     let transform_type = {
         let datum = children[0].eval_const()?.unwrap();

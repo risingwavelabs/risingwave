@@ -18,6 +18,7 @@ message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
   KeyRange key_range = 3;
+  // represents the physical object size, which is usually used in the builder.
   uint64 file_size = 4;
   repeated uint32 table_ids = 5;
   uint64 meta_offset = 6;
@@ -28,6 +29,10 @@ message SstableInfo {
   uint64 uncompressed_file_size = 11;
   uint64 range_tombstone_count = 12;
   BloomFilterType bloom_filter_kind = 13;
+
+  // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
+  // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
+  uint64 sst_size = 14;
 }
 
 enum LevelType {
@@ -58,6 +63,10 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
+message NewL0SubLevel {
+  repeated SstableInfo inserted_table_infos = 1;
+}
+
 message IntraLevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;
@@ -69,40 +78,45 @@ message IntraLevelDelta {
 enum CompatibilityVersion {
   VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
+  NO_MEMBER_TABLE_IDS = 2;
+  SPLIT_GROUP_BY_TABLE_ID = 3;
 }
 
 message GroupConstruct {
   CompactionConfig group_config = 1;
   // If parent_group_id is not 0, it means parent_group_id splits into parent_group_id and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
-  repeated uint32 table_ids = 3;
+  repeated uint32 table_ids = 3 [deprecated = true];
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
   CompatibilityVersion version = 6;
-}
 
-message GroupMetaChange {
-  repeated uint32 table_ids_add = 1;
-  repeated uint32 table_ids_remove = 2;
-}
-
-message GroupTableChange {
-  repeated uint32 table_ids = 1;
-  uint64 target_group_id = 2;
-  uint64 origin_group_id = 3;
-  uint64 new_sst_start_id = 4;
-  CompatibilityVersion version = 5;
+  // The split_key is the key that the group is split by.
+  // When GroupConstruct with commit_epoch, split_key will be empty
+  // When split_key is not None, GroupConstruct tells to use split_key to check each level and split the sstable_info in the level into two groups (bounded by split_key).
+  // For the left sstable_info, split_key (right_exclusive=true) will be used as key_range_right.
+  // In the current implementation split_key always contains a table_id, vnode = 0, epoch = MAX
+  optional bytes split_key = 7;
 }
 
 message GroupDestroy {}
 
+message GroupMerge {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
 message GroupDelta {
+  reserved 4;
+  reserved "group_meta_change";
+  reserved 5;
+  reserved "group_table_change";
   oneof delta_type {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
-    GroupMetaChange group_meta_change = 4;
-    GroupTableChange group_table_change = 5;
+    GroupMerge group_merge = 6;
+    NewL0SubLevel new_l0_sub_level = 7;
   }
 }
 
@@ -149,23 +163,37 @@ message TableChangeLog {
   repeated EpochNewChangeLog change_logs = 1;
 }
 
+message StateTableInfo {
+  uint64 committed_epoch = 1;
+  reserved 2;
+  reserved 'safe_epoch';
+  uint64 compaction_group_id = 3;
+}
+
+message StateTableInfoDelta {
+  uint64 committed_epoch = 1;
+  reserved 2;
+  reserved 'safe_epoch';
+  uint64 compaction_group_id = 3;
+}
+
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
     OverlappingLevel l0 = 2;
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
-    repeated uint32 member_table_ids = 5;
+    repeated uint32 member_table_ids = 5 [deprecated = true];
   }
   uint64 id = 1;
   // Levels of each compaction group
   map<uint64, Levels> levels = 2;
-  uint64 max_committed_epoch = 3;
-  // Snapshots with epoch less than the safe epoch have been GCed.
-  // Reads against such an epoch will fail.
-  uint64 safe_epoch = 4;
+  uint64 max_committed_epoch = 3 [deprecated = true];
+  reserved 4;
+  reserved 'safe_epoch';
   map<uint32, TableWatermarks> table_watermarks = 5;
   map<uint32, TableChangeLog> table_change_logs = 6;
+  map<uint32, StateTableInfo> state_table_info = 7;
 }
 
 message HummockVersionDelta {
@@ -176,10 +204,9 @@ message HummockVersionDelta {
   uint64 prev_id = 2;
   // Levels of each compaction group
   map<uint64, GroupDeltas> group_deltas = 3;
-  uint64 max_committed_epoch = 4;
-  // Snapshots with epoch less than the safe epoch have been GCed.
-  // Reads against such an epoch will fail.
-  uint64 safe_epoch = 5;
+  uint64 max_committed_epoch = 4 [deprecated = true];
+  reserved 5;
+  reserved 'safe_epoch';
   bool trivial_move = 6;
   reserved 7;
   reserved "gc_object_ids";
@@ -191,6 +218,7 @@ message HummockVersionDelta {
     uint64 truncate_epoch = 2;
   }
   map<uint32, ChangeLogDelta> change_log_delta = 10;
+  map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
 }
 
 message HummockVersionDeltas {
@@ -210,14 +238,6 @@ message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
   repeated HummockVersionDelta version_deltas = 2;
-}
-
-// We will have two epoch after decouple
-message HummockSnapshot {
-  // Epoch with checkpoint, we will read durable data with it.
-  uint64 committed_epoch = 1;
-  // Epoch without checkpoint, we will read real-time data with it. But it may be rolled back.
-  uint64 current_epoch = 2;
 }
 
 message VersionUpdatePayload {
@@ -251,48 +271,10 @@ message UnpinVersionResponse {
   common.Status status = 1;
 }
 
-message PinSnapshotRequest {
-  uint32 context_id = 1;
-}
-
-message PinSpecificSnapshotRequest {
-  uint32 context_id = 1;
-  uint64 epoch = 2;
-}
-
 message GetAssignedCompactTaskNumRequest {}
 
 message GetAssignedCompactTaskNumResponse {
   uint32 num_tasks = 1;
-}
-
-message PinSnapshotResponse {
-  common.Status status = 1;
-  HummockSnapshot snapshot = 2;
-}
-
-message GetEpochRequest {}
-
-message GetEpochResponse {
-  common.Status status = 1;
-  HummockSnapshot snapshot = 2;
-}
-
-message UnpinSnapshotRequest {
-  uint32 context_id = 1;
-}
-
-message UnpinSnapshotResponse {
-  common.Status status = 1;
-}
-
-message UnpinSnapshotBeforeRequest {
-  uint32 context_id = 1;
-  HummockSnapshot min_snapshot = 3;
-}
-
-message UnpinSnapshotBeforeResponse {
-  common.Status status = 1;
 }
 
 // When right_exclusive=false, it represents [left, right], of which both boundary are open. When right_exclusive=true,
@@ -328,14 +310,20 @@ message CompactTask {
     JOIN_HANDLE_FAILED = 11;
     TRACK_SST_OBJECT_ID_FAILED = 12;
     NO_AVAIL_CPU_RESOURCE_CANCELED = 13;
+    HEARTBEAT_PROGRESS_CANCELED = 14;
+    RETENTION_TIME_REJECTED = 17;
+
+    // for serverless compaction
+    SERVERLESS_SEND_FAIL_CANCELED = 15;
+    SERVERLESS_TABLE_NOT_FOUND_CANCELED = 16;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
   // In ideal case, the compaction will generate splits.len() tables which have key range
   // corresponding to that in [splits], respectively
   repeated KeyRange splits = 2;
-  // low watermark in 'ts-aware compaction'
-  uint64 watermark = 3;
+  reserved 3;
+  reserved 'watermark';
   // compaction output, which will be added to [target_level] of LSM after compaction
   repeated SstableInfo sorted_output_ssts = 4;
   // task id assigned by hummock storage service
@@ -366,6 +354,7 @@ message CompactTask {
     TTL = 5;
     TOMBSTONE = 6;
     EMERGENCY = 7;
+    VNODE_WATERMARK = 8;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -382,6 +371,8 @@ message CompactTask {
   map<uint32, TableWatermarks> table_watermarks = 24;
   // The table schemas that are at least as new as the one used to create `input_ssts`.
   map<uint32, TableSchema> table_schemas = 25;
+  // Max sub compaction task numbers
+  uint32 max_sub_compaction = 26;
 }
 
 message LevelHandler {
@@ -475,6 +466,7 @@ message SubscribeCompactionEventRequest {
     uint64 task_id = 4;
     CompactTask.TaskStatus task_status = 5;
     repeated SstableInfo sorted_output_ssts = 6;
+    map<uint64, uint64> object_timestamps = 7;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -506,9 +498,9 @@ message SubscribeCompactionEventResponse {
 
   oneof event {
     CompactTask compact_task = 1;
-    VacuumTask vacuum_task = 2;
-    FullScanTask full_scan_task = 3;
-    ValidationTask validation_task = 4;
+    VacuumTask vacuum_task = 2 [deprecated = true];
+    FullScanTask full_scan_task = 3 [deprecated = true];
+    ValidationTask validation_task = 4 [deprecated = true];
     CancelCompactTask cancel_compact_task = 5;
 
     PullTaskAck pull_task_ack = 6;
@@ -522,6 +514,7 @@ message ReportCompactionTaskRequest {
   message ReportTask {
     CompactTask compact_task = 2;
     map<uint32, TableStats> table_stats_change = 3;
+    map<uint64, uint64> object_timestamps = 4;
   }
   // HeartBeat provides the progress status of all tasks on the Compactor.
   message HeartBeat {
@@ -540,7 +533,6 @@ message ReportCompactionTaskResponse {
 message ValidationTask {
   repeated SstableInfo sst_infos = 1;
   map<uint64, uint32> sst_id_to_worker_id = 2;
-  uint64 epoch = 3;
 }
 
 // Delete SSTs in object store
@@ -550,21 +542,16 @@ message VacuumTask {
 
 // Scan object store to get candidate orphan SSTs.
 message FullScanTask {
-  uint64 sst_retention_time_sec = 1;
+  uint64 sst_retention_watermark = 1;
+  optional string prefix = 2;
+  optional string start_after = 3;
+  optional uint64 limit = 4;
 }
 
 // Cancel compact task
 message CancelCompactTask {
   uint32 context_id = 1;
   uint64 task_id = 2;
-}
-
-message ReportVacuumTaskRequest {
-  VacuumTask vacuum_task = 1;
-}
-
-message ReportVacuumTaskResponse {
-  common.Status status = 1;
 }
 
 message TriggerManualCompactionRequest {
@@ -579,21 +566,9 @@ message TriggerManualCompactionResponse {
   common.Status status = 1;
 }
 
-message ReportFullScanTaskRequest {
-  // Object ids that satisfying conditions specified by FullScanTask.
-  repeated uint64 object_ids = 1;
-  // Total count of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_count = 2;
-  // Total size of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_size = 3;
-}
-
-message ReportFullScanTaskResponse {
-  common.Status status = 1;
-}
-
 message TriggerFullGCRequest {
   uint64 sst_retention_time_sec = 1;
+  optional string prefix = 2;
 }
 
 message TriggerFullGCResponse {
@@ -615,21 +590,10 @@ message PinnedVersionsSummary {
   map<uint32, common.WorkerNode> workers = 2;
 }
 
-message PinnedSnapshotsSummary {
-  repeated HummockPinnedSnapshot pinned_snapshots = 1;
-  map<uint32, common.WorkerNode> workers = 2;
-}
-
 message RiseCtlGetPinnedVersionsSummaryRequest {}
 
 message RiseCtlGetPinnedVersionsSummaryResponse {
   PinnedVersionsSummary summary = 1;
-}
-
-message RiseCtlGetPinnedSnapshotsSummaryRequest {}
-
-message RiseCtlGetPinnedSnapshotsSummaryResponse {
-  PinnedSnapshotsSummary summary = 1;
 }
 
 message InitMetadataForReplayRequest {
@@ -669,6 +633,11 @@ message RiseCtlListCompactionGroupResponse {
 }
 
 message RiseCtlUpdateCompactionConfigRequest {
+  message CompressionAlgorithm {
+    uint32 level = 1;
+    string compression_algorithm = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -686,6 +655,12 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
       uint32 tombstone_reclaim_ratio = 16;
+      CompressionAlgorithm compression_algorithm = 17;
+      uint32 max_l0_compact_level_count = 18;
+      uint64 sst_allowed_trivial_move_min_size = 19;
+      uint32 split_weight_by_vnode = 20;
+      bool disable_auto_group_scheduling = 21;
+      uint64 max_overlapping_level_size = 22;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -707,6 +682,7 @@ message PinVersionResponse {
 message SplitCompactionGroupRequest {
   uint64 group_id = 1;
   repeated uint32 table_ids = 2;
+  uint32 partition_vnode_count = 3;
 }
 
 message SplitCompactionGroupResponse {
@@ -794,6 +770,22 @@ message CancelCompactTaskResponse {
   bool ret = 1;
 }
 
+message GetVersionByEpochRequest {
+  uint64 epoch = 1;
+  uint32 table_id = 2;
+}
+
+message GetVersionByEpochResponse {
+  HummockVersion version = 1;
+}
+
+message MergeCompactionGroupRequest {
+  uint64 left_group_id = 1;
+  uint64 right_group_id = 2;
+}
+
+message MergeCompactionGroupResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -802,18 +794,10 @@ service HummockManagerService {
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
-  rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
-  rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
-  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
-  rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
-  rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
-  rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
-  rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
-  rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
@@ -833,7 +817,8 @@ service HummockManagerService {
   rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
   rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
-  rpc ListChangeLogEpochs(ListChangeLogEpochsRequest) returns (ListChangeLogEpochsResponse);
+  rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
+  rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
 }
 
 message CompactionConfig {
@@ -865,12 +850,29 @@ message CompactionConfig {
   uint32 level0_overlapping_sub_level_compact_level_count = 18;
   uint32 tombstone_reclaim_ratio = 19;
   bool enable_emergency_picker = 20;
+
+  // The limitation of the level count of l0 compaction
+  optional uint32 max_l0_compact_level_count = 21;
+
+  // The limitation of base level trivial move sst size
+  optional uint64 sst_allowed_trivial_move_min_size = 22;
+
+  // The limitation of auto group scheduling
+  optional bool disable_auto_group_scheduling = 23;
+
+  // The limitation of the max size of the overlapping-level for the compaction
+  // hummock will reorg the commit-sstables to the multi overlapping-level if the size of the commit-sstables is larger than `max_overlapping_level_size`
+  optional uint64 max_overlapping_level_size = 24;
 }
 
 message TableStats {
   int64 total_key_size = 1;
   int64 total_value_size = 2;
   int64 total_key_count = 3;
+
+  // `total_compressed_size`` represents the size that the table takes up in the output sst
+  //  and this field is only filled and used by CN flushes, not compactor compaction
+  uint64 total_compressed_size = 4;
 }
 
 message HummockVersionStats {
@@ -889,17 +891,7 @@ message WriteLimits {
 
 message BranchedObject {
   uint64 object_id = 1;
-  uint64 sst_id = 2;
+  repeated uint64 sst_id = 2;
   // Compaction group id the SST belongs to.
   uint64 compaction_group_id = 3;
-}
-
-message ListChangeLogEpochsRequest {
-  uint32 table_id = 1;
-  uint64 min_epoch = 2;
-  uint32 max_count = 3;
-}
-
-message ListChangeLogEpochsResponse {
-  repeated uint64 epochs = 1;
 }

@@ -453,3 +453,10 @@
     select ts::timestamptz from t where ts > now();
   expected_outputs:
   - batch_plan
+- name: funtional index with timezone2
+  sql: |
+    create table t (a int, ts timestamp without time zone);
+    create index idx on t (CAST(ts AS timestamptz));
+    select * from t order by ts;
+  expected_outputs:
+    - batch_plan

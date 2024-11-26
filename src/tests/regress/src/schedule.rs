@@ -140,15 +140,15 @@ impl Schedule {
 
         if !different_tests.is_empty() {
             info!(
-                "Risingwave regress tests failed, these tests are different from expected output: {:?}",
+                "RisingWave regress tests failed, these tests are different from expected output: {:?}",
                 different_tests
             );
             bail!(
-                "Risingwave regress tests failed, these tests are different from expected output: {:?}",
+                "RisingWave regress tests failed, these tests are different from expected output: {:?}",
                 different_tests
             )
         } else {
-            info!("Risingwave regress tests passed.");
+            info!("RisingWave regress tests passed.");
             Ok(())
         }
     }

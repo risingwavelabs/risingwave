@@ -19,10 +19,10 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
+use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
-use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
+use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_pb::stream_service::streaming_control_stream_response::InitResponse;
 use risingwave_pb::stream_service::*;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -51,7 +51,7 @@ impl StreamClient {
                 "grpc-stream-client",
                 TcpConfig {
                     tcp_nodelay: true,
-                    keepalive_duration: None,
+                    ..Default::default()
                 },
             )
             .await?
@@ -69,11 +69,8 @@ pub type StreamClientPoolRef = Arc<StreamClientPool>;
 macro_rules! for_all_stream_rpc {
     ($macro:ident) => {
         $macro! {
-             { 0, update_actors, UpdateActorsRequest, UpdateActorsResponse }
-            ,{ 0, build_actors, BuildActorsRequest, BuildActorsResponse }
-            ,{ 0, broadcast_actor_info_table, BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse }
-            ,{ 0, drop_actors, DropActorsRequest, DropActorsResponse }
-            ,{ 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse }
+            { 0, wait_epoch_commit, WaitEpochCommitRequest, WaitEpochCommitResponse },
+            { 0, get_min_uncommitted_sst_id, GetMinUncommittedSstIdRequest, GetMinUncommittedSstIdResponse }
         }
     };
 }
@@ -86,10 +83,13 @@ pub type StreamingControlHandle =
     UnboundedBidiStreamHandle<StreamingControlStreamRequest, StreamingControlStreamResponse>;
 
 impl StreamClient {
-    pub async fn start_streaming_control(&self, prev_epoch: u64) -> Result<StreamingControlHandle> {
+    pub async fn start_streaming_control(
+        &self,
+        init_request: PbInitRequest,
+    ) -> Result<StreamingControlHandle> {
         let first_request = StreamingControlStreamRequest {
             request: Some(streaming_control_stream_request::Request::Init(
-                InitRequest { prev_epoch },
+                init_request,
             )),
         };
         let mut client = self.0.to_owned();

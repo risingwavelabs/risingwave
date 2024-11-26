@@ -20,11 +20,12 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{version_archive_dir, HummockSstableObjectId, HummockVersionId};
 use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::{HummockVersionArchive, SstableInfo};
+use risingwave_pb::hummock::HummockVersionArchive;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, SstableStoreRef};
@@ -62,9 +63,10 @@ async fn get_archive(
 
 pub async fn print_user_key_in_archive(
     context: &CtlContext,
-    archive_ids: Vec<HummockVersionId>,
+    archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
     user_key: String,
+    use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
     let user_key_bytes = hex::decode(user_key.clone()).unwrap_or_else(|_| {
         panic!("cannot decode user key {} into raw bytes", user_key);
@@ -72,7 +74,8 @@ pub async fn print_user_key_in_archive(
     let user_key = UserKey::decode(&user_key_bytes);
     println!("user key: {user_key:?}");
 
-    let hummock_opts = HummockServiceOpts::from_env(Some(data_dir.clone()))?;
+    let hummock_opts =
+        HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
     let sstable_store = hummock.sstable_store();
     let archive_object_store = sstable_store.store();
@@ -97,18 +100,9 @@ async fn print_user_key_in_version(
 ) -> anyhow::Result<()> {
     println!("print key {:?} in version {}", target_key, version.id);
     for cg in version.levels.values() {
-        for level in cg
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .rev()
-            .chain(cg.levels.iter())
-        {
+        for level in cg.l0.sub_levels.iter().rev().chain(cg.levels.iter()) {
             for sstable_info in &level.table_infos {
-                use risingwave_hummock_sdk::key_range::KeyRange;
-                let key_range: KeyRange = sstable_info.key_range.as_ref().unwrap().into();
+                let key_range = &sstable_info.key_range;
                 let left_user_key = FullKey::decode(&key_range.left);
                 let right_user_key = FullKey::decode(&key_range.right);
                 if left_user_key.user_key > *target_key || *target_key > right_user_key.user_key {
@@ -175,11 +169,13 @@ async fn print_user_key_in_sst(
 
 pub async fn print_version_delta_in_archive(
     context: &CtlContext,
-    archive_ids: Vec<HummockVersionId>,
+    archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
     sst_id: HummockSstableObjectId,
+    use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
-    let hummock_opts = HummockServiceOpts::from_env(Some(data_dir.clone()))?;
+    let hummock_opts =
+        HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
     let sstable_store = hummock.sstable_store();
     let archive_object_store = sstable_store.store();
@@ -194,7 +190,10 @@ pub async fn print_version_delta_in_archive(
                     if match_delta(d, sst_id) {
                         if is_first {
                             is_first = false;
-                            println!("delta: id {}, prev_id {}, max_committed_epoch {}, trivial_move {}, safe_epoch {}", delta.id, delta.prev_id, delta.max_committed_epoch, delta.trivial_move, delta.safe_epoch);
+                            println!(
+                                "delta: id {}, prev_id {}, trivial_move {}",
+                                delta.id, delta.prev_id, delta.trivial_move
+                            );
                         }
                         println!("compaction group id {cg_id}");
                         print_delta(d);
@@ -207,14 +206,22 @@ pub async fn print_version_delta_in_archive(
 }
 
 fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
-    let DeltaType::IntraLevel(delta) = delta else {
-        return false;
-    };
-    delta
-        .inserted_table_infos
-        .iter()
-        .any(|sst| sst.sst_id == sst_id)
-        || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)
+    match delta {
+        DeltaType::GroupConstruct(_) | DeltaType::GroupDestroy(_) | DeltaType::GroupMerge(_) => {
+            false
+        }
+        DeltaType::IntraLevel(delta) => {
+            delta
+                .inserted_table_infos
+                .iter()
+                .any(|sst| sst.sst_id == sst_id)
+                || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)
+        }
+        DeltaType::NewL0SubLevel(delta) => delta
+            .inserted_table_infos
+            .iter()
+            .any(|sst| sst.sst_id == sst_id),
+    }
 }
 
 fn print_delta(delta: &DeltaType) {

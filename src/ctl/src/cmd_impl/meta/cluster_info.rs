@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
@@ -31,7 +31,7 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes: _,
         source_infos: _,
@@ -40,37 +40,113 @@ pub async fn source_split_info(context: &CtlContext) -> anyhow::Result<()> {
         revision: _,
     } = get_cluster_info(context).await?;
 
+    let mut actor_splits_map: BTreeMap<u32, (usize, String)> = BTreeMap::new();
+
+    // build actor_splits_map
     for table_fragment in &table_fragments {
         if table_fragment.actor_splits.is_empty() {
             continue;
         }
 
-        println!("Table #{}", table_fragment.table_id);
-
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
-                || fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
             {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
                 // skip dummy source for dml fragment
                 continue;
             }
 
-            println!("\tFragment #{}", fragment.fragment_id);
             for actor in &fragment.actors {
                 if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
                     let splits = splits
                         .iter()
                         .map(|split| SplitImpl::try_from(split).unwrap())
                         .map(|split| split.id())
-                        .collect_vec();
+                        .collect_vec()
+                        .join(",");
+                    actor_splits_map.insert(actor.actor_id, (splits.len(), splits));
+                }
+            }
+        }
+    }
 
+    // print in the second iteration. Otherwise we don't have upstream splits info
+    for table_fragment in &table_fragments {
+        if table_fragment.actor_splits.is_empty() {
+            continue;
+        }
+        if ignore_id {
+            println!("Table");
+        } else {
+            println!("Table #{}", table_fragment.table_id);
+        }
+        for fragment in table_fragment.fragments.values() {
+            let fragment_type_mask = fragment.fragment_type_mask;
+            if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
+                && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
+            {
+                // no source or source backfill
+                continue;
+            }
+            if fragment_type_mask & FragmentTypeFlag::Dml as u32 != 0 {
+                // skip dummy source for dml fragment
+                continue;
+            }
+
+            println!(
+                "\tFragment{} ({})",
+                if ignore_id {
+                    "".to_string()
+                } else {
+                    format!(" #{}", fragment.fragment_id)
+                },
+                if fragment_type_mask == FragmentTypeFlag::Source as u32 {
+                    "Source"
+                } else {
+                    "SourceScan"
+                }
+            );
+            for actor in &fragment.actors {
+                if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor #{:<3} ({}): [{}]",
-                        actor.actor_id,
-                        splits.len(),
-                        splits.join(",")
+                        "\t\tActor{} ({} splits): [{}]{}",
+                        if ignore_id {
+                            "".to_string()
+                        } else {
+                            format!(" #{:<3}", actor.actor_id,)
+                        },
+                        split_count,
+                        splits,
+                        if !actor.upstream_actor_id.is_empty() {
+                            assert!(
+                                actor.upstream_actor_id.len() == 1,
+                                "should have only one upstream actor, got {actor:?}"
+                            );
+                            let upstream_splits =
+                                actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
+                            format!(
+                                " <- Upstream Actor{}: [{}]",
+                                if ignore_id {
+                                    "".to_string()
+                                } else {
+                                    format!(" #{}", actor.upstream_actor_id[0])
+                                },
+                                upstream_splits.1
+                            )
+                        } else {
+                            "".to_string()
+                        }
                     );
+                } else {
+                    println!(
+                        "\t\tError: Actor #{:<3} (not found in actor_splits)",
+                        actor.actor_id,
+                    )
                 }
             }
         }
@@ -88,7 +164,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         revision,
     } = get_cluster_info(context).await?;
 
-    // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
+    // Fragment ID -> [Worker ID -> [Actor ID]]
     let mut fragments = BTreeMap::new();
     // Fragment ID -> Table Fragments' State
     let mut fragment_states = HashMap::new();
@@ -96,31 +172,22 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     for table_fragment in &table_fragments {
         for (&id, fragment) in &table_fragment.fragments {
             for actor in &fragment.actors {
-                let parallel_unit = table_fragment
+                let worker_id = table_fragment
                     .actor_status
                     .get(&actor.actor_id)
                     .unwrap()
-                    .get_parallel_unit()
-                    .unwrap();
+                    .worker_id();
+
                 fragments
                     .entry(id)
-                    .or_insert_with(HashMap::new)
-                    .insert(parallel_unit.id, (parallel_unit, actor));
+                    .or_insert_with(BTreeMap::new)
+                    .entry(worker_id)
+                    .or_insert(BTreeSet::new())
+                    .insert(actor.actor_id);
             }
             fragment_states.insert(id, table_fragment.state());
         }
     }
-
-    // Parallel Unit ID -> Worker Node
-    let all_parallel_units: BTreeMap<_, _> = worker_nodes
-        .iter()
-        .flat_map(|worker_node| {
-            worker_node
-                .parallel_units
-                .iter()
-                .map(|parallel_unit| (parallel_unit.id, worker_node.clone()))
-        })
-        .collect();
 
     let mut table = Table::new();
 
@@ -132,11 +199,10 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         }
     };
 
-    // Compute Node, Parallel Unit, Frag 1, Frag 2, ..., Frag N
+    // Compute Node, Frag 1, Frag 2, ..., Frag N
     table.set_header({
         let mut row = Row::new();
         row.add_cell("Compute Node".into());
-        row.add_cell("Parallel Unit".into());
         for &fid in fragments.keys() {
             let cell = Cell::new(format!("Frag {fid}"));
             let cell = cross_out_if_creating(cell, fid);
@@ -146,8 +212,8 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     });
 
     let mut last_worker_id = None;
-    for (pu, worker) in all_parallel_units {
-        // Compute Node, Parallel Unit, Actor 1, Actor 11, -, ..., Actor N
+    for worker in worker_nodes {
+        // Compute Node,  Actor 1, Actor 11, -, ..., Actor N
         let mut row = Row::new();
         row.add_cell(if last_worker_id == Some(worker.id) {
             "".into()
@@ -166,14 +232,17 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
             ))
             .add_attribute(Attribute::Bold)
         });
-        row.add_cell(pu.into());
-        for (&fid, f) in &fragments {
-            let cell = if let Some((_pu, actor)) = f.get(&pu) {
-                actor.actor_id.into()
+        for (&fragment_id, worker_actors) in &fragments {
+            let cell = if let Some(actors) = worker_actors.get(&worker.id) {
+                actors
+                    .iter()
+                    .map(|actor| format!("{}", actor))
+                    .join(",")
+                    .into()
             } else {
                 "-".into()
             };
-            let cell = cross_out_if_creating(cell, fid);
+            let cell = cross_out_if_creating(cell, fragment_id);
             row.add_cell(cell);
         }
         table.add_row(row);

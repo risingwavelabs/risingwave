@@ -14,7 +14,7 @@
 
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -50,7 +50,7 @@ impl RowIdGenExecutor {
 
     /// Create a new row id generator based on the assigned vnodes.
     fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        RowIdGenerator::new(vnodes.iter_vnodes())
+        RowIdGenerator::new(vnodes.iter_vnodes(), vnodes.len())
     }
 
     /// Generate a row ID column according to ops.
@@ -123,26 +123,27 @@ impl Execute for RowIdGenExecutor {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, PrimitiveArray};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::PrimitiveArray;
+    use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Execute};
 
     #[tokio::test]
     async fn test_row_id_gen_executor() {
+        // This test only works when vnode count is 256.
+        assert_eq!(VirtualNode::COUNT_FOR_TEST, 256);
+
         let schema = Schema::new(vec![
             Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
+        let row_id_generator = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let (mut tx, upstream) = MockSource::channel();
         let upstream = upstream.into_executor(schema.clone(), pk_indices.clone());
 

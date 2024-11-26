@@ -17,16 +17,27 @@
 #![feature(let_chains)]
 
 use core::str::FromStr;
-use std::collections::HashMap;
+use core::sync::atomic::Ordering;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use clap::Parser;
+use futures::channel::oneshot;
 use futures::prelude::future::Either;
 use futures::prelude::stream::{BoxStream, PollNext};
 use futures::stream::select_with_strategy;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::buffer::Bitmap;
+use itertools::Itertools;
+use plotters::backend::SVGBackend;
+use plotters::chart::ChartBuilder;
+use plotters::drawing::IntoDrawingArea;
+use plotters::element::{Circle, EmptyElement};
+use plotters::series::{LineSeries, PointSeries};
+use plotters::style::{IntoFont, RED, WHITE};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::parser::{
@@ -49,16 +60,15 @@ use risingwave_connector::source::datagen::{
 use risingwave_connector::source::{
     Column, DataType, SourceContext, SourceEnumeratorContext, SplitEnumerator, SplitReader,
 };
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
 use serde::{Deserialize, Deserializer};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
-use tokio::time::{sleep, Instant};
+use tokio::time::sleep;
 
 const CHECKPOINT_INTERVAL: u64 = 1000;
-const THROUGHPUT_METRIC_RECORD_INTERVAL: u128 = 500;
+const THROUGHPUT_METRIC_RECORD_INTERVAL: u64 = 500;
 const BENCH_TIME: u64 = 20;
 const BENCH_TEST: &str = "bench_test";
 
@@ -144,47 +154,119 @@ impl MockRangeLogReader {
 }
 
 struct ThroughputMetric {
-    chunk_size_list: Vec<(u64, Instant)>,
-    accumulate_chunk_size: u64,
-    // Record every `record_interval` ms
-    record_interval: u128,
-    last_record_time: Instant,
+    accumulate_chunk_size: Arc<AtomicU64>,
+    stop_tx: oneshot::Sender<()>,
+    vec_rx: oneshot::Receiver<Vec<u64>>,
 }
 
 impl ThroughputMetric {
     pub fn new() -> Self {
+        let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+        let (vec_tx, vec_rx) = oneshot::channel::<Vec<u64>>();
+        let accumulate_chunk_size = Arc::new(AtomicU64::new(0));
+        let accumulate_chunk_size_clone = accumulate_chunk_size.clone();
+        tokio::spawn(async move {
+            let mut chunk_size_list = vec![];
+            loop {
+                tokio::select! {
+                    _ = sleep(tokio::time::Duration::from_millis(
+                        THROUGHPUT_METRIC_RECORD_INTERVAL,
+                    )) => {
+                        chunk_size_list.push(accumulate_chunk_size_clone.load(Ordering::Relaxed));
+                    }
+                    _ = &mut stop_rx => {
+                        vec_tx.send(chunk_size_list).unwrap();
+                        break;
+                    }
+                }
+            }
+        });
+
         Self {
-            chunk_size_list: vec![],
-            accumulate_chunk_size: 0,
-            record_interval: THROUGHPUT_METRIC_RECORD_INTERVAL,
-            last_record_time: Instant::now(),
+            accumulate_chunk_size,
+            stop_tx,
+            vec_rx,
         }
     }
 
     pub fn add_metric(&mut self, chunk_size: usize) {
-        self.accumulate_chunk_size += chunk_size as u64;
-        if Instant::now()
-            .duration_since(self.last_record_time)
-            .as_millis()
-            > self.record_interval
-        {
-            self.chunk_size_list
-                .push((self.accumulate_chunk_size, Instant::now()));
-            self.last_record_time = Instant::now();
-        }
+        self.accumulate_chunk_size
+            .fetch_add(chunk_size as u64, Ordering::Relaxed);
     }
 
-    pub fn get_throughput(&self) -> Vec<String> {
+    pub async fn print_throughput(self) {
+        self.stop_tx.send(()).unwrap();
+        let throughput_sum_vec = self.vec_rx.await.unwrap();
         #[allow(clippy::disallowed_methods)]
-        self.chunk_size_list
+        let throughput_vec = throughput_sum_vec
             .iter()
-            .zip(self.chunk_size_list.iter().skip(1))
-            .map(|(current, next)| {
-                let throughput = (next.0 - current.0) * 1000
-                    / (next.1.duration_since(current.1).as_millis() as u64);
-                format!("{} rows/s", throughput)
+            .zip(throughput_sum_vec.iter().skip(1))
+            .map(|(current, next)| (next - current) * 1000 / THROUGHPUT_METRIC_RECORD_INTERVAL)
+            .collect_vec();
+        if throughput_vec.is_empty() {
+            println!("Throughput Sink: Don't get Throughput, please check");
+            return;
+        }
+        let avg = throughput_vec.iter().sum::<u64>() / throughput_vec.len() as u64;
+        let throughput_vec_sorted = throughput_vec.iter().sorted().collect_vec();
+        let p90 = throughput_vec_sorted[throughput_vec_sorted.len() * 90 / 100];
+        let p95 = throughput_vec_sorted[throughput_vec_sorted.len() * 95 / 100];
+        let p99 = throughput_vec_sorted[throughput_vec_sorted.len() * 99 / 100];
+        println!("Throughput Sink:");
+        println!("avg: {:?} rows/s ", avg);
+        println!("p90: {:?} rows/s ", p90);
+        println!("p95: {:?} rows/s ", p95);
+        println!("p99: {:?} rows/s ", p99);
+        let draw_vec: Vec<(f32, f32)> = throughput_vec
+            .iter()
+            .enumerate()
+            .map(|(index, &value)| {
+                (
+                    (index as f32) * (THROUGHPUT_METRIC_RECORD_INTERVAL as f32 / 1000_f32),
+                    value as f32,
+                )
             })
-            .collect()
+            .collect();
+
+        let root = SVGBackend::new("throughput.svg", (640, 480)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.margin(10, 10, 10, 10);
+        let mut chart = ChartBuilder::on(&root)
+            .caption("Throughput Sink", ("sans-serif", 40).into_font())
+            .x_label_area_size(20)
+            .y_label_area_size(40)
+            .build_cartesian_2d(
+                0.0..BENCH_TIME as f32,
+                **throughput_vec_sorted.first().unwrap() as f32
+                    ..**throughput_vec_sorted.last().unwrap() as f32,
+            )
+            .unwrap();
+
+        chart
+            .configure_mesh()
+            .x_labels(5)
+            .y_labels(5)
+            .y_label_formatter(&|x| format!("{:.0}", x))
+            .draw()
+            .unwrap();
+
+        chart
+            .draw_series(LineSeries::new(draw_vec.clone(), &RED))
+            .unwrap();
+        chart
+            .draw_series(PointSeries::of_element(draw_vec, 5, &RED, &|c, s, st| {
+                EmptyElement::at(c) + Circle::new((0, 0), s, st.filled())
+            }))
+            .unwrap();
+        root.present().unwrap();
+
+        println!(
+            "Throughput Sink: {:?}",
+            throughput_vec
+                .iter()
+                .map(|a| format!("{} rows/s", a))
+                .collect_vec()
+        );
     }
 }
 
@@ -210,7 +292,6 @@ impl MockDatagenSource {
         .unwrap();
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },
@@ -302,10 +383,10 @@ where
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
-    if let Err(e) = log_sinker.consume_log_and_sink(&mut log_reader).await {
-        return Err(e.to_report_string());
+    match log_sinker.consume_log_and_sink(&mut log_reader).await {
+        Ok(_) => Err("Stream closed".to_string()),
+        Err(e) => Err(e.to_report_string()),
     }
-    Err("Stream closed".to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -358,9 +439,9 @@ fn read_table_schema_from_yml(path: &str) -> TableSchemaFromYml {
     table
 }
 
-fn read_sink_option_from_yml(path: &str) -> HashMap<String, HashMap<String, String>> {
+fn read_sink_option_from_yml(path: &str) -> HashMap<String, BTreeMap<String, String>> {
     let data = std::fs::read_to_string(path).unwrap();
-    let sink_option: HashMap<String, HashMap<String, String>> =
+    let sink_option: HashMap<String, BTreeMap<String, String>> =
         serde_yaml::from_str(&data).unwrap();
     sink_option
 }
@@ -404,19 +485,11 @@ fn mock_from_legacy_type(
             format,
             encode: SinkEncode::Json,
             options: Default::default(),
+            secret_refs: Default::default(),
             key_encode: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)
-    }
-}
-
-fn print_throughput_result(throughput_metric: ThroughputMetric) {
-    let throughput_result = throughput_metric.get_throughput();
-    if throughput_result.is_empty() {
-        println!("Throughput Sink: Don't get Throughput, please check");
-    } else {
-        println!("Throughput Sink: {:?}", throughput_result);
     }
 }
 
@@ -472,12 +545,11 @@ async fn main() {
             sink_from_name: "not_need_set".to_string(),
         };
         let sink = build_sink(sink_param).unwrap();
-        let mut sink_writer_param = SinkWriterParam::for_test();
+        let sink_writer_param = SinkWriterParam::for_test();
         println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
-        sink_writer_param.connector_params.sink_payload_format = SinkPayloadFormat::StreamChunk;
         tokio::spawn(async move {
             dispatch_sink!(sink, sink, {
-                consume_log_stream(sink, mock_range_log_reader, sink_writer_param).boxed()
+                consume_log_stream(*sink, mock_range_log_reader, sink_writer_param).boxed()
             })
             .await
             .unwrap();
@@ -486,5 +558,5 @@ async fn main() {
     sleep(tokio::time::Duration::from_secs(BENCH_TIME)).await;
     println!("Bench Over!");
     stop_tx.send(()).await.unwrap();
-    print_throughput_result(data_size_rx.await.unwrap());
+    data_size_rx.await.unwrap().print_throughput().await;
 }

@@ -8,6 +8,9 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints]
+workspace = true
+
 [dependencies]
 async-trait = "0.1"
 await-tree = { workspace = true }
@@ -23,16 +26,27 @@ crc32fast = "1"
 either = "1"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = { version = "0.14", features = ["tcp", "client"] } # required by aws sdk
+hyper = { version = "0.14", features = ["tcp", "client"] }                    # TODO(http-bump): required by aws sdk
 hyper-rustls = { version = "0.24.2", features = ["webpki-roots"] }
 hyper-tls = "0.5.0"
 itertools = { workspace = true }
-madsim = "0.2.22"
-opendal = "0.45.1"
+madsim = "0.2.31"
+opendal = { workspace = true, features = [
+    "executors-tokio",
+    "services-azblob",
+    "services-fs",
+    "services-gcs",
+    "services-memory",
+    "services-obs",
+    "services-oss",
+    "services-s3",
+    "services-webhdfs",
+    "services-azfile",
+] }
 prometheus = { version = "0.13", features = ["process"] }
-reqwest = "0.11" # required by opendal
+reqwest = "0.12.2" # required by opendal
 risingwave_common = { workspace = true }
-rustls = "0.23.5"
+risingwave_jni_core = { workspace = true, optional = true }
 spin = "0.9"
 thiserror = "1"
 thiserror-ext = { workspace = true }
@@ -49,4 +63,4 @@ tracing = "0.1"
 # normal = ["workspace-hack"]
 
 # [features]
-# hdfs-backend = ["opendal/services-hdfs"]
+# hdfs-backend = ["opendal/services-hdfs", "dep:risingwave_jni_core"]

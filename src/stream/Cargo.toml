@@ -24,7 +24,7 @@ await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 delta_btree_map = { path = "../utils/delta_btree_map" }
-educe = "0.5"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
@@ -32,12 +32,13 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 governor = { version = "0.6", default-features = false, features = [
-    "std",
-    "dashmap",
-    "jitter",
+  "std",
+  "dashmap",
+  "jitter",
 ] }
 hytra = "0.1.2"
 itertools = { workspace = true }
+jsonbb = { workspace = true }
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { workspace = true }
 maplit = "1.0.2"
@@ -68,17 +69,17 @@ strum_macros = "0.26"
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "macros",
+  "time",
+  "signal",
+  "fs",
 ] }
 tokio-metrics = "0.3.0"
 tokio-retry = "0.3"
-tokio-stream = "0.1"
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 
@@ -92,7 +93,7 @@ expect-test = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
-    "test",
+  "test",
 ] }
 serde_yaml = "0.9"
 tracing-test = "0.2"

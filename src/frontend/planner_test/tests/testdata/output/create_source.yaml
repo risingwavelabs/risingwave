@@ -11,7 +11,7 @@
   sql: |
     create source s with(connector='kafka') FORMAT PLAIN ENCODE JSON;
   planner_error: 'Protocol error: Schema definition is required, either from SQL or schema registry.'
-- id: csv_delimiter_tab
+- id: csv_delimiter_comma
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
       connector = 'kafka',
@@ -19,6 +19,23 @@
       properties.bootstrap.server = 'message_queue:29092',
       scan.startup.mode = 'earliest'
     ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamDml { columns: [v1, v2, _row_id] }
+            └─StreamSource
+- id: csv_delimiter_semicolon
+  sql: |
+    explain create table s0 (v1 int, v2 varchar) with (
+      connector = 'kafka',
+      topic = 'kafka_1_csv_topic',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE CSV (delimiter = ';', without_header = true);
   explain_output: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamRowIdGen { row_id_index: 2 }

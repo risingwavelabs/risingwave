@@ -20,18 +20,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::IntGauge;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, BranchedSstInfo,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
+use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
-};
-use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockVersionId};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersionStats, LevelType,
+    CompactionConfig, HummockPinnedVersion, HummockVersionStats, LevelType,
 };
 
 use super::compaction::selector::DynamicLevelSelectorCore;
@@ -111,17 +107,6 @@ pub fn trigger_local_table_stat(
             table_metrics.total_key_size.set(table_stats.total_key_size);
         }
     }
-}
-
-pub fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
-    metrics
-        .max_committed_epoch
-        .set(current_version.max_committed_epoch as i64);
-    metrics
-        .version_size
-        .set(current_version.estimated_encode_len() as i64);
-    metrics.safe_epoch.set(current_version.safe_epoch as i64);
-    metrics.current_version_id.set(current_version.id as i64);
 }
 
 pub fn trigger_mv_stat(
@@ -239,42 +224,42 @@ pub fn trigger_sst_stat(
         let overlapping_sst_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| sub_level.level_type() == LevelType::Overlapping)
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| sub_level.level_type == LevelType::Overlapping)
+                    .count()
             })
             .unwrap_or(0);
 
         let non_overlap_sst_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| sub_level.level_type() == LevelType::Nonoverlapping)
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| sub_level.level_type == LevelType::Nonoverlapping)
+                    .count()
             })
             .unwrap_or(0);
 
         let partition_level_num = current_version
             .levels
             .get(&compaction_group_id)
-            .and_then(|level| {
-                level.l0.as_ref().map(|l0| {
-                    l0.sub_levels
-                        .iter()
-                        .filter(|sub_level| {
-                            sub_level.level_type() == LevelType::Nonoverlapping
-                                && sub_level.vnode_partition_count > 0
-                        })
-                        .count()
-                })
+            .map(|level| {
+                level
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .filter(|sub_level| {
+                        sub_level.level_type == LevelType::Nonoverlapping
+                            && sub_level.vnode_partition_count > 0
+                    })
+                    .count()
             })
             .unwrap_or(0);
         metrics
@@ -368,6 +353,7 @@ pub fn remove_compaction_group_in_sst_stat(
     remove_compacting_task_stat(metrics, compaction_group_id, max_level);
     remove_split_stat(metrics, compaction_group_id);
     remove_compact_task_metrics(metrics, compaction_group_id, max_level);
+    remove_compaction_group_stat(metrics, compaction_group_id);
 }
 
 pub fn remove_compacting_task_stat(
@@ -403,6 +389,32 @@ pub fn remove_split_stat(metrics: &MetaMetrics, compaction_group_id: CompactionG
         .ok();
 }
 
+pub fn remove_compaction_group_stat(metrics: &MetaMetrics, compaction_group_id: CompactionGroupId) {
+    let label_str = compaction_group_id.to_string();
+    metrics
+        .compaction_group_size
+        .remove_label_values(&[&label_str])
+        .ok();
+    metrics
+        .compaction_group_file_count
+        .remove_label_values(&[&label_str])
+        .ok();
+    metrics
+        .compaction_group_throughput
+        .remove_label_values(&[&label_str])
+        .ok();
+
+    metrics
+        .split_compaction_group_count
+        .remove_label_values(&[&label_str])
+        .ok();
+
+    metrics
+        .merge_compaction_group_count
+        .remove_label_values(&[&label_str])
+        .ok();
+}
+
 pub fn trigger_pin_unpin_version_state(
     metrics: &MetaMetrics,
     pinned_versions: &BTreeMap<HummockContextId, HummockPinnedVersion>,
@@ -412,32 +424,7 @@ pub fn trigger_pin_unpin_version_state(
     } else {
         metrics
             .min_pinned_version_id
-            .set(HummockVersionId::MAX as _);
-    }
-}
-
-pub fn trigger_pin_unpin_snapshot_state(
-    metrics: &MetaMetrics,
-    pinned_snapshots: &BTreeMap<HummockContextId, HummockPinnedSnapshot>,
-) {
-    if let Some(m) = pinned_snapshots
-        .values()
-        .map(|v| v.minimal_pinned_snapshot)
-        .min()
-    {
-        metrics.min_pinned_epoch.set(m as i64);
-    } else {
-        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
-    }
-}
-
-pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
-    if let Some(sp) = safepoints.iter().min() {
-        metrics.min_safepoint_version_id.set(*sp as _);
-    } else {
-        metrics
-            .min_safepoint_version_id
-            .set(HummockVersionId::MAX as _);
+            .set(HummockVersionId::MAX.to_u64() as _);
     }
 }
 
@@ -478,10 +465,6 @@ pub fn trigger_gc_stat(
     metrics.stale_object_count.set(stale_object_count as _);
 }
 
-pub fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
-    metrics.delta_log_count.set(total_number as _);
-}
-
 // Triggers a report on compact_pending_bytes_needed
 pub fn trigger_lsm_stat(
     metrics: &MetaMetrics,
@@ -510,16 +493,16 @@ pub fn trigger_lsm_stat(
     {
         // compact_level_compression_ratio
         let level_compression_ratio = levels
-            .get_levels()
+            .levels
             .iter()
             .map(|level| {
-                let ratio = if level.get_uncompressed_file_size() == 0 {
+                let ratio = if level.uncompressed_file_size == 0 {
                     0.0
                 } else {
-                    level.get_total_file_size() as f64 / level.get_uncompressed_file_size() as f64
+                    level.total_file_size as f64 / level.uncompressed_file_size as f64
                 };
 
-                (level.get_level_idx(), ratio)
+                (level.level_idx, ratio)
             })
             .collect_vec();
 
@@ -555,36 +538,36 @@ pub fn trigger_write_stop_stats(
     }
 }
 
-pub fn trigger_split_stat(
-    metrics: &MetaMetrics,
-    compaction_group_id: CompactionGroupId,
-    member_table_id_len: usize,
-    branched_ssts: &BTreeMap<
-        // SST object id
-        HummockSstableObjectId,
-        BranchedSstInfo,
-    >,
-) {
-    let group_label = compaction_group_id.to_string();
-    metrics
-        .state_table_count
-        .with_label_values(&[&group_label])
-        .set(member_table_id_len as _);
+pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
+    let branched_ssts = version.build_branched_sst_info();
 
-    let branched_sst_count: usize = branched_ssts
-        .values()
-        .map(|branched_map| {
-            branched_map
-                .keys()
-                .filter(|group_id| **group_id == compaction_group_id)
-                .count()
-        })
-        .sum();
+    for compaction_group_id in version.levels.keys() {
+        let group_label = compaction_group_id.to_string();
+        metrics
+            .state_table_count
+            .with_label_values(&[&group_label])
+            .set(
+                version
+                    .state_table_info
+                    .compaction_group_member_table_ids(*compaction_group_id)
+                    .len() as _,
+            );
 
-    metrics
-        .branched_sst_count
-        .with_label_values(&[&group_label])
-        .set(branched_sst_count as _);
+        let branched_sst_count: usize = branched_ssts
+            .values()
+            .map(|branched_map| {
+                branched_map
+                    .keys()
+                    .filter(|group_id| *group_id == compaction_group_id)
+                    .count()
+            })
+            .sum();
+
+        metrics
+            .branched_sst_count
+            .with_label_values(&[&group_label])
+            .set(branched_sst_count as _);
+    }
 }
 
 pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {

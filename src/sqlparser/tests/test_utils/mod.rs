@@ -11,6 +11,7 @@
 // limitations under the License.
 
 // Re-export everything from `src/test_utils.rs`.
+#[allow(unused_imports)]
 pub use risingwave_sqlparser::test_utils::*;
 
 // For the test-only macros we take a different approach of keeping them here

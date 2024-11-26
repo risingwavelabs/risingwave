@@ -54,12 +54,18 @@ public class DbzConnectorConfig {
     public static final String PG_PUB_NAME = "publication.name";
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
+    public static final String PG_SSL_ROOT_CERT = "ssl.root.cert";
+
+    /* Sql Server configs */
+    public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
+    public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
+    private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
@@ -146,27 +152,34 @@ public class DbzConnectorConfig {
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty("snapshot.mode", "recovery");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
                     // read upstream table schemas and emit incremental changes only
-                    mysqlProps.setProperty("snapshot.mode", "schema_only");
+                    mysqlProps.setProperty("snapshot.mode", "no_data");
                 }
             } else {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
                 // reading from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
+                    // 'snapshot.mode=recovery' must be configured if binlog offset is
                     // specified. It only snapshots the schemas, not the data, and continue binlog
                     // reading from the specified offset
-                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty("snapshot.mode", "recovery");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
             }
 
             dbzProps.putAll(mysqlProps);
+
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared MySQL source, since we
+                // allow user to ingest tables in different database
+                LOG.info("Disable table filtering for the shared MySQL source");
+                dbzProps.remove("table.include.list");
+            }
 
         } else if (source == SourceTypeE.POSTGRES) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
@@ -180,7 +193,7 @@ public class DbzConnectorConfig {
             }
             if (isCdcBackfill) {
                 // skip the initial snapshot for cdc backfill
-                postgresProps.setProperty("snapshot.mode", "never");
+                postgresProps.setProperty("snapshot.mode", "no_data");
 
                 // if startOffset is specified, we should continue
                 // reading changes from the given offset
@@ -193,10 +206,27 @@ public class DbzConnectorConfig {
                 // if snapshot phase is finished and offset is specified, we will continue reading
                 // changes from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    postgresProps.setProperty("snapshot.mode", "never");
+                    postgresProps.setProperty("snapshot.mode", "no_data");
                     postgresProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
+            }
+
+            // adapt value of sslmode to the expected value
+            var sslMode = postgresProps.getProperty("database.sslmode");
+            if (sslMode != null) {
+                switch (sslMode) {
+                    case "disabled":
+                        sslMode = "disable";
+                        break;
+                    case "preferred":
+                        sslMode = "prefer";
+                        break;
+                    case "required":
+                        sslMode = "require";
+                        break;
+                }
+                postgresProps.setProperty("database.sslmode", sslMode);
             }
 
             dbzProps.putAll(postgresProps);
@@ -206,6 +236,10 @@ public class DbzConnectorConfig {
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Postgres source");
                 dbzProps.remove("table.include.list");
+            }
+
+            if (userProps.containsKey(PG_SSL_ROOT_CERT)) {
+                dbzProps.setProperty("database.sslrootcert", userProps.get(PG_SSL_ROOT_CERT));
             }
         } else if (source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
@@ -224,7 +258,7 @@ public class DbzConnectorConfig {
             // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                postgresProps.setProperty("snapshot.mode", "never");
+                postgresProps.setProperty("snapshot.mode", "no_data");
                 postgresProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
@@ -235,7 +269,7 @@ public class DbzConnectorConfig {
             // if snapshot phase is finished and offset is specified, we will continue reading
             // changes from the given offset
             if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                mongodbProps.setProperty("snapshot.mode", "never");
+                mongodbProps.setProperty("snapshot.mode", "no_data");
                 mongodbProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
             }
@@ -249,7 +283,38 @@ public class DbzConnectorConfig {
             mongodbProps.setProperty("name", connectorName);
 
             dbzProps.putAll(mongodbProps);
+        } else if (source == SourceTypeE.SQL_SERVER) {
+            var sqlServerProps = initiateDbConfig(SQL_SERVER_CONFIG_FILE, substitutor);
+            // disable snapshot locking at all
+            sqlServerProps.setProperty("snapshot.locking.mode", "none");
 
+            if (isCdcBackfill) {
+                // if startOffset is specified, we should continue
+                // reading changes from the given offset
+                if (null != startOffset && !startOffset.isBlank()) {
+                    // skip the initial snapshot for cdc backfill
+                    sqlServerProps.setProperty("snapshot.mode", "recovery");
+                    sqlServerProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                } else {
+                    sqlServerProps.setProperty("snapshot.mode", "no_data");
+                }
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue reading
+                // changes from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    sqlServerProps.setProperty("snapshot.mode", "recovery");
+                    sqlServerProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
+            }
+            dbzProps.putAll(sqlServerProps);
+            if (isCdcSourceJob) {
+                // remove table filtering for the shared Sql Server source, since we
+                // allow user to ingest tables in different schemas
+                LOG.info("Disable table filtering for the shared Sql Server source");
+                dbzProps.remove("table.include.list");
+            }
         } else {
             throw new RuntimeException("unsupported source type: " + source);
         }

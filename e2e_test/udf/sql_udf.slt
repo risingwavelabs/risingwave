@@ -360,7 +360,7 @@ In SQL UDF definition: `select a + b + c + not_be_displayed(c)`
                                        ^
 
 
-statement error Expected end of statement, found: 💩
+statement error expected end of statement, found: 💩
 create function call_regexp_replace() returns varchar language sql as 'select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic')';
 
 # Recursive definition can NOT be accepted at present due to semantic check
@@ -401,7 +401,7 @@ statement error return type mismatch detected
 create function type_mismatch(INT) returns varchar language sql as 'select $1 + 114514 + $1';
 
 # Invalid function body syntax
-statement error Expected an expression:, found: EOF at the end
+statement error expected an expression:, found: EOF at the end
 create function add_error(INT, INT) returns int language sql as $$select $1 + $2 +$$;
 
 ######################################################################

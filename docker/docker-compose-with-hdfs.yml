@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   compactor-0:
     image: ghcr.io/risingwavelabs/risingwave:RisingWave_1.6.1_HDFS_2.7-x86_64
@@ -81,56 +80,6 @@ services:
           memory: 26G
         reservations:
           memory: 26G
-  etcd-0:
-    image: "quay.io/coreos/etcd:v3.5.10"
-    command:
-      - /usr/local/bin/etcd
-      - "--listen-client-urls"
-      - "http://0.0.0.0:2388"
-      - "--advertise-client-urls"
-      - "http://etcd-0:2388"
-      - "--listen-peer-urls"
-      - "http://0.0.0.0:2389"
-      - "--initial-advertise-peer-urls"
-      - "http://etcd-0:2389"
-      - "--listen-metrics-urls"
-      - "http://0.0.0.0:2379"
-      - "--name"
-      - risedev-meta
-      - "--max-txn-ops"
-      - "999999"
-      - "--max-request-bytes"
-      - "10485760"
-      - "--auto-compaction-mode"
-      - periodic
-      - "--auto-compaction-retention"
-      - 1m
-      - "--snapshot-count"
-      - "10000"
-      - "--data-dir"
-      - /etcd-data
-    expose:
-      - "2388"
-    ports:
-      - "2388:2388"
-      - "2389:2389"
-    depends_on: []
-    volumes:
-      - "etcd-0:/etcd-data"
-    environment:
-      - HADOOP_HOME=/opt/hadoop/
-    container_name: etcd-0
-    healthcheck:
-      test:
-        - CMD
-        - etcdctl
-        - --endpoints=http://localhost:2388
-        - endpoint
-        - health
-      interval: 1s
-      timeout: 5s
-      retries: 5
-    restart: always
   frontend-node-0:
     image: "ghcr.io/risingwavelabs/risingwave:RisingWave_1.6.1_HDFS_2.7-x86_64"
     command:
@@ -209,9 +158,9 @@ services:
       - "--prometheus-endpoint"
       - "http://prometheus-0:9500"
       - "--backend"
-      - etcd
-      - "--etcd-endpoints"
-      - "etcd-0:2388"
+      - sql
+      - "--sql-endpoints"
+      - "postgres://postgres:@postgres-0:5432/metadata"
       - "--state-store"
       - "hummock+hdfs://<cluster_name>"
       - "--data-directory"
@@ -232,6 +181,7 @@ services:
       - "<HADOOP_HOME>:/opt/hadoop"
     environment:
       - HADOOP_HOME=/opt/hadoop/
+      - RW_TELEMETRY_TYPE=${RW_TELEMETRY_TYPE:-"docker-compose"}
     container_name: meta-node-0
     healthcheck:
       test:
@@ -247,6 +197,19 @@ services:
           memory: 2G
         reservations:
           memory: 1G
+  postgres-0:
+    image: "postgres:15-alpine"
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=trust
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=metadata
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    expose:
+      - "5432"
+    ports:
+      - "8432:5432"
+    volumes:
+      - "postgres-0:/var/lib/postgresql/data"
   prometheus-0:
     image: "prom/prometheus:latest"
     command:
@@ -275,7 +238,7 @@ services:
       retries: 5
     restart: always
   message_queue:
-    image: "docker.vectorized.io/vectorized/redpanda:latest"
+    image: "redpandadata/redpanda:latest"
     command:
       - redpanda
       - start
@@ -314,7 +277,7 @@ services:
       retries: 5
     restart: always
 volumes:
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

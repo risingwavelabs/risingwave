@@ -54,6 +54,9 @@ pub struct TranslateApplyRule {
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
+        if apply.translated() {
+            return None;
+        }
         let mut left: PlanRef = apply.left();
         let right: PlanRef = apply.right();
         let apply_left_len = left.schema().len();
@@ -167,6 +170,15 @@ impl TranslateApplyRule {
                 data_types,
                 index,
             )
+        } else if let Some(apply) = plan.as_logical_apply() {
+            Self::rewrite_apply(
+                apply,
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
         } else if let Some(scan) = plan.as_logical_scan() {
             Self::rewrite_scan(
                 scan,
@@ -199,18 +211,6 @@ impl TranslateApplyRule {
         data_types: &mut HashMap<usize, DataType>,
         index: &mut usize,
     ) -> Option<PlanRef> {
-        // Only accept join which doesn't generate null columns.
-        if !matches!(
-            join.join_type(),
-            JoinType::Inner
-                | JoinType::LeftSemi
-                | JoinType::RightSemi
-                | JoinType::LeftAnti
-                | JoinType::RightAnti
-        ) {
-            return None;
-        }
-
         // TODO: Do we need to take the `on` into account?
         let left_len = join.left().schema().len();
         let (left_idxs, right_idxs): (Vec<_>, Vec<_>) = required_col_idx
@@ -222,25 +222,108 @@ impl TranslateApplyRule {
                     indices.iter_mut().for_each(|index| *index -= left_len);
                     offset += left_len;
                 }
-                if let Some(join) = plan.as_logical_join() {
-                    Self::rewrite_join(join, indices, offset, index_mapping, data_types, index)
-                } else if let Some(scan) = plan.as_logical_scan() {
-                    Self::rewrite_scan(scan, indices, offset, index_mapping, data_types, index)
-                } else {
-                    None
-                }
+                Self::rewrite(&plan, indices, offset, index_mapping, data_types, index)
             };
         match (left_idxs.is_empty(), right_idxs.is_empty()) {
-            (true, false) => rewrite(join.right(), right_idxs, true),
-            (false, true) => rewrite(join.left(), left_idxs, false),
+            (true, false) => {
+                // Only accept join which doesn't generate null columns.
+                match join.join_type() {
+                    JoinType::Inner
+                    | JoinType::LeftSemi
+                    | JoinType::RightSemi
+                    | JoinType::LeftAnti
+                    | JoinType::RightAnti
+                    | JoinType::RightOuter
+                    | JoinType::AsofInner => rewrite(join.right(), right_idxs, true),
+                    JoinType::LeftOuter | JoinType::FullOuter | JoinType::AsofLeftOuter => None,
+                    JoinType::Unspecified => unreachable!(),
+                }
+            }
+            (false, true) => {
+                // Only accept join which doesn't generate null columns.
+                match join.join_type() {
+                    JoinType::Inner
+                    | JoinType::LeftSemi
+                    | JoinType::RightSemi
+                    | JoinType::LeftAnti
+                    | JoinType::RightAnti
+                    | JoinType::LeftOuter
+                    | JoinType::AsofInner
+                    | JoinType::AsofLeftOuter => rewrite(join.left(), left_idxs, false),
+                    JoinType::RightOuter | JoinType::FullOuter => None,
+                    JoinType::Unspecified => unreachable!(),
+                }
+            }
             (false, false) => {
-                let left = rewrite(join.left(), left_idxs, false)?;
-                let right = rewrite(join.right(), right_idxs, true)?;
-                let new_join =
-                    LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
-                Some(new_join.into())
+                // Only accept join which doesn't generate null columns.
+                match join.join_type() {
+                    JoinType::Inner
+                    | JoinType::LeftSemi
+                    | JoinType::RightSemi
+                    | JoinType::LeftAnti
+                    | JoinType::RightAnti
+                    | JoinType::AsofInner => {
+                        let left = rewrite(join.left(), left_idxs, false)?;
+                        let right = rewrite(join.right(), right_idxs, true)?;
+                        let new_join =
+                            LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
+                        Some(new_join.into())
+                    }
+                    JoinType::LeftOuter
+                    | JoinType::RightOuter
+                    | JoinType::FullOuter
+                    | JoinType::AsofLeftOuter => None,
+                    JoinType::Unspecified => unreachable!(),
+                }
             }
             _ => None,
+        }
+    }
+
+    /// ```text
+    ///             LogicalApply
+    ///            /            \
+    ///     LogicalApply       RHS1
+    ///    /            \
+    ///  LHS           RHS2
+    /// ```
+    ///
+    /// A common structure of multi scalar subqueries is a chain of `LogicalApply`. To avoid exponential growth of the domain operator, we need to rewrite the apply and try to simplify the domain as much as possible.
+    /// We use a top-down apply order to rewrite the apply, so that we don't need to handle operator like project and aggregation generated by the domain calculation.
+    /// As a cost, we need to add a flag `translated` to the apply operator to remind `translate_apply_rule` that the apply has been translated.
+    fn rewrite_apply(
+        apply: &LogicalApply,
+        required_col_idx: Vec<usize>,
+        offset: usize,
+        index_mapping: &mut ColIndexMapping,
+        data_types: &mut HashMap<usize, DataType>,
+        index: &mut usize,
+    ) -> Option<PlanRef> {
+        // TODO: Do we need to take the `on` into account?
+        let left_len = apply.left().schema().len();
+        let (left_idxs, right_idxs): (Vec<_>, Vec<_>) = required_col_idx
+            .into_iter()
+            .partition(|idx| *idx < left_len);
+        if !left_idxs.is_empty() && right_idxs.is_empty() {
+            // Deal with multi scalar subqueries
+            match apply.join_type() {
+                JoinType::Inner
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::LeftOuter
+                | JoinType::AsofInner
+                | JoinType::AsofLeftOuter => {
+                    let plan = apply.left();
+                    Self::rewrite(&plan, left_idxs, offset, index_mapping, data_types, index)
+                }
+                JoinType::RightOuter
+                | JoinType::RightAnti
+                | JoinType::RightSemi
+                | JoinType::FullOuter => None,
+                JoinType::Unspecified => unreachable!(),
+            }
+        } else {
+            None
         }
     }
 

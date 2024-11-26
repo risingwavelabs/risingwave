@@ -14,19 +14,21 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::core::{AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
-use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, HistogramVec,
-    Registry,
+use prometheus::{exponential_buckets, histogram_opts, Registry};
+use risingwave_common::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
+};
 
 use crate::source::kafka::stats::RdKafkaStats;
 
 #[derive(Debug, Clone)]
 pub struct EnumeratorMetrics {
-    pub high_watermark: GenericGaugeVec<AtomicI64>,
+    pub high_watermark: LabelGuardedIntGaugeVec<2>,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -34,7 +36,7 @@ pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
 
 impl EnumeratorMetrics {
     fn new(registry: &Registry) -> Self {
-        let high_watermark = register_int_gauge_vec_with_registry!(
+        let high_watermark = register_guarded_int_gauge_vec_with_registry!(
             "source_kafka_high_watermark",
             "High watermark for a exec per partition",
             &["source_id", "partition"],
@@ -57,18 +59,16 @@ impl Default for EnumeratorMetrics {
 
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
-    pub partition_input_count: GenericCounterVec<AtomicU64>,
+    pub partition_input_count: LabelGuardedIntCounterVec<5>,
 
     // **Note**: for normal messages, the metric is the message's payload size.
     // For messages from load generator, the metric is the size of stream chunk.
-    pub partition_input_bytes: GenericCounterVec<AtomicU64>,
+    pub partition_input_bytes: LabelGuardedIntCounterVec<5>,
     /// Report latest message id
-    pub latest_message_id: GenericGaugeVec<AtomicI64>,
+    pub latest_message_id: LabelGuardedIntGaugeVec<3>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
-    pub connector_source_rows_received: GenericCounterVec<AtomicU64>,
-
-    pub direct_cdc_event_lag_latency: HistogramVec,
+    pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec<1>,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -76,7 +76,7 @@ pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
 
 impl SourceMetrics {
     fn new(registry: &Registry) -> Self {
-        let partition_input_count = register_int_counter_vec_with_registry!(
+        let partition_input_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_input_count",
             "Total number of rows that have been input from specific partition",
             &[
@@ -89,7 +89,7 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
-        let partition_input_bytes = register_int_counter_vec_with_registry!(
+        let partition_input_bytes = register_guarded_int_counter_vec_with_registry!(
             "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
             &[
@@ -102,19 +102,11 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
-        let latest_message_id = register_int_gauge_vec_with_registry!(
+        let latest_message_id = register_guarded_int_gauge_vec_with_registry!(
             "source_latest_message_id",
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
-        )
-        .unwrap();
-
-        let connector_source_rows_received = register_int_counter_vec_with_registry!(
-            "source_rows_received",
-            "Number of rows received by source",
-            &["source_type", "source_id"],
-            registry
         )
         .unwrap();
 
@@ -124,7 +116,7 @@ impl SourceMetrics {
             exponential_buckets(1.0, 2.0, 21).unwrap(), // max 1048s
         );
         let direct_cdc_event_lag_latency =
-            register_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
+            register_guarded_histogram_vec_with_registry!(opts, &["table_name"], registry).unwrap();
 
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
@@ -132,7 +124,6 @@ impl SourceMetrics {
             partition_input_bytes,
             latest_message_id,
             rdkafka_native_metric,
-            connector_source_rows_received,
             direct_cdc_event_lag_latency,
         }
     }

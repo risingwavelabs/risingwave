@@ -49,6 +49,10 @@ impl DataChunkBuilder {
         }
     }
 
+    pub fn batch_size(&self) -> usize {
+        self.batch_size
+    }
+
     /// Lazily create the array builders if absent
     fn ensure_builders(&mut self) {
         if self.array_builders.len() != self.data_types.len() {
@@ -226,6 +230,10 @@ impl DataChunkBuilder {
 
     pub fn buffered_count(&self) -> usize {
         self.buffered_count
+    }
+
+    pub fn can_append(&self, count: usize) -> bool {
+        self.buffered_count + count <= self.batch_size
     }
 
     pub fn num_columns(&self) -> usize {
@@ -459,13 +467,13 @@ mod tests {
 
         let mut left_array_builder = DataType::Int32.create_array_builder(5);
         for v in [1, 2, 3, 4, 5] {
-            left_array_builder.append(&Some(ScalarImpl::Int32(v)));
+            left_array_builder.append(Some(ScalarImpl::Int32(v)));
         }
         let left_arrays = [left_array_builder.finish()];
 
         let mut right_array_builder = DataType::Int64.create_array_builder(5);
         for v in [5, 4, 3, 2, 1] {
-            right_array_builder.append(&Some(ScalarImpl::Int64(v)));
+            right_array_builder.append(Some(ScalarImpl::Int64(v)));
         }
         let right_arrays = [right_array_builder.finish()];
 

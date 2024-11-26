@@ -49,7 +49,8 @@ impl Rule for ApplyTopNTransposeRule {
             apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let topn: &LogicalTopN = right.as_logical_top_n()?;
-        let (topn_input, limit, offset, with_ties, mut order, group_key) = topn.clone().decompose();
+        let (topn_input, limit, offset, with_ties, mut order, mut group_key) =
+            topn.clone().decompose();
 
         let apply_left_len = left.schema().len();
 
@@ -57,7 +58,7 @@ impl Rule for ApplyTopNTransposeRule {
             return None;
         }
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             topn_input,
             JoinType::Inner,
@@ -65,8 +66,7 @@ impl Rule for ApplyTopNTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_topn = {
             // shift index of topn's `InputRef` with `apply_left_len`.
@@ -74,6 +74,7 @@ impl Rule for ApplyTopNTransposeRule {
                 .column_orders
                 .iter_mut()
                 .for_each(|ord| ord.column_index += apply_left_len);
+            group_key.iter_mut().for_each(|idx| *idx += apply_left_len);
             let new_group_key = (0..apply_left_len).chain(group_key).collect_vec();
             LogicalTopN::new(new_apply, limit, offset, with_ties, order, new_group_key)
         };

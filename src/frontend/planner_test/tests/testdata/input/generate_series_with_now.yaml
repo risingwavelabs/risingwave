@@ -1,0 +1,64 @@
+- sql: |
+    select * from generate_series(
+      '2024-06-21 17:36:00'::timestamptz,
+      now(),
+      interval '1 hour'
+    );
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+- sql: |
+    select * from generate_series(
+      '2024-06-21 17:36:00',
+      now(),
+      '1 hour'
+    );
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+- sql: |
+    select * from generate_series(
+      '2024-06-21 17:36:00'::timestamp, -- `timestamp` type is not supported
+      now(),
+      interval '1 hour'
+    );
+  expected_outputs:
+    - binder_error
+- sql: |
+    select * from generate_series(
+      now() - interval '1 hour',
+      now(),
+      interval '1 hour'
+    );
+  expected_outputs:
+    - stream_error
+- sql: |
+    select * from unnest(array[now(), now()]);
+  expected_outputs:
+    - stream_error
+- sql: |
+    select 1::int as constant from generate_series(
+      '2024-06-21 17:36:00'::timestamptz,
+      now(),
+      interval '1 hour'
+    );
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan
+- sql: |
+    select
+      extract('year' from t) as year,
+      extract('month' from t) as month,
+      1::int as constant
+    from generate_series(
+      '2024-01-01 00:00:00+00'::timestamptz,
+      now(),
+      interval '1 month'
+    ) as s(t);
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - stream_plan

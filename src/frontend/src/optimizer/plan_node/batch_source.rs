@@ -30,6 +30,8 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
+///
+/// For supported batch connectors, see [`crate::scheduler::plan_fragmenter::SourceScanInfo`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase<Batch>,
@@ -102,6 +104,7 @@ impl ToDistributedBatch for BatchSource {
 impl ToBatchPb for BatchSource {
     fn to_batch_prost_body(&self) -> NodeBody {
         let source_catalog = self.source_catalog().unwrap();
+        let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
@@ -111,8 +114,9 @@ impl ToBatchPb for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
+            with_properties,
             split: vec![],
+            secret_refs,
         })
     }
 }

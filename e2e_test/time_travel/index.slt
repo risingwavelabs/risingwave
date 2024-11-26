@@ -1,0 +1,40 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (k INT);
+
+statement ok
+CREATE INDEX idx_t_k on t (k);
+
+sleep 5s
+
+statement ok
+INSERT INTO t VALUES (1);
+
+query I
+SELECT *  FROM t WHERE k=1;
+----
+1
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now()  WHERE k=1;
+----
+1
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second WHERE k=1;
+----
+
+sleep 5s
+
+query I
+SELECT *  FROM t FOR SYSTEM_TIME AS OF now() - '5' second WHERE k=1;
+----
+1
+
+statement ok
+DROP INDEX idx_t_k;
+
+statement ok
+DROP TABLE t;

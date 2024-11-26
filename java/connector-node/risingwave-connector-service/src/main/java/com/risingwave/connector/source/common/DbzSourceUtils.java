@@ -19,6 +19,7 @@ import java.lang.management.ManagementFactory;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.management.JMException;
@@ -77,16 +78,30 @@ public class DbzSourceUtils {
                             Optional.of(quotePostgres(schemaName) + "." + quotePostgres(tableName));
                 }
 
+                String withClause = "";
+                try {
+                    // Always create with `WITH ( publish_via_partition_root = true )` to ensure the
+                    // CDC of partitioned tables can work correctly.
+                    // `publish_via_partition_root` is not supported before v13. Luckily, before
+                    // v13, user cannot add a partitioned table into a publication either.
+                    if (jdbcConnection.getMetaData().getDatabaseMajorVersion() >= 13) {
+                        withClause = " WITH ( publish_via_partition_root = true )";
+                    }
+                } catch (SQLException e) {
+                    throw ValidatorUtils.internalError(e.getMessage());
+                }
+
                 // create the publication if it doesn't exist
                 String createPublicationSql;
                 if (schemaTableName.isPresent()) {
                     createPublicationSql =
                             String.format(
-                                    "CREATE PUBLICATION %s FOR TABLE %s;",
-                                    quotePostgres(pubName), schemaTableName.get());
+                                    "CREATE PUBLICATION %s FOR TABLE %s%s;",
+                                    quotePostgres(pubName), schemaTableName.get(), withClause);
                 } else {
                     createPublicationSql =
-                            String.format("CREATE PUBLICATION %s", quotePostgres(pubName));
+                            String.format(
+                                    "CREATE PUBLICATION %s%s;", quotePostgres(pubName), withClause);
                 }
                 try (var stmt = jdbcConnection.createStatement()) {
                     LOG.info(
@@ -112,6 +127,9 @@ public class DbzSourceUtils {
         } else if (sourceType == SourceTypeE.POSTGRES) {
             return waitForStreamingRunningInner(
                     "postgres", dbServerName, waitStreamingStartTimeout);
+        } else if (sourceType == SourceTypeE.SQL_SERVER) {
+            return waitForStreamingRunningInner(
+                    "sql_server", dbServerName, waitStreamingStartTimeout);
         } else {
             LOG.info("Unsupported backfill source, just return true for {}", dbServerName);
             return true;
@@ -153,20 +171,32 @@ public class DbzSourceUtils {
                     mbeanServer.getAttribute(
                             getStreamingMetricsObjectName(connector, server, contextName),
                             "Connected");
-        } catch (JMException ex) {
-            LOG.warn("Failed to get streaming metrics", ex);
+        } catch (JMException _ex) {
+            // ignore the exception, as it is expected when the streaming source
+            // (aka. binlog client) is not ready
         }
         return false;
     }
 
     private static ObjectName getStreamingMetricsObjectName(
             String connector, String server, String context) throws MalformedObjectNameException {
-        return new ObjectName(
-                "debezium."
-                        + connector
-                        + ":type=connector-metrics,context="
-                        + context
-                        + ",server="
-                        + server);
+        if (Objects.equals(connector, "sql_server")) {
+            // TODO: fulfill the task id here, by WKX
+            return new ObjectName(
+                    "debezium."
+                            + connector
+                            + ":type=connector-metrics,task=0,context="
+                            + context
+                            + ",server="
+                            + server);
+        } else {
+            return new ObjectName(
+                    "debezium."
+                            + connector
+                            + ":type=connector-metrics,context="
+                            + context
+                            + ",server="
+                            + server);
+        }
     }
 }

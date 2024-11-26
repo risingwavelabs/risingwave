@@ -16,30 +16,26 @@ use std::collections::HashMap;
 
 use comfy_table::{Row, Table};
 use itertools::Itertools;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_common::hash::VirtualNode;
+use risingwave_pb::common::WorkerType;
 
 use crate::CtlContext;
 
 pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let mappings = meta_client.list_serving_vnode_mappings().await?;
-    let workers = meta_client
+    let workers: HashMap<_, _> = meta_client
         .list_worker_nodes(Some(WorkerType::ComputeNode))
-        .await?;
-    let mut pu_to_worker: HashMap<ParallelUnitId, &WorkerNode> = HashMap::new();
-    for w in &workers {
-        for pu in &w.parallel_units {
-            pu_to_worker.insert(pu.id, w);
-        }
-    }
+        .await?
+        .into_iter()
+        .map(|worker| (worker.id, worker))
+        .collect();
 
     let mut table = Table::new();
     table.set_header({
         let mut row = Row::new();
         row.add_cell("Table Id".into());
         row.add_cell("Fragment Id".into());
-        row.add_cell("Parallel Unit Id".into());
         row.add_cell("Virtual Node".into());
         row.add_cell("Worker".into());
         row
@@ -48,28 +44,25 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
     let rows = mappings
         .iter()
         .flat_map(|(fragment_id, (table_id, mapping))| {
-            let mut pu_vnodes: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-            for (vnode, pu) in mapping.iter_with_vnode() {
-                pu_vnodes.entry(pu).or_default().push(vnode);
+            let mut worker_nodes: HashMap<u32, Vec<VirtualNode>> = HashMap::new();
+            for (vnode, worker_slot_id) in mapping.iter_with_vnode() {
+                worker_nodes
+                    .entry(worker_slot_id.worker_id())
+                    .or_default()
+                    .push(vnode);
             }
-            pu_vnodes.into_iter().map(|(pu_id, vnodes)| {
-                (
-                    *table_id,
-                    *fragment_id,
-                    pu_id,
-                    vnodes,
-                    pu_to_worker.get(&pu_id),
-                )
+            worker_nodes.into_iter().map(|(worker_id, vnodes)| {
+                (*table_id, *fragment_id, vnodes, workers.get(&worker_id))
             })
         })
         .collect_vec();
-    for (table_id, fragment_id, pu_id, vnodes, worker) in
-        rows.into_iter().sorted_by_key(|(t, f, p, ..)| (*t, *f, *p))
+
+    for (table_id, fragment_id, vnodes, worker) in
+        rows.into_iter().sorted_by_key(|(t, f, ..)| (*t, *f))
     {
         let mut row = Row::new();
         row.add_cell(table_id.into());
         row.add_cell(fragment_id.into());
-        row.add_cell(pu_id.into());
         row.add_cell(
             format!(
                 "{} in total: {}",

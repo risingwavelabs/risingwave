@@ -151,9 +151,9 @@ fn calculate_encoded_size_inner(
                 deserializer.deserialize_decimal()?;
                 0 // the len is not used since decimal is not a fixed length type
             }
-            // these two types is var-length and should only be determine at runtime.
+            // these types are var-length and should only be determine at runtime.
             // TODO: need some test for this case (e.g. e2e test)
-            DataType::List { .. } => deserializer.skip_bytes()?,
+            DataType::List { .. } | DataType::Map(_) => deserializer.skip_bytes()?,
             DataType::Struct(t) => t
                 .types()
                 .map(|field| {
@@ -333,15 +333,12 @@ pub fn decode_row(
 mod tests {
     use std::ops::Neg;
 
-    use itertools::Itertools;
     use rand::thread_rng;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
-    use crate::util::iter_util::ZipEqFast;
-    use crate::util::sort_util::{ColumnOrder, OrderType};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::RowExt;
+    use crate::types::FloatExt;
 
     #[test]
     fn test_memcomparable() {
@@ -546,7 +543,7 @@ mod tests {
         use rand::seq::SliceRandom;
 
         fn serialize(f: F32) -> MemcmpEncoded {
-            encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
+            encode_value(Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
         fn deserialize(data: MemcmpEncoded) -> F32 {

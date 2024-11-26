@@ -48,7 +48,7 @@
 
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -58,6 +58,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::{BoxedRule, Rule};
 use crate::catalog::IndexCatalog;
@@ -93,9 +94,6 @@ impl Rule for IndexSelectionRule {
         let logical_scan: &LogicalScan = plan.as_logical_scan()?;
         let indexes = logical_scan.indexes();
         if indexes.is_empty() {
-            return None;
-        }
-        if logical_scan.as_of().is_some() {
             return None;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
@@ -216,32 +214,34 @@ impl IndexSelectionRule {
         // 1. logical_scan ->  logical_join
         //                      /        \
         //                index_scan   primary_table_scan
-        let predicate = logical_scan.predicate().clone();
-        let offset = index.index_item.len();
-        let mut rewriter = IndexPredicateRewriter::new(
-            index.primary_to_secondary_mapping(),
-            index.function_mapping(),
-            offset,
-        );
-        let new_predicate = predicate.rewrite_expr(&mut rewriter);
-
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
             index.index_table.clone(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             index.index_table.cardinality,
         );
+        // We use `schema.len` instead of `index_item.len` here,
+        // because schema contains system columns like `_rw_timestamp` column which is not represented in the index item.
+        let offset = index_scan.table_catalog().columns().len();
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
             index.primary_table.clone(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             index.primary_table.cardinality,
         );
+
+        let predicate = logical_scan.predicate().clone();
+        let mut rewriter = IndexPredicateRewriter::new(
+            index.primary_to_secondary_mapping(),
+            index.function_mapping(),
+            offset,
+        );
+        let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
         let conjunctions = index
             .primary_table_pk_ref_to_index_table()
@@ -253,7 +253,7 @@ impl IndexSelectionRule {
                     index.index_table.columns[x.column_index]
                         .data_type()
                         .clone(),
-                    y.column_index + index.index_item.len(),
+                    y.column_index + offset,
                     index.primary_table.columns[y.column_index]
                         .data_type()
                         .clone(),
@@ -338,7 +338,7 @@ impl IndexSelectionRule {
             logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
-            None,
+            logical_scan.as_of().clone(),
             logical_scan.table_cardinality(),
         );
 
@@ -543,9 +543,12 @@ impl IndexSelectionRule {
                 let condition = Condition {
                     conjunctions: conj.iter().map(|&x| x.to_owned()).collect(),
                 };
-                if let Some(index_access) =
-                    self.build_index_access(index.clone(), condition, logical_scan.ctx().clone())
-                {
+                if let Some(index_access) = self.build_index_access(
+                    index.clone(),
+                    condition,
+                    logical_scan.ctx().clone(),
+                    logical_scan.as_of().clone(),
+                ) {
                     result.push(index_access);
                 }
             }
@@ -573,7 +576,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
-            None,
+            logical_scan.as_of().clone(),
             logical_scan.table_cardinality(),
         );
 
@@ -588,6 +591,7 @@ impl IndexSelectionRule {
         index: Rc<IndexCatalog>,
         predicate: Condition,
         ctx: OptimizerContextRef,
+        as_of: Option<AsOf>,
     ) -> Option<PlanRef> {
         let mut rewriter = IndexPredicateRewriter::new(
             index.primary_to_secondary_mapping(),
@@ -613,7 +617,7 @@ impl IndexSelectionRule {
                 vec![],
                 ctx,
                 new_predicate,
-                None,
+                as_of,
                 index.index_table.cardinality,
             )
             .into(),
@@ -744,7 +748,7 @@ impl<'a> TableScanIoEstimator<'a> {
                 .sum::<usize>()
     }
 
-    pub fn estimate_data_type_size(data_type: &DataType) -> usize {
+    fn estimate_data_type_size(data_type: &DataType) -> usize {
         use std::mem::size_of;
 
         match data_type {
@@ -767,6 +771,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
+            DataType::Map(_) => 20,
         }
     }
 
@@ -956,17 +961,6 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
             }
         };
         self.cost = Some(cost);
-    }
-}
-
-#[derive(Default)]
-struct ExprInputRefFinder {
-    pub input_ref_index_set: HashSet<usize>,
-}
-
-impl ExprVisitor for ExprInputRefFinder {
-    fn visit_input_ref(&mut self, input_ref: &InputRef) {
-        self.input_ref_index_set.insert(input_ref.index);
     }
 }
 

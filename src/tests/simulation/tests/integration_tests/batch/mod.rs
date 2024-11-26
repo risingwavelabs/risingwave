@@ -18,6 +18,7 @@ use std::io::Write;
 
 use clap::Parser;
 use itertools::Itertools;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 use tokio::time::Duration;
 
@@ -44,7 +45,7 @@ fn create_compute_node(cluster: &Cluster, idx: usize, role: &str) {
         .name(format!("compute-{idx}"))
         .ip([192, 168, 3, idx as u8].into())
         .cores(config.compute_node_cores)
-        .init(move || risingwave_compute::start(opts.clone()))
+        .init(move || risingwave_compute::start(opts.clone(), CancellationToken::new()))
         .build();
 }
 
@@ -54,7 +55,7 @@ fn cluster_config_no_compute_nodes() -> Configuration {
         file.write_all(
             "\
 [meta]
-max_heartbeat_interval_secs = 60
+max_heartbeat_interval_secs = 300
 
 [system]
 barrier_interval_ms = 1000
@@ -63,6 +64,9 @@ checkpoint_frequency = 1
 [server]
 telemetry_enabled = false
 metrics_level = \"Disabled\"
+
+[batch]
+mask_worker_temporary_secs = 30
         "
             .as_bytes(),
         )
@@ -74,7 +78,7 @@ metrics_level = \"Disabled\"
         config_path: ConfigPath::Temp(config_path.into()),
         frontend_nodes: 2,
         compute_nodes: 0,
-        meta_nodes: 3,
+        meta_nodes: 1,
         compactor_nodes: 2,
         compute_node_cores: 2,
         ..Default::default()
@@ -163,7 +167,7 @@ async fn test_serving_cluster_availability() {
     tokio::time::sleep(Duration::from_secs(15)).await;
     query_and_assert(session.clone()).await;
     // wait for mask expire
-    tokio::time::sleep(Duration::from_secs(30)).await;
+    tokio::time::sleep(Duration::from_secs(60)).await;
     session.run(select).await.unwrap_err();
     // wait for previous nodes expire
     tokio::time::sleep(Duration::from_secs(300)).await;

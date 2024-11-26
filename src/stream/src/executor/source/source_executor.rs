@@ -13,27 +13,30 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
-use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
+use risingwave_common::array::ArrayRef;
+use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::source::cdc::jni_source;
+use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
+use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData,
+    SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
@@ -44,7 +47,7 @@ use super::{
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -68,7 +71,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    is_shared: bool,
+    is_shared_non_cdc: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -79,7 +82,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
-        is_shared: bool,
+        is_shared_non_cdc: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -88,32 +91,83 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
-            is_shared,
+            is_shared_non_cdc,
         }
     }
 
-    pub fn spawn_wait_epoch_worker(
+    async fn spawn_wait_checkpoint_worker(
         core: &StreamSourceCore<S>,
-    ) -> UnboundedSender<(Epoch, HashMap<SplitId, String>)> {
-        let (wait_epoch_tx, wait_epoch_rx) = mpsc::unbounded_channel();
-        let wait_epoch_worker = WaitEpochWorker {
-            wait_epoch_rx,
-            state_store: core.split_state_store.state_table.state_store().clone(),
+        source_reader: SourceReader,
+    ) -> StreamExecutorResult<Option<WaitCheckpointTaskBuilder>> {
+        let Some(initial_task) = source_reader.create_wait_checkpoint_task().await? else {
+            return Ok(None);
         };
-        tokio::spawn(wait_epoch_worker.run());
-        wait_epoch_tx
+        let (wait_checkpoint_tx, wait_checkpoint_rx) = mpsc::unbounded_channel();
+        let wait_checkpoint_worker = WaitCheckpointWorker {
+            wait_checkpoint_rx,
+            state_store: core.split_state_store.state_table.state_store().clone(),
+            table_id: core.split_state_store.state_table.table_id().into(),
+        };
+        tokio::spawn(wait_checkpoint_worker.run());
+        Ok(Some(WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            source_reader,
+            building_task: initial_task,
+        }))
     }
 
+    /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxChunkSourceStream> {
+        seek_to_latest: bool,
+    ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
         let column_ids = source_desc
             .columns
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+
+        let (schema_change_tx, mut schema_change_rx) =
+            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+        let schema_change_tx = if self.is_auto_schema_change_enable() {
+            let meta_client = self.actor_ctx.meta_client.clone();
+            // spawn a task to handle schema change event from source parser
+            let _join_handle = tokio::task::spawn(async move {
+                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+                    let table_ids = schema_change.table_ids();
+                    tracing::info!(
+                        target: "auto_schema_change",
+                        "recv a schema change event for tables: {:?}", table_ids);
+                    // TODO: retry on rpc error
+                    if let Some(ref meta_client) = meta_client {
+                        match meta_client
+                            .auto_schema_change(schema_change.to_protobuf())
+                            .await
+                        {
+                            Ok(_) => {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    "schema change success for tables: {:?}", table_ids);
+                                finish_tx.send(()).unwrap();
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    target: "auto_schema_change",
+                                    error = ?e.as_report(), "schema change error");
+                                finish_tx.send(()).unwrap();
+                            }
+                        }
+                    }
+                }
+            });
+            Some(schema_change_tx)
+        } else {
+            info!("auto schema change is disabled in config");
+            None
+        };
+
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.stream_source_core.as_ref().unwrap().source_id,
@@ -129,14 +183,25 @@ impl<S: StateStore> SourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            schema_change_tx,
         );
-        let stream = source_desc
+        let (stream, latest_splits) = source_desc
             .source
-            .to_stream(state, column_ids, Arc::new(source_ctx))
+            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
             .await
-            .map_err(StreamExecutorError::connector_error);
+            .map_err(StreamExecutorError::connector_error)?;
 
-        Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
+        Ok((
+            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            latest_splits,
+        ))
+    }
+
+    fn is_auto_schema_change_enable(&self) -> bool {
+        self.actor_ctx
+            .streaming_config
+            .developer
+            .enable_auto_schema_change
     }
 
     /// `source_id | source_name | actor_id | fragment_id`
@@ -172,17 +237,9 @@ impl<S: StateStore> SourceExecutor<S> {
         stream: &mut StreamReaderWithPause<BIASED, StreamChunk>,
         split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
         should_trim_state: bool,
+        source_split_change_count_metrics: &LabelGuardedIntCounter<4>,
     ) -> StreamExecutorResult<()> {
-        self.metrics
-            .source_split_change_count
-            .with_label_values(
-                &self
-                    .get_metric_labels()
-                    .iter()
-                    .map(AsRef::as_ref)
-                    .collect::<Vec<&str>>(),
-            )
-            .inc();
+        source_split_change_count_metrics.inc();
         if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
             if self
                 .update_state_if_changed(target_splits, should_trim_state)
@@ -257,11 +314,11 @@ impl<S: StateStore> SourceExecutor<S> {
             );
 
             core.updated_splits_in_epoch
-                .retain(|split_id, _| target_state.get(split_id).is_some());
+                .retain(|split_id, _| target_state.contains_key(split_id));
 
             let dropped_splits = core
                 .latest_split_info
-                .extract_if(|split_id, _| target_state.get(split_id).is_none())
+                .extract_if(|split_id, _| !target_state.contains_key(split_id))
                 .map(|(_, split)| split)
                 .collect_vec();
 
@@ -315,10 +372,10 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         // Replace the source reader with a new one of the new state.
-        let reader = self
-            .build_stream_source_reader(source_desc, Some(target_state.clone()))
-            .await?
-            .map_err(StreamExecutorError::connector_error);
+        let (reader, _) = self
+            .build_stream_source_reader(source_desc, Some(target_state.clone()), false)
+            .await?;
+        let reader = reader.map_err(StreamExecutorError::connector_error);
 
         stream.replace_data_stream(reader);
 
@@ -378,6 +435,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
+        let first_epoch = barrier.epoch;
+        let mut boot_state =
+            if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+                tracing::debug!(?splits, "boot with splits");
+                splits.to_vec()
+            } else {
+                Vec::default()
+            };
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -387,40 +455,16 @@ impl<S: StateStore> SourceExecutor<S> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let wait_epoch_tx = if source_desc.source.need_commit_offset_to_upstream() {
-            Some(Self::spawn_wait_epoch_worker(&core))
-        } else {
-            None
-        };
+        let mut wait_checkpoint_task_builder =
+            Self::spawn_wait_checkpoint_worker(&core, source_desc.source.clone()).await?;
 
         let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        tracing::debug!(
-                            "source exector: actor {:?} boot with splits: {:?}",
-                            self.actor_ctx.id,
-                            splits
-                        );
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        core.split_state_store.init_epoch(barrier.epoch);
-
+        core.split_state_store.init_epoch(first_epoch).await?;
+        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -428,42 +472,60 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+                // if state store is non-empty, we consider it's initialized.
+                is_uninitialized = false;
+            } else {
+                // This is a new split, not in state table.
+                // make sure it is written to state table later.
+                // Then even it receives no messages, we can observe it in state table.
+                core.updated_splits_in_epoch.insert(ele.id(), ele.clone());
             }
         }
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
-        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
-        let source_chunk_reader = self
-            .build_stream_source_reader(&source_desc, recover_state)
+        let (source_chunk_reader, latest_splits) = self
+            .build_stream_source_reader(
+                &source_desc,
+                recover_state,
+                // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                // It's highly probable that the work of scanning historical data cannot be shared,
+                // so don't waste work on it.
+                // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                // Note that shared CDC source is special. It already starts from latest.
+                self.is_shared_non_cdc && is_uninitialized,
+            )
             .instrument_await("source_build_reader")
-            .await?
-            .map_err(StreamExecutorError::connector_error);
-
+            .await?;
+        let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
+        if let Some(latest_splits) = latest_splits {
+            // make sure it is written to state table later.
+            // Then even it receives no messages, we can observe it in state table.
+            self.stream_source_core
+                .as_mut()
+                .unwrap()
+                .updated_splits_in_epoch
+                .extend(latest_splits.into_iter().map(|s| (s.id(), s)));
+        }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
 
-        // - For shared source, pause until there's a MV.
         // - If the first barrier requires us to pause on startup, pause the stream.
-        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
-            tracing::info!(
-                is_shared = self.is_shared,
-                is_uninitialized = is_uninitialized,
-                "source paused on startup"
-            );
+        if is_pause_on_startup {
+            tracing::info!("source paused on startup");
             stream.pause_stream();
+            command_paused = true;
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
         // milliseconds, considering some other latencies like network and cost in Meta.
@@ -471,6 +533,16 @@ impl<S: StateStore> SourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
+
+        let source_split_change_count = self
+            .metrics
+            .source_split_change_count
+            .with_guarded_label_values(&self.get_metric_labels().each_ref().map(AsRef::as_ref));
 
         while let Some(msg) = stream.next().await {
             let Ok(msg) = msg else {
@@ -486,25 +558,25 @@ impl<S: StateStore> SourceExecutor<S> {
                     last_barrier_time = Instant::now();
 
                     if self_paused {
-                        stream.resume_stream();
                         self_paused = false;
+                        // command_paused has a higher priority.
+                        if !command_paused {
+                            stream.resume_stream();
+                        }
                     }
 
                     let epoch = barrier.epoch;
 
-                    if self.is_shared
-                        && is_uninitialized
-                        && barrier.has_more_downstream_fragments(self.actor_ctx.id)
-                    {
-                        stream.resume_stream();
-                        is_uninitialized = false;
-                    }
-
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
-                            Mutation::Pause => stream.pause_stream(),
-                            Mutation::Resume => stream.resume_stream(),
+                            Mutation::Pause => {
+                                command_paused = true;
+                                stream.pause_stream()
+                            }
+                            Mutation::Resume => {
+                                command_paused = false;
+                                stream.resume_stream()
+                            }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
                                     actor_id = self.actor_ctx.id,
@@ -517,6 +589,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     true,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -527,6 +600,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     &mut stream,
                                     actor_splits,
                                     false,
+                                    &source_split_change_count,
                                 )
                                 .await?;
                             }
@@ -534,6 +608,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
+                                    tracing::info!(
+                                        "updating rate limit from {:?} to {:?}",
+                                        self.rate_limit_rps,
+                                        *new_rate_limit
+                                    );
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
@@ -548,19 +627,12 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
-                        && !updated_splits.is_empty()
-                        && let Some(ref tx) = wait_epoch_tx
+                        && let Some(task_builder) = &mut wait_checkpoint_task_builder
                     {
-                        let mut updated_offsets = HashMap::new();
-                        for (split_id, split_impl) in updated_splits {
-                            if split_impl.is_cdc_split() {
-                                updated_offsets.insert(split_id, split_impl.get_cdc_split_offset());
-                            }
-                        }
+                        task_builder.update_task_on_checkpoint(updated_splits);
 
                         tracing::debug!("epoch to wait {:?}", epoch);
-                        tx.send((Epoch(epoch.prev), updated_offsets))
-                            .expect("wait_epoch_tx send success");
+                        task_builder.send(Epoch(epoch.prev)).await?
                     }
 
                     yield Message::Barrier(barrier);
@@ -572,6 +644,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 Either::Right(chunk) => {
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        let offset_col = chunk.column_at(offset_idx);
+                        task_builder.update_task_on_chunk(offset_col.clone());
+                    }
                     // TODO: confirm when split_offset_mapping is None
                     let split_offset_mapping =
                         get_split_offset_mapping_from_chunk(&chunk, split_idx, offset_idx);
@@ -621,16 +697,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(
-                            &self
-                                .get_metric_labels()
-                                .iter()
-                                .map(AsRef::as_ref)
-                                .collect::<Vec<&str>>(),
-                        )
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);
                     yield Message::Chunk(chunk);
@@ -692,41 +759,112 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
-struct WaitEpochWorker<S: StateStore> {
-    wait_epoch_rx: UnboundedReceiver<(Epoch, HashMap<SplitId, String>)>,
-    state_store: S,
+struct WaitCheckpointTaskBuilder {
+    wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
+    source_reader: SourceReader,
+    building_task: WaitCheckpointTask,
 }
 
-impl<S: StateStore> WaitEpochWorker<S> {
+impl WaitCheckpointTaskBuilder {
+    fn update_task_on_chunk(&mut self, offset_col: ArrayRef) {
+        match &mut self.building_task {
+            WaitCheckpointTask::AckPubsubMessage(_, arrays) => {
+                arrays.push(offset_col);
+            }
+            WaitCheckpointTask::AckNatsJetStream(_, arrays, _) => {
+                arrays.push(offset_col);
+            }
+            WaitCheckpointTask::CommitCdcOffset(_) => {}
+        }
+    }
+
+    fn update_task_on_checkpoint(&mut self, updated_splits: HashMap<SplitId, SplitImpl>) {
+        #[expect(clippy::single_match)]
+        match &mut self.building_task {
+            WaitCheckpointTask::CommitCdcOffset(offsets) => {
+                if !updated_splits.is_empty() {
+                    // cdc source only has one split
+                    assert_eq!(1, updated_splits.len());
+                    for (split_id, split_impl) in updated_splits {
+                        if split_impl.is_cdc_split() {
+                            *offsets = Some((split_id, split_impl.get_cdc_split_offset()));
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Send and reset the building task to a new one.
+    async fn send(&mut self, epoch: Epoch) -> Result<(), anyhow::Error> {
+        let new_task = self
+            .source_reader
+            .create_wait_checkpoint_task()
+            .await?
+            .expect("wait checkpoint task should be created");
+        self.wait_checkpoint_tx
+            .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
+            .expect("wait_checkpoint_tx send should succeed");
+        Ok(())
+    }
+}
+
+/// A worker used to do some work after each checkpoint epoch is committed.
+///
+/// # Usage Cases
+///
+/// Typically there are 2 issues related with ack on checkpoint:
+///
+/// 1. Correctness (at-least-once), or don't let upstream clean uncommitted data.
+///    For message queueing semantics (delete after ack), we should ack to avoid redelivery,
+///    and only ack after checkpoint to avoid data loss.
+///
+/// 2. Allow upstream to clean data after commit.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/16736#issuecomment-2109379790>
+///
+/// ## CDC
+///
+/// Commit last consumed offset to upstream DB, so that old data can be discarded.
+///
+/// ## Google Pub/Sub
+///
+/// Due to queueing semantics.
+/// Although Pub/Sub supports `retain_acked_messages` and `seek` functionality,
+/// it's quite limited unlike Kafka.
+///
+/// See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
+struct WaitCheckpointWorker<S: StateStore> {
+    wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
+    state_store: S,
+    table_id: TableId,
+}
+
+impl<S: StateStore> WaitCheckpointWorker<S> {
     pub async fn run(mut self) {
         tracing::debug!("wait epoch worker start success");
         loop {
             // poll the rx and wait for the epoch commit
-            match self.wait_epoch_rx.recv().await {
-                Some((epoch, updated_offsets)) => {
+            match self.wait_checkpoint_rx.recv().await {
+                Some((epoch, task)) => {
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
-                        .try_wait_epoch(HummockReadEpoch::Committed(epoch.0))
+                        .try_wait_epoch(
+                            HummockReadEpoch::Committed(epoch.0),
+                            TryWaitEpochOptions {
+                                table_id: self.table_id,
+                            },
+                        )
                         .await;
 
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
-                            // cdc source only has one split
-                            assert_eq!(1, updated_offsets.len());
-                            let (split_id, offset) = updated_offsets.into_iter().next().unwrap();
-                            let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
-                            // notify cdc connector to commit offset
-                            match jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    tracing::error!(
-                                        error = %e.as_report(),
-                                        "source#{source_id}: failed to commit cdc offset: {offset}.",
-                                    )
-                                }
-                            }
+                            task.run().await;
                         }
                         Err(e) => {
                             tracing::error!(
@@ -748,15 +886,11 @@ impl<S: StateStore> WaitEpochWorker<S> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::time::Duration;
 
-    use futures::StreamExt;
-    use maplit::{convert_args, hashmap};
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use maplit::{btreemap, convert_args, hashmap};
+    use risingwave_common::catalog::{ColumnId, Field, TableId};
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
@@ -768,7 +902,7 @@ mod tests {
 
     use super::*;
     use crate::executor::source::{default_source_internal_table, SourceStateTableHandler};
-    use crate::executor::ActorContext;
+    use crate::executor::AddMutation;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
 
@@ -787,7 +921,7 @@ mod tests {
         let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
-        let properties: HashMap<String, String> = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "datagen.rows.per.second" => "3",
             "fields.sequence_int.kind" => "sequence",
@@ -838,6 +972,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -871,7 +1006,7 @@ mod tests {
             row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
-        let properties = convert_args!(hashmap!(
+        let properties = convert_args!(btreemap!(
             "connector" => "datagen",
             "fields.v1.kind" => "sequence",
             "fields.v1.start" => "11",
@@ -927,6 +1062,7 @@ mod tests {
                     ],
                 },
                 pause: false,
+                subscriptions_to_add: vec![],
             }));
         barrier_tx.send(init_barrier).unwrap();
 
@@ -977,7 +1113,10 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
+            .await
+            .unwrap();
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -1016,7 +1155,10 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+            .await
+            .unwrap();
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])

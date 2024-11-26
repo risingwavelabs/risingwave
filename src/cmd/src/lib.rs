@@ -37,27 +37,27 @@ risingwave_expr_impl::enable!();
 
 // Entry point functions.
 
-pub fn compute(opts: ComputeNodeOpts) {
+pub fn compute(opts: ComputeNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compute::start(opts));
+    main_okk(|shutdown| risingwave_compute::start(opts, shutdown));
 }
 
-pub fn meta(opts: MetaNodeOpts) {
+pub fn meta(opts: MetaNodeOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_meta_node::start(opts));
+    main_okk(|shutdown| risingwave_meta_node::start(opts, shutdown));
 }
 
-pub fn frontend(opts: FrontendOpts) {
+pub fn frontend(opts: FrontendOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_frontend::start(opts));
+    main_okk(|shutdown| risingwave_frontend::start(opts, shutdown));
 }
 
-pub fn compactor(opts: CompactorOpts) {
+pub fn compactor(opts: CompactorOpts) -> ! {
     init_risingwave_logger(LoggerSettings::from_opts(&opts));
-    main_okk(risingwave_compactor::start(opts));
+    main_okk(|shutdown| risingwave_compactor::start(opts, shutdown));
 }
 
-pub fn ctl(opts: CtlOpts) {
+pub fn ctl(opts: CtlOpts) -> ! {
     init_risingwave_logger(LoggerSettings::new("ctl").stderr(true));
-    main_okk(risingwave_ctl::start(opts));
+    main_okk(|shutdown| risingwave_ctl::start(opts, shutdown));
 }

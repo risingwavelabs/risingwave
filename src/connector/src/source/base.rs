@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -26,11 +26,13 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -39,32 +41,35 @@ use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::FsPageItem;
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc};
+use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str,
+    impl_split, match_source_name_str, WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
-pub trait TryFromHashmap: Sized + UnknownFields {
+pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self>;
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self>;
 }
 
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromHashmap + Clone + WithOptions {
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -84,8 +89,11 @@ pub trait UnknownFields {
     fn unknown_fields(&self) -> HashMap<String, String>;
 }
 
-impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
-    fn try_from_hashmap(props: HashMap<String, String>, deny_unknown_fields: bool) -> Result<Self> {
+impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
+    fn try_from_btreemap(
+        props: BTreeMap<String, String>,
+        deny_unknown_fields: bool,
+    ) -> Result<Self> {
         let json_value = serde_json::to_value(props)?;
         let res = serde_json::from_value::<P>(json_value)?;
 
@@ -100,7 +108,7 @@ impl<P: DeserializeOwned + UnknownFields> TryFromHashmap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
+pub async fn create_split_reader<P: SourceProperties>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
@@ -172,6 +180,9 @@ pub struct SourceContext {
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
     pub connector_props: ConnectorProperties,
+    // source parser put schema change event into this channel
+    pub schema_change_tx:
+        Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
 }
 
 impl SourceContext {
@@ -183,6 +194,9 @@ impl SourceContext {
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
         connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
     ) -> Self {
         Self {
             actor_id,
@@ -192,6 +206,7 @@ impl SourceContext {
             metrics,
             source_ctrl_opts,
             connector_props,
+            schema_change_tx: schema_change_channel,
         }
     }
 
@@ -209,6 +224,7 @@ impl SourceContext {
                 rate_limit: None,
             },
             ConnectorProperties::default(),
+            None,
         )
     }
 }
@@ -227,6 +243,7 @@ pub enum SourceFormat {
     Plain,
 }
 
+/// Refer to [`crate::parser::EncodingProperties`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SourceEncode {
     #[default]
@@ -238,6 +255,7 @@ pub enum SourceEncode {
     Protobuf,
     Json,
     Bytes,
+    Parquet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -290,6 +308,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
         (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
         (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
         (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Plain, PbEncodeType::Parquet) => {
+            (SourceFormat::Plain, SourceEncode::Parquet)
+        }
         (PbFormatType::Native, PbEncodeType::Native) => {
             (SourceFormat::Native, SourceEncode::Native)
         }
@@ -303,6 +324,9 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
             (SourceFormat::DebeziumMongo, SourceEncode::Json)
         }
         (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (PbFormatType::Upsert, PbEncodeType::Protobuf) => {
+            (SourceFormat::Upsert, SourceEncode::Protobuf)
+        }
         (format, encode) => {
             bail!(
                 "Unsupported combination of format {:?} and encode {:?}",
@@ -314,10 +338,19 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
+/// Stream of [`SourceMessage`].
 pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
-pub trait ChunkSourceStream =
-    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static;
+// Manually expand the trait alias to improve IDE experience.
+pub trait ChunkSourceStream:
+    Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
+}
+impl<T> ChunkSourceStream for T where
+    T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
+{
+}
+
 pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
@@ -338,6 +371,37 @@ pub trait SplitReader: Sized + Send {
     ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxChunkSourceStream;
+
+    fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
+        HashMap::new()
+    }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        Err(anyhow!("seek_to_latest is not supported for this connector").into())
+    }
+}
+
+/// Information used to determine whether we should start and finish source backfill.
+///
+/// XXX: if a connector cannot provide the latest offsets (but we want to make it shareable),
+/// perhaps we should ban blocking DDL for it.
+#[derive(Debug, Clone)]
+pub enum BackfillInfo {
+    HasDataToBackfill {
+        /// The last available offsets for each split (**inclusive**).
+        ///
+        /// This will be used to determine whether source backfill is finished when
+        /// there are no _new_ messages coming from upstream `SourceExecutor`. Otherwise,
+        /// blocking DDL cannot finish until new messages come.
+        ///
+        /// When there are upstream messages, we will use the latest offsets from the upstream.
+        latest_offset: String,
+    },
+    /// If there are no messages in the split at all, we don't need to start backfill.
+    /// In this case, there will be no message from the backfill stream too.
+    /// If we started backfill, we cannot finish it until new messages come.
+    /// So we mark this a special case for optimization.
+    NoDataToBackfill,
 }
 
 for_all_sources!(impl_connector_properties);
@@ -356,6 +420,7 @@ impl ConnectorProperties {
                 s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
                     || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
                     || s.eq_ignore_ascii_case(GCS_CONNECTOR)
+                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
             })
             .unwrap_or(false)
     }
@@ -364,21 +429,24 @@ impl ConnectorProperties {
 impl ConnectorProperties {
     /// Creates typed source properties from the raw `WITH` properties.
     ///
-    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_hashmap` method.
+    /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.
     ///
     /// `deny_unknown_fields`: Since `WITH` options are persisted in meta, we do not deny unknown fields when restoring from
     /// existing data to avoid breaking backwards compatibility. We only deny unknown fields when creating new sources.
     pub fn extract(
-        mut with_properties: HashMap<String, String>,
+        with_properties: WithOptionsSecResolved,
         deny_unknown_fields: bool,
     ) -> Result<Self> {
-        let connector = with_properties
+        let (options, secret_refs) = with_properties.into_parts();
+        let mut options_with_secret =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
         match_source_name_str!(
             connector.to_lowercase().as_str(),
             PropType,
-            PropType::try_from_hashmap(with_properties, deny_unknown_fields)
+            PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
             |other| bail!("connector '{}' is not supported", other)
         )
@@ -403,6 +471,7 @@ impl ConnectorProperties {
         matches!(self, ConnectorProperties::Kafka(_))
             || matches!(self, ConnectorProperties::OpendalS3(_))
             || matches!(self, ConnectorProperties::Gcs(_))
+            || matches!(self, ConnectorProperties::Azblob(_))
     }
 }
 
@@ -450,7 +519,7 @@ impl SplitImpl {
     pub fn is_cdc_split(&self) -> bool {
         matches!(
             self,
-            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_)
+            MysqlCdc(_) | PostgresCdc(_) | MongodbCdc(_) | CitusCdc(_) | SqlServerCdc(_)
         )
     }
 
@@ -461,6 +530,7 @@ impl SplitImpl {
             PostgresCdc(split) => split.start_offset().clone().unwrap_or_default(),
             MongodbCdc(split) => split.start_offset().clone().unwrap_or_default(),
             CitusCdc(split) => split.start_offset().clone().unwrap_or_default(),
+            SqlServerCdc(split) => split.start_offset().clone().unwrap_or_default(),
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
@@ -541,6 +611,19 @@ pub struct SourceMessage {
     pub offset: String, // TODO: use `Arc<str>`
     pub split_id: SplitId,
     pub meta: SourceMeta,
+}
+
+impl SourceMessage {
+    /// Create a dummy `SourceMessage` with all fields unset for testing purposes.
+    pub fn dummy() -> Self {
+        Self {
+            key: None,
+            payload: None,
+            offset: "".to_string(),
+            split_id: "".into(),
+            meta: SourceMeta::Empty,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -653,13 +736,15 @@ mod tests {
 
     #[test]
     fn test_extract_nexmark_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "nexmark",
             "nexmark.table.type" => "Person",
             "nexmark.split.num" => "1",
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
 
         if let ConnectorProperties::Nexmark(props) = props {
             assert_eq!(props.table_type, Some(EventType::Person));
@@ -671,7 +756,7 @@ mod tests {
 
     #[test]
     fn test_extract_kafka_config() {
-        let props: HashMap<String, String> = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "connector" => "kafka",
             "properties.bootstrap.server" => "b1,b2",
             "topic" => "test",
@@ -679,13 +764,15 @@ mod tests {
             "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
         ));
 
-        let props = ConnectorProperties::extract(props, true).unwrap();
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
-            let hashmap: HashMap<String, String> = hashmap! {
+            let btreemap = btreemap! {
                 "b-1:9092".to_string() => "dns-1".to_string(),
                 "b-2:9092".to_string() => "dns-2".to_string(),
             };
-            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(hashmap));
+            assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {
             panic!("extract kafka config failed");
         }
@@ -693,7 +780,7 @@ mod tests {
 
     #[test]
     fn test_extract_cdc_properties() {
-        let user_props_mysql: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_mysql = convert_args!(btreemap!(
             "connector" => "mysql-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "3306",
@@ -703,7 +790,7 @@ mod tests {
             "table.name" => "products",
         ));
 
-        let user_props_postgres: HashMap<String, String> = convert_args!(hashmap!(
+        let user_props_postgres = convert_args!(btreemap!(
             "connector" => "postgres-cdc",
             "database.hostname" => "127.0.0.1",
             "database.port" => "5432",
@@ -714,7 +801,11 @@ mod tests {
             "table.name" => "orders",
         ));
 
-        let conn_props = ConnectorProperties::extract(user_props_mysql, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_mysql),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::MysqlCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "3306");
@@ -726,7 +817,11 @@ mod tests {
             panic!("extract cdc config failed");
         }
 
-        let conn_props = ConnectorProperties::extract(user_props_postgres, true).unwrap();
+        let conn_props = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(user_props_postgres),
+            true,
+        )
+        .unwrap();
         if let ConnectorProperties::PostgresCdc(c) = conn_props {
             assert_eq!(c.properties.get("database.hostname").unwrap(), "127.0.0.1");
             assert_eq!(c.properties.get("database.port").unwrap(), "5432");

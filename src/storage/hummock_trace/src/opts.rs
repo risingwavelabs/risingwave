@@ -14,11 +14,11 @@
 
 use bincode::{Decode, Encode};
 use foyer::CacheContext;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::common::PbBuffer;
 
 use crate::TracedBytes;
@@ -64,7 +64,7 @@ impl From<CacheContext> for TracedCachePriority {
     fn from(value: CacheContext) -> Self {
         match value {
             CacheContext::Default => Self::High,
-            CacheContext::LruPriorityLow => Self::Low,
+            CacheContext::LowPriority => Self::Low,
         }
     }
 }
@@ -73,7 +73,7 @@ impl From<TracedCachePriority> for CacheContext {
     fn from(value: TracedCachePriority) -> Self {
         match value {
             TracedCachePriority::High => Self::Default,
-            TracedCachePriority::Low => Self::LruPriorityLow,
+            TracedCachePriority::Low => Self::LowPriority,
         }
     }
 }
@@ -102,20 +102,19 @@ impl From<TracedTableId> for TableId {
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedReadOptions {
     pub prefix_hint: Option<TracedBytes>,
-    pub ignore_range_tombstone: bool,
     pub prefetch_options: TracedPrefetchOptions,
     pub cache_policy: TracedCachePolicy,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TracedTableId,
     pub read_version_from_backup: bool,
+    pub read_committed: bool,
 }
 
 impl TracedReadOptions {
     pub fn for_test(table_id: u32) -> Self {
         Self {
             prefix_hint: Some(TracedBytes::from(vec![0])),
-            ignore_range_tombstone: true,
             prefetch_options: TracedPrefetchOptions {
                 prefetch: true,
                 for_large_query: true,
@@ -123,7 +122,8 @@ impl TracedReadOptions {
             cache_policy: TracedCachePolicy::Disable,
             retention_seconds: None,
             table_id: TracedTableId { table_id },
-            read_version_from_backup: true,
+            read_version_from_backup: false,
+            read_committed: false,
         }
     }
 }
@@ -170,6 +170,11 @@ pub struct TracedNewLocalOptions {
     pub vnodes: TracedBitmap,
 }
 
+#[derive(Encode, Decode, PartialEq, Debug, Clone)]
+pub struct TracedTryWaitEpochOptions {
+    pub table_id: TracedTableId,
+}
+
 #[cfg(test)]
 impl TracedNewLocalOptions {
     pub(crate) fn for_test(table_id: u32) -> Self {
@@ -182,7 +187,7 @@ impl TracedNewLocalOptions {
                 retention_seconds: None,
             },
             is_replicated: false,
-            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT)),
+            vnodes: TracedBitmap::from(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         }
     }
 }
@@ -192,18 +197,22 @@ pub type TracedHummockEpoch = u64;
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub enum TracedHummockReadEpoch {
     Committed(TracedHummockEpoch),
-    Current(TracedHummockEpoch),
+    BatchQueryReadCommitted(TracedHummockEpoch, u64),
     NoWait(TracedHummockEpoch),
     Backup(TracedHummockEpoch),
+    TimeTravel(TracedHummockEpoch),
 }
 
 impl From<HummockReadEpoch> for TracedHummockReadEpoch {
     fn from(value: HummockReadEpoch) -> Self {
         match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
-            HummockReadEpoch::Current(epoch) => Self::Current(epoch),
+            HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => {
+                Self::BatchQueryReadCommitted(epoch, version_id.to_u64())
+            }
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            HummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }
@@ -212,9 +221,12 @@ impl From<TracedHummockReadEpoch> for HummockReadEpoch {
     fn from(value: TracedHummockReadEpoch) -> Self {
         match value {
             TracedHummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
-            TracedHummockReadEpoch::Current(epoch) => Self::Current(epoch),
+            TracedHummockReadEpoch::BatchQueryReadCommitted(epoch, version_id) => {
+                Self::BatchQueryCommitted(epoch, HummockVersionId::new(version_id))
+            }
             TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+            TracedHummockReadEpoch::TimeTravel(epoch) => Self::TimeTravel(epoch),
         }
     }
 }

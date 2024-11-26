@@ -18,9 +18,11 @@ use crate::binder::{BoundStatement, ShareId};
 use crate::error::Result;
 use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
+mod changelog;
 mod delete;
 mod insert;
 mod query;
+mod recursive_union;
 mod relation;
 mod select;
 mod set_expr;

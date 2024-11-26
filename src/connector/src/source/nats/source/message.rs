@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_nats;
 use async_nats::jetstream::Message;
 
 use crate::source::base::SourceMessage;
@@ -23,6 +22,7 @@ pub struct NatsMessage {
     pub split_id: SplitId,
     pub sequence_number: String,
     pub payload: Vec<u8>,
+    pub reply_subject: Option<String>,
 }
 
 impl From<NatsMessage> for SourceMessage {
@@ -31,7 +31,10 @@ impl From<NatsMessage> for SourceMessage {
             key: None,
             payload: Some(message.payload),
             // For nats jetstream, use sequence id as offset
-            offset: message.sequence_number,
+            //
+            // DEPRECATED: no longer use sequence id as offset, let nats broker handle failover
+            // use reply_subject as offset for ack use, we just check the persisted state for whether this is the first run
+            offset: message.reply_subject.unwrap_or_default(),
             split_id: message.split_id,
             meta: SourceMeta::Empty,
         }
@@ -44,6 +47,10 @@ impl NatsMessage {
             split_id,
             sequence_number: message.info().unwrap().stream_sequence.to_string(),
             payload: message.message.payload.to_vec(),
+            reply_subject: message
+                .message
+                .reply
+                .map(|subject| subject.as_str().to_string()),
         }
     }
 }

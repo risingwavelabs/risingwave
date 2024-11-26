@@ -1,11 +1,23 @@
 statement ok
+set sink_decouple = false;
+
+system ok
+rpk topic create test-rw-sink-append-only-protobuf
+
+statement ok
 create table from_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
-  schema.location = 'file:///risingwave/proto-recursive',
-  message = 'recursive.AllTypes');
+  schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes');
+
+system ok
+rpk topic create test-rw-sink-append-only-protobuf-csr-a
+
+system ok
+sr_register 'test-rw-sink-append-only-protobuf-csr-a-value' PROTOBUF < src/connector/src/test_data/test-index-array.proto
 
 statement ok
 create table from_kafka_csr_trivial with (
@@ -13,8 +25,14 @@ create table from_kafka_csr_trivial with (
   topic = 'test-rw-sink-append-only-protobuf-csr-a',
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageA');
+
+system ok
+rpk topic create test-rw-sink-append-only-protobuf-csr-hi
+
+system ok
+sr_register 'test-rw-sink-append-only-protobuf-csr-hi-value' PROTOBUF < src/connector/src/test_data/test-index-array.proto
 
 statement ok
 create table from_kafka_csr_nested with (
@@ -22,8 +40,20 @@ create table from_kafka_csr_nested with (
   topic = 'test-rw-sink-append-only-protobuf-csr-hi',
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageH.MessageI');
+
+system ok
+rpk topic create test-rw-sink-upsert-protobuf
+
+statement ok
+create table from_kafka_raw (kafka_value bytea)
+include key as kafka_key
+with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-protobuf',
+  properties.bootstrap.server = 'message_queue:29092')
+format plain encode bytes;
 
 statement ok
 create table into_kafka (
@@ -58,8 +88,8 @@ create sink sink0 from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
-  schema.location = 'file:///risingwave/proto-recursive',
-  message = 'recursive.AllTypes');
+  schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes');
 
 statement ok
 create sink sink_csr_trivial as select string_field as field_a from into_kafka with (
@@ -68,7 +98,7 @@ create sink sink_csr_trivial as select string_field as field_a from into_kafka w
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageA');
 
 statement ok
@@ -78,8 +108,42 @@ create sink sink_csr_nested as select sint32_field as field_i from into_kafka wi
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageH.MessageI');
+
+statement error
+create sink sink_upsert from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-protobuf',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'string_field')
+format upsert encode protobuf (
+  schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: failed to validate sink
+  3: config error
+  4: sink format/encode/key_encode unsupported: Upsert Protobuf None
+
+
+statement ok
+create sink sink_upsert from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-upsert-protobuf',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'string_field')
+format upsert encode protobuf (
+  schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes')
+key encode text;
+
+# Shall be ignored by force_append_only sinks but processed by upsert sinks.
+statement ok
+delete from into_kafka where bool_field;
 
 sleep 2s
 
@@ -116,6 +180,11 @@ select field_i from from_kafka_csr_nested order by 1;
 13
 24
 
+query T
+select convert_from(kafka_key, 'utf-8') from from_kafka_raw where kafka_value is null;
+----
+Rising
+
 statement error No such file
 create sink sink_err from into_kafka with (
   connector = 'kafka',
@@ -124,7 +193,7 @@ create sink sink_err from into_kafka with (
 format plain encode protobuf (
   force_append_only = true,
   schema.location = 'file:///risingwave/proto-recursiv',
-  message = 'recursive.AllTypes');
+  message = 'all_types.AllTypes');
 
 statement error field not in proto
 create sink sink_err as select 1 as extra_column with (
@@ -133,8 +202,8 @@ create sink sink_err as select 1 as extra_column with (
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
-  schema.location = 'file:///risingwave/proto-recursive',
-  message = 'recursive.AllTypes');
+  schema.location = 'file:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes');
 
 statement error s3 URL not supported yet
 create sink sink_err from into_kafka with (
@@ -143,20 +212,32 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
-  schema.location = 's3:///risingwave/proto-recursive',
-  message = 'recursive.AllTypes');
+  schema.location = 's3:///risingwave/src/connector/codec/tests/test_data/all-types.pb',
+  message = 'all_types.AllTypes');
 
 statement ok
-drop sink sink_csr_nested;
+drop table from_kafka cascade;
 
 statement ok
-drop sink sink_csr_trivial;
+drop table from_kafka_csr_trivial cascade;
 
 statement ok
-drop sink sink0;
+drop table from_kafka_csr_nested cascade;
 
 statement ok
-drop table into_kafka;
+drop table from_kafka_raw cascade;
 
 statement ok
-drop table from_kafka;
+drop table into_kafka cascade;
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf-csr-a
+
+system ok
+rpk topic delete test-rw-sink-append-only-protobuf-csr-hi
+
+system ok
+rpk topic delete test-rw-sink-upsert-protobuf

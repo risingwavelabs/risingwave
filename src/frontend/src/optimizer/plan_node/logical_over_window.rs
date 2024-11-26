@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -105,17 +105,19 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             window_func.frame,
         );
 
-        let new_expr = if let WindowFuncKind::Aggregate(agg_kind) = kind
+        let new_expr = if let WindowFuncKind::Aggregate(agg_type) = &kind
             && matches!(
-                agg_kind,
-                AggKind::Avg
-                    | AggKind::StddevPop
-                    | AggKind::StddevSamp
-                    | AggKind::VarPop
-                    | AggKind::VarSamp
+                agg_type,
+                AggType::Builtin(
+                    PbAggKind::Avg
+                        | PbAggKind::StddevPop
+                        | PbAggKind::StddevSamp
+                        | PbAggKind::VarPop
+                        | PbAggKind::VarSamp
+                )
             ) {
             let agg_call = AggCall::new(
-                agg_kind,
+                agg_type.clone(),
                 args,
                 false,
                 order_by,
@@ -126,7 +128,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                 Ok(self.push_window_func(
                     // AggCall -> WindowFunction
                     WindowFunction::new(
-                        WindowFuncKind::Aggregate(agg_call.agg_kind),
+                        WindowFuncKind::Aggregate(agg_call.agg_type),
                         partition_by.clone(),
                         agg_call.order_by.clone(),
                         agg_call.args.clone(),
@@ -149,7 +151,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 }
 
-impl<'a> ExprRewriter for LogicalOverWindowBuilder<'a> {
+impl ExprRewriter for LogicalOverWindowBuilder<'_> {
     fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
         let dummy = Literal::new(None, window_func.return_type()).into();
         match self.try_rewrite_window_function(window_func) {
@@ -186,10 +188,15 @@ impl<'a> OverWindowProjectBuilder<'a> {
         &mut self,
         window_function: &WindowFunction,
     ) -> std::result::Result<(), ErrorCode> {
-        if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
+        if let WindowFuncKind::Aggregate(agg_type) = &window_function.kind
             && matches!(
-                agg_kind,
-                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp
+                agg_type,
+                AggType::Builtin(
+                    PbAggKind::StddevPop
+                        | PbAggKind::StddevSamp
+                        | PbAggKind::VarPop
+                        | PbAggKind::VarSamp
+                )
             )
         {
             let input = window_function.args.iter().exactly_one().unwrap();
@@ -219,7 +226,7 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+impl ExprVisitor for OverWindowProjectBuilder<'_> {
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {
             self.error = Some(e);
@@ -271,7 +278,7 @@ impl LogicalOverWindow {
         let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
 
         for window_func in &window_functions {
-            if window_func.kind.is_rank() && window_func.order_by.sort_exprs.is_empty() {
+            if window_func.kind.is_numbering() && window_func.order_by.sort_exprs.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "window rank function without order by: {:?}",
                     window_func
@@ -371,7 +378,10 @@ impl LogicalOverWindow {
                     )
                 };
 
-                (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
+                (
+                    WindowFuncKind::Aggregate(AggType::Builtin(PbAggKind::FirstValue)),
+                    frame,
+                )
             }
             WindowFuncKind::Aggregate(_) => {
                 let frame = window_function.frame.unwrap_or({
@@ -538,11 +548,10 @@ impl ColPrunable for LogicalOverWindow {
             let new_window_functions = req_cols_win_func_part
                 .indices()
                 .map(|idx| self.window_functions()[idx - input_len].clone())
-                .map(|func| {
+                .inspect(|func| {
                     tmp.extend(func.args.iter().map(|x| x.index()));
                     tmp.extend(func.partition_by.iter().map(|x| x.index()));
                     tmp.extend(func.order_by.iter().map(|x| x.column_index));
-                    func
                 })
                 .collect_vec();
             (tmp, new_window_functions)
@@ -604,6 +613,16 @@ impl PredicatePushdown for LogicalOverWindow {
     }
 }
 
+macro_rules! empty_partition_by_not_implemented {
+    () => {
+        bail_not_implemented!(
+            issue = 11505,
+            "Window function with empty PARTITION BY is not supported because of potential bad performance. \
+            If you really need this, please workaround with something like `PARTITION BY 1::int`."
+        )
+    };
+}
+
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         assert!(
@@ -619,7 +638,7 @@ impl ToBatch for LogicalOverWindow {
             .map(|e| e.index())
             .collect_vec();
         if partition_key_indices.is_empty() {
-            bail_not_implemented!("Window function with empty PARTITION BY is not supported yet");
+            empty_partition_by_not_implemented!();
         }
 
         let input = self.input().to_batch()?;
@@ -670,9 +689,7 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                bail_not_implemented!(
-                    "Window function with empty PARTITION BY is not supported yet"
-                );
+                empty_partition_by_not_implemented!();
             }
 
             let sort_input =
@@ -686,6 +703,17 @@ impl ToStream for LogicalOverWindow {
         } else {
             // General (Emit-On-Update) case
 
+            if self
+                .window_functions()
+                .iter()
+                .any(|f| f.frame.bounds.is_session())
+            {
+                bail_not_implemented!(
+                    "Session frame is not yet supported in general streaming mode. \
+                    Please consider using Emit-On-Window-Close mode."
+                );
+            }
+
             // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
             // empty PARTITION BY by simply removing the following check.
             let partition_key_indices = self.window_functions()[0]
@@ -694,9 +722,7 @@ impl ToStream for LogicalOverWindow {
                 .map(|e| e.index())
                 .collect_vec();
             if partition_key_indices.is_empty() {
-                bail_not_implemented!(
-                    "Window function with empty PARTITION BY is not supported yet"
-                );
+                empty_partition_by_not_implemented!();
             }
 
             let new_input =

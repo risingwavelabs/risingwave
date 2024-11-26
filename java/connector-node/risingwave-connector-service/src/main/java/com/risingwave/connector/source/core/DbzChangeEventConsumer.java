@@ -17,6 +17,7 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
+import com.risingwave.connector.source.common.CdcConnectorException;
 import com.risingwave.proto.ConnectorServiceProto.CdcMessage;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.connector.postgresql.PostgresOffsetContext;
@@ -43,6 +44,7 @@ enum EventType {
     HEARTBEAT,
     TRANSACTION,
     DATA,
+    SCHEMA_CHANGE,
 }
 
 public class DbzChangeEventConsumer
@@ -57,6 +59,7 @@ public class DbzChangeEventConsumer
     private final JsonConverter keyConverter;
     private final String heartbeatTopicPrefix;
     private final String transactionTopic;
+    private final String schemaChangeTopic;
 
     private volatile DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>>
             currentRecordCommitter;
@@ -66,12 +69,14 @@ public class DbzChangeEventConsumer
             long sourceId,
             String heartbeatTopicPrefix,
             String transactionTopic,
+            String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
         this.connector = connector;
         this.sourceId = sourceId;
         this.outputChannel = queue;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
         this.transactionTopic = transactionTopic;
+        this.schemaChangeTopic = schemaChangeTopic;
         LOG.info("heartbeat topic: {}, trnx topic: {}", heartbeatTopicPrefix, transactionTopic);
 
         // The default JSON converter will output the schema field in the JSON which is unnecessary
@@ -105,6 +110,8 @@ public class DbzChangeEventConsumer
             return EventType.HEARTBEAT;
         } else if (isTransactionMetaEvent(record)) {
             return EventType.TRANSACTION;
+        } else if (isSchemaChangeEvent(record)) {
+            return EventType.SCHEMA_CHANGE;
         } else {
             return EventType.DATA;
         }
@@ -120,6 +127,11 @@ public class DbzChangeEventConsumer
     private boolean isTransactionMetaEvent(SourceRecord record) {
         String topic = record.topic();
         return topic != null && topic.equals(transactionTopic);
+    }
+
+    private boolean isSchemaChangeEvent(SourceRecord record) {
+        String topic = record.topic();
+        return topic != null && topic.equals(schemaChangeTopic);
     }
 
     @Override
@@ -155,7 +167,8 @@ public class DbzChangeEventConsumer
             switch (eventType) {
                 case HEARTBEAT:
                     {
-                        var message = msgBuilder.build();
+                        var message =
+                                msgBuilder.setMsgType(CdcMessage.CdcMessageType.HEARTBEAT).build();
                         LOG.debug("heartbeat => {}", message.getOffset());
                         respBuilder.addEvents(message);
                         break;
@@ -168,7 +181,7 @@ public class DbzChangeEventConsumer
                                         record.topic(), record.valueSchema(), record.value());
                         var message =
                                 msgBuilder
-                                        .setIsTransactionMeta(true)
+                                        .setMsgType(CdcMessage.CdcMessageType.TRANSACTION_META)
                                         .setPayload(new String(payload, StandardCharsets.UTF_8))
                                         .setSourceTsMs(trxTs)
                                         .build();
@@ -176,12 +189,53 @@ public class DbzChangeEventConsumer
                         respBuilder.addEvents(message);
                         break;
                     }
+
+                case SCHEMA_CHANGE:
+                    {
+                        var sourceStruct = ((Struct) record.value()).getStruct("source");
+                        if (sourceStruct == null) {
+                            throw new CdcConnectorException(
+                                    "source field is missing in schema change event");
+                        }
+
+                        // upstream event time
+                        long sourceTsMs = sourceStruct.getInt64("ts_ms");
+                        byte[] payload =
+                                payloadConverter.fromConnectData(
+                                        record.topic(), record.valueSchema(), record.value());
+
+                        // We intentionally don't set the fullTableName for schema change event,
+                        // since it doesn't need to be routed to a specific cdc table
+                        var message =
+                                msgBuilder
+                                        .setMsgType(CdcMessage.CdcMessageType.SCHEMA_CHANGE)
+                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
+                                        .setSourceTsMs(sourceTsMs)
+                                        .build();
+                        LOG.debug(
+                                "[schema] offset => {}, key => {}, payload => {}",
+                                message.getOffset(),
+                                message.getKey(),
+                                message.getPayload());
+                        respBuilder.addEvents(message);
+
+                        // emit the schema change event as a single response
+                        respBuilder.setSourceId(sourceId);
+                        var response = respBuilder.build();
+                        outputChannel.put(response);
+
+                        // reset the response builder
+                        respBuilder = GetEventStreamResponse.newBuilder();
+                        break;
+                    }
+
                 case DATA:
                     {
                         // Topic naming conventions
                         // - PG: topicPrefix.schemaName.tableName
                         // - MySQL: topicPrefix.databaseName.tableName
                         // - Mongo: topicPrefix.databaseName.collectionName
+                        // - SQL Server: topicPrefix.databaseName.schemaName.tableName
                         // We can extract the full table name from the topic
                         var fullTableName =
                                 record.topic().substring(record.topic().indexOf('.') + 1);
@@ -192,25 +246,31 @@ public class DbzChangeEventConsumer
                         }
                         // get upstream event time from the "source" field
                         var sourceStruct = ((Struct) record.value()).getStruct("source");
-                        long sourceTsMs =
-                                sourceStruct == null
-                                        ? System.currentTimeMillis()
-                                        : sourceStruct.getInt64("ts_ms");
+                        if (sourceStruct == null) {
+                            throw new CdcConnectorException(
+                                    "source field is missing in data change event");
+                        }
+                        long sourceTsMs = sourceStruct.getInt64("ts_ms");
                         byte[] payload =
                                 payloadConverter.fromConnectData(
                                         record.topic(), record.valueSchema(), record.value());
                         byte[] key =
                                 keyConverter.fromConnectData(
                                         record.topic(), record.keySchema(), record.key());
+                        String msgPayload =
+                                payload == null ? "" : new String(payload, StandardCharsets.UTF_8);
+                        // key can be null if the table has no primary key
+                        String msgKey = key == null ? "" : new String(key, StandardCharsets.UTF_8);
                         var message =
                                 msgBuilder
+                                        .setMsgType(CdcMessage.CdcMessageType.DATA)
                                         .setFullTableName(fullTableName)
-                                        .setPayload(new String(payload, StandardCharsets.UTF_8))
-                                        .setKey(new String(key, StandardCharsets.UTF_8))
+                                        .setPayload(msgPayload)
+                                        .setKey(msgKey)
                                         .setSourceTsMs(sourceTsMs)
                                         .build();
                         LOG.debug(
-                                "offset => {}, key => {}, payload => {}",
+                                "[data] offset => {}, key => {}, payload => {}",
                                 message.getOffset(),
                                 message.getKey(),
                                 message.getPayload());

@@ -22,38 +22,6 @@ use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use tonic::{Status, Streaming};
 
-pub trait SubscribeTypeEnum {
-    fn subscribe_type() -> SubscribeType;
-}
-
-pub struct SubscribeFrontend {}
-impl SubscribeTypeEnum for SubscribeFrontend {
-    fn subscribe_type() -> SubscribeType {
-        SubscribeType::Frontend
-    }
-}
-
-pub struct SubscribeHummock {}
-impl SubscribeTypeEnum for SubscribeHummock {
-    fn subscribe_type() -> SubscribeType {
-        SubscribeType::Hummock
-    }
-}
-
-pub struct SubscribeCompactor {}
-impl SubscribeTypeEnum for SubscribeCompactor {
-    fn subscribe_type() -> SubscribeType {
-        SubscribeType::Compactor
-    }
-}
-
-pub struct SubscribeCompute {}
-impl SubscribeTypeEnum for SubscribeCompute {
-    fn subscribe_type() -> SubscribeType {
-        SubscribeType::Compute
-    }
-}
-
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.
@@ -64,7 +32,7 @@ pub struct ObserverManager<T: NotificationClient, S: ObserverState> {
 }
 
 pub trait ObserverState: Send + 'static {
-    type SubscribeType: SubscribeTypeEnum;
+    fn subscribe_type() -> SubscribeType;
     /// modify data after receiving notification from meta
     fn handle_notification(&mut self, resp: SubscribeResponse);
 
@@ -105,10 +73,7 @@ where
     S: ObserverState,
 {
     pub async fn new(client: T, observer_states: S) -> Self {
-        let rx = client
-            .subscribe(S::SubscribeType::subscribe_type())
-            .await
-            .unwrap();
+        let rx = client.subscribe(S::subscribe_type()).await.unwrap();
         Self {
             rx,
             client,
@@ -142,11 +107,9 @@ where
             | Info::RelationGroup(_)
             | Info::User(_)
             | Info::Connection(_)
+            | Info::Secret(_)
             | Info::Function(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
-            }
-            Info::ParallelUnitMapping(_) => {
-                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
             }
             Info::Node(_) => {
                 notification.version > info.version.as_ref().unwrap().worker_node_version
@@ -154,13 +117,20 @@ where
             Info::HummockVersionDeltas(version_delta) => {
                 version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
             }
-            Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) | Info::SessionParam(_) => true,
-            Info::ServingParallelUnitMappings(_) => true,
             Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
+            Info::StreamingWorkerSlotMapping(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_slot_mapping_version
+            }
+            Info::ServingWorkerSlotMappings(_) => true,
         });
 
         self.observer_states
@@ -186,7 +156,7 @@ where
                 match self.rx.message().await {
                     Ok(resp) => {
                         if resp.is_none() {
-                            tracing::error!("Stream of notification terminated.");
+                            tracing::warn!("Stream of notification terminated.");
                             self.re_subscribe().await;
                             continue;
                         }
@@ -204,11 +174,7 @@ where
     /// `re_subscribe` is used to re-subscribe to the meta's notification.
     async fn re_subscribe(&mut self) {
         loop {
-            match self
-                .client
-                .subscribe(S::SubscribeType::subscribe_type())
-                .await
-            {
+            match self.client.subscribe(S::subscribe_type()).await {
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
@@ -226,6 +192,7 @@ where
         }
     }
 }
+
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[async_trait::async_trait]

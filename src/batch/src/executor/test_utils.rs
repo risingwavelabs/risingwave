@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::collections::VecDeque;
 
 use assert_matches::assert_matches;
@@ -73,7 +75,7 @@ pub fn gen_sorted_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
-            array_builder.append(&data_gen.generate_datum(0));
+            array_builder.append(data_gen.generate_datum(0));
         }
 
         let array = array_builder.finish();
@@ -100,7 +102,7 @@ pub fn gen_projected_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
-            array_builder.append(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
+            array_builder.append(data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);

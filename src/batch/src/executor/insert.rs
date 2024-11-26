@@ -43,6 +43,7 @@ pub struct InsertExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
+    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -264,18 +265,16 @@ impl BoxedExecutorBuilder for InsertExecutor {
 #[cfg(test)]
 mod tests {
     use std::ops::Bound;
-    use std::sync::Arc;
 
     use assert_matches::assert_matches;
     use foyer::CacheContext;
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::transaction::transaction_message::TxnMsg;
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::StructType;
     use risingwave_dml::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;

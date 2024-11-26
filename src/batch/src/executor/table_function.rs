@@ -16,7 +16,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
+use risingwave_expr::table_function::{build_from_prost, check_error, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -28,6 +28,7 @@ pub struct TableFunctionExecutor {
     schema: Schema,
     identity: String,
     table_function: BoxedTableFunction,
+    #[expect(dead_code)]
     chunk_size: usize,
 }
 
@@ -53,6 +54,7 @@ impl TableFunctionExecutor {
         #[for_await]
         for chunk in self.table_function.eval(&dummy_chunk).await {
             let chunk = chunk?;
+            check_error(&chunk)?;
             // remove the first column and expand the second column if its data type is struct
             yield match chunk.column_at(1).as_ref() {
                 ArrayImpl::Struct(struct_array) => struct_array.into(),

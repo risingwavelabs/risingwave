@@ -1,0 +1,297 @@
+control substitution on
+
+system ok
+rpk topic delete 'test_include_key' || true;
+
+system ok
+rpk topic create 'test_include_key'
+
+system ok
+cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
+{"ID": 1}^{"ID": 1, "firstName": "John", "lastName": "Doe", "age": 18, "height": 5.10, "weight": 150}
+{"ID": 2}^{"ID": 2, "firstName": "Sarah", "lastName": "Smith", "age": 19, "height": 5.5, "weight": 120}
+{"ID": 3}^{"ID": 3, "firstName": "Ben", "lastName": "Johnson", "age": 21, "height": 6.0, "weight": 175}
+{"ID": 4}^{"ID": 4, "firstName": "Emma", "lastName": "Brown", "age": 20, "height": 5.3, "weight": 130}
+{"ID": 5}^{"ID": 5, "firstName": "Michael", "lastName": "Williams", "age": 22, "height": 6.2, "weight": 190}
+{"ID": 6}^{"ID": 6, "firstName": "Leah", "lastName": "Davis", "age": 18, "height": 5.7, "weight": 140}
+{"ID": 7}^{"ID": 7, "firstName": "Connor", "lastName": "Wilson", "age": 19, "height": 5.9, "weight": 160}
+{"ID": 8}^{"ID": 8, "firstName": "Ava", "lastName": "Garcia", "age": 21, "height": 5.2, "weight": 115}
+{"ID": 9}^{"ID": 9, "firstName": "Jacob", "lastName": "Anderson", "age": 20, "height": 5.8, "weight": 155}
+{"ID": 1}^{"ID": 1, "firstName": "Olivia", "lastName": "Hernandez", "age": 22, "height": 5.6, "weight": 125}
+{"ID": 1}^{"ID": 1, "firstName": "Ethan", "lastName": "Martinez", "age": 18, "height": 6.1, "weight": 180}
+{"ID": 2}^{"ID": 2, "firstName": "Emily", "lastName": "Jackson", "age": 19, "height": 5.4, "weight": 110}
+{"ID": 3}^{"ID": 3, "firstName": "Noah", "lastName": "Thompson", "age": 21, "height": 6.3, "weight": 195}
+{"ID": 7}^
+{"ID": 8}^
+EOF
+
+statement error
+CREATE SOURCE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+
+Hint: use CREATE TABLE instead
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
+
+
+# upsert format must have a pk
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Primary key must be specified to rw_key
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
+
+
+# upsert format pk must be the key column
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT primary key,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Only "rw_key" can be used as primary key
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
+
+
+statement error
+CREATE SOURCE upsert_students (
+    primary key (rw_key),
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Bind error: can't CREATE SOURCE with FORMAT UPSERT
+
+Hint: use CREATE TABLE instead
+
+Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
+example:
+    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
+    INCLUDE KEY [AS <key_name>]
+    WITH (...)
+    FORMAT UPSERT ENCODE JSON (...)
+
+
+statement ok
+CREATE TABLE plain_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT PLAIN ENCODE JSON
+
+
+statement ok
+CREATE TABLE upsert_students (
+    primary key (rw_key),
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL,
+)
+INCLUDE KEY AS rw_key
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+
+
+system ok
+rpk topic delete 'test_additional_columns' || true;
+
+system ok
+rpk topic create 'test_additional_columns'
+
+system ok
+for i in {0..10}; do echo "key$i:{\"a\": $i}" | rpk topic produce test_additional_columns -f "%k:%v\n" -H "header1=v1" -H "header2=v2"; done
+
+statement error
+create table additional_columns (a int)
+include key as key_col
+include partition as partition_col
+include offset as offset_col
+include timestamp 'header1' as timestamp_col
+include header 'header1' as header_col_1
+include header 'header2' as header_col_2
+include header 'header2' varchar as header_col_3
+include header 'header3' as header_col_4
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_additional_columns')
+FORMAT PLAIN ENCODE JSON
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Protocol error: Only header column can have inner field, but got "timestamp"
+
+
+statement ok
+create table additional_columns (a int)
+include key as key_col
+include partition as partition_col
+include offset as offset_col
+include timestamp as timestamp_col
+include header as header_col_combined
+include header 'header1' as header_col_1
+include header 'header2' as header_col_2
+include header 'header2' varchar as header_col_3
+include header 'header3' as header_col_4
+WITH (
+	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+	topic = 'test_additional_columns')
+FORMAT PLAIN ENCODE JSON
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 3s
+
+query ?
+select count(rw_key) from plain_students
+----
+15
+
+query ???????
+select * from plain_students order by ("ID", "firstName");
+----
+1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
+1	John	Doe	18	5.1	150	\x7b224944223a20317d
+1	Olivia	Hernandez	22	5.6	125	\x7b224944223a20317d
+2	Emily	Jackson	19	5.4	110	\x7b224944223a20327d
+2	Sarah	Smith	19	5.5	120	\x7b224944223a20327d
+3	Ben	Johnson	21	6	175	\x7b224944223a20337d
+3	Noah	Thompson	21	6.3	195	\x7b224944223a20337d
+4	Emma	Brown	20	5.3	130	\x7b224944223a20347d
+5	Michael	Williams	22	6.2	190	\x7b224944223a20357d
+6	Leah	Davis	18	5.7	140	\x7b224944223a20367d
+7	Connor	Wilson	19	5.9	160	\x7b224944223a20377d
+8	Ava	Garcia	21	5.2	115	\x7b224944223a20387d
+9	Jacob	Anderson	20	5.8	155	\x7b224944223a20397d
+NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20377d
+NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20387d
+
+
+query ???????
+select * from upsert_students order by "ID";
+----
+1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
+2	Emily	Jackson	19	5.4	110	\x7b224944223a20327d
+3	Noah	Thompson	21	6.3	195	\x7b224944223a20337d
+4	Emma	Brown	20	5.3	130	\x7b224944223a20347d
+5	Michael	Williams	22	6.2	190	\x7b224944223a20357d
+6	Leah	Davis	18	5.7	140	\x7b224944223a20367d
+9	Jacob	Anderson	20	5.8	155	\x7b224944223a20397d
+
+
+query ?
+SELECT count(*)
+FROM   additional_columns
+WHERE  key_col IS NOT NULL
+       AND partition_col IS NOT NULL
+       AND offset_col IS NOT NULL
+       AND timestamp_col IS NOT NULL
+       AND header_col_combined IS NOT NULL
+----
+11
+
+
+query ??
+WITH arr AS (SELECT header_col_combined FROM additional_columns),
+unnested AS (SELECT unnest(header_col_combined) FROM arr)
+select *, count(*) from unnested group by 1 order by 1;
+----
+(header1,"\\x7631") 11
+(header2,"\\x7632") 11
+
+query ????
+select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
+----
+\x7631	\x7632	v2	NULL
+
+statement ok
+drop table upsert_students
+
+statement ok
+drop table plain_students
+
+statement ok
+drop table additional_columns

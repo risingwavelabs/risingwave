@@ -19,23 +19,14 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use ahash::HashMap;
 use bitflags::bitflags;
 
 use super::*;
 use crate::catalog::ColumnId;
-use crate::row::Row;
-
-// deprecated design of have a Width to represent number of datum
-// may be considered should `ColumnId` representation be optimized
-// #[derive(Clone, Copy)]
-// enum Width {
-//     Mid(u8),
-//     Large(u16),
-//     Extra(u32),
-// }
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,9 +168,11 @@ impl ValueRowSerializer for Serializer {
 /// Should non-null default values be specified, a new field could be added to Deserializer
 #[derive(Clone)]
 pub struct Deserializer {
-    needed_column_ids: BTreeMap<i32, usize>,
+    required_column_ids: HashMap<i32, usize>,
     schema: Arc<[DataType]>,
-    default_column_values: Vec<(usize, Datum)>,
+
+    /// A row with default values for each column or `None` if no default value is specified
+    default_row: Vec<Datum>,
 }
 
 impl Deserializer {
@@ -189,14 +182,18 @@ impl Deserializer {
         column_with_default: impl Iterator<Item = (usize, Datum)>,
     ) -> Self {
         assert_eq!(column_ids.len(), schema.len());
+        let mut default_row: Vec<Datum> = vec![None; schema.len()];
+        for (i, datum) in column_with_default {
+            default_row[i] = datum;
+        }
         Self {
-            needed_column_ids: column_ids
+            required_column_ids: column_ids
                 .iter()
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
-                .collect::<BTreeMap<_, _>>(),
+                .collect::<HashMap<_, _>>(),
             schema,
-            default_column_values: column_with_default.collect(),
+            default_row,
         }
     }
 }
@@ -215,12 +212,11 @@ impl ValueRowDeserializer for Deserializer {
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
         let data = &encoded_bytes[data_start_idx..];
-        let mut datums: Vec<Option<Datum>> = vec![None; self.schema.len()];
-        let mut contained_indices = BTreeSet::new();
+
+        let mut row = self.default_row.clone();
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
-            if let Some(&decoded_idx) = self.needed_column_ids.get(&this_id) {
-                contained_indices.insert(decoded_idx);
+            if let Some(&decoded_idx) = self.required_column_ids.get(&this_id) {
                 let this_offset_start_idx = i * offset_bytes;
                 let mut this_offset_slice =
                     &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
@@ -247,15 +243,10 @@ impl ValueRowDeserializer for Deserializer {
                         &mut data_slice,
                     )?)
                 };
-                datums[decoded_idx] = Some(data);
+                row[decoded_idx] = data;
             }
         }
-        for (id, datum) in &self.default_column_values {
-            if !contained_indices.contains(id) {
-                datums[*id].get_or_insert(datum.clone());
-            }
-        }
-        Ok(datums.into_iter().map(|d| d.unwrap_or(None)).collect())
+        Ok(row)
     }
 }
 

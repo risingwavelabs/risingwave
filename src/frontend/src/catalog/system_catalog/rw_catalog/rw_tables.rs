@@ -27,7 +27,8 @@ struct RwTable {
     schema_id: i32,
     owner: i32,
     definition: String,
-    acl: String,
+    append_only: bool,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
@@ -50,6 +51,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
                 schema_id: schema.id() as i32,
                 owner: table.owner as i32,
                 definition: table.create_sql(),
+                append_only: table.append_only,
                 acl: get_acl_items(
                     &Object::TableId(table.id.table_id),
                     false,

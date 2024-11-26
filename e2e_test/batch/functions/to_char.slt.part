@@ -106,51 +106,17 @@ select to_char('-23:22:57.124562'::interval, 'HH12 MI SS MS US');
 ----
 -11 -22 -57 -124 -124562
 
-query error
+query error invalid format specification for an interval value
 select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MM SS tzhtzm');
-----
-db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
-
-
-query error
+query error invalid format specification for an interval value
 select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS TZH:TZM');
-----
-db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
-
-
-query error
+query error invalid format specification for an interval value
 select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS TZH');
-----
-db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
-
-
-query error
+query error invalid format specification for an interval value
 select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS Month');
-----
-db error: ERROR: Failed to run the query
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.
-
-
-query error
+query error invalid format specification for an interval value
 select to_char('1year 1month 1day 1hours 1minute 1second'::interval, 'IY MM DD AM HH12 MI SS Mon');
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter pattern: invalid format specification for an interval value, HINT: Intervals are not tied to specific calendar dates.

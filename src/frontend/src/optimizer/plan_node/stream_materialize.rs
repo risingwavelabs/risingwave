@@ -21,20 +21,20 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
     ColumnCatalog, ConflictBehavior, CreateType, StreamJobStatus, TableId, OBJECT_ID_PLACEHOLDER,
 };
+use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::error::Result;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -60,6 +60,7 @@ impl StreamMaterialize {
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
+            input.columns_monotonicity().clone(),
         );
         Self { base, input, table }
     }
@@ -86,6 +87,14 @@ impl StreamMaterialize {
         let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
+        let create_type = if matches!(table_type, TableType::MaterializedView)
+            && input.ctx().session_ctx().config().background_ddl()
+            && plan_can_use_background_ddl(&input)
+        {
+            CreateType::Background
+        } else {
+            CreateType::Foreground
+        };
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
@@ -100,6 +109,7 @@ impl StreamMaterialize {
             None,
             cardinality,
             retention_seconds,
+            create_type,
         )?;
 
         Ok(Self::new(input, table))
@@ -124,10 +134,11 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let table = Self::derive_table_catalog(
+        let mut table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,
@@ -141,7 +152,10 @@ impl StreamMaterialize {
             version,
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
+            CreateType::Foreground,
         )?;
+
+        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }
@@ -212,6 +226,7 @@ impl StreamMaterialize {
         version: Option<TableVersion>,
         cardinality: Cardinality,
         retention_seconds: Option<NonZeroU32>,
+        create_type: CreateType,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -261,13 +276,15 @@ impl StreamMaterialize {
             created_at_epoch: None,
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
-            create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
             incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
+            cdc_table_id: None,
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
         })
     }
 

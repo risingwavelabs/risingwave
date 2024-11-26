@@ -182,7 +182,7 @@ mod tests {
 
     use super::*;
     use crate::row::RowExt;
-    use crate::types::{DataType as Ty, Interval, ScalarImpl};
+    use crate::types::DataType as Ty;
     use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]

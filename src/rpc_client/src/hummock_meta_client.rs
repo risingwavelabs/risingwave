@@ -15,11 +15,9 @@
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, SyncResult,
-};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, SstObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{
-    HummockSnapshot, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse, VacuumTask,
+    PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -31,15 +29,14 @@ use crate::error::Result;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
-    async fn unpin_snapshot(&self) -> Result<()>;
-    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
     async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
-    async fn commit_epoch(&self, epoch: HummockEpoch, sync_result: SyncResult) -> Result<()>;
-    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()>;
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
+    async fn commit_epoch(
+        &self,
+        epoch: HummockEpoch,
+        sync_result: SyncResult,
+        is_log_store: bool,
+    ) -> Result<()>;
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
@@ -47,13 +44,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         level: u32,
         sst_ids: Vec<u64>,
     ) -> Result<()>;
-    async fn report_full_scan_task(
+    async fn trigger_full_gc(
         &self,
-        filtered_object_ids: Vec<HummockSstableObjectId>,
-        total_object_count: u64,
-        total_object_size: u64,
+        sst_retention_time_sec: u64,
+        prefix: Option<String>,
     ) -> Result<()>;
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 
     async fn subscribe_compaction_event(
         &self,
@@ -61,4 +56,10 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         UnboundedSender<SubscribeCompactionEventRequest>,
         BoxStream<'static, CompactionEventItem>,
     )>;
+
+    async fn get_version_by_epoch(
+        &self,
+        epoch: HummockEpoch,
+        table_id: u32,
+    ) -> Result<PbHummockVersion>;
 }

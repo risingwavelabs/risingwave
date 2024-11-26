@@ -22,8 +22,10 @@ import java.util.HashMap;
 import java.util.Objects;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.catalog.Catalog;
+import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.CatalogHandlers;
+import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.UpdateTableRequest;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
 
@@ -63,6 +65,38 @@ public class JniCatalogWrapper {
     }
 
     /**
+     * Create table through this prox.
+     *
+     * @param namespaceStr String.
+     * @param createTableRequest Request serialized using json.
+     * @return Response serialized using json.
+     * @throws Exception
+     */
+    public String createTable(String namespaceStr, String createTableRequest) throws Exception {
+        Namespace namespace;
+        if (namespaceStr == null) {
+            namespace = Namespace.empty();
+        } else {
+            namespace = Namespace.of(namespaceStr);
+        }
+        CreateTableRequest req =
+                RESTObjectMapper.mapper().readValue(createTableRequest, CreateTableRequest.class);
+        LoadTableResponse resp = CatalogHandlers.createTable(catalog, namespace, req);
+        return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
+    }
+
+    /**
+     * Checks if a table exists in the catalog.
+     *
+     * @param tableIdentifier The identifier of the table to check.
+     * @return true if the table exists, false otherwise.
+     */
+    public boolean tableExists(String tableIdentifier) {
+        TableIdentifier id = TableIdentifier.parse(tableIdentifier);
+        return catalog.tableExists(id);
+    }
+
+    /**
      * Create JniCatalogWrapper instance.
      *
      * @param name Catalog name.
@@ -74,15 +108,6 @@ public class JniCatalogWrapper {
         checkArgument(
                 props.length % 2 == 0,
                 "props should be key-value pairs, but length is: " + props.length);
-
-        //      Thread.currentThread().setContextClassLoader(ClassLoader.getSystemClassLoader());
-        System.out.println("Current thread name is: " + Thread.currentThread().getName());
-
-        //        try {
-        //            Thread.currentThread().getContextClassLoader().loadClass(klassName);
-        //        } catch (ClassNotFoundException e) {
-        //            throw new RuntimeException(e);
-        //        }
         try {
             HashMap<String, String> config = new HashMap<>(props.length / 2);
             for (int i = 0; i < props.length; i += 2) {

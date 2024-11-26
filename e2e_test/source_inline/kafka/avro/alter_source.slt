@@ -1,0 +1,74 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO false;
+
+# https://github.com/risingwavelabs/risingwave/issues/16486
+
+# cleanup
+system ok
+rpk topic delete 'avro_alter_source_test' || true; \
+(rpk sr subject delete 'avro_alter_source_test-value' && rpk sr subject delete 'avro_alter_source_test-value' --permanent) || true;
+
+# create topic and sr subject
+system ok
+rpk topic create 'avro_alter_source_test'
+
+system ok
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
+
+statement ok
+create source s
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_alter_source_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+# create a new version of schema and produce a message
+system ok
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+
+system ok
+echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test
+
+query ?
+select * from s
+----
+ABC
+
+statement error
+alter source s format plain encode json;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Feature is not yet implemented: the original definition is FORMAT Plain ENCODE Avro, and altering them is not supported yet
+No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+
+
+statement ok
+alter source s format plain encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+query ??
+select * from s
+----
+ABC	1
+
+statement ok
+create materialized view mv as select * from s;
+
+sleep 2s
+
+query ??
+select * from mv
+----
+ABC	1
+
+statement ok
+drop source s cascade;
+
+statement ok
+SET streaming_use_shared_source TO true;

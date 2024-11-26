@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::connector_common::{AwsAuthProps, KafkaPrivateLinkCommon};
+use crate::connector_common::{AwsAuthProps, KafkaConnection, KafkaPrivateLinkCommon};
 
 mod client_context;
 pub mod enumerator;
@@ -120,6 +120,20 @@ pub struct KafkaProperties {
     )]
     pub time_offset: Option<String>,
 
+    /// Specify a custom consumer group id prefix for the source.
+    /// Defaults to `rw-consumer`.
+    ///
+    /// Notes:
+    /// - Each job (materialized view) will have a separated consumer group and
+    ///   contains a generated suffix in the group id.
+    ///   The consumer group will be `{group_id_prefix}-{fragment_id}`.
+    /// - The consumer group is solely for monintoring progress in some external
+    ///   Kafka tools, and for authorization. RisingWave does not rely on committed
+    ///   offsets, and does not join the consumer group. It just reports offsets
+    ///   to the group.
+    #[serde(rename = "group.id.prefix")]
+    pub group_id_prefix: Option<String>,
+
     /// This parameter is used to tell `KafkaSplitReader` to produce `UpsertMessage`s, which
     /// combine both key and value fields of the Kafka message.
     /// TODO: Currently, `Option<bool>` can not be parsed here.
@@ -128,6 +142,9 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub common: KafkaCommon,
+
+    #[serde(flatten)]
+    pub connection: KafkaConnection,
 
     #[serde(flatten)]
     pub rdkafka_properties_common: RdKafkaPropertiesCommon,
@@ -163,8 +180,6 @@ impl KafkaProperties {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
-
-        tracing::info!("kafka client starts with: {:?}", c);
     }
 }
 
@@ -195,15 +210,15 @@ impl RdKafkaPropertiesConsumer {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
-    use maplit::hashmap;
+    use maplit::btreemap;
 
     use super::*;
 
     #[test]
     fn test_parse_config_consumer_common() {
-        let config: HashMap<String, String> = hashmap! {
+        let config: BTreeMap<String, String> = btreemap! {
             // common
             "properties.bootstrap.server".to_string() => "127.0.0.1:9092".to_string(),
             "topic".to_string() => "test".to_string(),
@@ -259,7 +274,7 @@ mod test {
             props.rdkafka_properties_consumer.fetch_queue_backoff_ms,
             Some(114514)
         );
-        let hashmap: HashMap<String, String> = hashmap! {
+        let hashmap: BTreeMap<String, String> = btreemap! {
             "broker1".to_string() => "10.0.0.1:8001".to_string()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));

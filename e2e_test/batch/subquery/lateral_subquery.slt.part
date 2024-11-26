@@ -82,3 +82,32 @@ drop table all_sales;
 statement ok
 drop table salesperson;
 
+statement ok
+CREATE TABLE r(ts TIMESTAMPTZ, src_id int, dev_id int);
+
+statement ok
+INSERT INTO r VALUES
+('2024-06-20T19:00:22Z'::TIMESTAMPTZ, 2, 2),
+('2024-06-20T19:00:22Z'::TIMESTAMPTZ, 1, 3),
+('2024-06-20T19:00:23Z'::TIMESTAMPTZ, 1, 2),
+('2024-06-20T19:00:24Z'::TIMESTAMPTZ, 2, 1),
+('2024-06-20T19:00:24Z'::TIMESTAMPTZ, 1, 2),
+('2024-06-20T19:00:25Z'::TIMESTAMPTZ, 2, 1);
+
+query TII rowsort
+SELECT e.ts AS e_ts, d.*
+FROM (
+  SELECT '2024-06-20T19:01:00Z'::TIMESTAMPTZ ts, 1::INT AS src_id) e
+JOIN LATERAL
+(
+  SELECT DISTINCT ON(src_id, dev_id) *
+  FROM r
+  WHERE r.src_id = e.src_id AND r.ts <= e.ts
+  ORDER BY src_id, dev_id, ts DESC
+)d on true;
+----
+2024-06-20 19:01:00+00:00 2024-06-20 19:00:22+00:00 1 3
+2024-06-20 19:01:00+00:00 2024-06-20 19:00:24+00:00 1 2
+
+statement ok
+DROP TABLE r CASCADE;

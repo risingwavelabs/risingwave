@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_pb::meta::serving_service_server::ServingService;
 use risingwave_pb::meta::{
-    FragmentParallelUnitMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
+    FragmentWorkerSlotMapping, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -49,37 +48,22 @@ impl ServingService for ServingServiceImpl {
             .serving_vnode_mapping
             .all()
             .into_iter()
-            .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+            .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
                 fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
             .collect();
-        let fragment_to_table = {
-            match &self.metadata_manager {
-                MetadataManager::V1(mgr) => {
-                    let guard = mgr.fragment_manager.get_fragment_read_guard().await;
-                    guard
-                        .table_fragments()
-                        .iter()
-                        .flat_map(|(table_id, tf)| {
-                            tf.fragment_ids()
-                                .map(|fragment_id| (fragment_id, table_id.table_id))
-                                .collect_vec()
-                        })
-                        .collect()
-                }
-                MetadataManager::V2(mgr) => mgr
-                    .catalog_controller
-                    .fragment_job_mapping()
-                    .await?
-                    .into_iter()
-                    .map(|(fragment_id, job_id)| (fragment_id as u32, job_id as u32))
-                    .collect(),
-            }
-        };
+        let fragment_to_table = self
+            .metadata_manager
+            .catalog_controller
+            .fragment_job_mapping()
+            .await?
+            .into_iter()
+            .map(|(fragment_id, job_id)| (fragment_id as u32, job_id as u32))
+            .collect();
         Ok(Response::new(GetServingVnodeMappingsResponse {
-            mappings,
             fragment_to_table,
+            worker_slot_mappings: mappings,
         }))
     }
 }

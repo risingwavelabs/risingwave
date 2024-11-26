@@ -27,9 +27,13 @@ pub async fn list_kv(
     epoch: u64,
     table_id: u32,
     data_dir: Option<String>,
+    use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
     let hummock = context
-        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .hummock_store(HummockServiceOpts::from_env(
+            data_dir,
+            use_new_object_prefix_strategy,
+        )?)
         .await?;
     if is_max_epoch(epoch) {
         tracing::info!("using MAX EPOCH as epoch");

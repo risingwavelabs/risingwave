@@ -50,14 +50,14 @@ impl Rule for IntersectToSemiJoinRule {
 
 impl IntersectToSemiJoinRule {
     pub(crate) fn gen_null_safe_equal(left: PlanRef, right: PlanRef) -> ExprImpl {
-        (left
+        let arms = (left
             .schema()
             .fields()
             .iter()
             .zip_eq_debug(right.schema().fields())
             .enumerate())
-        .fold(None, |expr, (i, (left_field, right_field))| {
-            let equal = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+        .map(|(i, (left_field, right_field))| {
+            ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
                 ExprType::IsNotDistinctFrom,
                 vec![
                     ExprImpl::InputRef(Box::new(InputRef::new(i, left_field.data_type()))),
@@ -67,16 +67,9 @@ impl IntersectToSemiJoinRule {
                     ))),
                 ],
                 Boolean,
-            )));
-
-            match expr {
-                None => Some(equal),
-                Some(expr) => Some(ExprImpl::FunctionCall(Box::new(
-                    FunctionCall::new_unchecked(ExprType::And, vec![expr, equal], Boolean),
-                ))),
-            }
-        })
-        .unwrap()
+            )))
+        });
+        ExprImpl::and(arms)
     }
 }
 

@@ -31,7 +31,6 @@
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![feature(lint_reasons)]
 #![feature(let_chains)]
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -45,6 +44,7 @@ extern crate alloc;
 pub mod ast;
 pub mod keywords;
 pub mod parser;
+pub mod parser_v2;
 pub mod tokenizer;
 
 #[doc(hidden)]

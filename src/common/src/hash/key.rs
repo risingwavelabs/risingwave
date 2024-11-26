@@ -21,7 +21,6 @@
 //! are encoded from both `t.b` and `t.c`. If `t.b="abc"` and `t.c=1`, the hashkey may be
 //! encoded in certain format of `("abc", 1)`.
 
-use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hasher};
@@ -34,7 +33,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListValue, StructValue};
+use crate::array::{ListValue, MapValue, StructValue};
 use crate::types::{
     DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
     Time, Timestamp, Timestamptz, F32, F64,
@@ -237,7 +236,7 @@ impl<T: BuildHasher> From<u64> for HashCode<T> {
 }
 
 impl<T: BuildHasher> HashCode<T> {
-    pub fn value(self) -> u64 {
+    pub fn value(&self) -> u64 {
         self.value
     }
 }
@@ -481,7 +480,7 @@ impl HashKeyDe for Int256 {
     }
 }
 
-impl<'a> HashKeySer<'a> for Serial {
+impl HashKeySer<'_> for Serial {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.as_row_id());
     }
@@ -562,14 +561,14 @@ impl HashKeySer<'_> for Date {
 impl HashKeyDe for Date {
     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
         let days = buf.get_i32_ne();
-        Date::with_days(days).unwrap()
+        Date::with_days_since_ce(days).unwrap()
     }
 }
 
 impl HashKeySer<'_> for Timestamp {
     fn serialize_into(self, mut buf: impl BufMut) {
-        buf.put_i64_ne(self.0.timestamp());
-        buf.put_u32_ne(self.0.timestamp_subsec_nanos());
+        buf.put_i64_ne(self.0.and_utc().timestamp());
+        buf.put_u32_ne(self.0.and_utc().timestamp_subsec_nanos());
     }
 
     fn exact_size() -> Option<usize> {
@@ -628,6 +627,7 @@ impl_value_encoding_hash_key_serde!(JsonbVal);
 // use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
+impl_memcmp_encoding_hash_key_serde!(MapValue);
 
 #[cfg(test)]
 mod tests {
@@ -643,11 +643,9 @@ mod tests {
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
         TimeArray, TimestampArray, Utf8Array,
     };
-    use crate::hash::{
-        HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
-    };
+    use crate::hash::{HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized};
     use crate::test_utils::rand_array::seed_rand_array_ref;
-    use crate::types::{DataType, Datum};
+    use crate::types::Datum;
 
     #[derive(Hash, PartialEq, Eq)]
     struct Row(Vec<Datum>);

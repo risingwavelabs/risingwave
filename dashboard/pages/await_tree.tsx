@@ -88,10 +88,14 @@ export default function AwaitTreeDump() {
         .join("\n")
       const barrierWorkerState = _(response.barrierWorkerState)
         .entries()
-        .map(([k, v]) => `[BarrierWorkerState ${k}]\n${v}`)
+        .map(([k, v]) => `[BarrierWorkerState (Worker ${k})]\n${v}`)
+        .join("\n")
+      const jvmStackTraces = _(response.jvmStackTraces)
+        .entries()
+        .map(([k, v]) => `[JVM (Worker ${k})]\n${v}`)
         .join("\n")
 
-      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}\n${barrierTraces}\n${barrierWorkerState}`
+      result = `${title}\n\n${actorTraces}\n${rpcTraces}\n${compactionTraces}\n${barrierTraces}\n${barrierWorkerState}\n\n${jvmStackTraces}`
     } catch (e: any) {
       result = `${title}\n\nERROR: ${e.message}\n${e.cause}`
     }

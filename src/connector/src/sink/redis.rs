@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -150,7 +150,7 @@ pub struct RedisConfig {
 }
 
 impl RedisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -178,7 +178,7 @@ impl TryFrom<SinkParam> for RedisSink {
                 "Redis Sink Primary Key must be specified."
             )));
         }
-        let config = RedisConfig::from_hashmap(param.properties.clone())?;
+        let config = RedisConfig::from_btreemap(param.properties.clone())?;
         Ok(Self {
             config,
             schema: param.schema(),
@@ -233,12 +233,12 @@ impl Sink for RedisSink {
         ) {
             let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'key_format',please set it or use JSON"
+                    "Cannot find 'key_format', please set it or use JSON"
                 ))
             })?;
             let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
                 SinkError::Config(anyhow!(
-                    "Cannot find 'value_format',please set it or use JSON"
+                    "Cannot find 'value_format', please set it or use JSON"
                 ))
             })?;
             TemplateEncoder::check_string_format(key_format, &pk_set)?;
@@ -249,8 +249,11 @@ impl Sink for RedisSink {
 }
 
 pub struct RedisSinkWriter {
+    #[expect(dead_code)]
     epoch: u64,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     formatter: SinkFormatterImpl,
     payload_writer: RedisSinkPayloadWriter,
@@ -285,7 +288,7 @@ impl RedisSinkPayloadWriter {
                 return Ok(());
             }
         }
-        self.pipe.query(self.conn.as_mut().unwrap()).await?;
+        self.pipe.query::<()>(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
     }
@@ -296,7 +299,7 @@ impl FormattedSink for RedisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        let k = k.unwrap();
+        let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_string()))?;
         match v {
             Some(v) => self.pipe.set(k, v),
             None => self.pipe.del(k),
@@ -375,11 +378,10 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
 #[cfg(test)]
 mod test {
     use core::panic;
-    use std::collections::BTreeMap;
 
     use rdkafka::message::FromBytes;
-    use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::{Array, I32Array, Op, Utf8Array};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
 
@@ -408,6 +410,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Json,
             options: BTreeMap::default(),
+            secret_refs: BTreeMap::default(),
             key_encode: None,
         };
 
@@ -485,6 +488,7 @@ mod test {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
             options: btree_map,
+            secret_refs: Default::default(),
             key_encode: None,
         };
 

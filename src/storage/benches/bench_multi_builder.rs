@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::ops::Range;
 use std::sync::atomic::AtomicU64;
@@ -20,19 +21,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::HybridCacheBuilder;
-use futures::future::try_join_all;
-use itertools::Itertools;
+use foyer::{Engine, HybridCacheBuilder};
+use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_object_store::object::{
+    InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
+};
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
+use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
+    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter,
+    SstableBuilder, SstableBuilderOptions, SstableIteratorReadOptions, SstableStore,
+    SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
+    Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
 
@@ -79,7 +86,11 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
+        let table_id_to_vnode = HashMap::from_iter(vec![(
+            TableId::default().into(),
+            VirtualNode::COUNT_FOR_TEST,
+        )]);
+        let builder = SstableBuilder::for_test(id, writer, self.options.clone(), table_id_to_vnode);
 
         Ok(builder)
     }
@@ -101,7 +112,7 @@ fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
 
 async fn build_tables<F: SstableWriterFactory>(
     mut builder: CapacitySplitTableBuilder<LocalTableBuilderFactory<F>>,
-) {
+) -> Vec<SstableInfo> {
     for i in RANGE {
         builder
             .add_full_key_for_test(
@@ -112,19 +123,49 @@ async fn build_tables<F: SstableWriterFactory>(
             .await
             .unwrap();
     }
-    let split_table_outputs = builder.finish().await.unwrap();
-    let join_handles = split_table_outputs
+
+    builder
+        .finish()
+        .await
+        .unwrap()
         .into_iter()
-        .map(|o| o.upload_join_handle)
-        .collect_vec();
-    try_join_all(join_handles).await.unwrap();
+        .map(|info| info.sst_info)
+        .collect()
+}
+
+async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<SstableStore> {
+    let meta_cache = HybridCacheBuilder::new()
+        .memory(64 << 20)
+        .with_shards(2)
+        .storage(Engine::Large)
+        .build()
+        .await
+        .unwrap();
+    let block_cache = HybridCacheBuilder::new()
+        .memory(128 << 20)
+        .with_shards(2)
+        .storage(Engine::Large)
+        .build()
+        .await
+        .unwrap();
+    Arc::new(SstableStore::new(SstableStoreConfig {
+        store: object_store,
+        path: "test".to_string(),
+        prefetch_buffer_capacity: 64 << 20,
+        max_prefetch_block_number: 16,
+        recent_filter: None,
+        state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
+        use_new_object_prefix_strategy: true,
+        meta_cache,
+        block_cache,
+    }))
 }
 
 fn bench_builder(
     c: &mut Criterion,
-    bucket: &str,
     capacity_mb: usize,
     enable_streaming_upload: bool,
+    local: bool,
 ) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -132,43 +173,33 @@ fn bench_builder(
         .unwrap();
 
     let metrics = Arc::new(ObjectStoreMetrics::unused());
-
     let default_config = Arc::new(ObjectStoreConfig::default());
+
     let object_store = runtime.block_on(async {
-        S3ObjectStore::new_with_config(bucket.to_string(), metrics.clone(), default_config.clone())
+        if local {
+            S3ObjectStore::new_minio_engine(
+                "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001",
+                metrics.clone(),
+                default_config.clone(),
+            )
             .await
             .monitored(metrics, default_config)
+        } else {
+            S3ObjectStore::new_with_config(
+                env::var("S3_BUCKET").unwrap(),
+                metrics.clone(),
+                default_config.clone(),
+            )
+            .await
+            .monitored(metrics, default_config)
+        }
     });
+
     let object_store = Arc::new(ObjectStoreImpl::S3(object_store));
 
-    let sstable_store = runtime.block_on(async {
-        let meta_cache_v2 = HybridCacheBuilder::new()
-            .memory(64 << 20)
-            .with_shards(2)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        let block_cache_v2 = HybridCacheBuilder::new()
-            .memory(128 << 20)
-            .with_shards(2)
-            .storage()
-            .build()
-            .await
-            .unwrap();
-        Arc::new(SstableStore::new(SstableStoreConfig {
-            store: object_store,
-            path: "test".to_string(),
-            prefetch_buffer_capacity: 64 << 20,
-            max_prefetch_block_number: 16,
-            recent_filter: None,
-            state_store_metrics: Arc::new(global_hummock_state_store_metrics(
-                MetricLevel::Disabled,
-            )),
-            meta_cache_v2,
-            block_cache_v2,
-        }))
-    });
+    let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
+
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
 
     let mut group = c.benchmark_group("bench_multi_builder");
     group
@@ -183,6 +214,7 @@ fn bench_builder(
                         StreamingSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -195,6 +227,7 @@ fn bench_builder(
                         BatchSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -205,12 +238,136 @@ fn bench_builder(
 // SST size: 4, 32, 64, 128, 256MiB
 fn bench_multi_builder(c: &mut Criterion) {
     let sst_capacities = vec![4, 32, 64, 128, 256];
-    let bucket = env::var("S3_BUCKET").unwrap();
+    let is_local_test = env::var("LOCAL_TEST").is_ok();
+
     for capacity in sst_capacities {
-        bench_builder(c, &bucket, capacity, false);
-        bench_builder(c, &bucket, capacity, true);
+        bench_builder(c, capacity, false, is_local_test);
+        bench_builder(c, capacity, true, is_local_test);
     }
 }
 
-criterion_group!(benches, bench_multi_builder);
+fn bench_table_scan(c: &mut Criterion) {
+    let capacity_mb: usize = 32;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let store = InMemObjectStore::new().monitored(
+        Arc::new(ObjectStoreMetrics::unused()),
+        Arc::new(ObjectStoreConfig::default()),
+    );
+    let object_store = Arc::new(ObjectStoreImpl::InMem(store));
+    let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
+
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
+    let ssts = runtime.block_on(async {
+        build_tables(CapacitySplitTableBuilder::for_test(
+            LocalTableBuilderFactory::new(
+                1,
+                BatchSstableWriterFactory::new(sstable_store.clone()),
+                get_builder_options(capacity_mb),
+            ),
+            compaction_catalog_agent_ref.clone(),
+        ))
+        .await
+    });
+    println!("sst count: {}", ssts.len());
+    let mut group = c.benchmark_group("bench_multi_builder");
+    group
+        .sample_size(SAMPLE_COUNT)
+        .measurement_time(ESTIMATED_MEASUREMENT_TIME);
+    let read_options = Arc::new(SstableIteratorReadOptions::default());
+    group.bench_function("bench_table_scan", |b| {
+        let sstable_ssts = ssts.clone();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            async move {
+                let mut iter = ConcatIterator::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.rewind().await.unwrap();
+                let mut count = 0;
+                while iter.is_valid() {
+                    count += 1;
+                    iter.next().await.unwrap();
+                }
+                assert_eq!(count, RANGE.end - RANGE.start);
+            }
+        });
+    });
+    group.bench_function("bench_table_reverse_scan", |b| {
+        let mut sstable_ssts = ssts.clone();
+        sstable_ssts.reverse();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            async move {
+                let mut iter = ConcatIteratorInner::<BackwardSstableIterator>::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.rewind().await.unwrap();
+                let mut count = 0;
+                while iter.is_valid() {
+                    count += 1;
+                    iter.next().await.unwrap();
+                }
+                assert_eq!(count, RANGE.end - RANGE.start);
+            }
+        });
+    });
+    group.bench_function("bench_point_scan", |b| {
+        let sstable_ssts = ssts.clone();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            let idx = random::<u64>() % (RANGE.end - RANGE.start);
+            let key = FullKey::from_user_key(test_user_key_of(idx), 1);
+            async move {
+                let mut iter = ConcatIterator::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.seek(key.to_ref()).await.unwrap();
+                if iter.is_valid() {
+                    iter.next().await.unwrap();
+                }
+            }
+        });
+    });
+    group.bench_function("bench_point_reverse_scan", |b| {
+        let mut sstable_ssts = ssts.clone();
+        sstable_ssts.reverse();
+        b.to_async(&runtime).iter(|| {
+            let sstable_ssts = sstable_ssts.clone();
+            let sstable_store = sstable_store.clone();
+            let read_options = read_options.clone();
+            let idx = random::<u64>() % (RANGE.end - RANGE.start);
+            let key = FullKey::from_user_key(test_user_key_of(idx), 1);
+            async move {
+                let mut iter = ConcatIteratorInner::<BackwardSstableIterator>::new(
+                    sstable_ssts.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                );
+                iter.seek(key.to_ref()).await.unwrap();
+                if iter.is_valid() {
+                    iter.next().await.unwrap();
+                }
+            }
+        });
+    });
+}
+
+criterion_group!(benches, bench_multi_builder, bench_table_scan);
 criterion_main!(benches);

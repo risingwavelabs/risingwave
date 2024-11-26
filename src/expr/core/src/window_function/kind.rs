@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
+use enum_as_inner::EnumAsInner;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 
-use crate::aggregate::AggKind;
+use crate::aggregate::AggType;
 use crate::Result;
 
 /// Kind of window functions.
-#[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
+#[expect(clippy::large_enum_variant)]
+#[derive(Debug, Display, FromStr /* for builtin */, Clone, PartialEq, Eq, Hash, EnumAsInner)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
@@ -31,14 +34,14 @@ pub enum WindowFuncKind {
 
     // Aggregate functions that are used with `OVER`.
     #[display("{0}")]
-    Aggregate(AggKind),
+    Aggregate(AggType),
 }
 
 impl WindowFuncKind {
     pub fn from_protobuf(
         window_function_type: &risingwave_pb::expr::window_function::PbType,
     ) -> Result<Self> {
-        use risingwave_pb::expr::agg_call::PbType as PbAggType;
+        use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
         use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
 
         let kind = match window_function_type {
@@ -51,17 +54,19 @@ impl WindowFuncKind {
                 Ok(PbGeneralType::Lead) => Self::Lead,
                 Err(_) => bail!("no such window function type"),
             },
-            PbType::Aggregate(agg_type) => match PbAggType::try_from(*agg_type) {
-                Ok(agg_type) => Self::Aggregate(AggKind::from_protobuf(agg_type)?),
-                Err(_) => bail!("no such aggregate function type"),
-            },
+            PbType::Aggregate(kind) => Self::Aggregate(AggType::from_protobuf_flatten(
+                PbAggKind::try_from(*kind).context("no such aggregate function type")?,
+                None,
+                None,
+            )?),
+            PbType::Aggregate2(agg_type) => Self::Aggregate(AggType::from_protobuf(agg_type)?),
         };
         Ok(kind)
     }
 }
 
 impl WindowFuncKind {
-    pub fn is_rank(&self) -> bool {
+    pub fn is_numbering(&self) -> bool {
         matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
     }
 }

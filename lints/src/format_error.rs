@@ -14,7 +14,7 @@
 
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::macros::{
-    find_format_arg_expr, find_format_args, is_format_macro, macro_backtrace,
+    find_format_arg_expr, is_format_macro, macro_backtrace, FormatArgsStorage,
 };
 use clippy_utils::ty::{implements_trait, match_type};
 use clippy_utils::{
@@ -56,7 +56,15 @@ declare_tool_lint! {
 }
 
 #[derive(Default)]
-pub struct FormatError;
+pub struct FormatError {
+    format_args: FormatArgsStorage,
+}
+
+impl FormatError {
+    pub fn new(format_args: FormatArgsStorage) -> Self {
+        Self { format_args }
+    }
+}
 
 impl_lint_pass!(FormatError => [FORMAT_ERROR]);
 
@@ -90,13 +98,13 @@ impl<'tcx> LateLintPass<'tcx> for FormatError {
 
         for macro_call in macro_backtrace(expr.span) {
             if is_format_macro(cx, macro_call.def_id)
-                && let Some(format_args) = find_format_args(cx, expr, macro_call.expn)
+                && let Some(format_args) = self.format_args.get(cx, expr, macro_call.expn)
             {
                 for piece in &format_args.template {
                     if let FormatArgsPiece::Placeholder(placeholder) = piece
                         && let Ok(index) = placeholder.argument.index
                         && let Some(arg) = format_args.arguments.all_args().get(index)
-                        && let Ok(arg_expr) = find_format_arg_expr(expr, arg)
+                        && let Some(arg_expr) = find_format_arg_expr(expr, arg)
                     {
                         if in_tracing_event_macro {
                             check_fmt_arg_in_tracing_event(cx, arg_expr);
@@ -168,7 +176,7 @@ fn check_fmt_arg_in_anyhow_context(cx: &LateContext<'_>, arg_expr: &Expr<'_>) {
     );
 }
 
-fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help) {
+fn check_fmt_arg_with_help(cx: &LateContext<'_>, arg_expr: &Expr<'_>, help: impl Help + 'static) {
     check_arg(cx, arg_expr, arg_expr.span, help);
 }
 
@@ -181,7 +189,7 @@ fn check_to_string_call(cx: &LateContext<'_>, receiver: &Expr<'_>, to_string_spa
     );
 }
 
-fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help) {
+fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl Help + 'static) {
     let Some(error_trait_id) = cx.tcx.get_diagnostic_item(sym::Error) else {
         return;
     };
@@ -218,31 +226,31 @@ fn check_arg(cx: &LateContext<'_>, arg_expr: &Expr<'_>, span: Span, help: impl H
 }
 
 trait Help {
-    fn normal_help(&self) -> &str;
-    fn anyhow_help(&self) -> &str {
+    fn normal_help(&self) -> &'static str;
+    fn anyhow_help(&self) -> &'static str {
         self.normal_help()
     }
-    fn report_help(&self) -> Option<&str> {
+    fn report_help(&self) -> Option<&'static str> {
         None
     }
 }
 
-impl Help for &str {
-    fn normal_help(&self) -> &str {
+impl Help for &'static str {
+    fn normal_help(&self) -> &'static str {
         self
     }
 }
 
-impl Help for (&str, &str, &str) {
-    fn normal_help(&self) -> &str {
+impl Help for (&'static str, &'static str, &'static str) {
+    fn normal_help(&self) -> &'static str {
         self.0
     }
 
-    fn anyhow_help(&self) -> &str {
+    fn anyhow_help(&self) -> &'static str {
         self.1
     }
 
-    fn report_help(&self) -> Option<&str> {
+    fn report_help(&self) -> Option<&'static str> {
         Some(self.2)
     }
 }

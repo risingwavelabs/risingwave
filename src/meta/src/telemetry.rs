@@ -17,10 +17,14 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, telemetry_cluster_type_from_env_var, SystemData,
+    TelemetryNodeType, TelemetryReportBase, TelemetryResult,
 };
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::telemetry::{
+    PbTelemetryClusterType, PbTelemetryDatabaseObject, PbTelemetryEventStage,
+};
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 
@@ -28,6 +32,25 @@ use crate::manager::MetadataManager;
 use crate::model::ClusterId;
 
 const TELEMETRY_META_REPORT_TYPE: &str = "meta";
+
+pub(crate) fn report_event(
+    event_stage: PbTelemetryEventStage,
+    event_name: &str,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    component: Option<PbTelemetryDatabaseObject>,
+    attributes: Option<jsonbb::Value>, // any json string
+) {
+    report_event_common(
+        event_stage,
+        event_name,
+        catalog_id,
+        connector_name,
+        component,
+        attributes,
+        TELEMETRY_META_REPORT_TYPE.to_string(),
+    );
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
@@ -62,10 +85,13 @@ pub struct MetaTelemetryReport {
     base: TelemetryReportBase,
     node_count: NodeCount,
     streaming_job_count: u64,
-    // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
     rw_version: RwVersion,
     job_desc: Vec<MetaTelemetryJobDesc>,
+
+    // Get the ENV from key `TELEMETRY_CLUSTER_TYPE`
+    cluster_type: PbTelemetryClusterType,
+    object_store_media_type: &'static str,
 }
 
 impl From<MetaTelemetryJobDesc> for risingwave_pb::telemetry::StreamJobDesc {
@@ -92,9 +118,11 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
         let pb_report = risingwave_pb::telemetry::MetaReport {
             base: Some(self.base.into()),
             meta_backend: match self.meta_backend {
-                MetaBackend::Etcd => risingwave_pb::telemetry::MetaBackend::Etcd as i32,
                 MetaBackend::Mem => risingwave_pb::telemetry::MetaBackend::Memory as i32,
-                MetaBackend::Sql => risingwave_pb::telemetry::MetaBackend::Rdb as i32,
+                MetaBackend::Sql
+                | MetaBackend::Sqlite
+                | MetaBackend::Postgres
+                | MetaBackend::Mysql => risingwave_pb::telemetry::MetaBackend::Rdb as i32,
             },
             node_count: Some(risingwave_pb::telemetry::NodeCount {
                 meta: self.node_count.meta_count as u32,
@@ -108,6 +136,8 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             }),
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
+            cluster_type: self.cluster_type as i32,
+            object_store_media_type: self.object_store_media_type.to_string(),
         };
         pb_report.encode_to_vec()
     }
@@ -133,14 +163,14 @@ impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
 #[derive(Clone)]
 pub struct MetaReportCreator {
     metadata_manager: MetadataManager,
-    meta_backend: MetaBackend,
+    object_store_media_type: &'static str,
 }
 
 impl MetaReportCreator {
-    pub fn new(metadata_manager: MetadataManager, meta_backend: MetaBackend) -> Self {
+    pub fn new(metadata_manager: MetadataManager, object_store_media_type: &'static str) -> Self {
         Self {
             metadata_manager,
-            meta_backend,
+            object_store_media_type,
         }
     }
 }
@@ -192,8 +222,10 @@ impl TelemetryReportCreator for MetaReportCreator {
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
             streaming_job_count,
-            meta_backend: self.meta_backend,
+            meta_backend: MetaBackend::Sql,
             job_desc: stream_job_desc,
+            cluster_type: telemetry_cluster_type_from_env_var(),
+            object_store_media_type: self.object_store_media_type,
         })
     }
 
@@ -208,6 +240,7 @@ mod test {
     use risingwave_common::telemetry::{
         current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase,
     };
+    use risingwave_pb::telemetry::PbTelemetryClusterType;
 
     use crate::telemetry::{MetaTelemetryReport, NodeCount, RwVersion};
 
@@ -219,7 +252,7 @@ mod test {
 
         use crate::telemetry::TELEMETRY_META_REPORT_TYPE;
 
-        // we don't call `create_report` here because it rely on the metadata manager
+        // we don't call `create_report` here because it relies on the metadata manager
         let report = MetaTelemetryReport {
             base: TelemetryReportBase {
                 tracking_id: "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
@@ -237,12 +270,14 @@ mod test {
                 compactor_count: 4,
             },
             streaming_job_count: 5,
-            meta_backend: MetaBackend::Etcd,
+            meta_backend: MetaBackend::Sql,
             rw_version: RwVersion {
                 version: "version".to_owned(),
                 git_sha: "git_sha".to_owned(),
             },
             job_desc: vec![],
+            cluster_type: PbTelemetryClusterType::Unspecified,
+            object_store_media_type: "s3",
         };
 
         let pb_bytes = report.to_pb_bytes();

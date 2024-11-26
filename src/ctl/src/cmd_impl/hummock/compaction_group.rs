@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 
 use crate::CtlContext;
 
@@ -63,6 +64,11 @@ pub fn build_compaction_config_vec(
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
+    compress_algorithm: Option<CompressionAlgorithm>,
+    max_l0_compact_level: Option<u32>,
+    sst_allowed_trivial_move_min_size: Option<u64>,
+    disable_auto_group_scheduling: Option<bool>,
+    max_overlapping_level_size: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -110,6 +116,21 @@ pub fn build_compaction_config_vec(
     if let Some(c) = tombstone_reclaim_ratio {
         configs.push(MutableConfig::TombstoneReclaimRatio(c))
     }
+    if let Some(c) = compress_algorithm {
+        configs.push(MutableConfig::CompressionAlgorithm(c))
+    }
+    if let Some(c) = max_l0_compact_level {
+        configs.push(MutableConfig::MaxL0CompactLevelCount(c))
+    }
+    if let Some(c) = sst_allowed_trivial_move_min_size {
+        configs.push(MutableConfig::SstAllowedTrivialMoveMinSize(c))
+    }
+    if let Some(c) = disable_auto_group_scheduling {
+        configs.push(MutableConfig::DisableAutoGroupScheduling(c))
+    }
+    if let Some(c) = max_overlapping_level_size {
+        configs.push(MutableConfig::MaxOverlappingLevelSize(c))
+    }
 
     configs
 }
@@ -118,10 +139,11 @@ pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
     table_ids_to_new_group: &[StateTableId],
+    partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let new_group_id = meta_client
-        .split_compaction_group(group_id, table_ids_to_new_group)
+        .split_compaction_group(group_id, table_ids_to_new_group, partition_vnode_count)
         .await?;
     println!(
         "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
@@ -269,5 +291,17 @@ pub async fn cancel_compact_task(context: &CtlContext, task_id: u64) -> anyhow::
         .await?;
     println!("cancel_compact_task {} ret {:?}", task_id, ret);
 
+    Ok(())
+}
+
+pub async fn merge_compaction_group(
+    context: &CtlContext,
+    left_group_id: CompactionGroupId,
+    right_group_id: CompactionGroupId,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .merge_compaction_group(left_group_id, right_group_id)
+        .await?;
     Ok(())
 }

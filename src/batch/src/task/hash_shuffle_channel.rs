@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::option::Option;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::HashInfo;
 use risingwave_pb::batch_plan::*;

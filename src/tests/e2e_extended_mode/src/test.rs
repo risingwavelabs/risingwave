@@ -65,7 +65,15 @@ impl TestSuite {
         Self { config }
     }
 
+    fn init_logger() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_ansi(false)
+            .try_init();
+    }
+
     pub async fn test(&self) -> anyhow::Result<()> {
+        Self::init_logger();
         self.binary_param_and_result().await?;
         self.dql_dml_with_param().await?;
         self.max_row().await?;
@@ -76,6 +84,7 @@ impl TestSuite {
         self.complex_cancel(false).await?;
         self.complex_cancel(true).await?;
         self.subquery_with_param().await?;
+        self.create_mview_with_parameter().await?;
         Ok(())
     }
 
@@ -378,13 +387,36 @@ impl TestSuite {
                 .is_err(),
             true
         );
-        test_eq!(
-            client
-                .query("create materialized view v as select $1", &[])
-                .await
-                .is_err(),
-            true
-        );
+
+        Ok(())
+    }
+
+    async fn create_mview_with_parameter(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
+
+        let statement = client
+            .prepare_typed(
+                "create materialized view mv as select $1 as x",
+                &[Type::INT4],
+            )
+            .await?;
+
+        client.execute(&statement, &[&42_i32]).await?;
+
+        let rows = client.query("select * from mv", &[]).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 42);
+
+        // Test renaming mv because it relies on parsing and rewrite the `create MV` query
+        client
+            .execute("alter materialized view mv rename to mv2", &[])
+            .await?;
+
+        let rows = client.query("select * from mv2", &[]).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 42);
+
+        client.execute("drop materialized view mv2", &[]).await?;
 
         Ok(())
     }
@@ -496,7 +528,15 @@ impl TestSuite {
         ";
 
         let query_handle = tokio::spawn(async move {
-            client.query(query_sql, &[]).await.unwrap();
+            let result = client.query(query_sql, &[]).await;
+            match result {
+                Ok(_) => {
+                    tracing::error!("Query should be canceled");
+                }
+                Err(e) => {
+                    tracing::error!("Query failed with error: {:?}", e);
+                }
+            };
         });
 
         select! {
@@ -504,7 +544,7 @@ impl TestSuite {
                 tracing::error!("Failed to cancel query")
             },
             _ = cancel_token.cancel_query(NoTls) => {
-                tracing::trace!("Cancel query successfully")
+                tracing::info!("Cancel query successfully")
             },
         }
 

@@ -51,9 +51,9 @@ use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::batch_plan::exchange_info::{
-    ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
+    ConsistentHashInfo, Distribution as PbDistribution, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
@@ -62,7 +62,6 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
 use crate::error::Result;
 use crate::optimizer::property::Order;
-use crate::optimizer::PlanRef;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -132,7 +131,7 @@ impl Distribution {
                         !key.is_empty(),
                         "hash key should not be empty, use `Single` instead"
                     );
-                    Some(DistributionPb::HashInfo(HashInfo {
+                    Some(PbDistribution::HashInfo(HashInfo {
                         output_count,
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
@@ -149,14 +148,17 @@ impl Distribution {
                     let vnode_mapping = worker_node_manager
                         .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
-                    let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
+                    let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
                         .enumerate()
-                        .map(|(i, pu)| (pu, i as u32))
+                        .map(|(i, worker_slot_id)| (worker_slot_id, i as u32))
                         .collect();
 
-                    Some(DistributionPb::ConsistentHashInfo(ConsistentHashInfo {
-                        vmap: vnode_mapping.iter().map(|x| pu2id_map[&x]).collect_vec(),
+                    Some(PbDistribution::ConsistentHashInfo(ConsistentHashInfo {
+                        vmap: vnode_mapping
+                            .iter()
+                            .map(|id| worker_slot_to_id_map[&id])
+                            .collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
                 }
@@ -204,7 +206,7 @@ impl Distribution {
     fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(Into::into)
     }

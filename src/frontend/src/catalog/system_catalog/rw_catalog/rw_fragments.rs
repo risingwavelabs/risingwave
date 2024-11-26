@@ -29,9 +29,10 @@ struct RwFragment {
     upstream_fragment_ids: Vec<i32>,
     flags: Vec<String>,
     parallelism: i32,
+    max_parallelism: i32,
 }
 
-fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
+pub(super) fn extract_fragment_type_flag(mask: u32) -> Vec<FragmentTypeFlag> {
     let mut result = vec![];
     for i in 0..32 {
         let bit = 1 << i;
@@ -71,6 +72,7 @@ async fn read_rw_fragment(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFragmen
                 .map(|s| s.into())
                 .collect(),
             parallelism: distribution.parallelism as i32,
+            max_parallelism: distribution.vnode_count as i32,
         })
         .collect())
 }

@@ -17,24 +17,20 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashSet;
 
-use risingwave_common::catalog::TableOption;
+use bytes::Bytes;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{compact_task, KeyRange};
+use risingwave_pb::hummock::compact_task;
 
-use super::{CompactionSelector, DynamicLevelSelectorCore, LocalSelectorStatistic};
+use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{
     CompactionPicker, LocalPickerStatistic, ManualCompactionPicker,
 };
-use crate::hummock::compaction::{
-    create_compaction_task, create_overlap_strategy, CompactionDeveloperConfig, CompactionTask,
-};
-use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
+use crate::hummock::compaction::selector::CompactionSelectorContext;
+use crate::hummock::compaction::{create_compaction_task, create_overlap_strategy, CompactionTask};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
@@ -53,8 +49,8 @@ impl Default for ManualCompactionOption {
         Self {
             sst_ids: vec![],
             key_range: KeyRange {
-                left: vec![],
-                right: vec![],
+                left: Bytes::default(),
+                right: Bytes::default(),
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
@@ -77,13 +73,15 @@ impl CompactionSelector for ManualCompactionSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group,
+            levels,
+            level_handlers,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());

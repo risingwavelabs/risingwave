@@ -18,7 +18,6 @@ use risingwave_common::error::tonic::ToTonicStatus;
 use risingwave_pb::compute::config_service_server::ConfigService;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_stream::task::LocalStreamManager;
-use serde_json;
 use tonic::{Code, Request, Response, Status};
 
 pub struct ConfigServiceImpl {

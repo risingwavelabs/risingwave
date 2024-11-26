@@ -40,6 +40,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
+use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 use crate::TableCatalog;
 
@@ -164,16 +165,14 @@ impl LogicalScan {
                         .pk()
                         .iter()
                         .map(|idx_item| {
-                            ColumnOrder::new(
-                                *output_col_map
-                                    .get(
-                                        s2p_mapping
-                                            .get(&idx_item.column_index)
-                                            .expect("should be in s2p mapping"),
-                                    )
-                                    .unwrap_or(&unmatched_idx),
-                                idx_item.order_type,
-                            )
+                            let idx = match s2p_mapping.get(&idx_item.column_index) {
+                                Some(col_idx) => {
+                                    *output_col_map.get(col_idx).unwrap_or(&unmatched_idx)
+                                }
+                                // After we support index on expressions, we need to handle the case where the column is not in the `s2p_mapping`.
+                                None => unmatched_idx,
+                            };
+                            ColumnOrder::new(idx, idx_item.order_type)
                         })
                         .collect(),
                 }
@@ -421,13 +420,13 @@ impl PredicatePushdown for LogicalScan {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
         } else {
-            return LogicalFilter::create(
+            LogicalFilter::create(
                 self.clone_with_predicate(predicate.and(self.predicate().clone()))
                     .into(),
                 Condition {
                     conjunctions: non_pushable_predicate,
                 },
-            );
+            )
         }
     }
 }
@@ -496,7 +495,7 @@ impl ToBatch for LogicalScan {
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
+            if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch()?);

@@ -1,0 +1,109 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+create table t1(
+    a smallint,
+    b int,
+    c bigint,
+    d rw_int256,
+    e real,
+    f double precision,
+    g varchar,
+    h bytea,
+    i date,
+    j time,
+    k timestamp,
+    l timestamptz,
+    m interval,
+    n STRUCT <b STRUCT<c INTEGER>, d INTEGER>,
+    o varchar[],
+    p jsonb
+) append only;
+
+statement ok
+create sink t1_sink from t1
+with (
+    connector='mongodb',
+    type = 'append-only',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t1',
+    mongodb.bulk_write.max_entries = '1024'
+);
+
+statement ok
+insert into t1 values(1, 2, 3, 4, 5.0, 6.0, '7', '\xDe00BeEf', date '2022-04-08', time '18:20:49',
+                      '2022-03-13 01:00:00'::timestamp, '2022-03-13 01:00:00Z'::timestamptz, interval '4 hour',
+                      ROW(ROW(8), 9), ARRAY['a', 'b', 'c'], '{"a": [{"b": 1}], "c": true}'::jsonb);
+
+statement ok
+create table t2(
+    _id bigint primary key,
+    collection_name varchar,
+    value varchar
+);
+
+statement ok
+create sink t2_sink from t2
+with (
+    connector='mongodb',
+    type = 'upsert',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t2',
+    mongodb.bulk_write.max_entries = '1024',
+    collection.name.field = 'collection_name',
+    collection.name.field.drop = 'true',
+    primary_key='_id'
+);
+
+statement ok
+insert into t2 values(1, 'shard_2024_01.tenant_1', 'data');
+
+statement ok
+insert into t2 values(2, '', 'data');
+
+statement ok
+create table t3(
+    a int,
+    b int,
+    value text,
+    primary key (a,b)
+);
+
+statement ok
+create sink t3_sink from t3
+with (
+    connector='mongodb',
+    type = 'upsert',
+    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
+    collection.name = 'demo.t3',
+    mongodb.bulk_write.max_entries = '1024',
+    primary_key='a,b'
+);
+
+statement ok
+delete from t3 where a = 1 and b = 2;
+
+statement ok
+insert into t3 values(1, 2, 'abc');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK t1_sink;
+
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP SINK t2_sink;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP SINK t3_sink;
+
+statement ok
+DROP TABLE t3;

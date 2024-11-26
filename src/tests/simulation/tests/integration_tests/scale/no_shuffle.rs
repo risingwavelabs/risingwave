@@ -14,6 +14,7 @@
 
 use anyhow::Result;
 use itertools::Itertools;
+use risingwave_common::hash::WorkerSlotId;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
@@ -80,40 +81,66 @@ async fn test_delta_join() -> Result<()> {
                 .assert_result_eq(result);
 
             #[allow(unused_assignments)]
-            test_times += 1;
+            {
+                test_times += 1;
+            }
         };
     }
 
     test_works!();
 
+    let workers = union_fragment.all_worker_count().into_keys().collect_vec();
     // Scale-in one side
-    cluster.reschedule(format!("{}-[0]", t1.id())).await?;
+    cluster
+        .reschedule(format!("{}:[{}:-1]", t1.id(), workers[0]))
+        .await?;
+
     test_works!();
 
     // Scale-in both sides together
     cluster
-        .reschedule(format!("{}-[2];{}-[0,2]", t1.id(), t2.id()))
+        .reschedule(format!(
+            "{}:[{}];{}:[{}]",
+            t1.id(),
+            format_args!("{}:-1", workers[1]),
+            t2.id(),
+            format_args!("{}:-1, {}:-1", workers[0], workers[1])
+        ))
         .await?;
     test_works!();
 
     // Scale-out one side
-    cluster.reschedule(format!("{}+[0]", t2.id())).await?;
+    cluster
+        .reschedule(format!("{}:[{}:1]", t2.id(), workers[0]))
+        .await?;
     test_works!();
 
     // Scale-out both sides together
     cluster
-        .reschedule(format!("{}+[0,2];{}+[2]", t1.id(), t2.id()))
+        .reschedule(format!(
+            "{}:[{}];{}:[{}]",
+            t1.id(),
+            format_args!("{}:1,{}:1", workers[0], workers[1]),
+            t2.id(),
+            format_args!("{}:1", workers[1]),
+        ))
         .await?;
     test_works!();
 
     // Scale-in join with union
     cluster
-        .reschedule(format!("{}-[5];{}-[5]", t1.id(), union_fragment.id()))
+        .reschedule(format!(
+            "{}:[{}];{}:[{}]",
+            t1.id(),
+            format_args!("{}:-1", workers[2]),
+            t2.id(),
+            format_args!("{}:-1", workers[2])
+        ))
         .await?;
     test_works!();
 
     let result = cluster
-        .reschedule(format!("{}-[0]", lookup_fragments[0].id()))
+        .reschedule(format!("{}:[{}:-1]", lookup_fragments[0].id(), workers[0]))
         .await;
     assert!(
         result.is_err(),
@@ -137,8 +164,15 @@ async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
         .locate_one_fragment([identity_contains("hashagg")])
         .await?;
 
-    cluster.reschedule(fragment.reschedule([0], [])).await?;
-    cluster.reschedule(fragment.reschedule([], [0])).await?;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    cluster
+        .reschedule(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
+        .await?;
+
+    cluster
+        .reschedule(fragment.reschedule([], [WorkerSlotId::new(workers[0], 0)]))
+        .await?;
 
     Ok(())
 }
@@ -157,15 +191,20 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
         .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
-    let result = cluster.reschedule(fragment.reschedule([0], [])).await;
+    let workers = fragment.all_worker_count().into_keys().collect_vec();
+
+    let result = cluster
+        .reschedule(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
+        .await;
 
     assert!(result.is_err());
 
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule([0], []))
+        .reschedule_resolve_no_shuffle(fragment.reschedule([WorkerSlotId::new(workers[0], 0)], []))
         .await?;
+
     cluster
-        .reschedule_resolve_no_shuffle(fragment.reschedule([], [0]))
+        .reschedule_resolve_no_shuffle(fragment.reschedule([], [WorkerSlotId::new(workers[0], 0)]))
         .await?;
 
     Ok(())

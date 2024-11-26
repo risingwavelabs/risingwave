@@ -19,11 +19,11 @@ use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
 
 #[derive(Fields)]
-#[primary_key(object_id, sst_id)] // TODO: is this correct?
+#[primary_key(object_id, compaction_group_id)]
 struct RwHummockBranchedObject {
     object_id: i64,
-    sst_id: i64,
     compaction_group_id: i64,
+    sst_id: Vec<i64>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_branched_objects")]
@@ -33,7 +33,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockBranchedObje
         .into_iter()
         .map(|o| RwHummockBranchedObject {
             object_id: o.object_id as _,
-            sst_id: o.sst_id as _,
+            sst_id: o.sst_id.into_iter().map(|id| id as _).collect(),
             compaction_group_id: o.compaction_group_id as _,
         })
         .collect();

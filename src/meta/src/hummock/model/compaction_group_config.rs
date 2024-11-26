@@ -17,10 +17,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
-use crate::hummock::model::HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME;
-use crate::model::{MetadataModel, MetadataModelResult};
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct CompactionGroup {
     pub group_id: CompactionGroupId,
     pub compaction_config: Arc<CompactionConfig>,
@@ -67,23 +64,22 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
     }
 }
 
-impl MetadataModel for CompactionGroup {
-    type KeyType = CompactionGroupId;
-    type PbType = risingwave_pb::hummock::CompactionGroup;
+impl CompactionGroup {
+    pub fn max_estimated_group_size(&self) -> u64 {
+        let max_level = self.compaction_config.max_level as usize;
+        let base_level_size = self.compaction_config.max_bytes_for_level_base;
+        let level_multiplier = self.compaction_config.max_bytes_for_level_multiplier;
 
-    fn cf_name() -> String {
-        String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)
-    }
+        fn size_for_levels(level_index: usize, base_size: u64, multiplier: u64) -> u64 {
+            if level_index == 0 {
+                base_size
+            } else {
+                base_size * multiplier.pow(level_index as u32)
+            }
+        }
 
-    fn to_protobuf(&self) -> Self::PbType {
-        self.into()
-    }
-
-    fn from_protobuf(prost: Self::PbType) -> Self {
-        (&prost).into()
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        Ok(self.group_id)
+        (0..max_level)
+            .map(|level_index| size_for_levels(level_index, base_level_size, level_multiplier))
+            .sum()
     }
 }

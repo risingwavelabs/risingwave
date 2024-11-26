@@ -30,6 +30,7 @@ shift $((OPTIND -1))
 RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
+sudo apt-get update -y
 if [ "$VERSION" = "11" ]; then
   echo "The test imgae default java version is 11, no need to install"
 else
@@ -54,12 +55,12 @@ sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name
 
 echo "--- starting minio"
 echo "setting up minio"
-wget https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
+wget --no-verbose https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
 chmod +x minio
 sudo ./minio server /tmp/minio &
 # wait for minio to start
 sleep 3
-wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
+wget --no-verbose https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
 chmod +x mc
 MC_PATH=${PWD}/mc
 ${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
@@ -90,15 +91,15 @@ export PYTHONPATH=proto
 
 echo "--- running streamchunk data format integration tests"
 cd "${RISINGWAVE_ROOT}"/java/connector-node/python-client
-if python3 integration_tests.py --stream_chunk_format_test --input_binary_file="./data/stream_chunk_data" --data_format_use_json=False; then
+if python3 integration_tests.py --stream_chunk_format_test --input_binary_file="./data/stream_chunk_data"; then
   echo "StreamChunk data format test passed"
 else
   echo "StreamChunk data format test failed"
   exit 1
 fi
 
-sink_input_feature=("--input_binary_file=./data/sink_input --data_format_use_json=False")
-upsert_sink_input_feature=("--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
+sink_input_feature=("--input_binary_file=./data/sink_input")
+upsert_sink_input_feature=("--input_binary_file=./data/upsert_sink_input")
 type=("StreamChunk format")
 
 ${MC_PATH} mb minio/bucket

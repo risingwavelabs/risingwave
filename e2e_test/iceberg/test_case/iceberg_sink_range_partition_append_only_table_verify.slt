@@ -1,0 +1,25 @@
+statement ok
+CREATE SOURCE iceberg_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'range_partition_append_only_table',
+);
+
+query I
+SELECT id from iceberg_source ORDER by id;
+----
+1
+2
+3
+4
+5
+
+statement ok
+DROP SOURCE iceberg_source

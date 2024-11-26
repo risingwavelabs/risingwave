@@ -21,7 +21,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, DataType};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
@@ -142,19 +142,24 @@ pub struct BytesArrayBuilder {
 impl ArrayBuilder for BytesArrayBuilder {
     type ArrayType = BytesArray;
 
-    fn new(capacity: usize) -> Self {
-        let mut offset = Vec::with_capacity(capacity + 1);
+    /// Creates a new `BytesArrayBuilder`.
+    ///
+    /// `item_capacity` is the number of items to pre-allocate. The size of the preallocated
+    /// buffer of offsets is the number of items plus one.
+    /// No additional memory is pre-allocated for the data buffer.
+    fn new(item_capacity: usize) -> Self {
+        let mut offset = Vec::with_capacity(item_capacity + 1);
         offset.push(0);
         Self {
             offset,
-            data: Vec::with_capacity(capacity),
-            bitmap: BitmapBuilder::with_capacity(capacity),
+            data: Vec::with_capacity(0),
+            bitmap: BitmapBuilder::with_capacity(item_capacity),
         }
     }
 
-    fn with_type(capacity: usize, ty: DataType) -> Self {
+    fn with_type(item_capacity: usize, ty: DataType) -> Self {
         assert_eq!(ty, DataType::Bytea);
-        Self::new(capacity)
+        Self::new(item_capacity)
     }
 
     fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {
@@ -266,7 +271,7 @@ pub struct PartialBytesWriter<'a> {
     builder: &'a mut BytesArrayBuilder,
 }
 
-impl<'a> PartialBytesWriter<'a> {
+impl PartialBytesWriter<'_> {
     /// `write_ref` will append partial dirty data to `builder`.
     /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
     /// in that it allows us to call it multiple times.
@@ -282,7 +287,7 @@ impl<'a> PartialBytesWriter<'a> {
     }
 }
 
-impl<'a> Drop for PartialBytesWriter<'a> {
+impl Drop for PartialBytesWriter<'_> {
     fn drop(&mut self) {
         // If `finish` is not called, we should rollback the data.
         self.builder.rollback_partial();

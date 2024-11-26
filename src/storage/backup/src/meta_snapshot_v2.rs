@@ -16,7 +16,6 @@ use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_meta_model_v2 as model_v2;
 use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
@@ -29,46 +28,108 @@ impl From<serde_json::Error> for BackupError {
     }
 }
 
-#[derive(Default)]
-pub struct MetadataV2 {
-    pub seaql_migrations: Vec<model_v2::serde_seaql_migration::Model>,
-    pub hummock_version: HummockVersion,
-    pub version_stats: Vec<model_v2::hummock_version_stats::Model>,
-    pub compaction_configs: Vec<model_v2::compaction_config::Model>,
-    pub actors: Vec<model_v2::actor::Model>,
-    pub clusters: Vec<model_v2::cluster::Model>,
-    pub actor_dispatchers: Vec<model_v2::actor_dispatcher::Model>,
-    pub catalog_versions: Vec<model_v2::catalog_version::Model>,
-    pub connections: Vec<model_v2::connection::Model>,
-    pub databases: Vec<model_v2::database::Model>,
-    pub fragments: Vec<model_v2::fragment::Model>,
-    pub functions: Vec<model_v2::function::Model>,
-    pub indexes: Vec<model_v2::index::Model>,
-    pub objects: Vec<model_v2::object::Model>,
-    pub object_dependencies: Vec<model_v2::object_dependency::Model>,
-    pub schemas: Vec<model_v2::schema::Model>,
-    pub sinks: Vec<model_v2::sink::Model>,
-    pub sources: Vec<model_v2::source::Model>,
-    pub streaming_jobs: Vec<model_v2::streaming_job::Model>,
-    pub subscriptions: Vec<model_v2::subscription::Model>,
-    pub system_parameters: Vec<model_v2::system_parameter::Model>,
-    pub tables: Vec<model_v2::table::Model>,
-    pub users: Vec<model_v2::user::Model>,
-    pub user_privileges: Vec<model_v2::user_privilege::Model>,
-    pub views: Vec<model_v2::view::Model>,
-    pub workers: Vec<model_v2::worker::Model>,
-    pub worker_properties: Vec<model_v2::worker_property::Model>,
-    pub hummock_sequences: Vec<model_v2::hummock_sequence::Model>,
-    pub session_parameters: Vec<model_v2::session_parameter::Model>,
+/// Add new item in the end. Do not change the order.
+#[macro_export]
+macro_rules! for_all_metadata_models_v2 {
+    ($macro:ident) => {
+        $macro! {
+            {seaql_migrations, risingwave_meta_model::serde_seaql_migration},
+            {version_stats, risingwave_meta_model::hummock_version_stats},
+            {compaction_configs, risingwave_meta_model::compaction_config},
+            {actors, risingwave_meta_model::actor},
+            {clusters, risingwave_meta_model::cluster},
+            {actor_dispatchers, risingwave_meta_model::actor_dispatcher},
+            {catalog_versions, risingwave_meta_model::catalog_version},
+            {connections, risingwave_meta_model::connection},
+            {databases, risingwave_meta_model::database},
+            {fragments, risingwave_meta_model::fragment},
+            {functions, risingwave_meta_model::function},
+            {indexes, risingwave_meta_model::index},
+            {objects, risingwave_meta_model::object},
+            {object_dependencies, risingwave_meta_model::object_dependency},
+            {schemas, risingwave_meta_model::schema},
+            {sinks, risingwave_meta_model::sink},
+            {sources, risingwave_meta_model::source},
+            {streaming_jobs, risingwave_meta_model::streaming_job},
+            {subscriptions, risingwave_meta_model::subscription},
+            {system_parameters, risingwave_meta_model::system_parameter},
+            {tables, risingwave_meta_model::table},
+            {users, risingwave_meta_model::user},
+            {user_privileges, risingwave_meta_model::user_privilege},
+            {views, risingwave_meta_model::view},
+            {workers, risingwave_meta_model::worker},
+            {worker_properties, risingwave_meta_model::worker_property},
+            {hummock_sequences, risingwave_meta_model::hummock_sequence},
+            {session_parameters, risingwave_meta_model::session_parameter},
+            {secrets, risingwave_meta_model::secret}
+        }
+    };
 }
+
+macro_rules! define_metadata_v2 {
+    ($({ $name:ident, $mod_path:ident::$mod_name:ident }),*) => {
+        #[derive(Default)]
+        pub struct MetadataV2 {
+            pub hummock_version: HummockVersion,
+            $(
+                pub $name: Vec<$mod_path::$mod_name::Model>,
+            )*
+        }
+    };
+}
+
+for_all_metadata_models_v2!(define_metadata_v2);
+
+macro_rules! define_encode_metadata {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        fn encode_metadata(
+          metadata: &MetadataV2,
+          buf: &mut Vec<u8>,
+        ) -> BackupResult<()> {
+            let mut _idx = 0;
+            $(
+                if _idx == 1 {
+                    put_1(buf, &metadata.hummock_version.to_protobuf())?;
+                }
+                put_n(buf, &metadata.$name)?;
+                _idx += 1;
+            )*
+            Ok(())
+        }
+    };
+}
+
+for_all_metadata_models_v2!(define_encode_metadata);
+
+macro_rules! define_decode_metadata {
+    ($( {$name:ident, $mod_path:ident::$mod_name:ident} ),*) => {
+        fn decode_metadata(
+          metadata: &mut MetadataV2,
+          mut buf: &[u8],
+        ) -> BackupResult<()> {
+            let mut _idx = 0;
+            $(
+                if _idx == 1 {
+                    metadata.hummock_version = HummockVersion::from_persisted_protobuf(&get_1(&mut buf)?);
+                }
+                metadata.$name = get_n(&mut buf)?;
+                _idx += 1;
+            )*
+            Ok(())
+        }
+    };
+}
+
+for_all_metadata_models_v2!(define_decode_metadata);
 
 impl Display for MetadataV2 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "clusters: {:#?}", self.clusters)?;
         writeln!(
             f,
-            "Hummock version: id {}, max_committed_epoch: {}",
-            self.hummock_version.id, self.hummock_version.max_committed_epoch
+            "Hummock version: id {}, committed_epoch: {:?}",
+            self.hummock_version.id,
+            self.hummock_version.state_table_info.info(),
         )?;
         // optionally dump other metadata
         Ok(())
@@ -77,102 +138,16 @@ impl Display for MetadataV2 {
 
 impl Metadata for MetadataV2 {
     fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()> {
-        put_n(buf, &self.seaql_migrations)?;
-        put_1(buf, &self.hummock_version.to_protobuf())?;
-        put_n(buf, &self.version_stats)?;
-        put_n(buf, &self.compaction_configs)?;
-        put_n(buf, &self.actors)?;
-        put_n(buf, &self.clusters)?;
-        put_n(buf, &self.actor_dispatchers)?;
-        put_n(buf, &self.catalog_versions)?;
-        put_n(buf, &self.connections)?;
-        put_n(buf, &self.databases)?;
-        put_n(buf, &self.fragments)?;
-        put_n(buf, &self.functions)?;
-        put_n(buf, &self.indexes)?;
-        put_n(buf, &self.objects)?;
-        put_n(buf, &self.object_dependencies)?;
-        put_n(buf, &self.schemas)?;
-        put_n(buf, &self.sinks)?;
-        put_n(buf, &self.sources)?;
-        put_n(buf, &self.streaming_jobs)?;
-        put_n(buf, &self.subscriptions)?;
-        put_n(buf, &self.system_parameters)?;
-        put_n(buf, &self.tables)?;
-        put_n(buf, &self.users)?;
-        put_n(buf, &self.user_privileges)?;
-        put_n(buf, &self.views)?;
-        put_n(buf, &self.workers)?;
-        put_n(buf, &self.worker_properties)?;
-        put_n(buf, &self.hummock_sequences)?;
-        put_n(buf, &self.session_parameters)?;
-        Ok(())
+        encode_metadata(self, buf)
     }
 
-    fn decode(mut buf: &[u8]) -> BackupResult<Self>
+    fn decode(buf: &[u8]) -> BackupResult<Self>
     where
         Self: Sized,
     {
-        let seaql_migrations = get_n(&mut buf)?;
-        let pb_hummock_version = get_1(&mut buf)?;
-        let version_stats = get_n(&mut buf)?;
-        let compaction_configs = get_n(&mut buf)?;
-        let actors = get_n(&mut buf)?;
-        let clusters = get_n(&mut buf)?;
-        let actor_dispatchers = get_n(&mut buf)?;
-        let catalog_versions = get_n(&mut buf)?;
-        let connections = get_n(&mut buf)?;
-        let databases = get_n(&mut buf)?;
-        let fragments = get_n(&mut buf)?;
-        let functions = get_n(&mut buf)?;
-        let indexes = get_n(&mut buf)?;
-        let objects = get_n(&mut buf)?;
-        let object_dependencies = get_n(&mut buf)?;
-        let schemas = get_n(&mut buf)?;
-        let sinks = get_n(&mut buf)?;
-        let sources = get_n(&mut buf)?;
-        let streaming_jobs = get_n(&mut buf)?;
-        let subscriptions = get_n(&mut buf)?;
-        let system_parameters = get_n(&mut buf)?;
-        let tables = get_n(&mut buf)?;
-        let users = get_n(&mut buf)?;
-        let user_privileges = get_n(&mut buf)?;
-        let views = get_n(&mut buf)?;
-        let workers = get_n(&mut buf)?;
-        let worker_properties = get_n(&mut buf)?;
-        let hummock_sequences = get_n(&mut buf)?;
-        let session_parameters = get_n(&mut buf)?;
-        Ok(Self {
-            seaql_migrations,
-            hummock_version: HummockVersion::from_persisted_protobuf(&pb_hummock_version),
-            version_stats,
-            compaction_configs,
-            actors,
-            clusters,
-            actor_dispatchers,
-            catalog_versions,
-            connections,
-            databases,
-            fragments,
-            functions,
-            indexes,
-            objects,
-            object_dependencies,
-            schemas,
-            sinks,
-            sources,
-            streaming_jobs,
-            subscriptions,
-            system_parameters,
-            tables,
-            users,
-            user_privileges,
-            views,
-            workers,
-            worker_properties,
-            hummock_sequences,
-            session_parameters,
-        })
+        let mut metadata = Self::default();
+        decode_metadata(&mut metadata, buf)?;
+        Ok(metadata)
     }
 
     fn hummock_version_ref(&self) -> &HummockVersion {

@@ -112,5 +112,6 @@ public interface JdbcDialect {
             throws SQLException;
 
     /** Bind the values of primary key fields to the {@code DELETE} statement. */
-    void bindDeleteStatement(PreparedStatement stmt, SinkRow row) throws SQLException;
+    void bindDeleteStatement(PreparedStatement stmt, TableSchema tableSchema, SinkRow row)
+            throws SQLException;
 }

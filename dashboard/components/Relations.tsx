@@ -35,7 +35,7 @@ import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
-  StreamingJob,
+  StreamingRelation,
   getDatabases,
   getSchemas,
   getUsers,
@@ -60,7 +60,7 @@ export const dependentsColumn: Column<Relation> = {
   name: "Depends",
   width: 1,
   content: (r) => (
-    <Link href={`/dependency_graph/?id=${r.id}`}>
+    <Link href={`/relation_graph/?id=${r.id}`}>
       <Button
         size="sm"
         aria-label="view dependents"
@@ -73,7 +73,7 @@ export const dependentsColumn: Column<Relation> = {
   ),
 }
 
-export const fragmentsColumn: Column<StreamingJob> = {
+export const fragmentsColumn: Column<StreamingRelation> = {
   name: "Fragments",
   width: 1,
   content: (r) => (
@@ -100,6 +100,17 @@ export const primaryKeyColumn: Column<RwTable> = {
       .map((col) => extractColumnInfo(col))
       .join(", "),
 }
+
+export const vnodeCountColumn: Column<RwTable> = {
+  name: "Vnode Count",
+  width: 1,
+  // The table catalogs retrieved here are constructed from SQL models,
+  // where the `vnode_count` column has already been populated during migration.
+  // Therefore, it should always be present and no need to specify a fallback.
+  content: (r) => r.maybeVnodeCount ?? "?",
+}
+
+export const tableColumns = [primaryKeyColumn, vnodeCountColumn]
 
 export const connectorColumnSource: Column<RwSource> = {
   name: "Connector",
@@ -183,12 +194,16 @@ export function Relations<R extends Relation>(
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                <Td overflowWrap="normal">
-                  {r.columns
-                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
-                    .map((col) => extractColumnInfo(col))
-                    .join(", ")}
-                </Td>
+                {r.columns && r.columns.length > 0 && (
+                  <Td overflowWrap="normal">
+                    {r.columns
+                      .filter((col) =>
+                        "isHidden" in col ? !col.isHidden : true
+                      )
+                      .map((col) => extractColumnInfo(col))
+                      .join(", ")}
+                  </Td>
+                )}
               </Tr>
             ))}
           </Tbody>

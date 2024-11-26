@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -105,7 +105,7 @@ impl Rule for GroupingSetsToExpandRule {
         let mut new_agg_calls = vec![];
         for agg_call in old_agg_calls {
             // Deal with grouping agg call for grouping sets.
-            if agg_call.agg_kind == AggKind::Grouping {
+            if matches!(agg_call.agg_type, AggType::Builtin(PbAggKind::Grouping)) {
                 let mut grouping_values = vec![];
                 let args = agg_call
                     .inputs

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{Ord, Ordering};
+use std::cmp::Ordering;
 use std::fmt;
 use std::sync::Arc;
 
@@ -574,13 +574,11 @@ pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Orde
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, Row};
+    use crate::array::{ListValue, StructValue};
+    use crate::row::OwnedRow;
     use crate::types::{DataType, Datum, ScalarImpl};
 
     #[test]

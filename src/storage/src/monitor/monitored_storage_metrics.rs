@@ -17,33 +17,44 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use prometheus::core::{AtomicU64, GenericLocalCounter};
-use prometheus::local::LocalHistogram;
 use prometheus::{
-    exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, linear_buckets, register_histogram_with_registry,
+    Histogram, Registry,
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedMetric, RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledHistogramVec,
+    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedLocalHistogram,
+    LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
+    RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::register_guarded_histogram_vec_with_registry;
+use risingwave_common::{
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
+};
+
+use crate::store::{
+    ChangeLogValue, IterItem, StateStoreKeyedRow, StateStoreKeyedRowRef, StateStoreReadLogItem,
+    StateStoreReadLogItemRef,
+};
 
 /// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug, Clone)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: RelabeledGuardedHistogramVec<1>,
-    pub get_key_size: RelabeledHistogramVec,
-    pub get_value_size: RelabeledHistogramVec,
+    pub get_key_size: RelabeledGuardedHistogramVec<1>,
+    pub get_value_size: RelabeledGuardedHistogramVec<1>,
 
-    pub iter_size: RelabeledHistogramVec,
-    pub iter_item: RelabeledHistogramVec,
-    pub iter_init_duration: RelabeledGuardedHistogramVec<1>,
-    pub iter_scan_duration: RelabeledGuardedHistogramVec<1>,
-    pub may_exist_duration: RelabeledHistogramVec,
+    // [table_id, iter_type: {"iter", "iter_log"}]
+    pub iter_size: RelabeledGuardedHistogramVec<2>,
+    pub iter_item: RelabeledGuardedHistogramVec<2>,
+    pub iter_init_duration: RelabeledGuardedHistogramVec<2>,
+    pub iter_scan_duration: RelabeledGuardedHistogramVec<2>,
+    pub iter_counts: RelabeledGuardedIntCounterVec<2>,
+    pub iter_in_progress_counts: RelabeledGuardedIntGaugeVec<2>,
 
-    pub iter_in_process_counts: RelabeledCounterVec,
+    // [table_id, op_type]
+    pub iter_log_op_type_counts: LabelGuardedIntCounterVec<2>,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -59,8 +70,8 @@ pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetr
 
 impl MonitoredStorageMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
-        // 256B ~ max 4GB
-        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 256B ~ max 64GB
+        let size_buckets = exponential_buckets(256.0, 16.0, 8).unwrap();
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----
@@ -70,8 +81,8 @@ impl MonitoredStorageMetrics {
             size_buckets.clone()
         );
         let get_key_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let get_key_size = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_key_size = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             get_key_size,
             metric_level,
@@ -83,8 +94,8 @@ impl MonitoredStorageMetrics {
             size_buckets.clone()
         );
         let get_value_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let get_value_size = RelabeledHistogramVec::with_metric_level(
+            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+        let get_value_size = RelabeledGuardedHistogramVec::with_metric_level(
             MetricLevel::Debug,
             get_value_size,
             metric_level,
@@ -124,32 +135,53 @@ impl MonitoredStorageMetrics {
             "Total bytes gotten from state store scan(), for calculating read throughput",
             size_buckets.clone()
         );
-        let iter_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_size =
-            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_size, metric_level);
+        let iter_size = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "iter_type"],
+            registry
+        )
+        .unwrap();
+        let iter_size = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            iter_size,
+            metric_level,
+            1,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
             size_buckets.clone(),
         );
-        let iter_item =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_item =
-            RelabeledHistogramVec::with_metric_level(MetricLevel::Debug, iter_item, metric_level);
+        let iter_item = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "iter_type"],
+            registry
+        )
+        .unwrap();
+        let iter_item = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            iter_item,
+            metric_level,
+            1,
+        );
 
         let opts = histogram_opts!(
             "state_store_iter_init_duration",
             "Histogram of the time spent on iterator initialization.",
             state_store_read_time_buckets.clone(),
         );
-        let iter_init_duration =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_init_duration = RelabeledGuardedHistogramVec::with_metric_level(
+        let iter_init_duration = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "iter_type"],
+            registry
+        )
+        .unwrap();
+        let iter_init_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
             MetricLevel::Critical,
             iter_init_duration,
             metric_level,
+            1,
         );
 
         let opts = histogram_opts!(
@@ -157,39 +189,54 @@ impl MonitoredStorageMetrics {
             "Histogram of the time spent on iterator scanning.",
             state_store_read_time_buckets.clone(),
         );
-        let iter_scan_duration =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let iter_scan_duration = RelabeledGuardedHistogramVec::with_metric_level(
-            MetricLevel::Critical,
-            iter_scan_duration,
-            metric_level,
-        );
-
-        let iter_in_process_counts = register_int_counter_vec_with_registry!(
-            "state_store_iter_in_process_counts",
-            "Total number of iter_in_process that have been issued to state store",
-            &["table_id"],
+        let iter_scan_duration = register_guarded_histogram_vec_with_registry!(
+            opts,
+            &["table_id", "iter_type"],
             registry
         )
         .unwrap();
-        let iter_in_process_counts = RelabeledCounterVec::with_metric_level(
-            MetricLevel::Debug,
-            iter_in_process_counts,
+        let iter_scan_duration = RelabeledGuardedHistogramVec::with_metric_level_relabel_n(
+            MetricLevel::Critical,
+            iter_scan_duration,
             metric_level,
+            1,
         );
 
-        let opts = histogram_opts!(
-            "state_store_may_exist_duration",
-            "Histogram of may exist time that have been issued to state store",
-            buckets,
-        );
-        let may_exist_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let may_exist_duration = RelabeledHistogramVec::with_metric_level(
+        let iter_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_iter_counts",
+            "Total number of iter that have been issued to state store",
+            &["table_id", "iter_type"],
+            registry
+        )
+        .unwrap();
+        let iter_counts = RelabeledGuardedIntCounterVec::with_metric_level_relabel_n(
             MetricLevel::Debug,
-            may_exist_duration,
+            iter_counts,
             metric_level,
+            1,
         );
+
+        let iter_in_progress_counts = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_iter_in_progress_counts",
+            "Total number of existing iter",
+            &["table_id", "iter_type"],
+            registry
+        )
+        .unwrap();
+        let iter_in_progress_counts = RelabeledGuardedIntGaugeVec::with_metric_level_relabel_n(
+            MetricLevel::Debug,
+            iter_in_progress_counts,
+            metric_level,
+            1,
+        );
+
+        let iter_log_op_type_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_iter_log_op_type_counts",
+            "Counter of each op type in iter_log",
+            &["table_id", "op_type"],
+            registry
+        )
+        .unwrap();
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
@@ -213,8 +260,9 @@ impl MonitoredStorageMetrics {
             iter_item,
             iter_init_duration,
             iter_scan_duration,
-            may_exist_duration,
-            iter_in_process_counts,
+            iter_counts,
+            iter_in_progress_counts,
+            iter_log_op_type_counts,
             sync_duration,
             sync_size,
         }
@@ -224,35 +272,91 @@ impl MonitoredStorageMetrics {
         global_storage_metrics(MetricLevel::Disabled)
     }
 
-    pub fn local_metrics(&self, table_label: &str) -> LocalStorageMetrics {
+    fn local_iter_metrics(&self, table_label: &str) -> LocalIterMetrics {
+        let inner = self.new_local_iter_metrics_inner(table_label, "iter");
+        LocalIterMetrics {
+            inner,
+            report_count: 0,
+        }
+    }
+
+    fn new_local_iter_metrics_inner(
+        &self,
+        table_label: &str,
+        iter_type: &str,
+    ) -> LocalIterMetricsInner {
         let iter_init_duration = self
             .iter_init_duration
-            .with_label_values(&[table_label])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
-        let iter_in_process_counts = self
-            .iter_in_process_counts
-            .with_label_values(&[table_label])
+        let iter_counts = self
+            .iter_counts
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
         let iter_scan_duration = self
             .iter_scan_duration
-            .with_label_values(&[table_label])
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
-        let iter_item = self.iter_item.with_label_values(&[table_label]).local();
-        let iter_size = self.iter_size.with_label_values(&[table_label]).local();
-
-        let get_duration = self.get_duration.with_label_values(&[table_label]).local();
-        let get_key_size = self.get_key_size.with_label_values(&[table_label]).local();
-        let get_value_size = self
-            .get_value_size
-            .with_label_values(&[table_label])
+        let iter_item = self
+            .iter_item
+            .with_guarded_label_values(&[table_label, iter_type])
             .local();
+        let iter_size = self
+            .iter_size
+            .with_guarded_label_values(&[table_label, iter_type])
+            .local();
+        let iter_in_progress_counts = self
+            .iter_in_progress_counts
+            .with_guarded_label_values(&[table_label, iter_type]);
 
-        LocalStorageMetrics {
+        LocalIterMetricsInner {
             iter_init_duration,
             iter_scan_duration,
-            iter_in_process_counts,
+            iter_counts,
             iter_item,
             iter_size,
+            iter_in_progress_counts,
+        }
+    }
+
+    fn local_iter_log_metrics(&self, table_label: &str) -> LocalIterLogMetrics {
+        let iter_metrics = self.new_local_iter_metrics_inner(table_label, "iter_log");
+        let insert_count = self
+            .iter_log_op_type_counts
+            .with_guarded_label_values(&[table_label, "INSERT"])
+            .local();
+        let update_count = self
+            .iter_log_op_type_counts
+            .with_guarded_label_values(&[table_label, "UPDATE"])
+            .local();
+        let delete_count = self
+            .iter_log_op_type_counts
+            .with_guarded_label_values(&[table_label, "DELETE"])
+            .local();
+        LocalIterLogMetrics {
+            iter_metrics,
+            insert_count,
+            update_count,
+            delete_count,
+            report_count: 0,
+        }
+    }
+
+    fn local_get_metrics(&self, table_label: &str) -> LocalGetMetrics {
+        let get_duration = self
+            .get_duration
+            .with_guarded_label_values(&[table_label])
+            .local();
+        let get_key_size = self
+            .get_key_size
+            .with_guarded_label_values(&[table_label])
+            .local();
+        let get_value_size = self
+            .get_value_size
+            .with_guarded_label_values(&[table_label])
+            .local();
+
+        LocalGetMetrics {
             get_duration,
             get_key_size,
             get_value_size,
@@ -261,28 +365,51 @@ impl MonitoredStorageMetrics {
     }
 }
 
-pub struct LocalStorageMetrics {
-    iter_init_duration: LabelGuardedMetric<LocalHistogram, 1>,
-    iter_scan_duration: LabelGuardedMetric<LocalHistogram, 1>,
-    iter_in_process_counts: GenericLocalCounter<AtomicU64>,
-    iter_item: LocalHistogram,
-    iter_size: LocalHistogram,
+struct LocalIterMetricsInner {
+    iter_init_duration: LabelGuardedLocalHistogram<2>,
+    iter_scan_duration: LabelGuardedLocalHistogram<2>,
+    iter_counts: LabelGuardedLocalIntCounter<2>,
+    iter_item: LabelGuardedLocalHistogram<2>,
+    iter_size: LabelGuardedLocalHistogram<2>,
+    iter_in_progress_counts: LabelGuardedIntGauge<2>,
+}
 
-    get_duration: LabelGuardedMetric<LocalHistogram, 1>,
-    get_key_size: LocalHistogram,
-    get_value_size: LocalHistogram,
+struct LocalIterMetrics {
+    inner: LocalIterMetricsInner,
     report_count: usize,
 }
 
-impl LocalStorageMetrics {
-    pub fn may_flush(&mut self) {
+impl LocalIterMetrics {
+    fn may_flush(&mut self) {
         self.report_count += 1;
         if self.report_count > MAX_FLUSH_TIMES {
-            self.iter_scan_duration.flush();
-            self.iter_init_duration.flush();
-            self.iter_in_process_counts.flush();
-            self.iter_item.flush();
-            self.iter_size.flush();
+            self.inner.flush();
+            self.report_count = 0;
+        }
+    }
+}
+
+impl LocalIterMetricsInner {
+    fn flush(&mut self) {
+        self.iter_scan_duration.flush();
+        self.iter_init_duration.flush();
+        self.iter_counts.flush();
+        self.iter_item.flush();
+        self.iter_size.flush();
+    }
+}
+
+struct LocalGetMetrics {
+    get_duration: LabelGuardedLocalHistogram<1>,
+    get_key_size: LabelGuardedLocalHistogram<1>,
+    get_value_size: LabelGuardedLocalHistogram<1>,
+    report_count: usize,
+}
+
+impl LocalGetMetrics {
+    fn may_flush(&mut self) {
+        self.report_count += 1;
+        if self.report_count > MAX_FLUSH_TIMES {
             self.get_duration.flush();
             self.get_key_size.flush();
             self.get_value_size.flush();
@@ -291,40 +418,115 @@ impl LocalStorageMetrics {
     }
 }
 
-pub struct MonitoredStateStoreIterStats {
+struct LocalIterLogMetrics {
+    iter_metrics: LocalIterMetricsInner,
+    insert_count: LabelGuardedLocalIntCounter<2>,
+    update_count: LabelGuardedLocalIntCounter<2>,
+    delete_count: LabelGuardedLocalIntCounter<2>,
+    report_count: usize,
+}
+
+impl LocalIterLogMetrics {
+    fn may_flush(&mut self) {
+        self.report_count += 1;
+        if self.report_count > MAX_FLUSH_TIMES {
+            self.iter_metrics.flush();
+            self.insert_count.flush();
+            self.update_count.flush();
+            self.delete_count.flush();
+            self.report_count = 0;
+        }
+    }
+}
+
+pub(crate) trait StateStoreIterStatsTrait: Send {
+    type Item: IterItem;
+    fn new(table_id: u32, metrics: &MonitoredStorageMetrics, iter_init_duration: Duration) -> Self;
+    fn observe(&mut self, item: <Self::Item as IterItem>::ItemRef<'_>);
+    fn report(&mut self, table_id: u32, metrics: &MonitoredStorageMetrics);
+}
+
+const MAX_FLUSH_TIMES: usize = 64;
+
+struct StateStoreIterStatsInner {
     pub iter_init_duration: Duration,
     pub iter_scan_time: Instant,
     pub total_items: usize,
     pub total_size: usize,
-    pub table_id: u32,
-    pub metrics: Arc<MonitoredStorageMetrics>,
 }
 
-thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32, LocalStorageMetrics>> = RefCell::new(HashMap::default()));
-const MAX_FLUSH_TIMES: usize = 64;
-
-impl MonitoredStateStoreIterStats {
-    pub fn new(
-        table_id: u32,
-        iter_init_duration: Duration,
-        metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
+impl StateStoreIterStatsInner {
+    fn new(iter_init_duration: Duration) -> Self {
         Self {
             iter_init_duration,
             iter_scan_time: Instant::now(),
             total_items: 0,
             total_size: 0,
-            table_id,
-            metrics,
+        }
+    }
+}
+
+pub(crate) struct MonitoredStateStoreIterStats<S: StateStoreIterStatsTrait> {
+    pub inner: S,
+    pub table_id: u32,
+    pub metrics: Arc<MonitoredStorageMetrics>,
+}
+
+impl<S: StateStoreIterStatsTrait> Drop for MonitoredStateStoreIterStats<S> {
+    fn drop(&mut self) {
+        self.inner.report(self.table_id, &self.metrics)
+    }
+}
+
+pub(crate) struct StateStoreIterStats {
+    inner: StateStoreIterStatsInner,
+}
+
+impl StateStoreIterStats {
+    fn for_table_metrics(
+        table_id: u32,
+        global_metrics: &MonitoredStorageMetrics,
+        f: impl FnOnce(&mut LocalIterMetrics),
+    ) {
+        thread_local!(static LOCAL_ITER_METRICS: RefCell<HashMap<u32, LocalIterMetrics>> = RefCell::new(HashMap::default()));
+        LOCAL_ITER_METRICS.with_borrow_mut(|local_metrics| {
+            let table_metrics = local_metrics.entry(table_id).or_insert_with(|| {
+                let table_label = table_id.to_string();
+                global_metrics.local_iter_metrics(&table_label)
+            });
+            f(table_metrics)
+        });
+    }
+}
+
+impl StateStoreIterStatsTrait for StateStoreIterStats {
+    type Item = StateStoreKeyedRow;
+
+    fn new(table_id: u32, metrics: &MonitoredStorageMetrics, iter_init_duration: Duration) -> Self {
+        Self::for_table_metrics(table_id, metrics, |metrics| {
+            metrics.inner.iter_in_progress_counts.inc();
+        });
+        Self {
+            inner: StateStoreIterStatsInner::new(iter_init_duration),
         }
     }
 
-    pub fn report(&self) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            let table_metrics = local_metrics.entry(self.table_id).or_insert_with(|| {
-                let table_label = self.table_id.to_string();
-                self.metrics.local_metrics(&table_label)
-            });
+    fn observe(&mut self, (key, value): StateStoreKeyedRowRef<'_>) {
+        self.inner.total_items += 1;
+        self.inner.total_size += key.encoded_len() + value.len();
+    }
+
+    fn report(&mut self, table_id: u32, metrics: &MonitoredStorageMetrics) {
+        Self::for_table_metrics(table_id, metrics, |table_metrics| {
+            self.inner.apply_to_local(&mut table_metrics.inner);
+            table_metrics.may_flush();
+        });
+    }
+}
+
+impl StateStoreIterStatsInner {
+    fn apply_to_local(&self, table_metrics: &mut LocalIterMetricsInner) {
+        {
             let iter_scan_duration = self.iter_scan_time.elapsed();
             table_metrics
                 .iter_scan_duration
@@ -332,21 +534,87 @@ impl MonitoredStateStoreIterStats {
             table_metrics
                 .iter_init_duration
                 .observe(self.iter_init_duration.as_secs_f64());
-            table_metrics.iter_in_process_counts.inc();
+            table_metrics.iter_counts.inc();
             table_metrics.iter_item.observe(self.total_items as f64);
             table_metrics.iter_size.observe(self.total_size as f64);
+            table_metrics.iter_in_progress_counts.dec();
+        }
+    }
+}
+
+pub(crate) struct StateStoreIterLogStats {
+    inner: StateStoreIterStatsInner,
+    insert_count: u64,
+    update_count: u64,
+    delete_count: u64,
+}
+
+impl StateStoreIterLogStats {
+    fn for_table_metrics(
+        table_id: u32,
+        global_metrics: &MonitoredStorageMetrics,
+        f: impl FnOnce(&mut LocalIterLogMetrics),
+    ) {
+        thread_local!(static LOCAL_ITER_LOG_METRICS: RefCell<HashMap<u32, LocalIterLogMetrics>> = RefCell::new(HashMap::default()));
+        LOCAL_ITER_LOG_METRICS.with_borrow_mut(|local_metrics| {
+            let table_metrics = local_metrics.entry(table_id).or_insert_with(|| {
+                let table_label = table_id.to_string();
+                global_metrics.local_iter_log_metrics(&table_label)
+            });
+            f(table_metrics)
+        });
+    }
+}
+
+impl StateStoreIterStatsTrait for StateStoreIterLogStats {
+    type Item = StateStoreReadLogItem;
+
+    fn new(table_id: u32, metrics: &MonitoredStorageMetrics, iter_init_duration: Duration) -> Self {
+        Self::for_table_metrics(table_id, metrics, |metrics| {
+            metrics.iter_metrics.iter_in_progress_counts.inc();
+        });
+        Self {
+            inner: StateStoreIterStatsInner::new(iter_init_duration),
+            insert_count: 0,
+            update_count: 0,
+            delete_count: 0,
+        }
+    }
+
+    fn observe(&mut self, (key, change_log): StateStoreReadLogItemRef<'_>) {
+        self.inner.total_items += 1;
+        let value_len = match change_log {
+            ChangeLogValue::Insert(value) => {
+                self.insert_count += 1;
+                value.len()
+            }
+            ChangeLogValue::Update {
+                old_value,
+                new_value,
+            } => {
+                self.update_count += 1;
+                old_value.len() + new_value.len()
+            }
+            ChangeLogValue::Delete(value) => {
+                self.delete_count += 1;
+                value.len()
+            }
+        };
+        self.inner.total_size += key.len() + value_len;
+    }
+
+    fn report(&mut self, table_id: u32, metrics: &MonitoredStorageMetrics) {
+        Self::for_table_metrics(table_id, metrics, |table_metrics| {
+            self.inner.apply_to_local(&mut table_metrics.iter_metrics);
+            table_metrics.insert_count.inc_by(self.insert_count);
+            table_metrics.update_count.inc_by(self.update_count);
+            table_metrics.delete_count.inc_by(self.delete_count);
             table_metrics.may_flush();
         });
     }
 }
 
-impl Drop for MonitoredStateStoreIterStats {
-    fn drop(&mut self) {
-        self.report();
-    }
-}
-
-pub struct MonitoredStateStoreGetStats {
+pub(crate) struct MonitoredStateStoreGetStats {
     pub get_duration: Instant,
     pub get_key_size: usize,
     pub get_value_size: usize,
@@ -355,7 +623,7 @@ pub struct MonitoredStateStoreGetStats {
 }
 
 impl MonitoredStateStoreGetStats {
-    pub fn new(table_id: u32, metrics: Arc<MonitoredStorageMetrics>) -> Self {
+    pub(crate) fn new(table_id: u32, metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             get_duration: Instant::now(),
             get_key_size: 0,
@@ -365,11 +633,12 @@ impl MonitoredStateStoreGetStats {
         }
     }
 
-    pub fn report(&self) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+    pub(crate) fn report(&self) {
+        thread_local!(static LOCAL_GET_METRICS: RefCell<HashMap<u32, LocalGetMetrics>> = RefCell::new(HashMap::default()));
+        LOCAL_GET_METRICS.with_borrow_mut(|local_metrics| {
             let table_metrics = local_metrics.entry(self.table_id).or_insert_with(|| {
                 let table_label = self.table_id.to_string();
-                self.metrics.local_metrics(&table_label)
+                self.metrics.local_get_metrics(&table_label)
             });
             let get_duration = self.get_duration.elapsed();
             table_metrics

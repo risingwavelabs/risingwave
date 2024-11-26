@@ -34,7 +34,3 @@ test-group = 'failpoint-limited'
 [[profile.ci-sim.overrides]]
 filter = 'test(failpoint_limited::)'
 test-group = 'failpoint-limited'
-
-[[profile.ci.junit.overrides]]
-filter = 'test(failpoint_limited::)'
-test-group = 'failpoint-limited'

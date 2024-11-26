@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_sqlparser::ast::{SetExpr, SetOperator};
+use risingwave_sqlparser::ast::{Corresponding, SetExpr, SetOperator};
 
 use super::statement::RewriteExprsRecursive;
+use super::UNNAMED_COLUMN;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{align_types, CorrelatedId, Depth};
@@ -33,6 +38,8 @@ pub enum BoundSetExpr {
     SetOperation {
         op: BoundSetOperation,
         all: bool,
+        // Corresponding columns of the left and right side.
+        corresponding_col_indices: Option<(ColIndexMapping, ColIndexMapping)>,
         left: Box<BoundSetExpr>,
         right: Box<BoundSetExpr>,
     },
@@ -71,13 +78,29 @@ impl From<SetOperator> for BoundSetOperation {
 
 impl BoundSetExpr {
     /// The schema returned by this [`BoundSetExpr`].
-
-    pub fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> Cow<'_, Schema> {
         match self {
-            BoundSetExpr::Select(s) => s.schema(),
-            BoundSetExpr::Values(v) => v.schema(),
+            BoundSetExpr::Select(s) => Cow::Borrowed(s.schema()),
+            BoundSetExpr::Values(v) => Cow::Borrowed(v.schema()),
             BoundSetExpr::Query(q) => q.schema(),
-            BoundSetExpr::SetOperation { left, .. } => left.schema(),
+            BoundSetExpr::SetOperation {
+                left,
+                corresponding_col_indices,
+                ..
+            } => {
+                if let Some((mapping_l, _)) = corresponding_col_indices {
+                    let mut schema = vec![None; mapping_l.target_size()];
+                    for (src, tar) in mapping_l.mapping_pairs() {
+                        assert_eq!(schema[tar], None);
+                        schema[tar] = Some(left.schema().fields[src].clone());
+                    }
+                    Cow::Owned(Schema::new(
+                        schema.into_iter().map(|x| x.unwrap()).collect(),
+                    ))
+                } else {
+                    left.schema()
+                }
+            }
         }
     }
 
@@ -194,6 +217,92 @@ impl Binder {
         Ok(())
     }
 
+    /// Check the corresponding specification of the set operation.
+    /// Returns the corresponding column index of the left and right side.
+    fn corresponding(
+        &self,
+        left: &BoundSetExpr,
+        right: &BoundSetExpr,
+        corresponding: Corresponding,
+        op: &SetOperator,
+    ) -> Result<(ColIndexMapping, ColIndexMapping)> {
+        let check_duplicate_name = |set_expr: &BoundSetExpr| {
+            let mut name2idx = HashMap::new();
+            for (idx, field) in set_expr.schema().fields.iter().enumerate() {
+                if name2idx.insert(field.name.clone(), idx).is_some() {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Duplicated column name `{}` in a column list of the query in a {} operation. Column list of the query: ({}).",
+                        field.name, op, set_expr.schema().formatted_col_names(),
+                    )));
+                }
+            }
+            Ok(name2idx)
+        };
+
+        // Within the columns of both side, the same <column name> shall not
+        // be specified more than once.
+        let name2idx_l = check_duplicate_name(left)?;
+        let name2idx_r = check_duplicate_name(right)?;
+
+        let mut corresponding_col_idx_l = vec![];
+        let mut corresponding_col_idx_r = vec![];
+
+        if let Some(column_list) = corresponding.column_list() {
+            // The select list of the corresponding set operation should be in the order of <corresponding column list>
+            for column in column_list {
+                let col_name = column.real_value();
+                if let Some(idx_l) = name2idx_l.get(&col_name)
+                    && let Some(idx_r) = name2idx_l.get(&col_name)
+                {
+                    corresponding_col_idx_l.push(*idx_l);
+                    corresponding_col_idx_r.push(*idx_r);
+                } else {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "Column name `{}` in CORRESPONDING BY is not found in a side of the {} operation. \
+                        It shall be included in both sides.",
+                        col_name,
+                        op,
+                    )).into());
+                }
+            }
+        } else {
+            // The select list of the corresponding set operation should be
+            // in the order that appears in the <column name>s of the left side.
+            for field in &left.schema().fields {
+                let col_name = &field.name;
+                if col_name != UNNAMED_COLUMN
+                    && let Some(idx_l) = name2idx_l.get(col_name)
+                    && let Some(idx_r) = name2idx_r.get(col_name)
+                {
+                    corresponding_col_idx_l.push(*idx_l);
+                    corresponding_col_idx_r.push(*idx_r);
+                }
+            }
+
+            if corresponding_col_idx_l.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    format!(
+                        "When CORRESPONDING is specified, at least one column of the left side \
+                        shall have a column name that is the column name of some column of the right side in a {} operation. \
+                        Left side query column list: ({}). \
+                        Right side query column list: ({}).",
+                        op,
+                        left.schema().formatted_col_names(),
+                        right.schema().formatted_col_names(),
+                    )
+                )
+                .into());
+            }
+        }
+
+        let corresponding_mapping_l =
+            ColIndexMapping::with_remaining_columns(&corresponding_col_idx_l, left.schema().len());
+        let corresponding_mapping_r =
+            ColIndexMapping::with_remaining_columns(&corresponding_col_idx_r, right.schema().len());
+
+        Ok((corresponding_mapping_l, corresponding_mapping_r))
+    }
+
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
@@ -202,6 +311,7 @@ impl Binder {
             SetExpr::SetOperation {
                 op,
                 all,
+                corresponding,
                 left,
                 right,
             } => {
@@ -215,15 +325,19 @@ impl Binder {
                             .clone_from(&new_context.cte_to_relation);
                         let mut right = self.bind_set_expr(*right)?;
 
-                        if left.schema().fields.len() != right.schema().fields.len() {
-                            return Err(ErrorCode::InvalidInputSyntax(format!(
-                                "each {} query must have the same number of columns",
-                                op
-                            ))
-                            .into());
-                        }
-
-                        Self::align_schema(&mut left, &mut right, op.clone())?;
+                        let corresponding_col_indices = if corresponding.is_corresponding() {
+                            Some(Self::corresponding(
+                                self,
+                                &left,
+                                &right,
+                                corresponding,
+                                &op,
+                            )?)
+                            // TODO: Align schema
+                        } else {
+                            Self::align_schema(&mut left, &mut right, op.clone())?;
+                            None
+                        };
 
                         if all {
                             match op {
@@ -243,6 +357,7 @@ impl Binder {
                         Ok(BoundSetExpr::SetOperation {
                             op: op.into(),
                             all,
+                            corresponding_col_indices,
                             left: Box::new(left),
                             right: Box::new(right),
                         })

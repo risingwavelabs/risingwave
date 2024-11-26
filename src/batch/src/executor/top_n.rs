@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::sync::Arc;
-use std::vec::Vec;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
@@ -244,10 +243,6 @@ impl HeapElem {
         }
     }
 
-    pub fn encoded_row(&self) -> &[u8] {
-        &self.encoded_row
-    }
-
     pub fn row(&self) -> impl Row + '_ {
         &self.row
     }
@@ -296,8 +291,8 @@ impl TopNExecutor {
 mod tests {
     use futures::stream::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, DataChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::Array;
+    use risingwave_common::catalog::Field;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;

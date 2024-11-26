@@ -31,6 +31,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
     fn from(tagged_message: TaggedReceivedMessage) -> Self {
         let TaggedReceivedMessage(split_id, message) = tagged_message;
 
+        let ack_id = message.ack_id().to_string();
         let timestamp = message
             .message
             .publish_time
@@ -50,8 +51,9 @@ impl From<TaggedReceivedMessage> for SourceMessage {
                     _ => Some(payload),
                 }
             },
-            offset: timestamp.timestamp_nanos_opt().unwrap().to_string(),
+            offset: ack_id,
             split_id,
+            // What's the usage of this?
             meta: SourceMeta::GooglePubsub(GooglePubsubMeta {
                 timestamp: Some(timestamp.timestamp_millis()),
             }),

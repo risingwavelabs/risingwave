@@ -18,14 +18,16 @@ use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{
-    ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
+    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
 };
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::expr::agg_call::Type;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
@@ -38,8 +40,9 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
-use crate::model::TableFragments;
+use crate::controller::cluster::StreamingClusterInfo;
+use crate::manager::{MetaSrvEnv, StreamingJob};
+use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -47,7 +50,7 @@ use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
-        function_type: Type::Unspecified as i32,
+        function_type: PbAggKind::Unspecified as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -58,7 +61,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
-        r#type: Type::Sum as i32,
+        kind: PbAggKind::Sum as i32,
         args: vec![PbInputRef {
             index: idx,
             r#type: Some(DataType {
@@ -74,6 +77,8 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
         order_by: vec![],
         filter: None,
         direct_args: vec![],
+        udf: None,
+        scalar: None,
     }
 }
 
@@ -344,9 +349,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
-            watermark_input_cols: vec![],
-            watermark_output_cols: vec![],
-            nondecreasing_exprs: vec![],
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
@@ -417,42 +420,33 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
     }
 }
 
 fn make_cluster_info() -> StreamingClusterInfo {
-    let parallel_units = (0..8)
-        .map(|id| {
-            (
-                id,
-                ParallelUnit {
-                    id,
-                    worker_node_id: 0,
-                },
-            )
-        })
-        .collect();
-
     let worker_nodes = std::iter::once((
         0,
         WorkerNode {
             id: 0,
+            property: Some(Property {
+                parallelism: 8,
+                ..Default::default()
+            }),
+            r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
         },
     ))
     .collect();
-    let unschedulable_parallel_units = Default::default();
     StreamingClusterInfo {
         worker_nodes,
-        parallel_units,
-        unschedulable_parallel_units,
+        unschedulable_workers: Default::default(),
     }
 }
 
 #[tokio::test]
-#[cfg(not(madsim))]
 async fn test_graph_builder() -> MetaResult<()> {
-    let env = MetaSrvEnv::for_test_with_sql_meta_store().await;
+    let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
@@ -460,8 +454,8 @@ async fn test_graph_builder() -> MetaResult<()> {
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
     };
-    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job).await?;
-    let internal_tables = fragment_graph.internal_tables();
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
+    let internal_tables = fragment_graph.incomplete_internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
@@ -469,21 +463,18 @@ async fn test_graph_builder() -> MetaResult<()> {
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
-    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
-        .generate_graph(&env, &job, expr_context)
-        .await?;
+    let ActorGraphBuildResult { graph, .. } =
+        actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
-    let table_fragments = TableFragments::for_test(TableId::default(), graph);
-    let actors = table_fragments.actors();
-    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
-    let mview_actor_ids = table_fragments.mview_actor_ids();
+    let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
+    let actors = stream_job_fragments.actors();
+    let mview_actor_ids = stream_job_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
-    let fragment_upstreams: HashMap<_, _> = table_fragments
+    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
         .fragments
         .iter()
         .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))

@@ -118,7 +118,7 @@
           └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [unnest], stream_key: [unnest], pk_columns: [unnest], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Unnest($0)] }
+    └─StreamProject { exprs: [Unnest($0)], noop_update_hint: true }
       └─StreamHashAgg { group_key: [Unnest($0)], aggs: [count] }
         └─StreamExchange { dist: HashShard(Unnest($0)) }
           └─StreamProjectSet { select_list: [Unnest($0), $1] }
@@ -228,7 +228,7 @@
   sql: |
     with a(a1) as (values (array[2]), (null)) select count(*) filter(where unnest(a1) < 3) from a;
   binder_error: |
-    Failed to bind expression: count(*) FILTER(WHERE unnest(a1) < 3)
+    Failed to bind expression: count(*) FILTER (WHERE unnest(a1) < 3)
 
     Caused by:
       Invalid input syntax: table functions are not allowed in FILTER

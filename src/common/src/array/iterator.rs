@@ -47,8 +47,8 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     }
 }
 
-impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
+impl<A: Array> ExactSizeIterator for ArrayIterator<'_, A> {}
+unsafe impl<A: Array> TrustedLen for ArrayIterator<'_, A> {}
 
 #[cfg(test)]
 mod tests {
@@ -56,10 +56,10 @@ mod tests {
 
     use super::*;
     use crate::array::{ArrayBuilder, ArrayImpl};
-    use crate::for_all_array_variants;
+    use crate::for_all_variants;
 
     macro_rules! test_trusted_len {
-        ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        ($( { $data_type:ident, $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty, $array:ty, $builder:ty } ),*) => {
             $(
                 paste! {
                     #[test]
@@ -91,5 +91,5 @@ mod tests {
         };
     }
 
-    for_all_array_variants! { test_trusted_len }
+    for_all_variants! { test_trusted_len }
 }

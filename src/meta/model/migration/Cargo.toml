@@ -1,0 +1,23 @@
+[package]
+name = "risingwave_meta_model_migration"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+async-std = { version = "1", features = ["attributes", "tokio1"] }
+easy-ext = "1"
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,62 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+create table t_many_data_type_rw (
+  k1 int, k2 int,
+  c_boolean bool,
+  c_int16 smallint,
+  c_int32 int,
+  c_int64 bigint,
+  c_float32 float,
+  c_float64 double,
+  c_decimal decimal,
+  c_date date,
+  c_time time,
+  c_timestamp timestamp,
+  c_timestampz timestamp,
+  c_nvarchar string,
+  c_varbinary bytea);
+
+statement ok
+create sink s_many_data_type from t_many_data_type_rw with (
+  connector = 'sqlserver',
+  type = 'upsert',
+  sqlserver.host = 'sqlserver-server',
+  sqlserver.port = 1433,
+  sqlserver.user = 'SA',
+  sqlserver.password = 'SomeTestOnly@SA',
+  sqlserver.database = 'SinkTest',
+  sqlserver.table = 't_many_data_type',
+  primary_key = 'k1,k2',
+);
+
+statement ok
+insert into t_many_data_type_rw values
+(0,0,false,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),
+(1,1,false,1,1,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf'),
+(1,2,false,2,2,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf'),
+(1,3,false,2,2,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf'),
+(1,4,false,2,2,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf'),
+(1,1,false,2,2,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf');
+flush;
+
+statement ok
+delete from t_many_data_type_rw where k1=1 and k2=2;
+delete from t_many_data_type_rw where k1=1 and k2=3;
+flush;
+
+statement ok
+insert into t_many_data_type_rw values
+(1,1,false,55,55,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf'),
+(1,2,false,66,66,1,1.0,1.0,1.0,date '2022-04-08',time '18:20:49','2022-03-13 01:00:00'::timestamp,'2022-03-13 01:00:00Z'::timestamptz,'Hello World!','\xDe00BeEf');
+flush;
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_many_data_type;
+
+statement ok
+DROP TABLE t_many_data_type_rw;

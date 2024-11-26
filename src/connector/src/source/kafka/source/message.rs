@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use itertools::Itertools;
 use rdkafka::message::{BorrowedMessage, Headers, OwnedHeaders};
-use rdkafka::Message;
-use risingwave_common::types::{Datum, ListValue, Scalar, ScalarImpl, StructValue};
+use rdkafka::{Message, Timestamp};
+use risingwave_common::types::{
+    Datum, DatumCow, DatumRef, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
+};
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::data::DataType as PbDataType;
 
@@ -25,45 +29,45 @@ use crate::source::SourceMeta;
 
 #[derive(Debug, Clone)]
 pub struct KafkaMeta {
-    // timestamp(milliseconds) of message append in mq
-    pub timestamp: Option<i64>,
+    pub timestamp: Timestamp,
     pub headers: Option<OwnedHeaders>,
 }
 
 impl KafkaMeta {
-    pub fn extract_timestamp(&self) -> Option<Datum> {
-        self.timestamp
-            .map(|ts| {
-                risingwave_common::cast::i64_to_timestamptz(ts)
-                    .unwrap()
-                    .to_scalar_value()
-            })
-            .into()
+    pub fn extract_timestamp(&self) -> DatumRef<'_> {
+        Some(
+            risingwave_common::types::Timestamptz::from_millis(self.timestamp.to_millis()?)?.into(),
+        )
     }
 
-    pub fn extract_header_inner(
-        &self,
+    pub fn extract_header_inner<'a>(
+        &'a self,
         inner_field: &str,
         data_type: Option<&PbDataType>,
-    ) -> Option<Datum> {
-        let target_value = self
-            .headers
-            .as_ref()
-            .iter()
-            .find_map(|headers| {
-                headers
-                    .iter()
-                    .find(|header| header.key == inner_field)
-                    .map(|header| header.value)
-            })
-            .unwrap_or(None); // if not found the specified column, return None
-        if let Some(data_type) = data_type
+    ) -> Option<DatumCow<'a>> {
+        let target_value = self.headers.as_ref().iter().find_map(|headers| {
+            headers
+                .iter()
+                .find(|header| header.key == inner_field)
+                .map(|header| header.value)
+        })?; // if not found the specified column, return None
+
+        let Some(target_value) = target_value else {
+            return Some(Datum::None.into());
+        };
+
+        let datum = if let Some(data_type) = data_type
             && data_type.type_name == PbTypeName::Varchar as i32
         {
-            Some(target_value.map(|byte| ScalarImpl::Utf8(String::from_utf8_lossy(byte).into())))
+            match String::from_utf8_lossy(target_value) {
+                Cow::Borrowed(str) => Some(ScalarRefImpl::Utf8(str)).into(),
+                Cow::Owned(string) => Some(ScalarImpl::Utf8(string.into())).into(),
+            }
         } else {
-            Some(target_value.map(|byte| ScalarImpl::Bytea(byte.into())))
-        }
+            Some(ScalarRefImpl::Bytea(target_value)).into()
+        };
+
+        Some(datum)
     }
 
     pub fn extract_headers(&self) -> Option<Datum> {
@@ -94,7 +98,7 @@ impl SourceMessage {
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
-                timestamp: message.timestamp().to_millis(),
+                timestamp: message.timestamp(),
                 headers: if require_header {
                     message.headers().map(|headers| headers.detach())
                 } else {

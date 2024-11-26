@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::{Buf, Bytes};
 use chrono::offset::Utc;
 use chrono::DateTime;
@@ -29,9 +28,10 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
-use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -59,6 +59,8 @@ pub struct SstDumpArgs {
     print_table: bool,
     #[clap(short = 'd')]
     data_dir: Option<String>,
+    #[clap(short, long = "use-new-object-prefix-strategy", default_value = "true")]
+    use_new_object_prefix_strategy: bool,
 }
 
 pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result<()> {
@@ -72,18 +74,21 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     if args.print_level {
         // Level information is retrieved from meta service
         let hummock = context
-            .hummock_store(HummockServiceOpts::from_env(args.data_dir.clone())?)
+            .hummock_store(HummockServiceOpts::from_env(
+                args.data_dir.clone(),
+                args.use_new_object_prefix_strategy,
+            )?)
             .await?;
-        let version = hummock.inner().get_pinned_version().version().clone();
+        let version = hummock.inner().get_pinned_version().clone();
         let sstable_store = hummock.sstable_store();
         for level in version.get_combined_levels() {
             for sstable_info in &level.table_infos {
                 if let Some(object_id) = &args.object_id {
-                    if *object_id == sstable_info.get_object_id() {
+                    if *object_id == sstable_info.object_id {
                         print_level(level, sstable_info);
                         sst_dump_via_sstable_store(
                             &sstable_store,
-                            sstable_info.get_object_id(),
+                            sstable_info.object_id,
                             sstable_info.meta_offset,
                             sstable_info.file_size,
                             &table_data,
@@ -96,7 +101,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
                     print_level(level, sstable_info);
                     sst_dump_via_sstable_store(
                         &sstable_store,
-                        sstable_info.get_object_id(),
+                        sstable_info.object_id,
                         sstable_info.meta_offset,
                         sstable_info.file_size,
                         &table_data,
@@ -108,16 +113,17 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
         }
     } else {
         // Object information is retrieved from object store. Meta service is not required.
-        let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
-        let sstable_store = hummock_service_opts.create_sstable_store().await?;
+        let hummock_service_opts = HummockServiceOpts::from_env(
+            args.data_dir.clone(),
+            args.use_new_object_prefix_strategy,
+        )?;
+        let sstable_store = hummock_service_opts
+            .create_sstable_store(args.use_new_object_prefix_strategy)
+            .await?;
         if let Some(obj_id) = &args.object_id {
             let obj_store = sstable_store.store();
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
-            let mut obj_metadata_iter = obj_store.list(&obj_path).await?;
-            let obj = obj_metadata_iter
-                .try_next()
-                .await?
-                .ok_or_else(|| anyhow!(format!("object {obj_path} doesn't exist")))?;
+            let obj = obj_store.metadata(&obj_path).await?;
             print_object(&obj);
             let meta_offset = get_meta_offset_from_object(&obj, obj_store.as_ref()).await?;
             let obj_id = SstableStore::get_object_id_from_path(&obj.key);
@@ -132,7 +138,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             .await?;
         } else {
             let mut metadata_iter = sstable_store
-                .list_object_metadata_from_object_store()
+                .list_object_metadata_from_object_store(None, None, None)
                 .await?;
             while let Some(obj) = metadata_iter.try_next().await? {
                 print_object(&obj);
@@ -156,7 +162,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 }
 
 fn print_level(level: &Level, sst_info: &SstableInfo) {
-    println!("Level Type: {}", level.level_type);
+    println!("Level Type: {}", level.level_type.as_str_name());
     println!("Level Idx: {}", level.level_idx);
     if level.level_idx == 0 {
         println!("L0 Sub-Level Idx: {}", level.sub_level_id);
@@ -222,14 +228,6 @@ pub async fn sst_dump_via_sstable_store(
     println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
-    println!(
-        "Monotonoic Deletes Count: {}",
-        sstable_meta.monotonic_tombstone_events.len()
-    );
-    for monotonic_delete in &sstable_meta.monotonic_tombstone_events {
-        println!("\tevent key: {:?}", monotonic_delete.event_key);
-        println!("\tnew epoch: {:?}", monotonic_delete.new_epoch);
-    }
 
     println!("Block Count: {}", sstable.block_count());
     for i in 0..sstable.block_count() {

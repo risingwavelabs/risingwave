@@ -13,9 +13,6 @@
 // limitations under the License.
 
 #![cfg_attr(not(madsim), allow(dead_code))]
-#![feature(lazy_cell)]
-
-use std::path::PathBuf;
 
 use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
@@ -48,7 +45,7 @@ pub struct Args {
     compactor_nodes: usize,
 
     /// The number of meta nodes.
-    #[clap(long, default_value = "3")]
+    #[clap(long, default_value = "1")]
     meta_nodes: usize,
 
     /// The number of CPU cores for each compute node.
@@ -63,10 +60,6 @@ pub struct Args {
     /// and all `--kill*` options will be ignored.
     #[clap(short, long)]
     jobs: Option<usize>,
-
-    /// The probability of etcd request timeout.
-    #[clap(long, default_value = "0.0")]
-    etcd_timeout_rate: f32,
 
     /// Allow to kill all risingwave node.
     #[clap(long)]
@@ -129,14 +122,6 @@ pub struct Args {
     #[clap(long)]
     run_differential_tests: bool,
 
-    /// Load etcd data from toml file.
-    #[clap(long)]
-    etcd_data: Option<PathBuf>,
-
-    /// Dump etcd data into toml file before exit.
-    #[clap(long)]
-    etcd_dump: Option<PathBuf>,
-
     #[arg(short, long)]
     e2e_extended_test: bool,
 
@@ -145,13 +130,16 @@ pub struct Args {
     #[clap(long, default_value = "0.0")]
     background_ddl_rate: f64,
 
-    /// Use arrangement backfill by default
+    /// Use arrangement backfill
     #[clap(long, default_value = "false")]
     use_arrangement_backfill: bool,
+
+    /// Set vnode count (`STREAMING_MAX_PARALLELISM`) to random value before running DDL.
+    #[clap(long, env = "RW_SIM_RANDOM_VNODE_COUNT")]
+    random_vnode_count: bool,
 }
 
 #[tokio::main]
-#[cfg_or_panic(madsim)]
 async fn main() {
     use std::sync::Arc;
 
@@ -175,17 +163,14 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
-        etcd_timeout_rate: args.etcd_timeout_rate,
-        etcd_data_path: args.etcd_data,
         per_session_queries: if args.use_arrangement_backfill {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
         } else {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
         },
-        ..Default::default()
     };
     let kill_opts = KillOpts {
-        kill_meta: args.kill_meta || args.kill,
+        kill_meta: false,
         kill_frontend: args.kill_frontend || args.kill,
         kill_compute: args.kill_compute || args.kill,
         kill_compactor: args.kill_compactor || args.kill,
@@ -203,7 +188,7 @@ async fn main() {
         cluster.create_kafka_producer(&datadir).await;
     }
 
-    let seed = madsim::runtime::Handle::current().seed();
+    let seed = sqlsmith_seed();
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -265,22 +250,15 @@ async fn main() {
             if let Some(jobs) = args.jobs {
                 run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
-                run_slt_task(cluster0, glob, &kill_opts, args.background_ddl_rate).await;
+                let opts = Opts {
+                    kill_opts,
+                    background_ddl_rate: args.background_ddl_rate,
+                    random_vnode_count: args.random_vnode_count,
+                };
+                run_slt_task(cluster0, glob, opts).await;
             }
         })
         .await;
-
-    if let Some(path) = args.etcd_dump {
-        cluster
-            .run_on_client(async move {
-                let mut client = etcd_client::Client::connect(["192.168.10.1:2388"], None)
-                    .await
-                    .unwrap();
-                let dump = client.dump().await.unwrap();
-                std::fs::write(path, dump).unwrap();
-            })
-            .await;
-    }
 
     if args.e2e_extended_test {
         cluster
@@ -298,4 +276,9 @@ async fn main() {
     }
 
     cluster.graceful_shutdown().await;
+}
+
+#[cfg_or_panic(madsim)]
+fn sqlsmith_seed() -> u64 {
+    madsim::runtime::Handle::current().seed()
 }

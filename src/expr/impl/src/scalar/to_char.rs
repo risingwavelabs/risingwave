@@ -351,6 +351,7 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                 | WeekFromMon | IsoYearDiv100 | Timestamp | YearDiv100 | Internal(_) => {
                     unreachable!()
                 }
+                _ => unreachable!(),
             }
             Ok(())
         }
@@ -395,6 +396,7 @@ fn format_inner(w: &mut impl Write, interval: Interval, item: &Item<'_>) -> Resu
                 | Nanosecond9
                 | RFC2822
                 | RFC3339 => unreachable!(),
+                _ => unreachable!(),
             }
         }
         Item::Error => Err(invalid_pattern_err()),

@@ -20,7 +20,7 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ConnectorSchema;
+use super::FormatEncodeOptions;
 use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
 };
@@ -28,7 +28,6 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterDatabaseOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameDatabase { database_name: ObjectName },
@@ -36,10 +35,10 @@ pub enum AlterDatabaseOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
+    SwapRenameSchema { target_schema: ObjectName },
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -104,15 +103,22 @@ pub enum AlterTableOperation {
         deferred: bool,
     },
     RefreshSchema,
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
+    SetSourceRateLimit {
         rate_limit: i32,
+    },
+    /// SET BACKFILL_RATE_LIMIT TO <rate_limit>
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
+    /// `SWAP WITH <table_name>`
+    SwapRenameTable {
+        target_table: ObjectName,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
@@ -126,7 +132,6 @@ pub enum AlterIndexOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView {
         view_name: ObjectName,
@@ -142,15 +147,18 @@ pub enum AlterViewOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
-    /// `SET STREAMING_RATE_LIMIT TO <rate_limit>`
-    SetStreamingRateLimit {
+    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
+    SetBackfillRateLimit {
         rate_limit: i32,
+    },
+    /// `SWAP WITH <view_name>`
+    SwapRenameView {
+        target_view: ObjectName,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
     RenameSink {
         sink_name: ObjectName,
@@ -166,40 +174,42 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SWAP WITH <sink_name>`
+    SwapRenameSink {
+        target_sink: ObjectName,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
+    SwapRenameSubscription { target_subscription: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
-    FormatEncode { connector_schema: ConnectorSchema },
+    FormatEncode { format_encode: FormatEncodeOptions },
     RefreshSchema,
-    SetStreamingRateLimit { rate_limit: i32 },
+    SetSourceRateLimit { rate_limit: i32 },
+    SwapRenameSource { target_source: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
@@ -225,6 +235,9 @@ impl fmt::Display for AlterSchemaOperation {
             }
             AlterSchemaOperation::RenameSchema { schema_name } => {
                 write!(f, "RENAME TO {}", schema_name)
+            }
+            AlterSchemaOperation::SwapRenameSchema { target_schema } => {
+                write!(f, "SWAP WITH {}", target_schema)
             }
         }
     }
@@ -299,8 +312,14 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterTableOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::SwapRenameTable { target_table } => {
+                write!(f, "SWAP WITH {}", target_table)
             }
         }
     }
@@ -350,8 +369,11 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
-            AlterViewOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterViewOperation::SwapRenameView { target_view } => {
+                write!(f, "SWAP WITH {}", target_view)
             }
         }
     }
@@ -380,6 +402,9 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SwapRenameSink { target_sink } => {
+                write!(f, "SWAP WITH {}", target_sink)
+            }
         }
     }
 }
@@ -395,6 +420,11 @@ impl fmt::Display for AlterSubscriptionOperation {
             }
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SwapRenameSubscription {
+                target_subscription,
+            } => {
+                write!(f, "SWAP WITH {}", target_subscription)
             }
         }
     }
@@ -415,14 +445,17 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
-            AlterSourceOperation::FormatEncode { connector_schema } => {
-                write!(f, "{connector_schema}")
+            AlterSourceOperation::FormatEncode { format_encode } => {
+                write!(f, "{format_encode}")
             }
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterSourceOperation::SetStreamingRateLimit { rate_limit } => {
-                write!(f, "SET STREAMING_RATE_LIMIT TO {}", rate_limit)
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
+                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSourceOperation::SwapRenameSource { target_source } => {
+                write!(f, "SWAP WITH {}", target_source)
             }
         }
     }
@@ -733,7 +766,7 @@ impl fmt::Display for ColumnOption {
 
 fn display_constraint_name(name: &'_ Option<Ident>) -> impl fmt::Display + '_ {
     struct ConstraintName<'a>(&'a Option<Ident>);
-    impl<'a> fmt::Display for ConstraintName<'a> {
+    impl fmt::Display for ConstraintName<'_> {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if let Some(name) = self.0 {
                 write!(f, "CONSTRAINT {} ", name)?;

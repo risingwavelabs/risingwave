@@ -14,7 +14,6 @@
 
 #![feature(let_chains)]
 #![feature(if_let_guard)]
-#![feature(lazy_cell)]
 #![feature(box_patterns)]
 #![feature(register_tool)]
 #![register_tool(rw)]
@@ -90,8 +89,8 @@ pub fn differential_sql_gen<R: Rng>(
 /// generated query when `QUERY_MODE=local`.
 pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
     [
-        "SET RW_ENABLE_TWO_PHASE_AGG TO TRUE",
-        "SET RW_ENABLE_TWO_PHASE_AGG TO FALSE",
+        "SET ENABLE_TWO_PHASE_AGG TO TRUE",
+        "SET ENABLE_TWO_PHASE_AGG TO FALSE",
         "SET RW_FORCE_TWO_PHASE_AGG TO TRUE",
         "SET RW_FORCE_TWO_PHASE_AGG TO FALSE",
     ]
@@ -277,7 +276,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -325,7 +324,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -384,7 +383,7 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -519,7 +518,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -574,7 +573,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -636,7 +635,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,
@@ -716,7 +715,7 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             wildcard_idx: None,
                             constraints: [],
                             with_options: [],
-                            source_schema: None,
+                            format_encode: None,
                             source_watermarks: [],
                             append_only: false,
                             on_conflict: None,

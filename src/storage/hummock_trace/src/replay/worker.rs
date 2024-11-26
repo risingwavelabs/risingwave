@@ -257,19 +257,15 @@ impl ReplayWorker {
                     panic!("expect iter result, but got {:?}", res);
                 }
             }
-            Operation::Sync(epoch_id) => {
+            Operation::Sync(sync_table_epochs) => {
                 assert_eq!(storage_type, StorageType::Global);
-                let sync_result = replay.sync(epoch_id).await.unwrap();
+                let sync_result = replay.sync(sync_table_epochs).await.unwrap();
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Sync(expected) = res {
                     assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");
                 } else {
                     panic!("expect sync result, but got {:?}", res);
                 }
-            }
-            Operation::Seal(epoch_id, is_checkpoint) => {
-                assert_eq!(storage_type, StorageType::Global);
-                replay.seal_epoch(epoch_id, is_checkpoint);
             }
             Operation::IterNext(id) => {
                 let iter = iters_map.get_mut(&id).expect("iter not in worker");
@@ -314,11 +310,11 @@ impl ReplayWorker {
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.init(options).await.unwrap();
             }
-            Operation::TryWaitEpoch(epoch) => {
+            Operation::TryWaitEpoch(epoch, options) => {
                 assert_eq!(storage_type, StorageType::Global);
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::TryWaitEpoch(expected) = res {
-                    let actual = replay.try_wait_epoch(epoch.into()).await;
+                    let actual = replay.try_wait_epoch(epoch.into(), options).await;
                     assert_eq!(TraceResult::from(actual), expected, "try_wait_epoch wrong");
                 } else {
                     panic!(
@@ -327,31 +323,10 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::ClearSharedBuffer(prev_epoch) => {
-                assert_eq!(storage_type, StorageType::Global);
-                replay.clear_shared_buffer(prev_epoch).await;
-            }
             Operation::SealCurrentEpoch { epoch, opts } => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 local_storage.seal_current_epoch(epoch, opts);
-            }
-            Operation::ValidateReadEpoch(epoch) => {
-                assert_eq!(storage_type, StorageType::Global);
-                let res = res_rx.recv().await.expect("recv result failed");
-                let actual = replay.validate_read_epoch(epoch.into());
-                if let OperationResult::ValidateReadEpoch(expected) = res {
-                    assert_eq!(
-                        TraceResult::from(actual),
-                        expected,
-                        "validate_read_epoch wrong"
-                    );
-                } else {
-                    panic!(
-                        "wrong validate_read_epoch result, expect epoch result, but got {:?}",
-                        res
-                    );
-                }
             }
             Operation::LocalStorageEpoch => {
                 assert_ne!(storage_type, StorageType::Global);
@@ -530,13 +505,10 @@ mod tests {
 
     use bytes::Bytes;
     use mockall::predicate;
-    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::replay::{MockGlobalReplayInterface, MockLocalReplayInterface};
-    use crate::{
-        MockReplayIterStream, StorageType, TracedBytes, TracedNewLocalOptions, TracedReadOptions,
-    };
+    use crate::{MockReplayIterStream, TracedBytes, TracedReadOptions};
 
     #[tokio::test]
     async fn test_handle_record() {

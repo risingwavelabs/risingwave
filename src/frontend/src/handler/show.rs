@@ -21,6 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::{DataType, Fields, Timestamptz};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
@@ -29,13 +30,13 @@ use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
     display_comma_separated, Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
 };
-use serde_json;
 
 use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
 
 pub fn get_columns_from_table(
@@ -104,6 +105,28 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
+}
+
+fn schema_or_search_path(
+    session: &Arc<SessionImpl>,
+    schema: &Option<Ident>,
+    search_path: &SearchPath,
+) -> Vec<String> {
+    if let Some(s) = schema {
+        vec![s.real_value()]
+    } else {
+        search_path
+            .real_path()
+            .iter()
+            .map(|s| {
+                if s.eq(USER_NAME_WILD_CARD) {
+                    session.auth_context().user_name.clone()
+                } else {
+                    s.to_string()
+                }
+            })
+            .collect()
+    }
 }
 
 #[derive(Fields)]
@@ -192,7 +215,7 @@ struct ShowClusterRow {
     addr: String,
     r#type: String,
     state: String,
-    parallel_units: String,
+    parallelism: i32,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
     is_unschedulable: Option<bool>,
@@ -225,6 +248,36 @@ struct ShowCreateObjectRow {
     create_sql: String,
 }
 
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSubscriptionRow {
+    name: String,
+    retention_seconds: i64,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowCursorRow {
+    session_id: String,
+    user: String,
+    host: String,
+    database: String,
+    cursor_name: String,
+}
+
+#[derive(Fields)]
+#[fields(style = "Title Case")]
+struct ShowSubscriptionCursorRow {
+    session_id: String,
+    user: String,
+    host: String,
+    database: String,
+    cursor_name: String,
+    subscription_name: String,
+    state: String,
+    idle_duration_ms: i64,
+}
+
 /// Infer the row description for different show objects.
 pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
     fields_to_descriptors(match objects {
@@ -254,12 +307,22 @@ pub async fn handle_show_object(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowObject::Table { schema } => catalog_reader
-            .read_guard()
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_table()
-            .map(|t| t.name.clone())
-            .collect(),
+        ShowObject::Table { schema } => {
+            let search_path = session.config().search_path();
+            let mut table_names_in_schema = vec![];
+            for schema in schema_or_search_path(&session, &schema, &search_path) {
+                // If the schema is not found, skip it
+                if let Ok(schema_catalog) = catalog_reader
+                    .read_guard()
+                    .get_schema_by_name(session.database(), schema.as_ref())
+                {
+                    table_names_in_schema
+                        .extend(schema_catalog.iter_table().map(|t| t.name.clone()));
+                }
+            }
+
+            table_names_in_schema
+        }
         ShowObject::InternalTable { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
@@ -279,15 +342,15 @@ pub async fn handle_show_object(
         ShowObject::MaterializedView { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_mv()
+            .iter_created_mvs()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
-            .filter(|t| t.associated_table_id.is_none())
             .map(|t| t.name.clone())
+            .chain(session.temporary_source_manager().keys())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
             .read_guard()
@@ -295,10 +358,24 @@ pub async fn handle_show_object(
             .iter_sink()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Subscription { schema } => catalog_reader
+        ShowObject::Subscription { schema } => {
+            let rows = catalog_reader
+                .read_guard()
+                .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+                .iter_subscription()
+                .map(|t| ShowSubscriptionRow {
+                    name: t.name.clone(),
+                    retention_seconds: t.retention_seconds as i64,
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
+        ShowObject::Secret { schema } => catalog_reader
             .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_subscription()
+            .iter_secret()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Columns { table } => {
@@ -398,7 +475,7 @@ pub async fn handle_show_object(
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_string(),
-                    parallel_units: worker.parallel_units.into_iter().map(|pu| pu.id).join(", "),
+                    parallelism: worker.parallelism() as _,
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
                     is_unschedulable: property.map(|p| p.is_unschedulable),
@@ -412,7 +489,7 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Jobs => {
-            let resp = session.env().meta_client().list_ddl_progress().await?;
+            let resp = session.env().meta_client().get_ddl_progress().await?;
             let rows = resp.into_iter().map(|job| ShowJobRow {
                 id: job.id as i64,
                 statement: job.statement,
@@ -439,6 +516,74 @@ pub async fn handle_show_object(
                         .map(|sql| format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024))),
                 }
             });
+
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
+        ShowObject::Cursor => {
+            let sessions = session
+                .env()
+                .sessions_map()
+                .read()
+                .values()
+                .cloned()
+                .collect_vec();
+            let mut rows = vec![];
+            for s in sessions {
+                let session_id = format!("{}", s.id().0);
+                let user = s.user_name().to_owned();
+                let host = format!("{}", s.peer_addr());
+                let database = s.database().to_owned();
+
+                s.get_cursor_manager()
+                    .iter_query_cursors(|cursor_name: &String, _| {
+                        rows.push(ShowCursorRow {
+                            session_id: session_id.clone(),
+                            user: user.clone(),
+                            host: host.clone(),
+                            database: database.clone(),
+                            cursor_name: cursor_name.to_owned(),
+                        });
+                    })
+                    .await;
+            }
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .rows(rows)
+                .into());
+        }
+        ShowObject::SubscriptionCursor => {
+            let sessions = session
+                .env()
+                .sessions_map()
+                .read()
+                .values()
+                .cloned()
+                .collect_vec();
+            let mut rows = vec![];
+            for s in sessions {
+                let ssession_id = format!("{}", s.id().0);
+                let user = s.user_name().to_owned();
+                let host = format!("{}", s.peer_addr());
+                let database = s.database().to_owned();
+
+                s.get_cursor_manager()
+                    .iter_subscription_cursors(
+                        |cursor_name: &String, cursor: &SubscriptionCursor| {
+                            rows.push(ShowSubscriptionCursorRow {
+                                session_id: ssession_id.clone(),
+                                user: user.clone(),
+                                host: host.clone(),
+                                database: database.clone(),
+                                cursor_name: cursor_name.to_owned(),
+                                subscription_name: cursor.subscription_name().to_owned(),
+                                state: cursor.state_info_string(),
+                                idle_duration_ms: cursor.idle_duration().as_millis() as i64,
+                            });
+                        },
+                    )
+                    .await;
+            }
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(rows)
@@ -479,7 +624,7 @@ pub fn handle_show_create_object(
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
             let mv = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_mview())
                 .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
             mv.create_sql()
@@ -488,11 +633,11 @@ pub fn handle_show_create_object(
             let view = schema
                 .get_view_by_name(&object_name)
                 .ok_or_else(|| CatalogError::NotFound("view", name.to_string()))?;
-            view.create_sql()
+            view.create_sql(schema.name())
         }
         ShowCreateType::Table => {
             let table = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
@@ -512,7 +657,7 @@ pub fn handle_show_create_object(
         }
         ShowCreateType::Index => {
             let index = schema
-                .get_table_by_name(&object_name)
+                .get_created_table_by_name(&object_name)
                 .filter(|t| t.is_index())
                 .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
             index.create_sql()
@@ -551,7 +696,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1 (column1 varchar)
-        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
         FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -565,7 +710,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.brokers = 'localhost:1001')
     FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );

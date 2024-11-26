@@ -27,7 +27,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("invalid hummock context {0}")]
     InvalidContext(HummockContextId),
-    #[error("failed to access meta store: {0}")]
+    #[error("failed to access meta store")]
     MetaStore(
         #[source]
         #[backtrace]
@@ -45,6 +45,12 @@ pub enum Error {
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
+    #[error("time travel")]
+    TimeTravel(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
     Internal(
         #[from]
@@ -67,7 +73,7 @@ impl From<MetaStoreError> for Error {
                 // TODO: need more concrete error from meta store.
                 Error::Internal(anyhow::anyhow!("meta store transaction failed"))
             }
-            // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
+            // TODO: Currently MetaStoreError::Internal is equivalent to SqlError, which
             // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
             MetaStoreError::Internal(err) => Error::MetaStore(err),

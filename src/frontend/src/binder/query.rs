@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{
-    Cte, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
+    Cte, CteInner, Expr, Fetch, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
 };
 use thiserror_ext::AsReport;
 
@@ -46,7 +46,7 @@ pub struct BoundQuery {
 
 impl BoundQuery {
     /// The schema returned by this [`BoundQuery`].
-    pub fn schema(&self) -> &Schema {
+    pub fn schema(&self) -> std::borrow::Cow<'_, Schema> {
         self.body.schema()
     }
 
@@ -284,52 +284,87 @@ impl Binder {
 
     fn bind_with(&mut self, with: With) -> Result<()> {
         for cte_table in with.cte_tables {
+            // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
-            let Cte { alias, query, .. } = cte_table;
+            let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
 
             if with.recursive {
-                let (
-                    SetExpr::SetOperation {
-                        op: SetOperator::Union,
-                        all,
-                        left,
-                        right,
-                    },
-                    with,
-                ) = Self::validate_rcte(query)?
-                else {
+                if let CteInner::Query(query) = cte_inner {
+                    let (
+                        SetExpr::SetOperation {
+                            op: SetOperator::Union,
+                            all,
+                            corresponding,
+                            left,
+                            right,
+                        },
+                        with,
+                    ) = Self::validate_rcte(query)?
+                    else {
+                        return Err(ErrorCode::BindError(
+                            "expect `SetOperation` as the return type of validation".into(),
+                        )
+                        .into());
+                    };
+
+                    // validated in `validate_rcte`
+                    assert!(
+                        !corresponding.is_corresponding(),
+                        "`CORRESPONDING` is not supported in recursive CTE"
+                    );
+
+                    let entry = self
+                        .context
+                        .cte_to_relation
+                        .entry(table_name)
+                        .insert_entry(Rc::new(RefCell::new(BindingCte {
+                            share_id,
+                            state: BindingCteState::Init,
+                            alias,
+                        })))
+                        .get()
+                        .clone();
+
+                    self.bind_rcte(with, entry, *left, *right, all)?;
+                } else {
                     return Err(ErrorCode::BindError(
-                        "expect `SetOperation` as the return type of validation".into(),
+                        "RECURSIVE CTE only support query".to_string(),
                     )
                     .into());
-                };
-
-                let entry = self
-                    .context
-                    .cte_to_relation
-                    .entry(table_name)
-                    .insert_entry(Rc::new(RefCell::new(BindingCte {
-                        share_id,
-                        state: BindingCteState::Init,
-                        alias,
-                    })))
-                    .get()
-                    .clone();
-
-                self.bind_rcte(with, entry, *left, *right, all)?;
+                }
             } else {
-                let bound_query = self.bind_query(query)?;
-                self.context.cte_to_relation.insert(
-                    table_name,
-                    Rc::new(RefCell::new(BindingCte {
-                        share_id,
-                        state: BindingCteState::Bound {
-                            query: either::Either::Left(bound_query),
-                        },
-                        alias,
-                    })),
-                );
+                match cte_inner {
+                    CteInner::Query(query) => {
+                        let bound_query = self.bind_query(query)?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::Bound {
+                                    query: either::Either::Left(bound_query),
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                    CteInner::ChangeLog(from_table_name) => {
+                        self.push_context();
+                        let from_table_relation =
+                            self.bind_relation_by_name(from_table_name.clone(), None, None)?;
+                        self.pop_context()?;
+                        self.context.cte_to_relation.insert(
+                            table_name,
+                            Rc::new(RefCell::new(BindingCte {
+                                share_id,
+                                state: BindingCteState::ChangeLog {
+                                    table: from_table_relation,
+                                },
+                                alias,
+                            })),
+                        );
+                    }
+                }
             }
         }
         Ok(())
@@ -365,6 +400,7 @@ impl Binder {
         let SetExpr::SetOperation {
             op: SetOperator::Union,
             all,
+            corresponding,
             left,
             right,
         } = body
@@ -381,10 +417,18 @@ impl Binder {
             .into());
         }
 
+        if corresponding.is_corresponding() {
+            return Err(ErrorCode::BindError(
+                "`CORRESPONDING` is not supported in recursive CTE".to_string(),
+            )
+            .into());
+        }
+
         Ok((
             SetExpr::SetOperation {
                 op: SetOperator::Union,
                 all,
+                corresponding,
                 left,
                 right,
             },
@@ -423,9 +467,7 @@ impl Binder {
         // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
         let mut base = self.bind_set_expr(left)?;
 
-        entry.borrow_mut().state = BindingCteState::BaseResolved {
-            schema: base.schema().clone(),
-        };
+        entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
 
         // Reset context for right side, but keep `cte_to_relation`.
         let new_context = std::mem::take(&mut self.context);
@@ -439,7 +481,7 @@ impl Binder {
         self.context.cte_to_relation = new_context.cte_to_relation;
 
         Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-        let schema = base.schema().clone();
+        let schema = base.schema().into_owned();
 
         let recursive_union = RecursiveUnion {
             all,

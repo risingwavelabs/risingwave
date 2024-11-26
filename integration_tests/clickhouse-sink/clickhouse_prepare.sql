@@ -30,3 +30,23 @@ CREATE table ck_types (
   c_struct Nested(s_int Int32, s_boolean Bool),
 )ENGINE = ReplacingMergeTree
 PRIMARY KEY (types_id);
+
+CREATE TABLE demo_test_null(
+    user_id Int32,
+    target_id String,
+    event_timestamp DateTime64,
+) ENGINE = Null;
+
+CREATE TABLE demo_test_target_null(
+    user_id Int32,
+    target_id String,
+    event_timestamp DateTime64
+) ENGINE = MergeTree()
+ORDER BY (user_id, event_timestamp);
+
+CREATE MATERIALIZED VIEW demo_mv_null TO demo_test_target_null AS
+SELECT
+    user_id,
+    target_id,
+    event_timestamp
+FROM demo_test_null;

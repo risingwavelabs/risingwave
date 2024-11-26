@@ -14,7 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-ahash = "0.8"
+ahash = "0.8.7"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
@@ -22,7 +22,7 @@ auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.2"
-dashmap = { version = "5", default-features = false }
+dashmap = { version = "6", default-features = false }
 dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
@@ -33,8 +33,10 @@ futures-async-stream = { workspace = true }
 hex = "0.4"
 itertools = { workspace = true }
 libc = "0.2"
-lz4 = "1.24.0"
+lz4 = "1.28.0"
 memcomparable = "0.2"
+metrics-prometheus = "0.7"
+moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
@@ -78,9 +80,9 @@ xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.16", default-features = false }
+procfs = { version = "0.17", default-features = false }
 libc = "0.2"
-nix = { version = "0.28", features = ["fs", "mman"] }
+nix = { version = "0.29", features = ["fs", "mman"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
@@ -94,8 +96,7 @@ workspace-hack = { path = "../workspace-hack" }
 bincode = "1"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
-moka = { version = "0.12", features = ["future"] }
-risingwave_hummock_sdk = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 
@@ -105,7 +106,7 @@ fiemap = "0.1.1"
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
-test = []
+test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
 bpf = []
 hm-trace = []

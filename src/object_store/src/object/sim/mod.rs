@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg(madsim)]
+
 mod client;
 mod error;
 use bytes::{BufMut, BytesMut};
@@ -33,8 +35,8 @@ use risingwave_common::range::RangeBoundsExt;
 use self::client::Client;
 use self::service::Response;
 use super::{
-    BoxedStreamingUploader, Bytes, ObjectDataStream, ObjectError, ObjectMetadata,
-    ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStore, StreamingUploader,
+    Bytes, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, StreamingUploader,
 };
 
 pub struct SimStreamingUploader {
@@ -53,14 +55,13 @@ impl SimStreamingUploader {
     }
 }
 
-#[async_trait::async_trait]
 impl StreamingUploader for SimStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.buf.put(data);
         Ok(())
     }
 
-    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+    async fn finish(mut self) -> ObjectResult<()> {
         if self.buf.is_empty() {
             Err(ObjectError::internal("upload empty object"))
         } else {
@@ -115,7 +116,9 @@ pub struct SimObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for SimObjectStore {
-    fn get_object_prefix(&self, _obj_id: u64) -> String {
+    type StreamingUploader = SimStreamingUploader;
+
+    fn get_object_prefix(&self, _obj_id: u64, _use_new_object_prefix_strategy: bool) -> String {
         String::default()
     }
 
@@ -136,11 +139,11 @@ impl ObjectStore for SimObjectStore {
         }
     }
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(SimStreamingUploader::new(
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
+        Ok(SimStreamingUploader::new(
             self.client.clone(),
             path.to_string(),
-        )))
+        ))
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
@@ -218,7 +221,18 @@ impl ObjectStore for SimObjectStore {
         }
     }
 
-    async fn list(&self, path: &str) -> ObjectResult<ObjectMetadataIter> {
+    async fn list(
+        &self,
+        path: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        if let Some(start_after) = start_after {
+            tracing::warn!(start_after, "start_after is ignored by SimObjectStore");
+        }
+        if let Some(limit) = limit {
+            tracing::warn!(limit, "limit is ignored by SimObjectStore");
+        }
         let path = path.to_string();
         let resp = self
             .client

@@ -83,6 +83,19 @@ impl ExprRewriter for InlineNowProcTime {
     }
 }
 
+/// Expression rewriter to rewrite `NOW()` to `PROCTIME()`
+///
+/// This is applied for the sink into table query for those column with default expression containing `now()` because streaming execution can not handle `now` expression
+pub struct RewriteNowToProcTime;
+
+impl ExprRewriter for RewriteNowToProcTime {
+    fn rewrite_now(&mut self, _now: Now) -> ExprImpl {
+        FunctionCall::new(expr_node::Type::Proctime, vec![])
+            .unwrap()
+            .into()
+    }
+}
+
 #[derive(Default)]
 pub struct NowProcTimeFinder {
     has: bool,

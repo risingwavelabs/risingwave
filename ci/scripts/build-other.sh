@@ -5,10 +5,10 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-
 echo "--- Build Rust UDF"
 cd e2e_test/udf/wasm
-cargo build --release
+rustup target add wasm32-wasi
+cargo build --release --target wasm32-wasi
 cd ../../..
 
 echo "--- Build Java packages"

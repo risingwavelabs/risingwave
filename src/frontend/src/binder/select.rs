@@ -25,11 +25,12 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::statement::RewriteExprsRecursive;
-use super::UNNAMED_COLUMN;
+use super::{BoundShareInput, UNNAMED_COLUMN};
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::CHANGELOG_OP;
 use crate::utils::group_by::GroupBy;
 
 #[derive(Debug, Clone)]
@@ -281,6 +282,17 @@ impl Binder {
                 Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
+
+        if let Some(Relation::Share(bound)) = &from {
+            if matches!(bound.input, BoundShareInput::ChangeLog(_))
+                && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
+            {
+                return Err(ErrorCode::BindError(
+                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_string()
+                )
+                .into());
+            }
+        }
 
         Ok(BoundSelect {
             distinct,
@@ -671,7 +683,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
-        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        Expr::Index { obj, index: _ } => derive_alias(&obj),
         _ => None,
     }
 }
@@ -702,8 +714,8 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
-        AstDataType::Struct(_) => {
-            // Note: Postgres doesn't have anonymous structs
+        AstDataType::Struct(_) | AstDataType::Map(_) => {
+            // It doesn't bother to derive aliases for these types.
             return None;
         }
     };

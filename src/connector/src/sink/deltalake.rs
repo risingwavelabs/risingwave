@@ -12,45 +12,50 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use core::num::NonZeroU64;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::protocol::{DeltaOperation, SaveMode};
-use deltalake::table::builder::s3_storage_options::{
+use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
+use deltalake::operations::transaction::CommitBuilder;
+use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use deltalake::DeltaTable;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::{Deserialize, Serialize};
-use serde_with::serde_as;
+use serde_with::{serde_as, DisplayFromStr};
 use with_options::WithOptions;
 
 use super::coordinate::CoordinatedSinkWriter;
-use super::writer::{LogSinkerOf, SinkWriter};
+use super::decouple_checkpoint_log_sink::{
+    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
+};
+use super::writer::SinkWriter;
 use super::{
-    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam,
+    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use crate::sink::writer::SinkWriterExt;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
+#[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
     #[serde(rename = "s3.access.key")]
@@ -65,7 +70,12 @@ pub struct DeltaLakeCommon {
     pub s3_endpoint: Option<String>,
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
+    /// Commit every n(>0) checkpoints, default is 10.
+    #[serde(default = "default_commit_checkpoint_interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub commit_checkpoint_interval: u64,
 }
+
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
@@ -99,6 +109,7 @@ impl DeltaLakeCommon {
                 }
                 storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
                 storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                deltalake::aws::register_handlers(None);
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
             DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
@@ -112,6 +123,7 @@ impl DeltaLakeCommon {
                         ))
                     })?,
                 );
+                deltalake::gcp::register_handlers(None);
                 deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
                     .await?
             }
@@ -128,7 +140,7 @@ impl DeltaLakeCommon {
             Ok(DeltaTableUrl::Local(path.to_string()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
-                "path need to start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
+                "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
             )))
         }
     }
@@ -150,7 +162,7 @@ pub struct DeltaLakeConfig {
 }
 
 impl DeltaLakeConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
             serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.into()))?,
         )
@@ -239,7 +251,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
                 for ((rw_name, rw_type), dl_field) in rw_struct
                     .names()
                     .zip_eq_fast(rw_struct.types())
-                    .zip_eq_fast(dl_struct.fields())
+                    .zip_eq_debug(dl_struct.fields())
                 {
                     result = check_field_type(rw_type, dl_field.data_type())?
                         && result
@@ -269,7 +281,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 
 impl Sink for DeltaLakeSink {
     type Coordinator = DeltaLakeSinkCommitter;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
+    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
@@ -280,7 +292,9 @@ impl Sink for DeltaLakeSink {
             self.param.downstream_pk.clone(),
         )
         .await?;
-        Ok(CoordinatedSinkWriter::new(
+
+        let metrics = SinkWriterMetrics::new(&writer_param);
+        let writer = CoordinatedSinkWriter::new(
             writer_param
                 .meta_client
                 .expect("should have meta client")
@@ -294,8 +308,18 @@ impl Sink for DeltaLakeSink {
             })?,
             inner,
         )
-        .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .await?;
+
+        let commit_checkpoint_interval =
+            NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
+                "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
+            );
+
+        Ok(DecoupleCheckpointLogSinkerOf::new(
+            writer,
+            metrics,
+            commit_checkpoint_interval,
+        ))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -310,12 +334,11 @@ impl Sink for DeltaLakeSink {
         let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
             .get_schema()?
             .fields()
-            .iter()
             .map(|f| (f.name(), f.data_type()))
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
             return Err(SinkError::DeltaLake(anyhow!(
-                "column count not match, rw is {}, deltalake is {}",
+                "Columns mismatch. RisingWave is {}, DeltaLake is {}",
                 self.param.schema().fields().len(),
                 deltalake_fields.len()
             )));
@@ -339,6 +362,11 @@ impl Sink for DeltaLakeSink {
                 )));
             }
         }
+        if self.config.common.commit_checkpoint_interval == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "`commit_checkpoint_interval` must be greater than 0"
+            )));
+        }
         Ok(())
     }
 
@@ -353,17 +381,20 @@ impl TryFrom<SinkParam> for DeltaLakeSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        let config = DeltaLakeConfig::from_hashmap(param.properties.clone())?;
+        let config = DeltaLakeConfig::from_btreemap(param.properties.clone())?;
         DeltaLakeSink::new(config, param)
     }
 }
 
 pub struct DeltaLakeSinkWriter {
     pub config: DeltaLakeConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     writer: RecordBatchWriter,
     dl_schema: Arc<deltalake::arrow::datatypes::Schema>,
+    #[expect(dead_code)]
     dl_table: DeltaTable,
 }
 
@@ -472,7 +503,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         if write_adds.is_empty() {
             return Ok(());
         }
-        let partition_cols = self.table.get_metadata()?.partition_columns.clone();
+        let partition_cols = self.table.metadata()?.partition_columns.clone();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {
@@ -483,14 +514,15 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
             partition_by,
             predicate: None,
         };
-        let version = deltalake::operations::transaction::commit(
-            self.table.log_store().as_ref(),
-            &write_adds,
-            operation,
-            &self.table.state,
-            None,
-        )
-        .await?;
+        let version = CommitBuilder::default()
+            .with_actions(write_adds)
+            .build(
+                Some(self.table.snapshot()?),
+                self.table.log_store().clone(),
+                operation,
+            )
+            .await?
+            .version();
         self.table.update().await?;
         tracing::info!(
             "Succeeded to commit ti DeltaLake table in epoch {epoch} version {version}."
@@ -532,7 +564,7 @@ impl DeltaLakeWriteResult {
 mod test {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
-    use maplit::hashmap;
+    use maplit::btreemap;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
 
@@ -548,12 +580,22 @@ mod test {
         let path = dir.path().to_str().unwrap();
         CreateBuilder::new()
             .with_location(path)
-            .with_column("id", SchemaDataType::integer(), false, Default::default())
-            .with_column("name", SchemaDataType::string(), false, Default::default())
+            .with_column(
+                "id",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::Integer),
+                false,
+                Default::default(),
+            )
+            .with_column(
+                "name",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::String),
+                false,
+                Default::default(),
+            )
             .await
             .unwrap();
 
-        let properties = hashmap! {
+        let properties = btreemap! {
             "connector".to_string() => "deltalake".to_string(),
             "force_append_only".to_string() => "true".to_string(),
             "type".to_string() => "append-only".to_string(),
@@ -575,7 +617,7 @@ mod test {
             },
         ]);
 
-        let deltalake_config = DeltaLakeConfig::from_hashmap(properties).unwrap();
+        let deltalake_config = DeltaLakeConfig::from_btreemap(properties).unwrap();
         let deltalake_table = deltalake_config
             .common
             .create_deltalake_client()

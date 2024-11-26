@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamptz};
 use serde::{Deserialize, Serialize};
+use strum::Display;
 
 use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
@@ -78,6 +79,7 @@ impl FsSplit {
 pub struct OpendalFsSplit<Src: OpendalSource> {
     pub name: String,
     pub offset: usize,
+    // For Parquet encoding, the `size` represents the number of rows, while for other encodings, the `size` denotes the file size.
     pub size: usize,
     _marker: PhantomData<Src>,
 }
@@ -141,3 +143,12 @@ pub struct FsPageItem {
 }
 
 pub type FsPage = Vec<FsPageItem>;
+
+#[derive(Debug, Default, Clone, PartialEq, Display, Deserialize)]
+pub enum CompressionFormat {
+    #[default]
+    None,
+
+    #[serde(rename = "gzip", alias = "gz")]
+    Gzip,
+}

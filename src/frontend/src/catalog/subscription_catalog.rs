@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::str::FromStr;
-use std::collections::BTreeMap;
-
 use risingwave_common::catalog::{TableId, UserId, OBJECT_ID_PLACEHOLDER};
-use risingwave_common::types::Interval;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 use risingwave_pb::catalog::PbSubscription;
-use thiserror_ext::AsReport;
 
 use super::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
+use crate::handler::util::convert_interval_to_u64_seconds;
+use crate::WithOptions;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -82,19 +79,11 @@ impl SubscriptionId {
 }
 
 impl SubscriptionCatalog {
-    pub fn set_retention_seconds(&mut self, properties: BTreeMap<String, String>) -> Result<()> {
+    pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
             ErrorCode::InternalError("Subscription retention time not set.".to_string())
         })?;
-        let retention_seconds = (Interval::from_str(retention_seconds_str)
-            .map_err(|err| {
-                ErrorCode::InternalError(format!(
-                    "Retention needs to be set in Interval format: {:?}",
-                    err.to_report_string()
-                ))
-            })?
-            .epoch_in_micros()
-            / 1000000) as u64;
+        let retention_seconds = convert_interval_to_u64_seconds(retention_seconds_str)?;
         self.retention_seconds = retention_seconds;
         Ok(())
     }

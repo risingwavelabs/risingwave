@@ -16,13 +16,14 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
+use risingwave_sqlparser::ast::{
+    ExplainFormat, ExplainOptions, ExplainType, FetchCursorStatement, Statement,
+};
 use thiserror_ext::AsReport;
 
 use super::create_index::{gen_create_index_plan, resolve_index_schema};
 use super::create_mv::gen_create_mv_plan;
-use super::create_sink::{gen_sink_plan, get_partition_compute_info};
-use super::create_table::ColumnIdGenerator;
+use super::create_sink::gen_sink_plan;
 use super::query::gen_batch_plan_by_statement;
 use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
@@ -56,7 +57,7 @@ async fn do_handle_explain(
                 name,
                 columns,
                 constraints,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -66,15 +67,12 @@ async fn do_handle_explain(
                 wildcard_idx,
                 ..
             } => {
-                let col_id_gen = ColumnIdGenerator::new_initial();
-
-                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+                let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     handler_args,
                     explain_options,
-                    col_id_gen,
-                    source_schema,
+                    format_encode,
                     cdc_table_info,
                     name.clone(),
                     columns,
@@ -91,10 +89,21 @@ async fn do_handle_explain(
                 (Ok(plan), context)
             }
             Statement::CreateSink { stmt } => {
-                let partition_info = get_partition_compute_info(&handler_args.with_options).await?;
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let plan = gen_sink_plan(&session, context.into(), stmt, partition_info)
+                let plan = gen_sink_plan(handler_args, stmt, Some(explain_options))
+                    .await
                     .map(|plan| plan.sink_plan)?;
+                let context = plan.ctx();
+                (Ok(plan), context)
+            }
+
+            Statement::FetchCursor {
+                stmt: FetchCursorStatement { cursor_name, .. },
+            } => {
+                let cursor_manager = session.clone().get_cursor_manager();
+                let plan = cursor_manager
+                    .gen_batch_plan_with_subscription_cursor(cursor_name, handler_args)
+                    .await
+                    .map(|x| x.plan)?;
                 let context = plan.ctx();
                 (Ok(plan), context)
             }
@@ -184,6 +193,7 @@ async fn do_handle_explain(
         let explain_trace = context.is_explain_trace();
         let explain_verbose = context.is_explain_verbose();
         let explain_type = context.explain_type();
+        let explain_format = context.explain_format();
 
         if explain_trace {
             let trace = context.take_trace();
@@ -217,7 +227,13 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    blocks.push(plan.explain_to_string());
+                    match explain_format {
+                        ExplainFormat::Text => blocks.push(plan.explain_to_string()),
+                        ExplainFormat::Json => blocks.push(plan.explain_to_json()),
+                        ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
+                        ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
+                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
+                    }
                 }
             }
             ExplainType::Logical => {
@@ -252,6 +268,21 @@ pub async fn handle_explain(
 ) -> Result<RwPgResponse> {
     if analyze {
         bail_not_implemented!(issue = 4856, "explain analyze");
+    }
+    if options.trace && options.explain_format == ExplainFormat::Json {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
+    }
+    if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
+    {
+        return Err(ErrorCode::NotSupported(
+            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+        )
+        .into());
     }
 
     let mut blocks = Vec::new();

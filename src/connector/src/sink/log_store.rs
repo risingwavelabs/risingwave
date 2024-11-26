@@ -20,14 +20,13 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
+use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
-
-use crate::sink::SinkMetrics;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -84,7 +83,7 @@ impl TruncateOffset {
             } => {
                 if epoch != *offset_epoch {
                     bail!(
-                        "new item epoch {} not match current chunk offset epoch {}",
+                        "new item epoch {} does not match current chunk offset epoch {}",
                         epoch,
                         offset_epoch
                     );
@@ -95,7 +94,7 @@ impl TruncateOffset {
             } => {
                 if epoch <= *offset_epoch {
                     bail!(
-                        "new item epoch {} not exceed barrier offset epoch {}",
+                        "new item epoch {} does not exceed barrier offset epoch {}",
                         epoch,
                         offset_epoch
                     );
@@ -219,11 +218,11 @@ pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    wait_new_future_duration_ns: LabelGuardedIntCounter<3>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<3>) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<4>) -> Self {
         Self {
             inner,
             wait_new_future_start_time: None,
@@ -267,11 +266,17 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
 pub struct MonitoredLogReader<R: LogReader> {
     inner: R,
     read_epoch: u64,
-    metrics: SinkMetrics,
+    metrics: LogReaderMetrics,
+}
+
+pub struct LogReaderMetrics {
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
+    pub log_store_read_rows: LabelGuardedIntCounter<4>,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
 impl<R: LogReader> MonitoredLogReader<R> {
-    pub fn new(inner: R, metrics: SinkMetrics) -> Self {
+    pub fn new(inner: R, metrics: LogReaderMetrics) -> Self {
         Self {
             inner,
             read_epoch: INVALID_EPOCH,
@@ -282,21 +287,25 @@ impl<R: LogReader> MonitoredLogReader<R> {
 
 impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     async fn init(&mut self) -> LogStoreResult<()> {
-        self.inner.init().await
+        self.inner.init().instrument_await("log_reader_init").await
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        self.inner.next_item().await.inspect(|(epoch, item)| {
-            if self.read_epoch != *epoch {
-                self.read_epoch = *epoch;
-                self.metrics.log_store_latest_read_epoch.set(*epoch as _);
-            }
-            if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
-                self.metrics
-                    .log_store_read_rows
-                    .inc_by(chunk.cardinality() as _);
-            }
-        })
+        self.inner
+            .next_item()
+            .instrument_await("log_reader_next_item")
+            .await
+            .inspect(|(epoch, item)| {
+                if self.read_epoch != *epoch {
+                    self.read_epoch = *epoch;
+                    self.metrics.log_store_latest_read_epoch.set(*epoch as _);
+                }
+                if let LogStoreReadItem::StreamChunk { chunk, .. } = item {
+                    self.metrics
+                        .log_store_read_rows
+                        .inc_by(chunk.cardinality() as _);
+                }
+            })
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
@@ -306,7 +315,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
     fn rewind(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.inner.rewind()
+        self.inner.rewind().instrument_await("log_reader_rewind")
     }
 }
 
@@ -322,7 +331,8 @@ where
         TransformChunkLogReader { f, inner: self }
     }
 
-    pub fn monitored(self, metrics: SinkMetrics) -> impl LogReader {
+    pub fn monitored(self, metrics: LogReaderMetrics) -> impl LogReader {
+        // TODO: The `clone()` can be avoided if move backpressure inside `MonitoredLogReader`
         let wait_new_future_duration = metrics.log_store_reader_wait_new_future_duration_ns.clone();
         BackpressureMonitoredLogReader::new(
             MonitoredLogReader::new(self, metrics),
@@ -333,7 +343,14 @@ where
 
 pub struct MonitoredLogWriter<W: LogWriter> {
     inner: W,
-    metrics: SinkMetrics,
+    metrics: LogWriterMetrics,
+}
+
+pub struct LogWriterMetrics {
+    // Labels: [actor_id, sink_id, sink_name]
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_write_rows: LabelGuardedIntCounter<3>,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
@@ -390,7 +407,7 @@ impl<T> T
 where
     T: LogWriter + Sized,
 {
-    pub fn monitored(self, metrics: SinkMetrics) -> MonitoredLogWriter<T> {
+    pub fn monitored(self, metrics: LogWriterMetrics) -> MonitoredLogWriter<T> {
         MonitoredLogWriter {
             inner: self,
             metrics,

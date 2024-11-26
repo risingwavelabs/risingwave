@@ -1,0 +1,168 @@
+control substitution on
+
+system ok
+rpk topic delete 'upsert_avro_json.*'
+
+
+# wrong strategy name
+statement error expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy
+create source s1 () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+) format plain encode avro (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  schema.registry.name.strategy = 'no sense',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+);
+
+
+#######################
+# topic_name_strategy
+#######################
+
+# TODO: refactor the producer script and the test data format.
+# Currently we are abusing this test case to also test data types.
+
+system ok
+python3 e2e_test/source_legacy/basic/scripts/schema_registry_producer.py  "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" e2e_test/source_inline/kafka/avro/upsert_avro_json "topic" "avro"
+
+statement ok
+CREATE TABLE t_topic ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+	topic = 'upsert_avro_json')
+FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+#######################
+# record_name_strategy
+#######################
+
+
+## topic: upsert_avro_json-record, key subject: string, value subject: CPLM.OBJ_ATTRIBUTE_VALUE
+system ok
+python3 e2e_test/source_legacy/basic/scripts/schema_registry_producer.py  "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" e2e_test/source_inline/kafka/avro/upsert_avro_json "record" "avro"
+
+
+statement error key\.message
+create table t_record_format_plain () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+) format plain encode avro (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  schema.registry.name.strategy = 'record_name_strategy',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+  key.message = 'string'
+);
+
+# Note that FORMAT PLAIN is used here.
+statement ok
+create table t_record_format_plain () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+) format plain encode avro (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  schema.registry.name.strategy = 'record_name_strategy',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+);
+
+
+#######################
+# topic_record_name_strategy
+#######################
+
+## topic: upsert_avro_json-topic-record,
+## key subject: upsert_avro_json-topic-record-string
+## value subject: upsert_avro_json-topic-record-CPLM.OBJ_ATTRIBUTE_VALUE
+system ok
+python3 e2e_test/source_legacy/basic/scripts/schema_registry_producer.py  "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" e2e_test/source_inline/kafka/avro/upsert_avro_json "topic-record" "avro"
+
+
+
+statement ok
+create table t_topic_record (primary key(rw_key))
+INCLUDE KEY AS rw_key
+with (
+    connector = 'kafka',
+    topic = 'upsert_avro_json-topic-record',
+    properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}'
+) format upsert encode avro (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+    schema.registry.name.strategy = 'topic_record_name_strategy',
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
+);
+
+
+#######################
+# test result now
+#######################
+
+sleep 2s
+
+
+query II
+SELECT
+ * except (rw_key)
+FROM
+ t_topic
+ORDER BY
+ "ID";
+----
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z -21474836.47 NULL NULL NULL NaN
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 99999999.99 NULL NULL NULL NaN
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.47 NULL NULL NULL NaN
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49 NULL NULL NULL NaN
+NULL id6 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL (abcdefg) NULL NaN
+NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9247-bb680e5fe0c8 NaN
+
+
+query II
+SELECT
+  *
+FROM
+ t_record_format_plain
+ORDER BY
+ "ID";
+----
+update id1 1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z 99999999.99 NULL NULL NULL NaN
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z -21474836.47 NULL NULL NULL NaN
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 99999999.99 NULL NULL NULL NaN
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.47 NULL NULL NULL NaN
+delete id4 4 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49 NULL NULL NULL NaN
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49 NULL NULL NULL NaN
+NULL id6 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL (abcdefg) NULL NaN
+NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9247-bb680e5fe0c8 NaN
+NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
+
+
+query II
+SELECT
+ * except (rw_key)
+FROM
+ t_topic_record
+ORDER BY
+ "ID";
+----
+update id1 -1 6768 6970 value9 7172 info9 2021-05-18T07:59:58.714Z -21474836.47 NULL NULL NULL NaN
+delete id2 2 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 99999999.99 NULL NULL NULL NaN
+delete id3 3 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.47 NULL NULL NULL NaN
+delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z 21474836.49 NULL NULL NULL NaN
+NULL id6 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL (abcdefg) NULL NaN
+NULL id7 NULL NULL NULL NULL NULL NULL NULL -0.01 NULL NULL 67e55044-10b1-426f-9247-bb680e5fe0c8 NaN
+
+
+
+statement ok
+DROP TABLE t_topic;
+
+statement ok
+DROP TABLE t_record_format_plain;
+
+
+statement ok
+DROP TABLE t_topic_record;

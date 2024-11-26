@@ -8,11 +8,15 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
+default = ["rw-static-link"]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
-embedded-deno-udf = ["risingwave_expr/embedded-deno-udf"]
-embedded-python-udf = ["risingwave_expr/embedded-python-udf"]
-default = ["rw-static-link"]
+openssl-vendored = ["workspace-config/openssl-vendored"]
+all-udf = ["external-udf", "wasm-udf", "js-udf", "python-udf"]
+external-udf = ["risingwave_expr_impl/external-udf"]
+wasm-udf = ["risingwave_expr_impl/wasm-udf"]
+js-udf = ["risingwave_expr_impl/js-udf"]
+python-udf = ["risingwave_expr_impl/python-udf"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -32,7 +36,6 @@ risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }
 risingwave_ctl = { workspace = true }
-risingwave_expr = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }

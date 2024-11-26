@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Display;
 use std::process::Command;
+use std::sync::LazyLock;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
@@ -82,4 +84,22 @@ pub fn is_env_set(var: &str) -> bool {
 
 pub fn is_enable_backtrace() -> bool {
     !is_env_set("DISABLE_BACKTRACE")
+}
+
+pub fn risedev_cmd() -> &'static str {
+    static RISEDEV_CMD: LazyLock<String> = LazyLock::new(|| {
+        if let Ok(val) = std::env::var("RISEDEV_CMD") {
+            val
+        } else {
+            "./risedev".to_owned()
+        }
+    });
+
+    RISEDEV_CMD.as_str()
+}
+
+pub fn stylized_risedev_subcmd(subcmd: &str) -> impl Display {
+    console::style(format!("{} {}", risedev_cmd(), subcmd))
+        .blue()
+        .bold()
 }

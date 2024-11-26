@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Deref;
 
 use anyhow::anyhow;
-use icelake::Table;
+use futures::StreamExt;
+use iceberg::spec::ManifestList;
+use iceberg::table::Table;
 use risingwave_common::types::Fields;
-use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_frontend_macro::system_catalog;
@@ -44,10 +44,10 @@ struct RwIcebergFiles {
     /// Total file size in bytes
     pub file_size_in_bytes: i64,
     /// Field ids used to determine row equality in equality delete files.
-    /// Required when content is EqualityDeletes and should be null
+    /// Required when content is `EqualityDeletes` and should be null
     /// otherwise. Fields with ids listed in this column must be present
     /// in the delete file
-    pub equality_ids: Option<Vec<i32>>,
+    pub equality_ids: Vec<i32>,
     /// ID representing sort order for this file.
     ///
     /// If sort order ID is missing or unknown, then the order is assumed to
@@ -78,31 +78,39 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
 
     let mut result = vec![];
     for (schema_name, source) in iceberg_sources {
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source.with_properties.clone());
-        let config = ConnectorProperties::extract(source_props, false)?;
+        let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-            let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
-            let table: Table = iceberg_config.load_table().await?;
-            result.extend(
-                table
-                    .current_data_files()
+            let table: Table = iceberg_properties.load_table_v2().await?;
+            if let Some(snapshot) = table.metadata().current_snapshot() {
+                let manifest_list: ManifestList = snapshot
+                    .load_manifest_list(table.file_io(), table.metadata())
                     .await
-                    .map_err(|e| anyhow!(e))?
-                    .iter()
-                    .map(|file| RwIcebergFiles {
-                        source_id: source.id as i32,
-                        schema_name: schema_name.clone(),
-                        source_name: source.name.clone(),
-                        content: file.content as i32,
-                        file_path: file.file_path.clone(),
-                        file_format: file.file_format.to_string(),
-                        record_count: file.record_count,
-                        file_size_in_bytes: file.file_size_in_bytes,
-                        equality_ids: file.equality_ids.clone(),
-                        sort_order_id: file.sort_order_id,
-                    }),
-            );
+                    .map_err(|e| anyhow!(e))?;
+                for entry in manifest_list.entries() {
+                    let manifest = entry
+                        .load_manifest(table.file_io())
+                        .await
+                        .map_err(|e| anyhow!(e))?;
+                    let mut manifest_entries_stream =
+                        futures::stream::iter(manifest.entries().iter().filter(|e| e.is_alive()));
+
+                    while let Some(manifest_entry) = manifest_entries_stream.next().await {
+                        let file = manifest_entry.data_file();
+                        result.push(RwIcebergFiles {
+                            source_id: source.id as i32,
+                            schema_name: schema_name.clone(),
+                            source_name: source.name.clone(),
+                            content: file.content_type() as i32,
+                            file_path: file.file_path().to_string(),
+                            file_format: file.file_format().to_string(),
+                            record_count: file.record_count() as i64,
+                            file_size_in_bytes: file.file_size_in_bytes() as i64,
+                            equality_ids: file.equality_ids().to_vec(),
+                            sort_order_id: file.sort_order_id(),
+                        });
+                    }
+                }
+            }
         } else {
             unreachable!()
         }

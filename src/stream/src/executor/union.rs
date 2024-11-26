@@ -15,16 +15,20 @@
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Instant;
 
 use futures::stream::{FusedStream, FuturesUnordered};
 use pin_project::pin_project;
 
 use super::watermark::BufferedWatermarks;
 use crate::executor::prelude::*;
+use crate::task::FragmentId;
 
 /// `UnionExecutor` merges data from multiple inputs.
 pub struct UnionExecutor {
     inputs: Vec<Executor>,
+    metrics: Arc<StreamingMetrics>,
+    actor_context: ActorContextRef,
 }
 
 impl std::fmt::Debug for UnionExecutor {
@@ -34,15 +38,29 @@ impl std::fmt::Debug for UnionExecutor {
 }
 
 impl UnionExecutor {
-    pub fn new(inputs: Vec<Executor>) -> Self {
-        Self { inputs }
+    pub fn new(
+        inputs: Vec<Executor>,
+        metrics: Arc<StreamingMetrics>,
+        actor_context: ActorContextRef,
+    ) -> Self {
+        Self {
+            inputs,
+            metrics,
+            actor_context,
+        }
     }
 }
 
 impl Execute for UnionExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let streams = self.inputs.into_iter().map(|e| e.execute()).collect();
-        merge(streams).boxed()
+        merge(
+            streams,
+            self.metrics,
+            self.actor_context.fragment_id,
+            self.actor_context.id,
+        )
+        .boxed()
     }
 }
 
@@ -63,7 +81,12 @@ impl Stream for Input {
 
 /// Merges input streams and aligns with barriers.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-async fn merge(inputs: Vec<BoxedMessageStream>) {
+async fn merge(
+    inputs: Vec<BoxedMessageStream>,
+    metrics: Arc<StreamingMetrics>,
+    fragment_id: FragmentId,
+    actor_id: ActorId,
+) {
     let input_num = inputs.len();
     let mut active: FuturesUnordered<_> = inputs
         .into_iter()
@@ -82,6 +105,13 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
     // watermark column index -> `BufferedWatermarks`
     let mut watermark_buffers = BTreeMap::<usize, BufferedWatermarks<usize>>::new();
 
+    let mut start_time = Instant::now();
+    let barrier_align = metrics.barrier_align_duration.with_guarded_label_values(&[
+        &actor_id.to_string(),
+        &fragment_id.to_string(),
+        "",
+        "Union",
+    ]);
     loop {
         match active.next().await {
             Some((Some(Ok(message)), remaining)) => {
@@ -106,6 +136,9 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
                     }
                     Message::Barrier(barrier) => {
                         // Block this upstream by pushing it to `blocked`.
+                        if blocked.is_empty() {
+                            start_time = Instant::now();
+                        }
                         blocked.push(remaining);
                         if let Some(cur_barrier) = current_barrier.as_ref() {
                             if barrier.epoch != cur_barrier.epoch {
@@ -131,6 +164,7 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
             None => {
                 assert!(active.is_terminated());
                 let barrier = current_barrier.take().unwrap();
+                barrier_align.inc_by(start_time.elapsed().as_nanos() as u64);
 
                 let upstreams = std::mem::take(&mut blocked);
                 active.extend(upstreams.into_iter().map(|upstream| upstream.into_future()));
@@ -145,12 +179,9 @@ async fn merge(inputs: Vec<BoxedMessageStream>) {
 mod tests {
     use async_stream::try_stream;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::executor::Watermark;
 
     #[tokio::test]
     async fn union() {
@@ -177,7 +208,7 @@ mod tests {
             .boxed(),
         ];
         let mut output = vec![];
-        let mut merged = merge(streams).boxed();
+        let mut merged = merge(streams, Arc::new(StreamingMetrics::unused()), 0, 0).boxed();
 
         let result = vec![
             Message::Chunk(StreamChunk::from_pretty("I\n + 1")),

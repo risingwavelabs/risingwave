@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use prometheus::core::Atomic;
 use risingwave_batch::error::Result;
-use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
+use risingwave_batch::monitor::BatchMetrics;
 use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -58,7 +58,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         Arc::new(SysCatalogReaderImpl::new(
             self.session.env().catalog_reader().clone(),
             self.session.env().user_info_reader().clone(),
-            self.session.env().worker_node_manager_ref(),
             self.session.env().meta_client_ref(),
             self.session.auth_context(),
             self.session.shared_config(),
@@ -74,7 +73,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         unimplemented!("not supported in local mode")
     }
 
-    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
+    fn batch_metrics(&self) -> Option<BatchMetrics> {
         None
     }
 
@@ -92,6 +91,10 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.session.env().source_metrics()
+    }
+
+    fn spill_metrics(&self) -> Arc<risingwave_batch::monitor::BatchSpillMetrics> {
+        self.session.env().spill_metrics()
     }
 
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {

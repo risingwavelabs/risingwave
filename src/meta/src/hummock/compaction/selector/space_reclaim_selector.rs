@@ -18,20 +18,14 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::compact_task;
-use risingwave_pb::hummock::hummock_version::Levels;
 
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
-use crate::hummock::compaction::{
-    create_compaction_task, CompactionDeveloperConfig, CompactionTask, LocalSelectorStatistic,
-};
-use crate::hummock::level_handler::LevelHandler;
-use crate::hummock::model::CompactionGroup;
+use crate::hummock::compaction::selector::CompactionSelectorContext;
+use crate::hummock::compaction::{create_compaction_task, CompactionTask};
 
 #[derive(Default)]
 pub struct SpaceReclaimCompactionSelector {
@@ -42,18 +36,24 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,
-        group: &CompactionGroup,
-        levels: &Levels,
-        level_handlers: &mut [LevelHandler],
-        _selector_stats: &mut LocalSelectorStatistic,
-        _table_id_to_options: HashMap<u32, TableOption>,
-        developer_config: Arc<CompactionDeveloperConfig>,
+        context: CompactionSelectorContext<'_>,
     ) -> Option<CompactionTask> {
+        let CompactionSelectorContext {
+            group,
+            levels,
+            member_table_ids,
+            level_handlers,
+            developer_config,
+            ..
+        } = context;
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
-            levels.member_table_ids.iter().cloned().collect(),
+            member_table_ids
+                .iter()
+                .map(|table_id| table_id.table_id)
+                .collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self.state.entry(group.group_id).or_default();

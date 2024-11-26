@@ -41,7 +41,7 @@ use super::{
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::{AddMutation, UpdateMutation};
+use crate::executor::UpdateMutation;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -108,6 +108,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            None,
         );
         let stream = source_desc
             .source
@@ -298,6 +299,16 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     self.stream_source_core.source_id
                 )
             })?;
+        // If the first barrier requires us to pause on startup, pause the stream.
+        let start_with_paused = barrier.is_pause_on_startup();
+        let first_epoch = barrier.epoch;
+        let mut boot_state = Vec::default();
+        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            boot_state = splits.to_vec();
+        }
+        let boot_state = boot_state;
+
+        yield Message::Barrier(barrier);
 
         let source_desc_builder: SourceDescBuilder =
             self.stream_source_core.source_desc_builder.take().unwrap();
@@ -311,28 +322,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        let start_with_paused = barrier.is_pause_on_startup();
-
-        let mut boot_state = Vec::default();
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Add(AddMutation { splits, .. })
-                | Mutation::Update(UpdateMutation {
-                    actor_splits: splits,
-                    ..
-                }) => {
-                    if let Some(splits) = splits.get(&self.actor_ctx.id) {
-                        boot_state.clone_from(splits);
-                    }
-                }
-                _ => {}
-            }
-        }
-
         self.stream_source_core
             .split_state_store
-            .init_epoch(barrier.epoch);
+            .init_epoch(first_epoch)
+            .await?;
 
         let all_completed: HashSet<SplitId> = self
             .stream_source_core
@@ -374,11 +367,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
         if start_with_paused {
             stream.pause_stream();
+            command_paused = true;
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
         // some other latencies like network and cost in Meta.
@@ -386,6 +379,17 @@ impl<S: StateStore> FsSourceExecutor<S> {
             self.system_params.load().barrier_interval_ms() as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+
+        let source_output_row_count = self
+            .metrics
+            .source_output_row_count
+            .with_guarded_label_values(&[
+                self.stream_source_core.source_id.to_string().as_ref(),
+                self.stream_source_core.source_name.as_ref(),
+                self.actor_ctx.id.to_string().as_str(),
+                self.actor_ctx.fragment_id.to_string().as_str(),
+            ]);
+
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -393,7 +397,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     Message::Barrier(barrier) => {
                         last_barrier_time = Instant::now();
                         if self_paused {
-                            stream.resume_stream();
+                            // command_paused has a higher priority.
+                            if !command_paused {
+                                stream.resume_stream();
+                            }
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
@@ -404,8 +411,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?
                                 }
-                                Mutation::Pause => stream.pause_stream(),
-                                Mutation::Resume => stream.resume_stream(),
+                                Mutation::Pause => {
+                                    command_paused = true;
+                                    stream.pause_stream()
+                                }
+                                Mutation::Resume => {
+                                    command_paused = false;
+                                    stream.resume_stream()
+                                }
                                 Mutation::Update(UpdateMutation { actor_splits, .. }) => {
                                     self.apply_split_change(
                                         &source_desc,
@@ -474,15 +487,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .extend(state);
                     }
 
-                    self.metrics
-                        .source_output_row_count
-                        .with_label_values(&[
-                            self.stream_source_core.source_id.to_string().as_ref(),
-                            self.stream_source_core.source_name.as_ref(),
-                            self.actor_ctx.id.to_string().as_str(),
-                            self.actor_ctx.fragment_id.to_string().as_str(),
-                        ])
-                        .inc_by(chunk.cardinality() as u64);
+                    source_output_row_count.inc_by(chunk.cardinality() as u64);
 
                     let chunk =
                         prune_additional_cols(&chunk, split_idx, offset_idx, &source_desc.columns);

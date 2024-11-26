@@ -15,3 +15,4 @@
 pub mod bitmap;
 pub mod mapping;
 pub mod vnode;
+pub mod vnode_count;

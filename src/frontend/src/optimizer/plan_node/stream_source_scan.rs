@@ -17,11 +17,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
+use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -32,7 +32,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
@@ -58,12 +58,13 @@ impl StreamSourceScan {
         if let Some(source_catalog) = &core.catalog
             && source_catalog.info.is_shared()
         {
-            let (columns_exist, additional_columns) =
-                add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
-            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                c.is_hidden = true;
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &core.column_catalog,
+                &source_catalog.connector_name(),
+            );
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
-                    core.column_catalog.push(c);
+                    core.column_catalog.push(ColumnCatalog::hidden(c));
                 }
             }
         }
@@ -74,6 +75,7 @@ impl StreamSourceScan {
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(core.column_catalog.len()),
+            MonotonicityMap::new(),
         );
 
         Self { base, core }
@@ -138,6 +140,7 @@ impl StreamSourceScan {
             .collect_vec();
 
         let source_catalog = self.source_catalog();
+        let (with_properties, secret_refs) = source_catalog.with_properties.clone().into_parts();
         let backfill = SourceBackfillNode {
             upstream_source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
@@ -154,8 +157,9 @@ impl StreamSourceScan {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            with_properties,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            secret_refs,
         };
 
         let fields = self.schema().to_prost();

@@ -43,6 +43,15 @@ from t
 emit on window close;
 
 statement ok
+create materialized view mv4 as
+select
+    *,
+    first_value(tm) over (partition by bar order by tm session with gap '10 minutes') as window_start,
+    last_value(tm) over (partition by bar order by tm session with gap '10 minutes') as window_end
+from t
+emit on window close;
+
+statement ok
 insert into t values
   ('2023-05-06 16:51:00', 1, 100)
 , ('2023-05-06 16:56:00', 8, 100)
@@ -70,6 +79,12 @@ select * from mv3 order by tm;
 2023-05-06 16:56:00  8  100  2
 2023-05-06 17:30:00  3  200  1
 2023-05-06 17:35:00  5  100  3
+
+query TiiTT
+select * from mv4 order by tm;
+----
+2023-05-06 16:51:00	1	100	2023-05-06 16:51:00	2023-05-06 16:56:00
+2023-05-06 16:56:00	8	100	2023-05-06 16:51:00	2023-05-06 16:56:00
 
 statement ok
 insert into t values
@@ -100,6 +115,14 @@ select * from mv3 order by tm;
 2023-05-06 17:59:00  4  100  4
 2023-05-06 18:01:00  6  200  2
 
+query TiiTT
+select * from mv4 order by tm;
+----
+2023-05-06 16:51:00	1	100	2023-05-06 16:51:00	2023-05-06 16:56:00
+2023-05-06 16:56:00	8	100	2023-05-06 16:51:00	2023-05-06 16:56:00
+2023-05-06 17:30:00	3	200	2023-05-06 17:30:00	2023-05-06 17:30:00
+2023-05-06 17:35:00	5	100	2023-05-06 17:35:00	2023-05-06 17:35:00
+
 statement ok
 drop materialized view mv1;
 
@@ -108,6 +131,9 @@ drop materialized view mv2;
 
 statement ok
 drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
 
 statement ok
 drop table t;

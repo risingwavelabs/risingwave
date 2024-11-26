@@ -28,6 +28,10 @@ use risingwave_frontend_macro::system_catalog;
     "SELECT c.relation_id AS attrelid,
             c.name AS attname,
             c.type_oid AS atttypid,
+            CASE
+              WHEN c.udt_type = 'list' THEN 1::int2
+              ELSE 0::int2
+            END AS attndims,
             c.type_len AS attlen,
             c.position::smallint AS attnum,
             false AS attnotnull,
@@ -39,6 +43,7 @@ use risingwave_frontend_macro::system_catalog;
               ELSE ''::varchar
             END AS attgenerated,
             -1 AS atttypmod,
+            NULL::text[] AS attoptions,
             0 AS attcollation
         FROM rw_catalog.rw_columns c
         WHERE c.is_hidden = false"
@@ -48,6 +53,7 @@ struct PgAttribute {
     attrelid: i32,
     attname: String,
     atttypid: i32,
+    attndims: i16,
     attlen: i16,
     attnum: i16,
     attnotnull: bool,
@@ -56,5 +62,6 @@ struct PgAttribute {
     attidentity: String,
     attgenerated: String,
     atttypmod: i32,
+    attoptions: Vec<String>,
     attcollation: i32,
 }

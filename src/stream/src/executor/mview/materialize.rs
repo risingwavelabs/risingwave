@@ -22,9 +22,9 @@ use bytes::Bytes;
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, TableId};
-use risingwave_common::row::{CompactedRow, OwnedRow, RowDeserializer};
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DefaultOrd;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -34,9 +34,11 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTableInner, StateTableOpConsistencyLevel};
+use crate::common::table::test_utils::gen_pbtable;
+use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::prelude::*;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -61,6 +63,8 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     may_have_downstream: bool,
 
     depended_subscription_ids: HashSet<u32>,
+
+    metrics: MaterializeMetrics,
 }
 
 fn get_op_consistency_level(
@@ -129,8 +133,15 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         )
         .await;
 
+        let mv_metrics = metrics.new_materialize_metrics(
+            TableId::new(table_catalog.id),
+            actor_context.id,
+            actor_context.fragment_id,
+        );
+
         let metrics_info =
             MetricsInfo::new(metrics, table_catalog.id, actor_context.id, "Materialize");
+
         Self {
             input,
             schema,
@@ -147,26 +158,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             version_column_index,
             may_have_downstream,
             depended_subscription_ids,
+            metrics: mv_metrics,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // for metrics
-        let table_id_str = self.state_table.table_id().to_string();
-        let actor_id_str = self.actor_context.id.to_string();
-        let fragment_id_str = self.actor_context.fragment_id.to_string();
-
         let mv_table_id = TableId::new(self.state_table.table_id());
 
         let data_types = self.schema.data_types();
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -176,10 +183,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    self.actor_context
-                        .streaming_metrics
-                        .mview_input_row_count
-                        .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    self.metrics
+                        .materialize_input_row_count
                         .inc_by(chunk.cardinality() as u64);
 
                     // This is an optimization that handles conflicts only when a particular materialized view downstream has no MV dependencies.
@@ -232,7 +237,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handle(row_ops, &self.state_table, &self.conflict_behavior)
+                                .handle(
+                                    row_ops,
+                                    &self.state_table,
+                                    &self.conflict_behavior,
+                                    &self.metrics,
+                                )
                                 .await?;
 
                             match generate_output(fixed_changes, data_types.clone())? {
@@ -263,7 +273,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
                     Self::may_update_depended_subscriptions(
                         &mut self.depended_subscription_ids,
-                        b.mutation.as_deref(),
+                        &b,
                         mv_table_id,
                     );
                     let op_consistency_level = get_op_consistency_level(
@@ -287,7 +297,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
-                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
@@ -297,51 +306,36 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// return true when changed
     fn may_update_depended_subscriptions(
         depended_subscriptions: &mut HashSet<u32>,
-        mutation: Option<&Mutation>,
+        barrier: &Barrier,
         mv_table_id: TableId,
     ) {
-        let Some(mutation) = mutation else {
-            return;
-        };
-        match mutation {
-            Mutation::CreateSubscription {
-                subscription_id,
-                upstream_mv_table_id,
-            } => {
+        for subscriber_id in barrier.added_subscriber_on_mv_table(mv_table_id) {
+            if !depended_subscriptions.insert(subscriber_id) {
+                warn!(
+                    ?depended_subscriptions,
+                    ?mv_table_id,
+                    subscriber_id,
+                    "subscription id already exists"
+                );
+            }
+        }
+
+        if let Some(Mutation::DropSubscriptions {
+            subscriptions_to_drop,
+        }) = barrier.mutation.as_deref()
+        {
+            for (subscriber_id, upstream_mv_table_id) in subscriptions_to_drop {
                 if *upstream_mv_table_id == mv_table_id
-                    && !depended_subscriptions.insert(*subscription_id)
+                    && !depended_subscriptions.remove(subscriber_id)
                 {
                     warn!(
                         ?depended_subscriptions,
                         ?mv_table_id,
-                        subscription_id,
-                        "subscription id already exists"
+                        subscriber_id,
+                        "drop non existing subscriber_id id"
                     );
                 }
             }
-            Mutation::DropSubscription {
-                subscription_id,
-                upstream_mv_table_id,
-            } => {
-                if *upstream_mv_table_id == mv_table_id
-                    && !depended_subscriptions.remove(subscription_id)
-                {
-                    warn!(
-                        ?depended_subscriptions,
-                        ?mv_table_id,
-                        subscription_id,
-                        "drop non existing subscription id"
-                    );
-                }
-            }
-            Mutation::Stop(_)
-            | Mutation::Update(_)
-            | Mutation::Add(_)
-            | Mutation::SourceChangeSplit(_)
-            | Mutation::Pause
-            | Mutation::Resume
-            | Mutation::Throttle(_)
-            | Mutation::AddAndUpdate(_, _) => {}
         }
     }
 }
@@ -371,14 +365,20 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Arc::from((0..columns.len()).collect_vec()),
             Arc::from(columns.clone().into_boxed_slice()),
         );
-        let state_table = StateTableInner::new_without_distribution(
+        let state_table = StateTableInner::from_table_catalog(
+            &gen_pbtable(
+                table_id,
+                columns,
+                arrange_order_types,
+                arrange_columns.clone(),
+                0,
+            ),
             store,
-            table_id,
-            columns,
-            arrange_order_types,
-            arrange_columns.clone(),
+            None,
         )
         .await;
+
+        let metrics = StreamingMetrics::unused().new_materialize_metrics(table_id, 1, 2);
 
         Self {
             input,
@@ -396,6 +396,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             version_column_index: None,
             may_have_downstream: true,
             depended_subscription_ids: HashSet::new(),
+            metrics,
         }
     }
 }
@@ -539,7 +540,6 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
     data: ManagedLruCache<Vec<u8>, CacheValue>,
-    metrics_info: MetricsInfo,
     row_serde: BasicSerde,
     version_column_index: Option<u32>,
     _serde: PhantomData<SD>,
@@ -549,16 +549,15 @@ type CacheValue = Option<CompactedRow>;
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         metrics_info: MetricsInfo,
         row_serde: BasicSerde,
         version_column_index: Option<u32>,
     ) -> Self {
         let cache: ManagedLruCache<Vec<u8>, CacheValue> =
-            new_unbounded(watermark_epoch, metrics_info.clone());
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info.clone());
         Self {
             data: cache,
-            metrics_info,
             row_serde,
             version_column_index,
             _serde: PhantomData,
@@ -570,13 +569,19 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         row_ops: Vec<(Op, Vec<u8>, Bytes)>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<MaterializeBuffer> {
         let key_set: HashSet<Box<[u8]>> = row_ops
             .iter()
             .map(|(_, k, _)| k.as_slice().into())
             .collect();
-        self.fetch_keys(key_set.iter().map(|v| v.deref()), table, conflict_behavior)
-            .await?;
+        self.fetch_keys(
+            key_set.iter().map(|v| v.deref()),
+            table,
+            conflict_behavior,
+            metrics,
+        )
+        .await?;
         let mut fixed_changes = MaterializeBuffer::new();
         let row_serde = self.row_serde.clone();
         let version_column_index = self.version_column_index;
@@ -697,11 +702,9 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
                         ConflictBehavior::Overwrite
                         | ConflictBehavior::IgnoreConflict
                         | ConflictBehavior::DoUpdateIfNotNull => {
-                            match self.force_get(&key) {
-                                Some(old_row) => {
-                                    fixed_changes().delete(key.clone(), old_row.row.clone());
-                                }
-                                None => (), // delete a nonexistent value
+                            // delete a nonexistent value
+                            if let Some(old_row) = self.force_get(&key) {
+                                fixed_changes().delete(key.clone(), old_row.row.clone());
                             };
                         }
                         _ => unreachable!(),
@@ -721,20 +724,14 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         keys: impl Iterator<Item = &'a [u8]>,
         table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
+        metrics: &MaterializeMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
-            self.metrics_info
-                .metrics
-                .materialize_cache_total_count
-                .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                .inc();
+            metrics.materialize_cache_total_count.inc();
+
             if self.data.contains(key) {
-                self.metrics_info
-                    .metrics
-                    .materialize_cache_hit_count
-                    .with_label_values(&[&self.metrics_info.table_id, &self.metrics_info.actor_id])
-                    .inc();
+                metrics.materialize_cache_hit_count.inc();
                 continue;
             }
             futures.push(async {
@@ -833,23 +830,17 @@ mod tests {
     use std::iter;
     use std::sync::atomic::AtomicU64;
 
-    use futures::stream::StreamExt;
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
-    use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
-    use risingwave_common::array::Op;
-    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
     use super::*;
-    use crate::executor::test_utils::prelude::StateTable;
     use crate::executor::test_utils::*;
 
     #[tokio::test]
@@ -2019,12 +2010,16 @@ mod tests {
         ];
         let pk_indices = vec![0];
 
-        let mut table = StateTable::new_without_distribution(
+        let mut table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::from(1002),
+                column_descs.clone(),
+                order_types,
+                pk_indices,
+                0,
+            ),
             memory_state_store.clone(),
-            TableId::from(1002),
-            column_descs.clone(),
-            order_types,
-            pk_indices,
+            None,
         )
         .await;
 

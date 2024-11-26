@@ -99,6 +99,10 @@ impl MemoryContext {
         Self::new_with_mem_limit(None, counter, mem_limit)
     }
 
+    pub fn for_spill_test() -> Self {
+        Self::new_with_mem_limit(None, TrAdderAtomic::new(0), 0)
+    }
+
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
     /// Returns `false` if the memory usage exceeds the limit.
     pub fn add(&self, bytes: i64) -> bool {

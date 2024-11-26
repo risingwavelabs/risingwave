@@ -33,7 +33,6 @@ use risingwave_pb::PbFieldNotFound;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::task::JoinHandle;
-use tokio_metrics::TaskMonitor;
 use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
@@ -79,7 +78,7 @@ impl StateReporter {
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
-    pub task_id: u32,
+    pub task_id: u64,
     pub stage_id: u32,
     pub query_id: String,
 }
@@ -87,7 +86,7 @@ pub struct TaskId {
 #[derive(PartialEq, Eq, Hash, Clone, Default)]
 pub struct TaskOutputId {
     pub task_id: TaskId,
-    pub output_id: u32,
+    pub output_id: u64,
 }
 
 /// More compact formatter compared to derived `fmt::Debug`.
@@ -393,7 +392,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 self.plan.root.as_ref().unwrap(),
                 &self.task_id,
                 self.context.clone(),
-                self.epoch.clone(),
+                self.epoch,
                 self.shutdown_rx.clone(),
             )
             .build(),
@@ -433,7 +432,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
             let mut state_tx_1 = state_tx.clone();
-            let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
                 let span = tracing_context.attach(tracing::info_span!(
@@ -452,34 +450,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 .await;
             };
 
-            if let Some(batch_metrics) = batch_metrics {
-                let monitor = TaskMonitor::new();
-                let instrumented_task =
-                    AssertUnwindSafe(TaskMonitor::instrument(&monitor, task(task_id.clone())));
-                if let Err(error) = instrumented_task.rw_catch_unwind().await {
-                    error!("Batch task {:?} panic: {:?}", task_id, error);
-                    notify_panic(&this, state_tx.as_mut()).await;
-                }
-                let cumulative = monitor.cumulative();
-                batch_metrics
-                    .task_first_poll_delay
-                    .set(cumulative.total_first_poll_delay.as_secs_f64());
-                batch_metrics
-                    .task_fast_poll_duration
-                    .set(cumulative.total_fast_poll_duration.as_secs_f64());
-                batch_metrics
-                    .task_idle_duration
-                    .set(cumulative.total_idle_duration.as_secs_f64());
-                batch_metrics
-                    .task_poll_duration
-                    .set(cumulative.total_poll_duration.as_secs_f64());
-                batch_metrics
-                    .task_scheduled_duration
-                    .set(cumulative.total_scheduled_duration.as_secs_f64());
-                batch_metrics
-                    .task_slow_poll_duration
-                    .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
+            if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
                 .rw_catch_unwind()
                 .await
             {
@@ -559,8 +530,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
-                date_chunk = data_chunk_stream.next()=> {
-                    match date_chunk {
+                data_chunk = data_chunk_stream.next()=> {
+                    match data_chunk {
                         Some(Ok(data_chunk)) => {
                             if let Err(e) = sender.send(data_chunk).await {
                                 match e {

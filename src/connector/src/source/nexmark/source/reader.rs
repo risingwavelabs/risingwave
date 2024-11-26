@@ -41,6 +41,7 @@ use crate::source::{
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
+    #[expect(dead_code)]
     assigned_split: NexmarkSplit,
     event_num: u64,
     event_type: Option<EventType>,
@@ -114,31 +115,30 @@ impl SplitReader for NexmarkSplitReader {
         let split_id = self.split_id.clone();
         let metrics = self.source_ctx.metrics.clone();
 
+        let partition_input_count_metric =
+            metrics.partition_input_count.with_guarded_label_values(&[
+                &actor_id,
+                &source_id,
+                &split_id,
+                &source_name,
+                &fragment_id,
+            ]);
+        let partition_input_bytes_metric =
+            metrics.partition_input_bytes.with_guarded_label_values(&[
+                &actor_id,
+                &source_id,
+                &split_id,
+                &source_name,
+                &fragment_id,
+            ]);
+
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
             self.into_native_stream()
                 .inspect_ok(move |chunk: &StreamChunk| {
-                    metrics
-                        .partition_input_count
-                        .with_label_values(&[
-                            &actor_id,
-                            &source_id,
-                            &split_id,
-                            &source_name,
-                            &fragment_id,
-                        ])
-                        .inc_by(chunk.cardinality() as u64);
-                    metrics
-                        .partition_input_bytes
-                        .with_label_values(&[
-                            &actor_id,
-                            &source_id,
-                            &split_id,
-                            &source_name,
-                            &fragment_id,
-                        ])
-                        .inc_by(chunk.estimated_size() as u64);
+                    partition_input_count_metric.inc_by(chunk.cardinality() as u64);
+                    partition_input_bytes_metric.inc_by(chunk.estimated_size() as u64);
                 }),
             BUFFER_SIZE,
         )
@@ -210,7 +210,7 @@ impl NexmarkSplitReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::nexmark::{NexmarkProperties, NexmarkSplitEnumerator};
+    use crate::source::nexmark::NexmarkSplitEnumerator;
     use crate::source::{SourceContext, SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]

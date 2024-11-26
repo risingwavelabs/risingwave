@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
+use risingwave_common::cast::str_to_bool;
+use risingwave_common::types::{Date, Decimal, ScalarImpl, Time, Timestamp, Timestamptz};
 
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
@@ -76,7 +77,15 @@ impl CsvParser {
     fn parse_string(dtype: &DataType, v: String) -> AccessResult {
         let v = match dtype {
             // mysql use tinyint to represent boolean
-            DataType::Boolean => (parse!(v, i16)? != 0).into(),
+            DataType::Boolean => {
+                str_to_bool(&v)
+                    .map(ScalarImpl::Bool)
+                    .map_err(|_| AccessError::TypeError {
+                        expected: "boolean".to_owned(),
+                        got: "string".to_owned(),
+                        value: v,
+                    })?
+            }
             DataType::Int16 => parse!(v, i16)?.into(),
             DataType::Int32 => parse!(v, i32)?.into(),
             DataType::Int64 => parse!(v, i64)?.into(),
@@ -112,7 +121,7 @@ impl CsvParser {
                 // The header row does not output a row, so we return early.
                 return Ok(());
             }
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
                     let value = fields.get_mut(i).map(std::mem::take).unwrap_or_default();
                     if value.is_empty() {
@@ -125,7 +134,7 @@ impl CsvParser {
             })?;
         } else {
             fields.reverse();
-            writer.insert(|desc| {
+            writer.do_insert(|desc| {
                 if let Some(value) = fields.pop() {
                     if value.is_empty() {
                         return Ok(None);
@@ -168,7 +177,7 @@ impl ByteStreamSourceParser for CsvParser {
 mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, ToOwnedDatum};
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
@@ -376,5 +385,64 @@ mod tests {
                 (Some(ScalarImpl::Int32(0)))
             );
         }
+    }
+
+    #[test]
+    fn test_parse_boolean() {
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "1".to_string()).unwrap(),
+            Some(true.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "t".to_string()).unwrap(),
+            Some(true.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "T".to_string()).unwrap(),
+            Some(true.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "true".to_string()).unwrap(),
+            Some(true.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "TRUE".to_string()).unwrap(),
+            Some(true.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "True".to_string()).unwrap(),
+            Some(true.into())
+        );
+
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "0".to_string()).unwrap(),
+            Some(false.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "f".to_string()).unwrap(),
+            Some(false.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "F".to_string()).unwrap(),
+            Some(false.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "false".to_string()).unwrap(),
+            Some(false.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "FALSE".to_string()).unwrap(),
+            Some(false.into())
+        );
+        assert_eq!(
+            CsvParser::parse_string(&DataType::Boolean, "False".to_string()).unwrap(),
+            Some(false.into())
+        );
+
+        assert!(CsvParser::parse_string(&DataType::Boolean, "2".to_string()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "t1".to_string()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "f1".to_string()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "false1".to_string()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "TRUE1".to_string()).is_err());
     }
 }

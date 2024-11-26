@@ -21,7 +21,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::data::PbArray;
 
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::types::{DataType, Int256, Int256Ref, Scalar};
 
 #[derive(Debug, Clone, EstimateSize)]

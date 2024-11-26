@@ -11,7 +11,8 @@ repository = { workspace = true }
 [features]
 # some crates opt-in static linking, while some opt-in dynamic linking,
 # so they are two features :)
-rw-static-link = ["static-libz-sys", "static-lzma-sys", "static-openssl-sys", "static-sasl2-sys"]
+openssl-vendored = ["vendored-openssl-sys"]
+rw-static-link = ["static-libz-sys", "static-lzma-sys", "static-sasl2-sys"]
 rw-dynamic-link = ["dynamic-zstd-sys"]
 
 [dependencies]
@@ -22,8 +23,8 @@ tracing = { version = "0.1", features = ["release_max_level_debug"] }
 # Static linking
 static-libz-sys = { package = "libz-sys", version = "1", optional = true, features = ["static"] }
 static-lzma-sys = { package = "lzma-sys", version = "0.1", optional = true, features = ["static"] }
-static-openssl-sys = { package = "openssl-sys", version = "0.9.96", optional = true, features = ["vendored"] }
 static-sasl2-sys = { package = "sasl2-sys", version = "0.1", optional = true, features = ["gssapi-vendored"] }
+vendored-openssl-sys = { package = "openssl-sys", version = "0.9.96", optional = true, features = ["vendored"] }
 
 # Dynamic linking
 dynamic-zstd-sys = { package = "zstd-sys", version = "2", optional = true, default-features = false, features = ["pkg-config"] }

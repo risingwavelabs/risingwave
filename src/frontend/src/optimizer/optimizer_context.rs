@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::convert::Into;
 use core::fmt::Formatter;
 use std::cell::{RefCell, RefMut};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
+use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
+use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
+use crate::PlanRef;
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -58,6 +60,9 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
+    /// Store the mapping between `share_id` and the corresponding
+    /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
+    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
 
     _phantom: PhantomUnsend,
 }
@@ -91,6 +96,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
+            rcte_cache: RefCell::new(HashMap::new()),
             _phantom: Default::default(),
         }
     }
@@ -113,6 +119,7 @@ impl OptimizerContext {
             next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
+            rcte_cache: RefCell::new(HashMap::new()),
             _phantom: Default::default(),
         }
         .into()
@@ -167,6 +174,10 @@ impl OptimizerContext {
 
     pub fn explain_type(&self) -> ExplainType {
         self.explain_options.explain_type.clone()
+    }
+
+    pub fn explain_format(&self) -> ExplainFormat {
+        self.explain_options.explain_format.clone()
     }
 
     pub fn is_explain_logical(&self) -> bool {
@@ -229,6 +240,14 @@ impl OptimizerContext {
 
     pub fn get_session_timezone(&self) -> String {
         self.session_timezone.borrow().timezone()
+    }
+
+    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
+        self.rcte_cache.borrow().get(id).cloned()
+    }
+
+    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
+        self.rcte_cache.borrow_mut().insert(id, plan);
     }
 }
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::GroupKey;
+use super::{AggStateCacheStats, GroupKey};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -81,7 +81,7 @@ impl AggState {
             AggStateStorage::Value => {
                 let state = match encoded_state {
                     Some(encoded) => agg_func.decode_state(encoded.clone())?,
-                    None => agg_func.create_state(),
+                    None => agg_func.create_state()?,
                 };
                 Self::Value(state)
             }
@@ -129,11 +129,11 @@ impl AggState {
         storage: &AggStateStorage<impl StateStore>,
         func: &BoxedAggregateFunction,
         group_key: Option<&GroupKey>,
-    ) -> StreamExecutorResult<Datum> {
+    ) -> StreamExecutorResult<(Datum, AggStateCacheStats)> {
         match self {
             Self::Value(state) => {
                 debug_assert!(matches!(storage, AggStateStorage::Value));
-                Ok(func.get_result(state).await?)
+                Ok((func.get_result(state).await?, AggStateCacheStats::default()))
             }
             Self::MaterializedInput(state) => {
                 let state_table = must_match!(
@@ -146,10 +146,11 @@ impl AggState {
     }
 
     /// Reset the value state to initial state.
-    pub fn reset(&mut self, func: &BoxedAggregateFunction) {
+    pub fn reset(&mut self, func: &BoxedAggregateFunction) -> StreamExecutorResult<()> {
         if let Self::Value(state) = self {
             // now only value states need to be reset
-            *state = func.create_state();
+            *state = func.create_state()?;
         }
+        Ok(())
     }
 }

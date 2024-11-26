@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// for derived code of `Message`
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
-#![allow(non_snake_case)] // for derived code of `Message`
-#![feature(lint_reasons)]
 
 use std::str::FromStr;
 
+use plan_common::AdditionalColumn;
+pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
+
+use crate::common::WorkerType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -56,7 +59,7 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path="sim/connector_service.rs")]
+#[cfg_attr(madsim, path = "sim/connector_service.rs")]
 pub mod connector_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
@@ -83,6 +86,9 @@ pub mod monitor_service;
 #[cfg_attr(madsim, path = "sim/backup_service.rs")]
 pub mod backup_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/frontend_service.rs")]
+pub mod frontend_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/java_binding.rs")]
 pub mod java_binding;
 #[rustfmt::skip]
@@ -91,6 +97,10 @@ pub mod health;
 #[rustfmt::skip]
 #[path = "sim/telemetry.rs"]
 pub mod telemetry;
+
+#[rustfmt::skip]
+#[path = "sim/secret.rs"]
+pub mod secret;
 #[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
@@ -158,6 +168,10 @@ pub mod java_binding_serde;
 #[path = "telemetry.serde.rs"]
 pub mod telemetry_serde;
 
+#[rustfmt::skip]
+#[path = "secret.serde.rs"]
+pub mod secret_serde;
+
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
@@ -169,6 +183,14 @@ impl From<PbFieldNotFound> for tonic::Status {
 }
 
 impl FromStr for crate::expr::table_function::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
+    }
+}
+
+impl FromStr for crate::expr::agg_call::PbKind {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -196,6 +218,17 @@ impl stream_plan::MaterializeNode {
     }
 }
 
+// Encapsulating the use of parallelism.
+impl common::WorkerNode {
+    pub fn parallelism(&self) -> usize {
+        assert_eq!(self.r#type(), WorkerType::ComputeNode);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
+    }
+}
+
 impl stream_plan::SourceNode {
     pub fn column_ids(&self) -> Option<Vec<i32>> {
         Some(
@@ -206,6 +239,29 @@ impl stream_plan::SourceNode {
                 .map(|c| c.get_column_desc().unwrap().column_id)
                 .collect(),
         )
+    }
+}
+
+impl meta::table_fragments::ActorStatus {
+    pub fn worker_id(&self) -> u32 {
+        self.location
+            .as_ref()
+            .expect("actor location should be exist")
+            .worker_node_id
+    }
+}
+
+impl common::WorkerNode {
+    pub fn is_streaming_schedulable(&self) -> bool {
+        let property = self.property.as_ref();
+        property.map_or(false, |p| p.is_streaming)
+            && !property.map_or(false, |p| p.is_unschedulable)
+    }
+}
+
+impl common::ActorLocation {
+    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+        Some(Self { worker_node_id })
     }
 }
 
@@ -251,10 +307,146 @@ impl stream_plan::StreamNode {
     }
 }
 
+impl stream_plan::FragmentTypeFlag {
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn backfill_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::SourceScan as i32
+            | stream_plan::FragmentTypeFlag::StreamScan as i32
+    }
+
+    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
+    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
+    pub fn source_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
+    }
+
+    /// Note: this doesn't include `FsFetch` created in old versions.
+    pub fn rate_limit_fragments() -> i32 {
+        Self::backfill_rate_limit_fragments() | Self::source_rate_limit_fragments()
+    }
+}
+
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {
         self.cdc_source_job
+    }
+}
+
+impl catalog::Sink {
+    // TODO: remove this placeholder
+    // creating table sink does not have an id, so we need a placeholder
+    pub const UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK: &'static str = "PLACE_HOLDER";
+
+    pub fn unique_identity(&self) -> String {
+        // TODO: use a more unique name
+        format!("{}", self.id)
+    }
+}
+
+impl std::fmt::Debug for meta::SystemParams {
+    /// Directly formatting `SystemParams` can be inaccurate or leak sensitive information.
+    ///
+    /// Use `SystemParamsReader` instead.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SystemParams").finish_non_exhaustive()
+    }
+}
+
+// More compact formats for debugging
+
+impl std::fmt::Debug for data::DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let data::DataType {
+            precision,
+            scale,
+            interval_type,
+            field_type,
+            field_names,
+            type_name,
+            // currently all data types are nullable
+            is_nullable: _,
+        } = self;
+
+        let type_name = data::data_type::TypeName::try_from(*type_name)
+            .map(|t| t.as_str_name())
+            .unwrap_or("Unknown");
+
+        let mut s = f.debug_struct(type_name);
+        if self.precision != 0 {
+            s.field("precision", precision);
+        }
+        if self.scale != 0 {
+            s.field("scale", scale);
+        }
+        if self.interval_type != 0 {
+            s.field("interval_type", interval_type);
+        }
+        if !self.field_type.is_empty() {
+            s.field("field_type", field_type);
+        }
+        if !self.field_names.is_empty() {
+            s.field("field_names", field_names);
+        }
+        s.finish()
+    }
+}
+
+impl std::fmt::Debug for plan_common::column_desc::GeneratedOrDefaultColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GeneratedColumn(arg0) => f.debug_tuple("GeneratedColumn").field(arg0).finish(),
+            Self::DefaultColumn(arg0) => f.debug_tuple("DefaultColumn").field(arg0).finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for plan_common::ColumnDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // destruct here to avoid missing new fields in the future.
+        let plan_common::ColumnDesc {
+            column_type,
+            column_id,
+            name,
+            field_descs,
+            type_name,
+            description,
+            additional_column_type,
+            additional_column,
+            generated_or_default_column,
+            version,
+        } = self;
+
+        let mut s = f.debug_struct("ColumnDesc");
+        if let Some(column_type) = column_type {
+            s.field("column_type", column_type);
+        } else {
+            s.field("column_type", &"Unknown");
+        }
+        s.field("column_id", column_id).field("name", name);
+        if !self.field_descs.is_empty() {
+            s.field("field_descs", field_descs);
+        }
+        if !self.type_name.is_empty() {
+            s.field("type_name", type_name);
+        }
+        if let Some(description) = description {
+            s.field("description", description);
+        }
+        if self.additional_column_type != 0 {
+            s.field("additional_column_type", additional_column_type);
+        }
+        s.field("version", version);
+        if let Some(AdditionalColumn { column_type }) = additional_column {
+            // AdditionalColumn { None } means a normal column
+            if let Some(column_type) = column_type {
+                s.field("additional_column", &column_type);
+            }
+        }
+        if let Some(generated_or_default_column) = generated_or_default_column {
+            s.field("generated_or_default_column", &generated_or_default_column);
+        }
+        s.finish()
     }
 }
 

@@ -16,13 +16,13 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::PlanRef;
 
 pub struct OverWindowSplitRule;
 
 impl OverWindowSplitRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowSplitRule)
     }
 }
@@ -36,7 +36,7 @@ impl Rule for OverWindowSplitRule {
             .iter()
             .enumerate()
             .map(|(idx, func)| {
-                let func_seq = if func.kind.is_rank() {
+                let func_seq = if func.kind.is_numbering() {
                     rank_func_seq += 1;
                     rank_func_seq
                 } else {

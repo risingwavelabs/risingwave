@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use strum::EnumDiscriminants;
+use strum::{EnumDiscriminants, EnumIs};
 
+use super::{get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source};
 use crate::model::FragmentId;
+use crate::MetaResult;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumDiscriminants)]
+#[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -129,6 +133,10 @@ impl StreamingJob {
     }
 }
 
+// TODO: basically we want to ensure that the `Table` persisted in the catalog is the same as the
+// one in the `Materialize` node in the actor. However, they are currently handled separately
+// and can be out of sync. Shall we directly copy the whole struct from the actor to the catalog
+// to avoid `set`ting each field separately?
 impl StreamingJob {
     pub fn set_id(&mut self, id: u32) {
         match self {
@@ -151,6 +159,16 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 table.fragment_id = id;
+            }
+            Self::Sink(_, _) | Self::Source(_) => {}
+        }
+    }
+
+    /// Set the vnode count of the table.
+    pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
+                table.maybe_vnode_count = Some(vnode_count as u32);
             }
             Self::Sink(_, _) | Self::Source(_) => {}
         }
@@ -237,6 +255,16 @@ impl StreamingJob {
         }
     }
 
+    pub fn job_type_str(&self) -> &'static str {
+        match self {
+            StreamingJob::MaterializedView(_) => "materialized view",
+            StreamingJob::Sink(_, _) => "sink",
+            StreamingJob::Table(_, _, _) => "table",
+            StreamingJob::Index(_, _) => "index",
+            StreamingJob::Source(_) => "source",
+        }
+    }
+
     pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
@@ -271,13 +299,14 @@ impl StreamingJob {
         }
     }
 
-    // TODO: record all objects instead.
+    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
     pub fn dependent_relations(&self) -> Vec<u32> {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
             StreamingJob::Index(index, index_table) => {
+                // TODO(rc): record index dependencies via `dependencies` field
                 assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
                 vec![]
             }
@@ -285,7 +314,19 @@ impl StreamingJob {
         }
     }
 
-    pub fn is_source_job(&self) -> bool {
-        matches!(self, StreamingJob::Source(_))
+    // Get the secret ids that are referenced by this job.
+    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<u32>> {
+        match self {
+            StreamingJob::Sink(sink, _) => Ok(get_referred_secret_ids_from_sink(sink)),
+            StreamingJob::Table(source, _, _) => {
+                if let Some(source) = source {
+                    get_referred_secret_ids_from_source(source)
+                } else {
+                    Ok(HashSet::new())
+                }
+            }
+            StreamingJob::Source(source) => get_referred_secret_ids_from_source(source),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
+        }
     }
 }

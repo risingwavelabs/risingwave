@@ -15,20 +15,8 @@ ignored = ["workspace-hack", "ctor"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack", "ctor"]
 
-[features]
-embedded-deno-udf = ["arrow-udf-js-deno"]
-embedded-python-udf = ["arrow-udf-python"]
-
 [dependencies]
 anyhow = "1"
-arrow-array = { workspace = true }
-arrow-flight = "50"
-arrow-schema = { workspace = true }
-arrow-udf-flight = { workspace = true }
-arrow-udf-js = { workspace = true }
-arrow-udf-js-deno = { workspace = true, optional = true }
-arrow-udf-python = { workspace = true, optional = true }
-arrow-udf-wasm = { workspace = true }
 async-trait = "0.1"
 auto_impl = "1"
 await-tree = { workspace = true }
@@ -40,20 +28,16 @@ chrono = { version = "0.4", default-features = false, features = [
 const-currying = "0.0.4"
 downcast-rs = "1.2"
 easy-ext = "1"
-educe = "0.5"
+educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
 futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-ginepro = "0.7"
 itertools = { workspace = true }
 linkme = { version = "0.3", features = ["used_linker"] }
-md5 = "0.7"
-moka = { version = "0.12", features = ["sync"] }
 num-traits = "0.2"
-openssl = { version = "0.10", features = ["vendored"] }
-parse-display = "0.9"
+parse-display = "0.10"
 paste = "1"
 prometheus = "0.13"
 risingwave_common = { workspace = true }
@@ -68,9 +52,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt-multi-thread",
     "macros",
 ] }
-tonic = "0.10"
 tracing = "0.1"
-zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

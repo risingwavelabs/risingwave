@@ -14,7 +14,8 @@
 
 pub mod desc;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -27,6 +28,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
+use risingwave_pb::secret::PbSecretRef;
+use serde_derive::Serialize;
 
 use super::{
     SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -119,26 +122,40 @@ pub struct SinkFormatDesc {
     pub format: SinkFormat,
     pub encode: SinkEncode,
     pub options: BTreeMap<String, String>,
-
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkFormat {
     AppendOnly,
     Upsert,
     Debezium,
 }
 
+impl Display for SinkFormat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 /// TODO: consolidate with [`crate::source::SourceEncode`] and [`crate::parser::EncodingProperties`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum SinkEncode {
     Json,
     Protobuf,
     Avro,
     Template,
+    Parquet,
     Text,
+    Bytes,
+}
+
+impl Display for SinkEncode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl SinkFormatDesc {
@@ -169,6 +186,7 @@ impl SinkFormatDesc {
             format,
             encode,
             options: Default::default(),
+            secret_refs: Default::default(),
             key_encode: None,
         }))
     }
@@ -186,7 +204,9 @@ impl SinkFormatDesc {
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
             SinkEncode::Template => E::Template,
+            SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
+            SinkEncode::Bytes => E::Bytes,
         };
 
         let encode = mapping_encode(&self.encode);
@@ -202,6 +222,19 @@ impl SinkFormatDesc {
             encode: encode.into(),
             options,
             key_encode,
+            secret_refs: self.secret_refs.clone(),
+        }
+    }
+
+    // This function is for compatibility purposes. It sets the `SinkFormatDesc`
+    // when there is no configuration provided for the snowflake sink only.
+    pub fn plain_json_for_snowflake_only() -> Self {
+        Self {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: Default::default(),
+            secret_refs: Default::default(),
+            key_encode: None,
         }
     }
 }
@@ -233,6 +266,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Protobuf => SinkEncode::Protobuf,
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
+            E::Parquet => SinkEncode::Parquet,
             e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
@@ -241,15 +275,16 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
             | E::Template
             | E::Native
+            | E::Parquet
             | E::None) => {
                 return Err(SinkError::Config(anyhow!(
                     "unsupported {} as sink key encode",
@@ -257,13 +292,13 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 )))
             }
         };
-        let options = value.options.into_iter().collect();
 
         Ok(Self {
             format,
             encode,
-            options,
+            options: value.options,
             key_encode,
+            secret_refs: value.secret_refs,
         })
     }
 }
@@ -303,13 +338,10 @@ pub struct SinkCatalog {
     pub distribution_key: Vec<usize>,
 
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
 
     /// Owner of the sink.
     pub owner: UserId,
-
-    // Relations on which the sink depends.
-    pub dependent_relations: Vec<TableId>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -337,10 +369,17 @@ pub struct SinkCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub create_type: CreateType,
+
+    /// The secret reference for the sink, mapping from property name to secret id.
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
+
+    /// Only for the sink whose target is a table. Columns of the target table when the sink is created. At this point all the default columns of the target table are all handled by the project operator in the sink plan.
+    pub original_target_columns: Vec<ColumnCatalog>,
 }
 
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
+        #[allow(deprecated)] // for `dependent_relations`
         PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
@@ -354,11 +393,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|id| id.table_id)
-                .collect_vec(),
+            dependent_relations: vec![],
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -378,6 +413,12 @@ impl SinkCatalog {
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
+            secret_refs: self.secret_refs.clone(),
+            original_target_columns: self
+                .original_target_columns
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
         }
     }
 
@@ -413,6 +454,11 @@ impl SinkCatalog {
 
     pub fn downstream_pk_indices(&self) -> Vec<usize> {
         self.downstream_pk.clone()
+    }
+
+    pub fn unique_identity(&self) -> String {
+        // We need to align with meta here, so we've utilized the proto method.
+        self.to_proto().unique_identity()
     }
 }
 
@@ -455,11 +501,6 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             properties: pb.properties,
             owner: pb.owner.into(),
-            dependent_relations: pb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
             format_desc,
             connection_id: pb.connection_id.map(ConnectionId),
@@ -471,6 +512,12 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
+            secret_refs: pb.secret_refs,
+            original_target_columns: pb
+                .original_target_columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect_vec(),
         }
     }
 }

@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_sqlparser::ast::{
-    Cte, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
+    Cte, CteInner, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
     TableWithJoins, With,
 };
 
@@ -123,8 +123,10 @@ pub(crate) fn find_ddl_references(sql_statements: &[Statement]) -> HashSet<Strin
 pub(crate) fn find_ddl_references_for_query(query: &Query, ddl_references: &mut HashSet<String>) {
     let Query { with, body, .. } = query;
     if let Some(With { cte_tables, .. }) = with {
-        for Cte { query, .. } in cte_tables {
-            find_ddl_references_for_query(query, ddl_references)
+        for Cte { cte_inner, .. } in cte_tables {
+            if let CteInner::Query(query) = cte_inner {
+                find_ddl_references_for_query(query, ddl_references)
+            }
         }
     }
     find_ddl_references_for_query_in_set_expr(body, ddl_references);

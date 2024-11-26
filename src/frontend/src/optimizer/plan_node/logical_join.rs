@@ -33,6 +33,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DynamicFilter;
+use crate::optimizer::plan_node::stream_asof_join::StreamAsOfJoin;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
@@ -133,7 +134,7 @@ impl LogicalJoin {
             .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
         let index_group = input_refs
             .ones()
-            .group_by(|i| *i < self.core.left.schema().len());
+            .chunk_by(|i| *i < self.core.left.schema().len());
         let left_index = index_group
             .into_iter()
             .next()
@@ -418,6 +419,7 @@ impl LogicalJoin {
             .collect_vec();
 
         let new_scan_output_column_ids = new_scan.output_column_ids();
+        let as_of = new_scan.as_of.clone();
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
@@ -435,6 +437,7 @@ impl LogicalJoin {
             new_scan_output_column_ids,
             lookup_prefix_len,
             false,
+            as_of,
         ))
     }
 
@@ -835,14 +838,13 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    fn to_stream_hash_join(
+    fn get_stream_input_for_hash_join(
         &self,
-        predicate: EqJoinPredicate,
+        predicate: &EqJoinPredicate,
         ctx: &mut ToStreamContext,
-    ) -> Result<PlanRef> {
+    ) -> Result<(PlanRef, PlanRef)> {
         use super::stream::prelude::*;
 
-        assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
             ctx,
@@ -886,6 +888,18 @@ impl LogicalJoin {
             }
             _ => unreachable!(),
         }
+        Ok((left, right))
+    }
+
+    fn to_stream_hash_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
+        assert!(predicate.has_eq());
+        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
         let logical_join = self.clone_with_left_right(left, right);
 
@@ -983,16 +997,7 @@ impl LogicalJoin {
         result_plan
     }
 
-    fn to_stream_temporal_join(
-        &self,
-        predicate: EqJoinPredicate,
-        ctx: &mut ToStreamContext,
-    ) -> Result<StreamTemporalJoin> {
-        use super::stream::prelude::*;
-
-        assert!(predicate.has_eq());
-
-        let right = self.right();
+    fn check_temporal_rhs(right: &PlanRef) -> Result<&LogicalScan> {
         let Some(logical_scan) = right.as_logical_scan() else {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table scan as its lookup table".into(),
@@ -1006,6 +1011,88 @@ impl LogicalJoin {
                 "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
+        Ok(logical_scan)
+    }
+
+    fn temporal_join_scan_predicate_pull_up(
+        logical_scan: &LogicalScan,
+        predicate: EqJoinPredicate,
+        output_indices: &[usize],
+        left_schema_len: usize,
+    ) -> Result<(StreamTableScan, EqJoinPredicate, Condition, Vec<usize>)> {
+        // Extract the predicate from logical scan. Only pure scan is supported.
+        let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
+        // Construct output column to require column mapping
+        let o2r = if let Some(project_expr) = project_expr {
+            project_expr
+                .into_iter()
+                .map(|x| x.as_input_ref().unwrap().index)
+                .collect_vec()
+        } else {
+            (0..logical_scan.output_col_idx().len()).collect_vec()
+        };
+        let mut join_predicate_rewriter = LookupJoinPredicateRewriter {
+            offset: left_schema_len,
+            mapping: o2r.clone(),
+        };
+
+        let new_eq_cond = predicate
+            .eq_cond()
+            .rewrite_expr(&mut join_predicate_rewriter);
+
+        let mut scan_predicate_rewriter = LookupJoinScanPredicateRewriter {
+            offset: left_schema_len,
+        };
+
+        let new_other_cond = predicate
+            .other_cond()
+            .clone()
+            .rewrite_expr(&mut join_predicate_rewriter)
+            .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
+
+        let new_join_on = new_eq_cond.and(new_other_cond);
+
+        let new_predicate = EqJoinPredicate::create(
+            left_schema_len,
+            new_scan.schema().len(),
+            new_join_on.clone(),
+        );
+
+        // Rewrite the join output indices and all output indices referred to the old scan need to
+        // rewrite.
+        let new_join_output_indices = output_indices
+            .iter()
+            .map(|&x| {
+                if x < left_schema_len {
+                    x
+                } else {
+                    o2r[x - left_schema_len] + left_schema_len
+                }
+            })
+            .collect_vec();
+        // Use UpstreamOnly chain type
+        let new_stream_table_scan =
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
+        Ok((
+            new_stream_table_scan,
+            new_predicate,
+            new_join_on,
+            new_join_output_indices,
+        ))
+    }
+
+    fn to_stream_temporal_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
+        assert!(predicate.has_eq());
+
+        let right = self.right();
+
+        let logical_scan = Self::check_temporal_rhs(&right)?;
 
         let table_desc = logical_scan.table_desc();
         let output_column_ids = logical_scan.output_column_ids();
@@ -1071,68 +1158,21 @@ impl LogicalJoin {
         // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule the join fragment together with the RHS with a `no_shuffle` exchange.
         let left = required_dist.enforce(left, &Order::any());
 
-        // Extract the predicate from logical scan. Only pure scan is supported.
-        let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
-        // Construct output column to require column mapping
-        let o2r = if let Some(project_expr) = project_expr {
-            project_expr
-                .into_iter()
-                .map(|x| x.as_input_ref().unwrap().index)
-                .collect_vec()
-        } else {
-            (0..logical_scan.output_col_idx().len()).collect_vec()
-        };
-        let left_schema_len = self.left().schema().len();
-        let mut join_predicate_rewriter = LookupJoinPredicateRewriter {
-            offset: left_schema_len,
-            mapping: o2r.clone(),
-        };
+        let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
+            Self::temporal_join_scan_predicate_pull_up(
+                logical_scan,
+                predicate,
+                self.output_indices(),
+                self.left().schema().len(),
+            )?;
 
-        let new_eq_cond = predicate
-            .eq_cond()
-            .rewrite_expr(&mut join_predicate_rewriter);
-
-        let mut scan_predicate_rewriter = LookupJoinScanPredicateRewriter {
-            offset: left_schema_len,
-        };
-
-        let new_other_cond = predicate
-            .other_cond()
-            .clone()
-            .rewrite_expr(&mut join_predicate_rewriter)
-            .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
-
-        let new_join_on = new_eq_cond.and(new_other_cond);
-        let new_predicate = EqJoinPredicate::create(
-            left_schema_len,
-            new_scan.schema().len(),
-            new_join_on.clone(),
-        );
-
+        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
         if !new_predicate.has_eq() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a non trivial join condition".into(),
                 "Please remove the false condition of the join".into(),
             )));
         }
-
-        // Rewrite the join output indices and all output indices referred to the old scan need to
-        // rewrite.
-        let new_join_output_indices = self
-            .output_indices()
-            .iter()
-            .map(|&x| {
-                if x < left_schema_len {
-                    x
-                } else {
-                    o2r[x - left_schema_len] + left_schema_len
-                }
-            })
-            .collect_vec();
-        // Use UpstreamOnly chain type
-        let new_stream_table_scan =
-            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
-        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = generic::Join::new(
@@ -1145,7 +1185,68 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate))
+        Ok(StreamTemporalJoin::new(
+            new_logical_join,
+            new_predicate,
+            false,
+        ))
+    }
+
+    fn to_stream_nested_loop_temporal_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+        assert!(!predicate.has_eq());
+
+        let left = self.left().to_stream_with_dist_required(
+            &RequiredDist::PhysicalDist(Distribution::Broadcast),
+            ctx,
+        )?;
+        assert!(left.as_stream_exchange().is_some());
+
+        if self.join_type() != JoinType::Inner {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires an inner join".into(),
+                "Please use an inner join".into(),
+            )));
+        }
+
+        if !left.append_only() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Nested-loop Temporal join requires the left hash side to be append only".into(),
+                "Please ensure the left hash side is append only".into(),
+            )));
+        }
+
+        let right = self.right();
+        let logical_scan = Self::check_temporal_rhs(&right)?;
+
+        let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
+            Self::temporal_join_scan_predicate_pull_up(
+                logical_scan,
+                predicate,
+                self.output_indices(),
+                self.left().schema().len(),
+            )?;
+
+        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
+
+        // Construct a new logical join, because we have change its RHS.
+        let new_logical_join = generic::Join::new(
+            left,
+            right,
+            new_join_on,
+            self.join_type(),
+            new_join_output_indices,
+        );
+
+        Ok(StreamTemporalJoin::new(
+            new_logical_join,
+            new_predicate,
+            true,
+        ))
     }
 
     fn to_stream_dynamic_filter(
@@ -1258,10 +1359,45 @@ impl LogicalJoin {
             .expect("Fail to convert to lookup join")
             .into())
     }
+
+    fn to_stream_asof_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<StreamAsOfJoin> {
+        use super::stream::prelude::*;
+
+        if predicate.eq_keys().is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "AsOf join requires at least 1 equal condition".to_string(),
+            )
+            .into());
+        }
+
+        let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
+        let left_len = left.schema().len();
+        let logical_join = self.clone_with_left_right(left, right);
+
+        let inequality_desc =
+            StreamAsOfJoin::get_inequality_desc_from_predicate(predicate.clone(), left_len)?;
+
+        Ok(StreamAsOfJoin::new(
+            logical_join.core.clone(),
+            predicate,
+            inequality_desc,
+        ))
+    }
 }
 
 impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
+        if JoinType::AsofInner == self.join_type() || JoinType::AsofLeftOuter == self.join_type() {
+            return Err(ErrorCode::NotSupported(
+                "AsOf join in batch query".to_string(),
+                "AsOf join is only supported in streaming query".to_string(),
+            )
+            .into());
+        }
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1318,7 +1454,9 @@ impl ToStream for LogicalJoin {
             self.on().clone(),
         );
 
-        if predicate.has_eq() {
+        if self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter {
+            self.to_stream_asof_join(predicate, ctx).map(|x| x.into())
+        } else if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
                 return Err(ErrorCode::InternalError(format!(
                     "Join eq keys are not aligned for predicate: {predicate:?}"
@@ -1332,6 +1470,9 @@ impl ToStream for LogicalJoin {
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }
+        } else if self.should_be_temporal_join() {
+            self.to_stream_nested_loop_temporal_join(predicate, ctx)
+                .map(|x| x.into())
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {
@@ -1451,7 +1592,7 @@ impl ToStream for LogicalJoin {
                 )
                 .collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
         } else {
             join_with_pk.into()
         };
@@ -1471,7 +1612,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;

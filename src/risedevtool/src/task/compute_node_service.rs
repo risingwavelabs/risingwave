@@ -18,7 +18,7 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{ExecuteContext, Task};
+use super::{risingwave_cmd, ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
 
@@ -29,16 +29,6 @@ pub struct ComputeNodeService {
 impl ComputeNodeService {
     pub fn new(config: ComputeNodeConfig) -> Result<Self> {
         Ok(Self { config })
-    }
-
-    fn compute_node(&self) -> Result<Command> {
-        let prefix_bin = env::var("PREFIX_BIN")?;
-
-        Ok(Command::new(
-            Path::new(&prefix_bin)
-                .join("risingwave")
-                .join("compute-node"),
-        ))
     }
 
     /// Apply command args according to config
@@ -55,9 +45,9 @@ impl ComputeNodeService {
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
             .arg("--parallelism")
-            .arg(&config.parallelism.to_string())
+            .arg(config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string())
+            .arg(config.total_memory_bytes.to_string())
             .arg("--role")
             .arg(&config.role);
 
@@ -78,7 +68,7 @@ impl Task for ComputeNodeService {
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        let mut cmd = self.compute_node()?;
+        let mut cmd = risingwave_cmd("compute-node")?;
 
         cmd.env(
             "TOKIO_CONSOLE_BIND",

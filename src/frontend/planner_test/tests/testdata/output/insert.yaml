@@ -80,7 +80,11 @@
   sql: |
     create table t (v1 real, v2 int);
     insert into t values (22.33, true);
-  binder_error: 'Bind error: cannot cast type "boolean" to "integer" in Assign context'
+  binder_error: |
+    failed to cast the 2nd column
+
+    Caused by:
+      cannot cast type "boolean" to "integer" in Assign context
 - name: simple insert
   sql: |
     create table t (v1 int, v2 int);
@@ -175,7 +179,11 @@
   sql: |
     create table t (v1 timestamp, v2 real);
     insert into t select time '01:02:03', 4.5 from t;
-  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp without time zone" in Assign context'
+  binder_error: |
+    failed to cast the 1st column
+
+    Caused by:
+      cannot cast type "time without time zone" to "timestamp without time zone" in Assign context
 - name: insert into select mismatch columns length
   sql: |
     create table t (v1 int, v2 real);
@@ -231,7 +239,7 @@
     └─LogicalInsert { table: t, returning: true, mapping: [0:0, 1:1] }
       └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
         └─LogicalProject { exprs: [t.a, t.b] }
-          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [a, b, a, (a + b) as $expr1] }
@@ -284,7 +292,7 @@
   logical_plan: |-
     LogicalInsert { table: t, mapping: [0:0], default: [1<-null:Int32] }
     └─LogicalProject { exprs: [t.b] }
-      └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t, mapping: [0:0], default: [1<-null:Int32] }
@@ -309,7 +317,7 @@
     LogicalInsert { table: t, mapping: [0:0], default: [1<-null:Int32] }
     └─LogicalProject { exprs: [t.a] }
       └─LogicalProject { exprs: [t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t, mapping: [0:0], default: [1<-null:Int32] }

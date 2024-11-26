@@ -15,15 +15,16 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{max_column_id, ColumnCatalog};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, CreateSourceStatement, Encode, Format, ObjectName,
+    CompatibleFormatEncode, CreateSourceStatement, Encode, Format, FormatEncodeOptions, ObjectName,
     SqlOption, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
@@ -37,6 +38,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::session::SessionImpl;
+use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
 
 fn format_type_to_format(from: FormatType) -> Option<Format> {
@@ -63,19 +65,25 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Json => Encode::Json,
         EncodeType::Bytes => Encode::Bytes,
         EncodeType::Template => Encode::Template,
+        EncodeType::Parquet => Encode::Parquet,
         EncodeType::None => Encode::None,
         EncodeType::Text => Encode::Text,
     })
 }
 
-/// Returns the columns in `columns_a` but not in `columns_b`,
-/// where the comparison is done by name and data type,
-/// and hidden columns are ignored.
+/// Returns the columns in `columns_a` but not in `columns_b`.
+///
+/// Note:
+/// - The comparison is done by name and data type, without checking `ColumnId`.
+/// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
+///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
+///   This is fragile and we should really refactor it later.
 fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
     columns_a
         .iter()
         .filter(|col_a| {
             !col_a.is_hidden()
+                && !col_a.is_connector_additional_column()
                 && !columns_b.iter().any(|col_b| {
                     col_a.name() == col_b.name() && col_a.data_type() == col_b.data_type()
                 })
@@ -112,7 +120,7 @@ pub fn fetch_source_catalog_with_db_schema_id(
 /// and if the FORMAT and ENCODE are modified.
 pub fn check_format_encode(
     original_source: &SourceCatalog,
-    new_connector_schema: &ConnectorSchema,
+    new_format_encode: &FormatEncodeOptions,
 ) -> Result<()> {
     let StreamSourceInfo {
         format, row_encode, ..
@@ -129,9 +137,7 @@ pub fn check_format_encode(
         .into());
     };
 
-    if new_connector_schema.format != old_format
-        || new_connector_schema.row_encode != old_row_encode
-    {
+    if new_format_encode.format != old_format || new_format_encode.row_encode != old_row_encode {
         bail_not_implemented!(
             "the original definition is FORMAT {:?} ENCODE {:?}, and altering them is not supported yet",
             &old_format,
@@ -145,45 +151,53 @@ pub fn check_format_encode(
 /// Refresh the source registry and get the added/dropped columns.
 pub async fn refresh_sr_and_get_columns_diff(
     original_source: &SourceCatalog,
-    connector_schema: &ConnectorSchema,
+    format_encode: &FormatEncodeOptions,
     session: &Arc<SessionImpl>,
 ) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>, Vec<ColumnCatalog>)> {
-    let mut with_properties = original_source
-        .with_properties
-        .clone()
-        .into_iter()
-        .collect();
-    validate_compatibility(connector_schema, &mut with_properties)?;
+    let mut with_properties = original_source.with_properties.clone();
+    validate_compatibility(format_encode, &mut with_properties)?;
 
     if with_properties.is_cdc_connector() {
         bail_not_implemented!("altering a cdc source is not supported");
     }
 
     let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, connector_schema, &with_properties).await?
+        bind_columns_from_source(session, format_encode, Either::Right(&with_properties)).await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
     };
 
-    let added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    let mut added_columns = columns_minus(&columns_from_resolve_source, &original_source.columns);
+    // The newly resolved columns' column IDs also starts from 1. They cannot be used directly.
+    let mut next_col_id = max_column_id(&original_source.columns).next();
+    for col in &mut added_columns {
+        col.column_desc.column_id = next_col_id;
+        next_col_id = next_col_id.next();
+    }
     let dropped_columns = columns_minus(&original_source.columns, &columns_from_resolve_source);
+    tracing::debug!(
+        ?added_columns,
+        ?dropped_columns,
+        ?columns_from_resolve_source,
+        original_source = ?original_source.columns
+    );
 
     Ok((source_info, added_columns, dropped_columns))
 }
 
-fn get_connector_schema_from_source(source: &SourceCatalog) -> Result<ConnectorSchema> {
+fn get_format_encode_from_source(source: &SourceCatalog) -> Result<FormatEncodeOptions> {
     let [stmt]: [_; 1] = Parser::parse_sql(&source.definition)
         .context("unable to parse original source definition")?
         .try_into()
         .unwrap();
     let Statement::CreateSource {
-        stmt: CreateSourceStatement { source_schema, .. },
+        stmt: CreateSourceStatement { format_encode, .. },
     } = stmt
     else {
         unreachable!()
     };
-    Ok(source_schema.into_v2_with_warning())
+    Ok(format_encode.into_v2_with_warning())
 }
 
 pub async fn handler_refresh_schema(
@@ -191,14 +205,14 @@ pub async fn handler_refresh_schema(
     name: ObjectName,
 ) -> Result<RwPgResponse> {
     let (source, _, _) = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
-    let connector_schema = get_connector_schema_from_source(&source)?;
-    handle_alter_source_with_sr(handler_args, name, connector_schema).await
+    let format_encode = get_format_encode_from_source(&source)?;
+    handle_alter_source_with_sr(handler_args, name, format_encode).await
 }
 
 pub async fn handle_alter_source_with_sr(
     handler_args: HandlerArgs,
     name: ObjectName,
-    connector_schema: ConnectorSchema,
+    format_encode: FormatEncodeOptions,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let (source, database_id, schema_id) = fetch_source_catalog_with_db_schema_id(&session, &name)?;
@@ -211,10 +225,13 @@ pub async fn handle_alter_source_with_sr(
         )
         .into());
     };
+    if source.info.is_shared() {
+        bail_not_implemented!(issue = 16003, "alter shared source");
+    }
 
-    check_format_encode(&source, &connector_schema)?;
+    check_format_encode(&source, &format_encode)?;
 
-    if !schema_has_schema_registry(&connector_schema) {
+    if !schema_has_schema_registry(&format_encode) {
         return Err(ErrorCode::NotSupported(
             "altering a source without schema registry".to_string(),
             "try `ALTER SOURCE .. ADD COLUMN ...` instead".to_string(),
@@ -223,7 +240,7 @@ pub async fn handle_alter_source_with_sr(
     }
 
     let (source_info, added_columns, dropped_columns) =
-        refresh_sr_and_get_columns_diff(&source, &connector_schema, &session).await?;
+        refresh_sr_and_get_columns_diff(&source, &format_encode, &session).await?;
 
     if !dropped_columns.is_empty() {
         bail_not_implemented!(
@@ -238,13 +255,22 @@ pub async fn handle_alter_source_with_sr(
     source.info = source_info;
     source.columns.extend(added_columns);
     source.definition =
-        alter_definition_format_encode(&source.definition, connector_schema.row_options.clone())?;
+        alter_definition_format_encode(&source.definition, format_encode.row_options.clone())?;
 
-    let format_encode_options = WithOptions::try_from(connector_schema.row_options())?.into_inner();
+    let (format_encode_options, format_encode_secret_ref) = resolve_secret_ref_in_with_options(
+        WithOptions::try_from(format_encode.row_options())?,
+        session.as_ref(),
+    )?
+    .into_parts();
     source
         .info
         .format_encode_options
         .extend(format_encode_options);
+
+    source
+        .info
+        .format_encode_secret_refs
+        .extend(format_encode_secret_ref);
 
     let mut pb_source = source.to_prost(schema_id, database_id);
 
@@ -252,7 +278,7 @@ pub async fn handle_alter_source_with_sr(
     pb_source.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source_with_sr(pb_source).await?;
+    catalog_writer.alter_source(pb_source).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
@@ -270,19 +296,19 @@ pub fn alter_definition_format_encode(
 
     match &mut stmt {
         Statement::CreateSource {
-            stmt: CreateSourceStatement { source_schema, .. },
+            stmt: CreateSourceStatement { format_encode, .. },
         }
         | Statement::CreateTable {
-            source_schema: Some(source_schema),
+            format_encode: Some(format_encode),
             ..
         } => {
-            match source_schema {
-                CompatibleSourceSchema::V2(schema) => {
+            match format_encode {
+                CompatibleFormatEncode::V2(schema) => {
                     schema.row_options = format_encode_options;
                 }
                 // TODO: Confirm the behavior of legacy source schema.
                 // Legacy source schema should be rejected by the handler and never reaches here.
-                CompatibleSourceSchema::RowFormat(_schema) => unreachable!(),
+                CompatibleFormatEncode::RowFormat(_schema) => unreachable!(),
             }
         }
         _ => unreachable!(),
@@ -319,7 +345,14 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
         let get_source = || {
             let catalog_reader = session.env().catalog_reader().read_guard();

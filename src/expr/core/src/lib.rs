@@ -13,9 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
-#![feature(lazy_cell)]
 #![feature(coroutines)]
 #![feature(never_type)]
 #![feature(error_generic_member_access)]
@@ -35,6 +33,6 @@ pub mod sig;
 pub mod table_function;
 pub mod window_function;
 
-pub use error::{ContextUnavailable, CryptographyError, CryptographyStage, ExprError, Result};
+pub use error::{ContextUnavailable, ExprError, Result};
 pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;

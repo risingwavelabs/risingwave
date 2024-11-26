@@ -19,7 +19,8 @@ use opendal::services::Obs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
@@ -28,13 +29,10 @@ impl OpendalObjectStore {
         bucket: String,
         root: String,
         config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
         // Create obs backend builder.
-        let mut builder = Obs::default();
-
-        builder.bucket(&bucket);
-
-        builder.root(&root);
+        let mut builder = Obs::default().bucket(&bucket).root(&root);
 
         let endpoint = std::env::var("OBS_ENDPOINT")
             .unwrap_or_else(|_| panic!("OBS_ENDPOINT not found from environment variables"));
@@ -44,17 +42,19 @@ impl OpendalObjectStore {
             panic!("OBS_SECRET_ACCESS_KEY not found from environment variables")
         });
 
-        builder.endpoint(&endpoint);
-        builder.access_key_id(&access_key_id);
-        builder.secret_access_key(&secret_access_key);
+        builder = builder
+            .endpoint(&endpoint)
+            .access_key_id(&access_key_id)
+            .secret_access_key(&secret_access_key);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Obs,
+            media_type: MediaType::Obs,
             config,
+            metrics,
         })
     }
 }

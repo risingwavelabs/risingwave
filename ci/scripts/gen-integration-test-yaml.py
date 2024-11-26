@@ -44,6 +44,8 @@ CASES_MAP = {
     'presto-trino': ['json'],
     'client-library': ['none'],
     'kafka-cdc': ['json'],
+    'pubsub': ['json'],
+    'dynamodb': ['json'],
 }
 
 def gen_pipeline_steps():
@@ -63,6 +65,7 @@ def gen_pipeline_steps():
          env:
            GHCR_USERNAME: ghcr-username
            GHCR_TOKEN: ghcr-token
+           RW_LICENSE_KEY: rw-license-key
      - ./ci/plugins/docker-compose-logs
 """
     return pipeline_steps

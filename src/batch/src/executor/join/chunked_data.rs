@@ -37,7 +37,7 @@ pub(super) struct AllRowIdIter<'a> {
     chunk_offsets: &'a [usize],
 }
 
-impl<'a> Iterator for AllRowIdIter<'a> {
+impl Iterator for AllRowIdIter<'_> {
     type Item = RowId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -120,17 +120,6 @@ impl<V> ChunkedData<V> {
         AllRowIdIter {
             cur: RowId::default(),
             chunk_offsets: &self.chunk_offsets,
-        }
-    }
-
-    pub(super) fn next_row_id(&self, cur: RowId) -> Option<RowId> {
-        let current_chunk_row_count =
-            self.chunk_offsets[cur.chunk_id() + 1] - self.chunk_offsets[cur.chunk_id()];
-        let next = cur.next_row(current_chunk_row_count);
-        if (next.chunk_id() + 1) >= self.chunk_offsets.len() {
-            None
-        } else {
-            Some(next)
         }
     }
 }

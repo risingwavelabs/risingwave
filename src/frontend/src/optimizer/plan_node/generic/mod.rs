@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains the generic plan nodes that are shared by all the plan nodes.
+//! They are meant to reuse the common fields between logical, batch and stream nodes.
+
 use std::borrow::Cow;
 use std::hash::Hash;
 
@@ -74,6 +77,23 @@ mod limit;
 pub use limit::*;
 mod max_one_row;
 pub use max_one_row::*;
+mod cte_ref;
+pub use cte_ref::*;
+mod recursive_union;
+pub use recursive_union::*;
+mod changelog;
+pub use changelog::*;
+mod now;
+pub use now::*;
+
+mod file_scan;
+pub use file_scan::*;
+
+mod postgres_query;
+pub use postgres_query::*;
+
+mod mysql_query;
+pub use mysql_query::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

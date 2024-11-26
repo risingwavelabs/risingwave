@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::str::FromStr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -28,13 +29,16 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{write_date_time_tz, DataType, ScalarRefImpl, Timestamptz};
+use risingwave_common::types::{
+    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
-    TableFactor, TableWithJoins,
+    CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName, OrderByExpr, Query,
+    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::session::{current, SessionImpl};
@@ -53,14 +57,14 @@ pin_project! {
         #[pin]
         chunk_stream: VS,
         column_types: Vec<DataType>,
-        formats: Vec<Format>,
+        pub formats: Vec<Format>,
         session_data: StaticSessionData,
     }
 }
 
 // Static session data frozen at the time of the creation of the stream
-struct StaticSessionData {
-    timezone: String,
+pub struct StaticSessionData {
+    pub timezone: String,
 }
 
 impl<VS> DataChunkToRowSetAdapter<VS>
@@ -110,7 +114,7 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(
+pub fn pg_value_format(
     data_type: &DataType,
     d: ScalarRefImpl<'_>,
     format: Format,
@@ -151,6 +155,15 @@ fn to_pg_rows(
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
     assert_eq!(chunk.dimension(), column_types.len());
+    if cfg!(debug_assertions) {
+        let chunk_data_types = chunk.data_types();
+        for (ty1, ty2) in chunk_data_types.iter().zip_eq_fast(column_types) {
+            debug_assert!(
+                ty1.equals_datatype(ty2),
+                "chunk_data_types: {chunk_data_types:?}, column_types: {column_types:?}"
+            )
+        }
+    }
 
     chunk
         .rows()
@@ -181,16 +194,16 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]
-impl CompatibleSourceSchema {
-    /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
-    pub fn into_v2_with_warning(self) -> ConnectorSchema {
+impl CompatibleFormatEncode {
+    /// Convert `self` to [`FormatEncodeOptions`] and warn the user if the syntax is deprecated.
+    pub fn into_v2_with_warning(self) -> FormatEncodeOptions {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => {
+            CompatibleFormatEncode::RowFormat(inner) => {
                 // TODO: should be warning
                 current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
-                inner.into_source_schema_v2()
+                inner.into_format_encode_v2()
             }
-            CompatibleSourceSchema::V2(inner) => inner,
+            CompatibleFormatEncode::V2(inner) => inner,
         }
     }
 }
@@ -221,6 +234,22 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
+pub fn gen_query_from_table_name_order_by(from_name: ObjectName, pk_names: Vec<String>) -> Query {
+    let mut query = gen_query_from_table_name(from_name);
+    query.order_by = pk_names
+        .into_iter()
+        .map(|pk| {
+            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
+            OrderByExpr {
+                expr,
+                asc: None,
+                nulls_first: None,
+            }
+        })
+        .collect();
+    query
+}
+
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {
     Epoch::from_unix_millis(unix_millis).0
 }
@@ -229,12 +258,23 @@ pub fn convert_logstore_u64_to_unix_millis(logstore_u64: u64) -> u64 {
     Epoch::from(logstore_u64).as_unix_millis()
 }
 
+pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
+    let seconds = (Interval::from_str(interval)
+        .map_err(|err| {
+            ErrorCode::InternalError(format!(
+                "Covert interval to u64 error, please check format, error: {:?}",
+                err.to_report_string()
+            ))
+        })?
+        .epoch_in_micros()
+        / 1000000) as u64;
+    Ok(seconds)
+}
+
 #[cfg(test)]
 mod tests {
-    use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
-    use risingwave_common::types::Timestamptz;
 
     use super::*;
 

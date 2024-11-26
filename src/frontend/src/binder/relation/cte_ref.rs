@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::ShareId;
+use crate::binder::{BoundSetExpr, ShareId};
 
 /// A CTE reference, currently only used in the back reference of recursive CTE.
 /// For the non-recursive one, see [`BoundShare`](super::BoundShare).
 #[derive(Debug, Clone)]
 pub struct BoundBackCteRef {
-    #[expect(dead_code)]
     pub(crate) share_id: ShareId,
+    pub(crate) base: BoundSetExpr,
 }
 
 impl RewriteExprsRecursive for BoundBackCteRef {

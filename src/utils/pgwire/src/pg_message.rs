@@ -426,7 +426,7 @@ pub enum TransactionStatus {
     InFailedTransaction,
 }
 
-impl<'a> BeMessage<'a> {
+impl BeMessage<'_> {
     /// Write message to the given buf.
     pub fn write(buf: &mut BytesMut, message: &BeMessage<'_>) -> Result<()> {
         match message {
@@ -697,7 +697,7 @@ macro_rules! from_usize {
         impl FromUsize for $t {
             #[inline]
             fn from_usize(x: usize) -> Result<$t> {
-                if x > <$t>::max_value() as usize {
+                if x > <$t>::MAX as usize {
                     Err(Error::new(ErrorKind::InvalidInput, "value too large to transmit").into())
                 } else {
                     Ok(x as $t)

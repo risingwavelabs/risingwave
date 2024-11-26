@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
@@ -25,6 +26,8 @@ use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
 use thiserror::Error;
 use tokio::task::JoinError;
 
+use crate::expr::CastError;
+
 /// The error type for the frontend crate, acting as the top-level error type for the
 /// entire RisingWave project.
 // TODO(error-handling): this is migrated from the `common` crate, and there could
@@ -32,8 +35,8 @@ use tokio::task::JoinError;
 // - Some variants are never constructed.
 // - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
 //   It's not necessary anymore as the error type is now defined at the top-level.
-#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
-#[thiserror_ext(newtype(name = RwError, backtrace))]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Macro)]
+#[thiserror_ext(newtype(name = RwError, backtrace), macro(path = "crate::error"))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
@@ -104,7 +107,7 @@ pub enum ErrorCode {
     // TODO: use a new type for bind error
     // TODO(error-handling): should prefer use error types than strings.
     #[error("Bind error: {0}")]
-    BindError(String),
+    BindError(#[message] String),
     // TODO: only keep this one
     #[error("Failed to bind expression: {expr}: {error}")]
     BindErrorRoot {
@@ -113,6 +116,12 @@ pub enum ErrorCode {
         #[backtrace]
         error: BoxedError,
     },
+    #[error(transparent)]
+    CastError(
+        #[from]
+        #[backtrace]
+        CastError,
+    ),
     #[error("Catalog error: {0}")]
     CatalogError(
         #[source]
@@ -163,6 +172,12 @@ pub enum ErrorCode {
         #[from]
         #[backtrace]
         SessionConfigError,
+    ),
+    #[error("Secret error: {0}")]
+    SecretError(
+        #[from]
+        #[backtrace]
+        SecretError,
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),

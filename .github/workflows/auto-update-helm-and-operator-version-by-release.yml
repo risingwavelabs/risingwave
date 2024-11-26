@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Helm Charts Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'risingwavelabs/helm-charts'
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PR_TOKEN }}
           path: 'helm-charts'
 
       - name: Update values.yaml
@@ -37,22 +37,26 @@ jobs:
           echo "NEW_CHART_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PR_TOKEN }}
           commit-message: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
           title: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
           body: 'This is an automated pull request to update the chart versions'
           branch: 'auto-update-${{ env.NEW_APP_VERSION }}'
+          path: 'helm-charts'
+          reviewers: arkbriar
+          delete-branch: true
+          signoff: true
 
   update-risingwave-operator:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Risingwave Operator Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: 'risingwavelabs/risingwave-operator'
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PR_TOKEN }}
           path: 'risingwave-operator'
 
       - name: Update risingwave-operator image tags
@@ -62,10 +66,14 @@ jobs:
           grep -rl "risingwavelabs/risingwave:$PREV_VERSION" . | xargs sed -i "s|risingwavelabs/risingwave:$PREV_VERSION|risingwavelabs/risingwave:${{ env.NEW_APP_VERSION }}|g"
 
       - name: Create Pull Request for risingwave-operator
-        uses: peter-evans/create-pull-request@v4
+        uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PR_TOKEN }}
           commit-message: 'chore: bump risingwave image tags to ${{ env.NEW_APP_VERSION }}'
           title: 'chore: bump risingwave image tags to ${{ env.NEW_APP_VERSION }}'
           body: 'This is an automated pull request to update the risingwave image tags'
           branch: 'auto-update-${{ env.NEW_APP_VERSION }}'
+          path: 'risingwave-operator'
+          reviewers: arkbriar
+          delete-branch: true
+          signoff: true

@@ -25,6 +25,8 @@ pub const LIMIT_ALL_COUNT: u64 = u64::MAX / 2;
 
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
+    ///
+    /// Works for both batch query and streaming query (`CREATE MATERIALIZED VIEW`).
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
         let out_names = query.schema().names();
         let BoundQuery {

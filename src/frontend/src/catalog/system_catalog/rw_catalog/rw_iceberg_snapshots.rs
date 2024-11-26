@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Deref;
 
-use icelake::Table;
+use iceberg::table::Table;
 use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
-use risingwave_connector::sink::iceberg::IcebergConfig;
+use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_frontend_macro::system_catalog;
@@ -58,32 +57,36 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
 
     let mut result = vec![];
     for (schema_name, source) in iceberg_sources {
-        let source_props: HashMap<String, String> =
-            HashMap::from_iter(source.with_properties.clone());
-        let config = ConnectorProperties::extract(source_props, false)?;
+        let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
-            let iceberg_config: IcebergConfig = iceberg_properties.to_iceberg_config();
-            let table: Table = iceberg_config.load_table().await?;
-            if let Some(snapshots) = &table.current_table_metadata().snapshots {
-                result.extend(snapshots.iter().map(|snapshot| {
-                    RwIcebergSnapshots {
+            let table: Table = iceberg_properties.load_table_v2().await?;
+
+            let snapshots: ConnectorResult<Vec<RwIcebergSnapshots>> = table
+                .metadata()
+                .snapshots()
+                .map(|snapshot| {
+                    Ok(RwIcebergSnapshots {
                         source_id: source.id as i32,
                         schema_name: schema_name.clone(),
                         source_name: source.name.clone(),
-                        sequence_number: snapshot.sequence_number,
-                        snapshot_id: snapshot.snapshot_id,
-                        timestamp_ms: Timestamptz::from_millis(snapshot.timestamp_ms),
-                        manifest_list: snapshot.manifest_list.clone(),
+                        sequence_number: snapshot.sequence_number(),
+                        snapshot_id: snapshot.snapshot_id(),
+                        timestamp_ms: Timestamptz::from_millis(
+                            snapshot.timestamp()?.timestamp_millis(),
+                        ),
+                        manifest_list: snapshot.manifest_list().to_string(),
                         summary: Value::object(
                             snapshot
-                                .summary
+                                .summary()
+                                .other
                                 .iter()
                                 .map(|(k, v)| (k.as_str(), ValueRef::String(v))),
                         )
                         .into(),
-                    }
-                }));
-            }
+                    })
+                })
+                .collect();
+            result.extend(snapshots?);
         }
     }
     Ok(result)

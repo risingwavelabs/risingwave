@@ -42,7 +42,7 @@ pub struct Int256(pub(crate) Box<i256>);
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
-impl<'a> Display for Int256Ref<'a> {
+impl Display for Int256Ref<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.write(f)
     }
@@ -165,14 +165,11 @@ macro_rules! impl_common_for_num256 {
         }
 
         impl ToBinary for $scalar_ref<'_> {
-            fn to_binary_with_type(
-                &self,
-                _ty: &DataType,
-            ) -> super::to_binary::Result<Option<Bytes>> {
+            fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Bytes> {
                 let mut output = bytes::BytesMut::new();
                 let buffer = self.to_be_bytes();
                 output.put_slice(&buffer);
-                Ok(Some(output.freeze()))
+                Ok(output.freeze())
             }
         }
 
@@ -208,7 +205,7 @@ impl Int256 {
     }
 }
 
-impl<'a> Int256Ref<'a> {
+impl Int256Ref<'_> {
     pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
@@ -335,7 +332,6 @@ impl EstimateSize for Int256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::F64;
 
     macro_rules! check_op {
         ($t:ty, $lhs:expr, $rhs:expr, [$($op:tt),+]) => {

@@ -13,17 +13,15 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
-use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::MonotonicityMap;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -43,29 +41,29 @@ impl StreamHopWindow {
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
         let input = core.input.clone();
-        let i2o = core.i2o_col_mapping();
-        let dist = i2o.rewrite_provided_distribution(input.distribution());
+        let dist = core
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input.distribution());
 
-        let mut watermark_columns = input.watermark_columns().clone();
+        let input2internal = core.input2internal_col_mapping();
+        let internal2output = core.internal2output_col_mapping();
+
+        let mut watermark_columns = input2internal.rewrite_bitset(input.watermark_columns());
         watermark_columns.grow(core.internal_column_num());
 
-        if watermark_columns.contains(core.time_col.index) {
+        if input.watermark_columns().contains(core.time_col.index) {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
             watermark_columns.insert(core.internal_window_start_col_idx());
             watermark_columns.insert(core.internal_window_end_col_idx());
         }
-        let watermark_columns = ColIndexMapping::with_remaining_columns(
-            &core.output_indices,
-            core.internal_column_num(),
-        )
-        .rewrite_bitset(&watermark_columns);
 
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),
             input.emit_on_window_close(),
-            watermark_columns,
+            internal2output.rewrite_bitset(&watermark_columns),
+            MonotonicityMap::new(), /* hop window start/end jumps, so monotonicity is not propagated */
         );
         Self {
             base,

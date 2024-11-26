@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use simd_json::prelude::ValueAsContainer;
+use simd_json::prelude::ValueAsObject;
 use simd_json::BorrowedValue;
 
 /// Get a value from a json object by key, case insensitive.
 ///
 /// Returns `None` if the given json value is not an object, or the key is not found.
-pub(crate) fn json_object_get_case_insensitive<'a, 'b>(
-    v: &'b simd_json::BorrowedValue<'a>,
-    key: &'b str,
-) -> Option<&'b BorrowedValue<'a>> {
+pub(crate) fn json_object_get_case_insensitive<'b>(
+    v: &'b simd_json::BorrowedValue<'b>,
+    key: &str,
+) -> Option<&'b BorrowedValue<'b>> {
     let obj = v.as_object()?;
     let value = obj.get(key);
     if value.is_some() {

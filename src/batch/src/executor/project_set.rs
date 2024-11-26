@@ -15,13 +15,16 @@
 use either::Either;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::table_function::ProjectSetSelectItem;
+use risingwave_expr::expr::{self, BoxedExpression};
+use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOutputIter};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::expr::project_set_select_item::PbSelectItem;
+use risingwave_pb::expr::PbProjectSetSelectItem;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{
@@ -97,7 +100,7 @@ impl ProjectSetExecutor {
                                     && i == row_idx
                                 {
                                     valid = true;
-                                    value
+                                    value?
                                 } else {
                                     None
                                 }
@@ -170,19 +173,68 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
     }
 }
 
+/// Either a scalar expression or a set-returning function.
+///
+/// See also [`PbProjectSetSelectItem`]
+#[derive(Debug)]
+pub enum ProjectSetSelectItem {
+    Scalar(BoxedExpression),
+    Set(BoxedTableFunction),
+}
+
+impl From<BoxedTableFunction> for ProjectSetSelectItem {
+    fn from(table_function: BoxedTableFunction) -> Self {
+        ProjectSetSelectItem::Set(table_function)
+    }
+}
+
+impl From<BoxedExpression> for ProjectSetSelectItem {
+    fn from(expr: BoxedExpression) -> Self {
+        ProjectSetSelectItem::Scalar(expr)
+    }
+}
+
+impl ProjectSetSelectItem {
+    pub fn from_prost(prost: &PbProjectSetSelectItem, chunk_size: usize) -> Result<Self> {
+        Ok(match prost.select_item.as_ref().unwrap() {
+            PbSelectItem::Expr(expr) => Self::Scalar(expr::build_from_prost(expr)?),
+            PbSelectItem::TableFunction(tf) => {
+                Self::Set(table_function::build_from_prost(tf, chunk_size)?)
+            }
+        })
+    }
+
+    pub fn return_type(&self) -> DataType {
+        match self {
+            ProjectSetSelectItem::Scalar(expr) => expr.return_type(),
+            ProjectSetSelectItem::Set(tf) => tf.return_type(),
+        }
+    }
+
+    pub async fn eval<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
+        match self {
+            Self::Set(tf) => Ok(Either::Left(
+                TableFunctionOutputIter::new(tf.eval(input).await).await?,
+            )),
+            Self::Scalar(expr) => Ok(Either::Right(expr.eval(input).await?)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
     use futures_async_stream::for_await;
-    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::*;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::{ExpressionBoxExt, InputRefExpression, LiteralExpression};
     use risingwave_expr::table_function::repeat;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{Executor, ValuesExecutor};
+    use crate::executor::ValuesExecutor;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;

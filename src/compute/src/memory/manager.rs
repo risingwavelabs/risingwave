@@ -16,18 +16,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::sequence::AtomicSequence;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
 use super::controller::LruWatermarkController;
 
 pub struct MemoryManagerConfig {
-    pub total_memory: usize,
+    /// [`MemoryManager`] will try to control the jemalloc-reported memory usage
+    /// to be lower than this
+    pub target_memory: usize,
 
     pub threshold_aggressive: f64,
     pub threshold_graceful: f64,
     pub threshold_stable: f64,
+
+    pub eviction_factor_stable: f64,
+    pub eviction_factor_graceful: f64,
+    pub eviction_factor_aggressive: f64,
 
     pub metrics: Arc<StreamingMetrics>,
 }
@@ -35,7 +40,7 @@ pub struct MemoryManagerConfig {
 /// Compute node uses [`MemoryManager`] to limit the memory usage.
 pub struct MemoryManager {
     /// All cached data before the watermark should be evicted.
-    watermark_epoch: Arc<AtomicU64>,
+    watermark_sequence: Arc<AtomicSequence>,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -45,58 +50,40 @@ pub struct MemoryManager {
 impl MemoryManager {
     // Arbitrarily set a minimal barrier interval in case it is too small,
     // especially when it's 0.
-    const MIN_TICK_INTERVAL_MS: u32 = 10;
+    const MIN_INTERVAL: Duration = Duration::from_millis(10);
 
     pub fn new(config: MemoryManagerConfig) -> Arc<Self> {
         let controller = Mutex::new(LruWatermarkController::new(&config));
         tracing::info!("LRU watermark controller: {:?}", &controller);
 
         Arc::new(Self {
-            watermark_epoch: Arc::new(0.into()),
+            watermark_sequence: Arc::new(0.into()),
             metrics: config.metrics,
             controller,
         })
     }
 
-    pub fn get_watermark_epoch(&self) -> Arc<AtomicU64> {
-        self.watermark_epoch.clone()
+    pub fn get_watermark_sequence(&self) -> Arc<AtomicU64> {
+        self.watermark_sequence.clone()
     }
 
-    pub async fn run(
-        self: Arc<Self>,
-        initial_interval_ms: u32,
-        mut system_params_change_rx: tokio::sync::watch::Receiver<SystemParamsReaderRef>,
-    ) {
+    pub async fn run(self: Arc<Self>, interval: Duration) {
         // Loop interval of running control policy
-        let mut interval_ms = std::cmp::max(initial_interval_ms, Self::MIN_TICK_INTERVAL_MS);
-        tracing::info!(
-            "start running MemoryManager with interval {}ms",
-            interval_ms
-        );
+        let interval = std::cmp::max(interval, Self::MIN_INTERVAL);
+        tracing::info!("start running MemoryManager with interval {interval:?}",);
 
         // Keep same interval with the barrier interval
-        let mut tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
+        let mut tick_interval = tokio::time::interval(interval);
 
         loop {
-            // Wait for a while to check if need eviction.
-            tokio::select! {
-                Ok(_) = system_params_change_rx.changed() => {
-                    let params = system_params_change_rx.borrow().load();
-                    let new_interval_ms = std::cmp::max(params.barrier_interval_ms(), Self::MIN_TICK_INTERVAL_MS);
-                    if new_interval_ms != interval_ms {
-                        interval_ms = new_interval_ms;
-                        tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
-                        tracing::info!("updated MemoryManager interval to {}ms", interval_ms);
-                    }
-                }
+            tick_interval.tick().await;
 
-                _ = tick_interval.tick() => {
-                    let new_watermark_epoch = self.controller.lock().unwrap().tick(interval_ms);
-                    self.watermark_epoch.store(new_watermark_epoch.0, Ordering::Relaxed);
+            let new_watermark_sequence = self.controller.lock().unwrap().tick();
 
-                    self.metrics.lru_runtime_loop_count.inc();
-                }
-            }
+            self.watermark_sequence
+                .store(new_watermark_sequence, Ordering::Relaxed);
+
+            self.metrics.lru_runtime_loop_count.inc();
         }
     }
 }

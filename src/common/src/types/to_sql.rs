@@ -15,11 +15,11 @@
 use std::error::Error;
 
 use bytes::BytesMut;
-use postgres_types::{accepts, to_sql_checked, IsNull, ToSql, Type};
+use postgres_types::{to_sql_checked, IsNull, ToSql, Type};
 
-use crate::types::{JsonbRef, ScalarRefImpl};
+use crate::types::ScalarImpl;
 
-impl ToSql for ScalarRefImpl<'_> {
+impl ToSql for ScalarImpl {
     to_sql_checked!();
 
     fn to_sql(&self, ty: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
@@ -27,27 +27,26 @@ impl ToSql for ScalarRefImpl<'_> {
         Self: Sized,
     {
         match self {
-            ScalarRefImpl::Int16(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Int32(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Int64(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Serial(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Float32(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Float64(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Utf8(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Bool(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Decimal(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Interval(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Date(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Timestamp(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Timestamptz(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Time(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Bytea(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Jsonb(_) // jsonbb::Value doesn't implement ToSql yet
-            | ScalarRefImpl::Int256(_)
-            | ScalarRefImpl::Struct(_)
-            | ScalarRefImpl::List(_) => {
+            ScalarImpl::Int16(v) => v.to_sql(ty, out),
+            ScalarImpl::Int32(v) => v.to_sql(ty, out),
+            ScalarImpl::Int64(v) => v.to_sql(ty, out),
+            ScalarImpl::Serial(v) => v.to_sql(ty, out),
+            ScalarImpl::Float32(v) => v.to_sql(ty, out),
+            ScalarImpl::Float64(v) => v.to_sql(ty, out),
+            ScalarImpl::Utf8(v) => v.to_sql(ty, out),
+            ScalarImpl::Bool(v) => v.to_sql(ty, out),
+            ScalarImpl::Decimal(v) => v.to_sql(ty, out),
+            ScalarImpl::Interval(v) => v.to_sql(ty, out),
+            ScalarImpl::Date(v) => v.to_sql(ty, out),
+            ScalarImpl::Timestamp(v) => v.to_sql(ty, out),
+            ScalarImpl::Timestamptz(v) => v.to_sql(ty, out),
+            ScalarImpl::Time(v) => v.to_sql(ty, out),
+            ScalarImpl::Bytea(v) => (&**v).to_sql(ty, out),
+            ScalarImpl::Jsonb(v) => v.to_sql(ty, out),
+            ScalarImpl::Int256(_) | ScalarImpl::Struct(_) | ScalarImpl::List(_) => {
                 bail_not_implemented!("the postgres encoding for {ty} is unsupported")
             }
+            ScalarImpl::Map(_) => todo!(),
         }
     }
 
@@ -57,20 +56,5 @@ impl ToSql for ScalarRefImpl<'_> {
         Self: Sized,
     {
         true
-    }
-}
-
-impl ToSql for JsonbRef<'_> {
-    accepts!(JSONB);
-
-    to_sql_checked!();
-
-    fn to_sql(&self, _: &Type, out: &mut BytesMut) -> Result<IsNull, Box<dyn Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        let buf = self.value_serialize();
-        out.extend(buf);
-        Ok(IsNull::No)
     }
 }

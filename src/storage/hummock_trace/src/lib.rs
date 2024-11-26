@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(lazy_cell)]
-#![feature(cursor_remaining)]
-#![feature(bound_map)]
+#![feature(cursor_split)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
 

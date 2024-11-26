@@ -15,15 +15,18 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use risingwave_common::types::Datum;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
-    AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
+    AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::row_id_column_desc;
+use super::{row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::DataType;
+use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
@@ -44,6 +47,10 @@ impl ColumnId {
     /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         Self(i32::MAX - 1)
+    }
+
+    pub const fn first_user_column() -> Self {
+        Self(USER_COLUMN_ID_OFFSET)
     }
 }
 
@@ -95,6 +102,11 @@ impl std::fmt::Display for ColumnId {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SystemColumn {
+    RwTimestamp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
@@ -105,6 +117,9 @@ pub struct ColumnDesc {
     pub description: Option<String>,
     pub additional_column: AdditionalColumn,
     pub version: ColumnDescVersion,
+    /// Currently the system column is used for `_rw_timestamp` only and is generated at runtime,
+    /// so this field is not persisted.
+    pub system_column: Option<SystemColumn>,
 }
 
 impl ColumnDesc {
@@ -119,6 +134,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -133,6 +149,28 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
+        }
+    }
+
+    pub fn named_with_default_value(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        snapshot_value: Datum,
+    ) -> ColumnDesc {
+        let default_col = DefaultColumnDesc {
+            expr: Some(ExprNode {
+                // equivalent to `Literal::to_expr_proto`
+                function_type: ExprType::Unspecified as i32,
+                return_type: Some(data_type.to_protobuf()),
+                rex_node: Some(RexNode::Constant(snapshot_value.to_protobuf())),
+            }),
+            snapshot_value: Some(snapshot_value.to_protobuf()),
+        };
+        ColumnDesc {
+            generated_or_default_column: Some(GeneratedOrDefaultColumn::DefaultColumn(default_col)),
+            ..Self::named(name, column_id, data_type)
         }
     }
 
@@ -152,6 +190,27 @@ impl ColumnDesc {
             description: None,
             additional_column: additional_column_type,
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
+        }
+    }
+
+    pub fn named_with_system_column(
+        name: impl Into<String>,
+        column_id: ColumnId,
+        data_type: DataType,
+        system_column: SystemColumn,
+    ) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
+            additional_column: AdditionalColumn { column_type: None },
+            version: ColumnDescVersion::Pr13707,
+            system_column: Some(system_column),
         }
     }
 
@@ -201,6 +260,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -224,6 +284,7 @@ impl ColumnDesc {
             description: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -242,6 +303,7 @@ impl ColumnDesc {
             generated_or_default_column: None,
             additional_column: AdditionalColumn { column_type: None },
             version: ColumnDescVersion::Pr13707,
+            system_column: None,
         }
     }
 
@@ -286,6 +348,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             description: prost.description.clone(),
             additional_column,
             version,
+            system_column: None,
         }
     }
 }
@@ -320,6 +383,20 @@ pub struct ColumnCatalog {
 }
 
 impl ColumnCatalog {
+    pub fn visible(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: false,
+        }
+    }
+
+    pub fn hidden(column_desc: ColumnDesc) -> Self {
+        Self {
+            column_desc,
+            is_hidden: true,
+        }
+    }
+
     /// Get the column catalog's is hidden.
     pub fn is_hidden(&self) -> bool {
         self.is_hidden
@@ -328,6 +405,10 @@ impl ColumnCatalog {
     /// If the column is a generated column
     pub fn is_generated(&self) -> bool {
         self.column_desc.is_generated()
+    }
+
+    pub fn can_dml(&self) -> bool {
+        !self.is_generated() && !self.is_rw_timestamp_column()
     }
 
     /// If the column is a generated column
@@ -344,6 +425,11 @@ impl ColumnCatalog {
     /// If the column is a column with default expr
     pub fn is_default(&self) -> bool {
         self.column_desc.is_default()
+    }
+
+    /// If the columns is an `INCLUDE ... AS ...` connector column.
+    pub fn is_connector_additional_column(&self) -> bool {
+        self.column_desc.additional_column.column_type.is_some()
     }
 
     /// Get a reference to the column desc's data type.
@@ -375,6 +461,20 @@ impl ColumnCatalog {
             column_desc: row_id_column_desc(),
             is_hidden: true,
         }
+    }
+
+    pub fn rw_timestamp_column() -> Self {
+        Self {
+            column_desc: rw_timestamp_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn is_rw_timestamp_column(&self) -> bool {
+        matches!(
+            self.column_desc.system_column,
+            Some(SystemColumn::RwTimestamp)
+        )
     }
 
     pub fn offset_column() -> Self {
@@ -430,15 +530,30 @@ pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<C
     preserved_columns.extend(columns);
 }
 
-pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
-    let mut column_ids = columns
+pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
+    debug_assert!(
+        columns
+            .iter()
+            .map(|c| c.column_id())
+            .duplicates()
+            .next()
+            .is_none(),
+        "duplicate ColumnId found in source catalog. Columns: {columns:#?}"
+    );
+}
+
+/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
+/// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
+///
+/// Besides, the logic of column id handling is a mess.
+/// In some places, we use `ColumnId::placeholder()`, and use `col_id_gen` to fill it at the end;
+/// In other places, we create column id ad-hoc.
+pub fn max_column_id(columns: &[ColumnCatalog]) -> ColumnId {
+    // XXX: should we check the column IDs of struct fields here?
+    columns
         .iter()
-        .map(|column| column.column_id().get_id())
-        .collect_vec();
-    column_ids.sort();
-    let original_len = column_ids.len();
-    column_ids.dedup();
-    column_ids.len() == original_len
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id()))
 }
 
 #[cfg(test)]

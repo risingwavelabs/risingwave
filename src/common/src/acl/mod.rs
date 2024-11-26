@@ -14,7 +14,6 @@
 
 //! `Acl` defines all grantable privileges.
 
-use std::convert::Into;
 use std::fmt::Formatter;
 use std::sync::LazyLock;
 
@@ -100,12 +99,12 @@ pub static ALL_AVAILABLE_DATABASE_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| make_bitflags!(AclMode::{Create | Connect}).into());
 pub static ALL_AVAILABLE_SCHEMA_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| make_bitflags!(AclMode::{Create | Usage}).into());
+// Including TABLES and VIEWS
 pub static ALL_AVAILABLE_TABLE_MODES: LazyLock<AclModeSet> =
     LazyLock::new(|| make_bitflags!(AclMode::{Select | Insert | Update | Delete}).into());
 pub static ALL_AVAILABLE_SOURCE_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_MVIEW_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_VIEW_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
-pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::empty);
+pub static ALL_AVAILABLE_SINK_MODES: LazyLock<AclModeSet> = LazyLock::new(AclModeSet::readonly);
 pub static ALL_AVAILABLE_SUBSCRIPTION_MODES: LazyLock<AclModeSet> =
     LazyLock::new(AclModeSet::empty);
 pub static ALL_AVAILABLE_FUNCTION_MODES: LazyLock<AclModeSet> =

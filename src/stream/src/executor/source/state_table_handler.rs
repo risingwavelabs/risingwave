@@ -28,7 +28,7 @@ use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
@@ -71,8 +71,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         }
     }
 
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_table.init_epoch(epoch);
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_table.init_epoch(epoch).await
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
@@ -144,7 +144,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<()> {
         if states.is_empty() {
             // TODO should be a clear Error Code
-            bail!("states require not null");
+            bail!("states should not be null");
         } else {
             for split in states {
                 self.set_complete(split.id(), split.encode_to_json())
@@ -257,11 +257,9 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{Datum, ScalarImpl};
-    use risingwave_common::util::epoch::{test_epoch, EpochPair};
+    use risingwave_common::types::Datum;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
     use serde_json::Value;
@@ -285,7 +283,7 @@ pub(crate) mod tests {
         let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
         let next_epoch = EpochPair::new_test_epoch(init_epoch_num + test_epoch(1));
 
-        state_table.init_epoch(init_epoch);
+        state_table.init_epoch(init_epoch).await.unwrap();
         state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
         state_table.commit(next_epoch).await.unwrap();
 
@@ -310,7 +308,7 @@ pub(crate) mod tests {
         let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
         let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
 
-        state_table_handler.init_epoch(epoch_1);
+        state_table_handler.init_epoch(epoch_1).await?;
         state_table_handler
             .set_states(vec![split_impl.clone()])
             .await?;

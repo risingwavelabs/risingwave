@@ -19,7 +19,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use console::style;
-use fs_err::{self, File};
+use fs_err::File;
 use itertools::Itertools;
 use risedev::{
     compose_deploy, generate_risedev_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
@@ -82,11 +82,11 @@ fn main() -> Result<()> {
             )
             .collect();
 
-        let (config_path, expanded_config) =
+        let (config_path, _env, expanded_config) =
             ConfigExpander::expand_with_extra_info(".", &opts.profile, extra_info)?;
         (expanded_config, Some(compose_deploy_config), config_path)
     } else {
-        let (config_path, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
+        let (config_path, _env, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
         (expanded_config, None, config_path)
     };
 
@@ -116,10 +116,6 @@ fn main() -> Result<()> {
         let compose_deploy_config = compose_deploy_config.as_ref();
         let (address, mut compose) = match service {
             ServiceConfig::Minio(c) => {
-                volumes.insert(c.id.clone(), ComposeVolume::default());
-                (c.address.clone(), c.compose(&compose_config)?)
-            }
-            ServiceConfig::Etcd(c) => {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
@@ -219,9 +215,11 @@ fn main() -> Result<()> {
                 volumes.insert(c.id.clone(), ComposeVolume::default());
                 (c.address.clone(), c.compose(&compose_config)?)
             }
-            ServiceConfig::Redis(_) | ServiceConfig::MySql(_) => {
-                return Err(anyhow!("not supported"))
-            }
+            ServiceConfig::Redis(_)
+            | ServiceConfig::MySql(_)
+            | ServiceConfig::Postgres(_)
+            | ServiceConfig::SqlServer(_)
+            | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };
         compose.container_name = service.id().to_string();
         if opts.deploy {
@@ -244,7 +242,6 @@ fn main() -> Result<()> {
                 }
             });
             let compose_file = ComposeFile {
-                version: "3".into(),
                 services: services.clone(),
                 volumes: node_volumes,
                 name: format!("risingwave-{}", opts.profile),
@@ -302,7 +299,6 @@ fn main() -> Result<()> {
             }
         }
         let compose_file = ComposeFile {
-            version: "3".into(),
             services,
             volumes,
             name: format!("risingwave-{}", opts.profile),

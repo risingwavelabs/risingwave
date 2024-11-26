@@ -18,8 +18,8 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
     Array, CreateSink, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement,
-    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem,
-    SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
+    Distinct, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName,
+    Query, SelectItem, SetExpr, Statement, TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -153,7 +153,15 @@ impl QueryRewriter<'_> {
     fn visit_query(&self, query: &mut Query) {
         if let Some(with) = &mut query.with {
             for cte_table in &mut with.cte_tables {
-                self.visit_query(&mut cte_table.query);
+                match &mut cte_table.cte_inner {
+                    risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
+                    risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
+                        let idx = name.0.len() - 1;
+                        if name.0[idx].real_value() == self.from {
+                            name.0[idx] = Ident::with_quote_unchecked('"', self.to);
+                        }
+                    }
+                }
             }
         }
         self.visit_set_expr(&mut query.body);
@@ -170,7 +178,7 @@ impl QueryRewriter<'_> {
     ///
     /// So that we DON'T have to:
     /// 1. rewrite the select and expr part like `schema.table.column`, `table.column`,
-    /// `alias.column` etc.
+    ///    `alias.column` etc.
     /// 2. handle the case that the old name is used as alias.
     /// 3. handle the case that the new name is used as alias.
     fn visit_table_factor(&self, table_factor: &mut TableFactor) {
@@ -190,7 +198,7 @@ impl QueryRewriter<'_> {
             TableFactor::Derived { subquery, .. } => self.visit_query(subquery),
             TableFactor::TableFunction { args, .. } => {
                 for arg in args {
-                    self.visit_function_args(arg);
+                    self.visit_function_arg(arg);
                 }
             }
             TableFactor::NestedJoin(table_with_joins) => {
@@ -242,8 +250,8 @@ impl QueryRewriter<'_> {
     }
 
     /// Visit function arguments and update all references.
-    fn visit_function_args(&self, function_args: &mut FunctionArg) {
-        match function_args {
+    fn visit_function_arg(&self, function_arg: &mut FunctionArg) {
+        match function_arg {
             FunctionArg::Unnamed(arg) | FunctionArg::Named { arg, .. } => match arg {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
@@ -259,10 +267,25 @@ impl QueryRewriter<'_> {
         }
     }
 
+    fn visit_function_arg_list(&self, arg_list: &mut FunctionArgList) {
+        for arg in &mut arg_list.args {
+            self.visit_function_arg(arg);
+        }
+        for expr in &mut arg_list.order_by {
+            self.visit_expr(&mut expr.expr)
+        }
+    }
+
     /// Visit function and update all references.
     fn visit_function(&self, function: &mut Function) {
-        for arg in &mut function.args {
-            self.visit_function_args(arg);
+        self.visit_function_arg_list(&mut function.arg_list);
+        if let Some(over) = &mut function.over {
+            for expr in &mut over.partition_by {
+                self.visit_expr(expr);
+            }
+            for expr in &mut over.order_by {
+                self.visit_expr(&mut expr.expr);
+            }
         }
     }
 
@@ -293,7 +316,7 @@ impl QueryRewriter<'_> {
             | Expr::Overlay { expr, .. }
             | Expr::Trim { expr, .. }
             | Expr::Nested(expr)
-            | Expr::ArrayIndex { obj: expr, .. }
+            | Expr::Index { obj: expr, .. }
             | Expr::ArrayRangeIndex { obj: expr, .. } => self.visit_expr(expr),
 
             Expr::Position { substring, string } => {
@@ -357,6 +380,12 @@ impl QueryRewriter<'_> {
             Expr::Row(exprs) | Expr::Array(Array { elem: exprs, .. }) => {
                 for expr in exprs {
                     self.visit_expr(expr);
+                }
+            }
+            Expr::Map { entries } => {
+                for (key, value) in entries {
+                    self.visit_expr(key);
+                    self.visit_expr(value);
                 }
             }
 
@@ -474,6 +503,30 @@ mod tests {
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo AS bar WHERE bar.v1 = 1";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar AS bar WHERE bar.v1 = 1";
+        let actual = alter_relation_rename_refs(definition, from, to);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_rename_with_complex_funcs() {
+        let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT \
+                            agg1(\
+                              foo.v1, func2(foo.v2) \
+                              ORDER BY \
+                              (SELECT foo.v3 FROM foo), \
+                              (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM foo) ORDER BY (SELECT foo.v6 FROM foo)) FROM foo)\
+                            ) \
+                          FROM foo";
+        let from = "foo";
+        let to = "bar";
+        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT \
+                          agg1(\
+                            foo.v1, func2(foo.v2) \
+                            ORDER BY \
+                            (SELECT foo.v3 FROM bar AS foo), \
+                            (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM bar AS foo) ORDER BY (SELECT foo.v6 FROM bar AS foo)) FROM bar AS foo)\
+                          ) \
+                        FROM bar AS foo";
         let actual = alter_relation_rename_refs(definition, from, to);
         assert_eq!(expected, actual);
     }

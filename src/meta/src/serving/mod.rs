@@ -16,14 +16,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentParallelUnitMappings};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::{FragmentWorkerSlotMapping, FragmentWorkerSlotMappings};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
 use crate::model::FragmentId;
 
@@ -31,11 +33,11 @@ pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
 
 #[derive(Default)]
 pub struct ServingVnodeMapping {
-    serving_vnode_mappings: RwLock<HashMap<FragmentId, ParallelUnitMapping>>,
+    serving_vnode_mappings: RwLock<HashMap<FragmentId, WorkerSlotMapping>>,
 }
 
 impl ServingVnodeMapping {
-    pub fn all(&self) -> HashMap<FragmentId, ParallelUnitMapping> {
+    pub fn all(&self) -> HashMap<FragmentId, WorkerSlotMapping> {
         self.serving_vnode_mappings.read().clone()
     }
 
@@ -43,21 +45,21 @@ impl ServingVnodeMapping {
     /// Returns (successful updates, failed updates).
     pub fn upsert(
         &self,
-        streaming_parallelisms: HashMap<FragmentId, usize>,
+        streaming_parallelisms: HashMap<FragmentId, FragmentParallelismInfo>,
         workers: &[WorkerNode],
-    ) -> (HashMap<FragmentId, ParallelUnitMapping>, Vec<FragmentId>) {
+    ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
-        let mut upserted: HashMap<FragmentId, ParallelUnitMapping> = HashMap::default();
+        let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
-        for (fragment_id, streaming_parallelism) in streaming_parallelisms {
+        for (fragment_id, info) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(&fragment_id);
-                let max_parallelism = if streaming_parallelism == 1 {
-                    Some(1)
-                } else {
-                    None
+                let max_parallelism = match info.distribution_type {
+                    FragmentDistributionType::Unspecified => unreachable!(),
+                    FragmentDistributionType::Single => Some(1),
+                    FragmentDistributionType::Hash => None,
                 };
-                place_vnode(old_mapping, workers, max_parallelism)
+                place_vnode(old_mapping, workers, max_parallelism, info.vnode_count)
             };
             match new_mapping {
                 None => {
@@ -81,24 +83,24 @@ impl ServingVnodeMapping {
     }
 }
 
-pub(crate) fn to_fragment_parallel_unit_mapping(
-    mappings: &HashMap<FragmentId, ParallelUnitMapping>,
-) -> Vec<FragmentParallelUnitMapping> {
+pub(crate) fn to_fragment_worker_slot_mapping(
+    mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+) -> Vec<FragmentWorkerSlotMapping> {
     mappings
         .iter()
-        .map(|(fragment_id, mapping)| FragmentParallelUnitMapping {
+        .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
             fragment_id: *fragment_id,
             mapping: Some(mapping.to_protobuf()),
         })
         .collect()
 }
 
-pub(crate) fn to_deleted_fragment_parallel_unit_mapping(
+pub(crate) fn to_deleted_fragment_worker_slot_mapping(
     fragment_ids: &[FragmentId],
-) -> Vec<FragmentParallelUnitMapping> {
+) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
         .iter()
-        .map(|fragment_id| FragmentParallelUnitMapping {
+        .map(|fragment_id| FragmentWorkerSlotMapping {
             fragment_id: *fragment_id,
             mapping: None,
         })
@@ -120,45 +122,36 @@ pub async fn on_meta_start(
     );
     notification_manager.notify_frontend_without_version(
         Operation::Snapshot,
-        Info::ServingParallelUnitMappings(FragmentParallelUnitMappings {
-            mappings: to_fragment_parallel_unit_mapping(&mappings),
+        Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings {
+            mappings: to_fragment_worker_slot_mapping(&mappings),
         }),
     );
 }
 
 async fn fetch_serving_infos(
     metadata_manager: &MetadataManager,
-) -> (Vec<WorkerNode>, HashMap<FragmentId, usize>) {
-    match metadata_manager {
-        MetadataManager::V1(mgr) => (
-            mgr.cluster_manager
-                .list_active_serving_compute_nodes()
-                .await,
-            mgr.fragment_manager
-                .running_fragment_parallelisms(None)
-                .await,
-        ),
-        MetadataManager::V2(mgr) => {
-            // TODO: need another mechanism to refresh serving info instead of panic.
-            let parallelisms = mgr
-                .catalog_controller
-                .running_fragment_parallelisms(None)
-                .await
-                .expect("fail to fetch running parallelisms");
-            let serving_compute_nodes = mgr
-                .cluster_controller
-                .list_active_serving_workers()
-                .await
-                .expect("fail to list serving compute nodes");
-            (
-                serving_compute_nodes,
-                parallelisms
-                    .into_iter()
-                    .map(|(fragment_id, cnt)| (fragment_id as FragmentId, cnt))
-                    .collect(),
-            )
-        }
-    }
+) -> (
+    Vec<WorkerNode>,
+    HashMap<FragmentId, FragmentParallelismInfo>,
+) {
+    // TODO: need another mechanism to refresh serving info instead of panic.
+    let parallelisms = metadata_manager
+        .catalog_controller
+        .running_fragment_parallelisms(None)
+        .await
+        .expect("fail to fetch running parallelisms");
+    let serving_compute_nodes = metadata_manager
+        .cluster_controller
+        .list_active_serving_workers()
+        .await
+        .expect("fail to list serving compute nodes");
+    (
+        serving_compute_nodes,
+        parallelisms
+            .into_iter()
+            .map(|(fragment_id, info)| (fragment_id as FragmentId, info))
+            .collect(),
+    )
 }
 
 pub async fn start_serving_vnode_mapping_worker(
@@ -185,21 +178,30 @@ pub async fn start_serving_vnode_mapping_worker(
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let (mappings, _) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
-                                    notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&mappings) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&mappings) }));
                                 }
                                 LocalNotification::FragmentMappingsUpsert(fragment_ids) => {
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
                                     let (workers, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
+                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id| {
+                                        match streaming_parallelisms.get(frag_id) {
+                                            Some(info) => Some((*frag_id, info.clone())),
+                                            None => {
+                                                tracing::warn!(fragment_id = *frag_id, "streaming parallelism not found");
+                                                None
+                                            }
+                                        }
+                                    }).collect();
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
-                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&upserted) }));
+                                        notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
                                         tracing::debug!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_deleted_fragment_parallel_unit_mapping(&failed)}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
                                     }
                                 }
                                 LocalNotification::FragmentMappingsDelete(fragment_ids) => {
@@ -208,7 +210,7 @@ pub async fn start_serving_vnode_mapping_worker(
                                     }
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_deleted_fragment_parallel_unit_mapping(&fragment_ids) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&fragment_ids) }));
                                 }
                                 _ => {}
                             }

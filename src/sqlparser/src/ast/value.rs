@@ -17,6 +17,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::ObjectName;
+
 /// Primitive SQL values such as number and string
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -57,6 +59,8 @@ pub enum Value {
     },
     /// `NULL` value
     Null,
+    /// name of the reference to secret
+    Ref(SecretRef),
 }
 
 impl fmt::Display for Value {
@@ -111,6 +115,7 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Null => write!(f, "NULL"),
+            Value::Ref(v) => write!(f, "secret {}", v),
         }
     }
 }
@@ -176,7 +181,7 @@ impl fmt::Display for DateTimeField {
 
 pub struct EscapeSingleQuoteString<'a>(&'a str);
 
-impl<'a> fmt::Display for EscapeSingleQuoteString<'a> {
+impl fmt::Display for EscapeSingleQuoteString<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for c in self.0.chars() {
             if c == '\'' {
@@ -232,4 +237,26 @@ impl fmt::Display for JsonPredicateType {
             Scalar => " SCALAR",
         })
     }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SecretRef {
+    pub secret_name: ObjectName,
+    pub ref_as: SecretRefAsType,
+}
+
+impl fmt::Display for SecretRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.ref_as {
+            SecretRefAsType::Text => write!(f, "{}", self.secret_name),
+            SecretRefAsType::File => write!(f, "{} AS FILE", self.secret_name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SecretRefAsType {
+    Text,
+    File,
 }

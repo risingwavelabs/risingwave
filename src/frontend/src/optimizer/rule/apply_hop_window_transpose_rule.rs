@@ -62,7 +62,7 @@ impl Rule for ApplyHopWindowTransposeRule {
             return None;
         }
 
-        let new_apply = LogicalApply::new(
+        let new_apply = LogicalApply::create(
             left,
             hop_window_input,
             JoinType::Inner,
@@ -70,8 +70,7 @@ impl Rule for ApplyHopWindowTransposeRule {
             correlated_id,
             correlated_indices,
             false,
-        )
-        .into();
+        );
 
         let new_hop_window = LogicalHopWindow::create(
             new_apply,

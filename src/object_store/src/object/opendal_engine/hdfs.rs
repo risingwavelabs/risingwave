@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use opendal::layers::LoggingLayer;
 use opendal::services::Hdfs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
-use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
+use super::{MediaType, OpendalObjectStore};
+// use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
@@ -26,23 +28,34 @@ impl OpendalObjectStore {
     pub fn new_hdfs_engine(
         namenode: String,
         root: String,
-        config: ObjectStoreConfig,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
     ) -> ObjectResult<Self> {
+        // Init the jvm explicitly to avoid duplicate JVM creation by hdfs client
+        use risingwave_jni_core::jvm_runtime::JVM;
+        let _ = JVM
+            .get_or_init()
+            .inspect_err(|e| tracing::error!("Failed to init JVM: {:?}", e))
+            .unwrap();
+
         // Create hdfs backend builder.
         let mut builder = Hdfs::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         builder.root(&root);
-        if config.retry.set_atomic_write_dir {
-            let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
-            builder.atomic_write_dir(&atomic_write_dir);
-        }
+        // todo: reopen the following lines after https://github.com/apache/opendal/issues/4867 is resolved.
+        // if config.set_atomic_write_dir {
+        //     let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
+        //     builder.atomic_write_dir(&atomic_write_dir);
+        // }
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Hdfs,
+            media_type: MediaType::Hdfs,
+            config,
+            metrics,
         })
     }
 }

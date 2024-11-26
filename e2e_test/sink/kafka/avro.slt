@@ -1,4 +1,18 @@
 statement ok
+set sink_decouple = false;
+
+system ok
+rpk topic create test-rw-sink-upsert-avro
+
+# use jq to remove 2 fields/columns before registration
+system ok
+jq '.fields = (.fields | map(select(.name | test("unsupported|mon_day_sec_field") | not)))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-value' AVRO
+
+# use jq to select 2 fields/columns used as key
+system ok
+jq '.fields = (.fields | map(select(.name | test("string_field|int32_field"))))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-key' AVRO
+
+statement ok
 create table from_kafka ( *, gen_i32_field int as int32_field + 2, primary key (some_key) )
 include key as some_key
 with (
@@ -6,7 +20,7 @@ with (
   topic = 'test-rw-sink-upsert-avro',
   properties.bootstrap.server = 'message_queue:29092')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement ok
 create table into_kafka (
@@ -40,9 +54,127 @@ create sink sink0 from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
+
+system ok
+rpk topic create test-rw-sink-plain-avro
+
+system ok
+sr_register test-rw-sink-plain-avro-value AVRO << EOF
+{
+  "type": "record",
+  "name": "Simple",
+  "fields": [
+    {
+      "name": "int32_field",
+      "type": ["null", "int"]
+    },
+    {
+      "name": "string_field",
+      "type": ["null", "string"]
+    }
+  ]
+}
+EOF
+
+statement ok
+create table from_kafka_plain
+include key as raw_key
+with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-plain-avro',
+  properties.bootstrap.server = 'message_queue:29092')
+format plain encode avro (
+  schema.registry = 'http://schemaregistry:8082');
+
+statement ok
+create sink sink_plain_key_none as select int32_field, string_field from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-plain-avro',
+  properties.bootstrap.server = 'message_queue:29092')
+format plain encode avro (
+  force_append_only = true,
+  schema.registry = 'http://schemaregistry:8082');
+
+statement ok
+create sink sink_plain_key_text as select int32_field, string_field from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-plain-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field')
+format plain encode avro (
+  force_append_only = true,
+  schema.registry = 'http://schemaregistry:8082')
+key encode text;
+
+system ok
+sr_register test-rw-sink-plain-avro-key AVRO << EOF
+{
+  "type": "record",
+  "name": "Key",
+  "fields": [
+    {
+      "name": "int32_field",
+      "type": ["null", "int"]
+    }
+  ]
+}
+EOF
+
+statement ok
+create sink sink_plain_key_avro as select int32_field, string_field from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-plain-avro',
+  properties.bootstrap.server = 'message_queue:29092',
+  primary_key = 'int32_field')
+format plain encode avro (
+  force_append_only = true,
+  schema.registry = 'http://schemaregistry:8082');
 
 sleep 2s
+
+query ITT
+select
+  int32_field,
+  string_field,
+  case when octet_length(raw_key) > 5 and substring(raw_key from 1 for 1) = '\x00'
+  then substring(raw_key from 6) -- skip indeterministic confluent schema registry header
+  else raw_key end
+from from_kafka_plain order by string_field, raw_key;
+----
+22 Rising \x022c
+22 Rising \x3232
+22 Rising NULL
+11 Wave   \x0216
+11 Wave   \x3131
+11 Wave   NULL
+
+statement ok
+drop sink sink_plain_key_avro;
+
+statement ok
+drop sink sink_plain_key_text;
+
+statement ok
+drop sink sink_plain_key_none;
+
+statement ok
+drop table from_kafka_plain;
+
+system ok
+curl -X DELETE 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-key'
+
+system ok
+curl -X DELETE 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-key?permanent=true'
+
+system ok
+curl -X DELETE 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-value'
+
+system ok
+curl -X DELETE 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-value?permanent=true'
+
+system ok
+rpk topic delete test-rw-sink-plain-avro
 
 query TTTRRIITTTTTTTT
 select
@@ -72,7 +204,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement error field not in avro
 create sink sink_err as select 1 as extra_column, * from into_kafka with (
@@ -81,7 +213,7 @@ create sink sink_err as select 1 as extra_column, * from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081');
+  schema.registry = 'http://schemaregistry:8082');
 
 statement error unrecognized
 create sink sink_err from into_kafka with (
@@ -90,7 +222,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'typo');
 
 statement error empty field key.message
@@ -100,7 +232,7 @@ create sink sink_err from into_kafka with (
   properties.bootstrap.server = 'message_queue:29092',
   primary_key = 'int32_field,string_field')
 format upsert encode avro (
-  schema.registry = 'http://message_queue:8081',
+  schema.registry = 'http://schemaregistry:8082',
   schema.registry.name.strategy = 'record_name_strategy');
 
 statement ok
@@ -111,3 +243,6 @@ drop table into_kafka;
 
 statement ok
 drop table from_kafka;
+
+system ok
+rpk topic delete test-rw-sink-upsert-avro

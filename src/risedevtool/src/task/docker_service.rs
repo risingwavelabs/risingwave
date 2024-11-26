@@ -72,6 +72,23 @@ where
         Self { config }
     }
 
+    /// Run `docker image inspect <image>` to check if the image exists locally.
+    ///
+    /// `docker run --pull=missing` does the same thing, but as we split the pull and run
+    /// into two commands while `pull` does not provide such an option, we need to check
+    /// the image existence manually.
+    fn check_image_exists(&self) -> bool {
+        Command::new("docker")
+            .arg("image")
+            .arg("inspect")
+            .arg(self.config.image())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+
     fn docker_pull(&self) -> Command {
         let mut cmd = Command::new("docker");
         cmd.arg("pull").arg(self.config.image());
@@ -83,7 +100,9 @@ where
         cmd.arg("run")
             .arg("--rm")
             .arg("--name")
-            .arg(format!("risedev-{}", self.id()));
+            .arg(format!("risedev-{}", self.id()))
+            .arg("--add-host")
+            .arg("host.docker.internal:host-gateway");
 
         for (k, v) in self.config.envs() {
             cmd.arg("-e").arg(format!("{k}={v}"));
@@ -118,9 +137,11 @@ where
 
         check_docker_installed()?;
 
-        ctx.pb
-            .set_message(format!("pulling image `{}`...", self.config.image()));
-        ctx.run_command(self.docker_pull())?;
+        if !self.check_image_exists() {
+            ctx.pb
+                .set_message(format!("pulling image `{}`...", self.config.image()));
+            ctx.run_command(self.docker_pull())?;
+        }
 
         ctx.pb.set_message("starting...");
         ctx.run_command(ctx.tmux_run(self.docker_run()?)?)?;

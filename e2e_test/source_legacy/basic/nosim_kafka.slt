@@ -1,0 +1,129 @@
+control substitution on
+
+# FIXME: does this really work??
+# Start with nosim to avoid running in deterministic test
+
+
+statement ok
+CREATE TABLE upsert_student_avro_json ( primary key (rw_key) )
+INCLUDE KEY AS rw_key
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+	topic = 'upsert_student_avro_json')
+FORMAT UPSERT ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+statement ok
+CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_non_compact_avro_json',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+statement ok
+CREATE TABLE debezium_compact (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_compact_avro_json',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT DEBEZIUM ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+statement ok
+CREATE TABLE kafka_json_schema_plain with (
+    connector = 'kafka',
+    kafka.topic = 'kafka_json_schema',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+query
+describe kafka_json_schema_plain;
+----
+dimensions (empty) false NULL
+map jsonb false NULL
+notMap (empty) false NULL
+price double precision false NULL
+productId bigint false NULL
+productName character varying false NULL
+tags character varying[] false NULL
+_row_id serial true NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key _row_id NULL NULL
+distribution key _row_id NULL NULL
+table description kafka_json_schema_plain NULL NULL
+
+statement ok
+CREATE TABLE kafka_json_schema_upsert (PRIMARY KEY(rw_key))
+INCLUDE KEY AS rw_key
+with (
+    connector = 'kafka',
+    kafka.topic = 'kafka_upsert_json_schema',
+    kafka.brokers = '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}',
+    kafka.scan.startup.mode = 'earliest'
+) FORMAT UPSERT ENCODE JSON (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+statement ok
+flush;
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 8s
+
+query II
+SELECT
+ "ID", "firstName", "lastName", "age", "height", "weight"
+FROM
+ upsert_student_avro_json
+ORDER BY
+ "ID";
+----
+1 Ethan Martinez 18 6.1 180
+2 Emily Jackson 19 5.4 110
+3 Noah Thompson 21 6.3 195
+4 Emma Brown 20 5.3 130
+5 Michael Williams 22 6.2 190
+6 Leah Davis 18 5.7 140
+9 Jacob Anderson 20 5.8 155
+
+query I
+select count(*) from debezium_non_compact;
+----
+2
+
+query I
+select count(*) from debezium_compact;
+----
+2
+
+query TFITT
+select
+  *
+from kafka_json_schema_plain
+----
+(9.5,7,12) {"foo": "bar"} (b) 12.5 1 An ice sculpture {cold,ice}
+
+query TFITT
+select
+  "dimensions", "id", "price", "productName", "tags"
+from kafka_json_schema_upsert order by id
+----
+(9.5,7,12) 1 23 An ice sculpture {cold,ice}
+(9.5,7,12) 2 12.5 An ice sculpture {cold,ice}
+
+statement ok
+DROP TABLE upsert_student_avro_json;
+
+statement ok
+DROP TABLE debezium_non_compact;
+
+statement ok
+DROP TABLE debezium_compact;
+
+statement ok
+DROP TABLE kafka_json_schema_plain;
+
+statement ok
+DROP TABLE kafka_json_schema_upsert;

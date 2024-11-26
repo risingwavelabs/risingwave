@@ -36,7 +36,7 @@ impl From<&PbView> for ViewCatalog {
             id: view.id,
             name: view.name.clone(),
             owner: view.owner,
-            properties: WithOptions::new(view.properties.clone()),
+            properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
         }
@@ -54,8 +54,12 @@ impl ViewCatalog {
     }
 
     /// Returns the SQL statement that can be used to create this view.
-    pub fn create_sql(&self) -> String {
-        format!("CREATE VIEW {} AS {}", self.name, self.sql)
+    pub fn create_sql(&self, schema: String) -> String {
+        if schema == "public" {
+            format!("CREATE VIEW {} AS {}", self.name, self.sql)
+        } else {
+            format!("CREATE VIEW {}.{} AS {}", schema, self.name, self.sql)
+        }
     }
 }
 

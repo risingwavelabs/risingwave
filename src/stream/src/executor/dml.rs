@@ -273,13 +273,9 @@ impl Execute for DmlExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, INITIAL_TABLE_VERSION_ID};
+    use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::transaction::transaction_id::TxnId;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_dml::dml_manager::DmlManager;
 

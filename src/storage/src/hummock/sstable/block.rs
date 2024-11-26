@@ -23,7 +23,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use serde::{Deserialize, Serialize};
-use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils;
@@ -144,7 +143,7 @@ impl RestartPoint {
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
-    /// Uncompressed entried data length.
+    /// Uncompressed entries data length.
     data_len: usize,
 
     /// Table id of this block.
@@ -523,7 +522,7 @@ impl BlockBuilder {
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
         let input_table_id = full_key.user_key.table_id.table_id();
         match self.table_id {
-            Some(current_table_id) => debug_assert_eq!(current_table_id, input_table_id),
+            Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
             None => self.table_id = Some(input_table_id),
         }
         #[cfg(debug_assertions)]
@@ -814,9 +813,9 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::TableId;
+
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
+    use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};

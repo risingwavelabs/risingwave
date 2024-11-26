@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use arrow_array::{Int32Array, Int64Array, RecordBatch};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -27,7 +26,8 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::array::arrow::{FromArrow, IcebergArrowConvert};
+use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, Int64Array, RecordBatch};
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::{bail, ensure};
@@ -38,9 +38,11 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    SplitMetaData, SplitReader,
 };
+
+const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
 
 pub enum PulsarSplitReader {
     Broker(PulsarBrokerReader),
@@ -89,7 +91,11 @@ impl SplitReader for PulsarSplitReader {
             Self::Broker(reader) => {
                 let (parser_config, source_context) =
                     (reader.parser_config.clone(), reader.source_ctx.clone());
-                Box::pin(into_chunk_stream(reader, parser_config, source_context))
+                Box::pin(into_chunk_stream(
+                    reader.into_data_stream(),
+                    parser_config,
+                    source_context,
+                ))
             }
             Self::Iceberg(reader) => Box::pin(reader.into_stream()),
         }
@@ -98,10 +104,12 @@ impl SplitReader for PulsarSplitReader {
 
 /// This reader reads from pulsar broker
 pub struct PulsarBrokerReader {
+    #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
+    #[expect(dead_code)]
     split: PulsarSplit,
-
+    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -168,8 +176,12 @@ impl SplitReader for PulsarBrokerReader {
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
-                "rw-consumer-{}-{}",
-                source_ctx.fragment_id, source_ctx.actor_id
+                "{}-{}-{}",
+                props
+                    .subscription_name_prefix
+                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_string()),
+                source_ctx.fragment_id,
+                source_ctx.actor_id
             ));
 
         let builder = match split.start_offset.clone() {
@@ -181,12 +193,16 @@ impl SplitReader for PulsarBrokerReader {
                     )
                 } else {
                     builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                        ConsumerOptions::default()
+                            .with_initial_position(InitialPosition::Earliest)
+                            .durable(false),
                     )
                 }
             }
             PulsarEnumeratorOffset::Latest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                ConsumerOptions::default()
+                    .with_initial_position(InitialPosition::Latest)
+                    .durable(false),
             ),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
@@ -227,11 +243,11 @@ impl SplitReader for PulsarBrokerReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self, parser_config, source_context)
+        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
     }
 }
 
-impl CommonSplitReader for PulsarBrokerReader {
+impl PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
@@ -247,7 +263,9 @@ impl CommonSplitReader for PulsarBrokerReader {
     }
 }
 
+#[expect(dead_code)]
 const META_COLUMN_TOPIC: &str = "__topic";
+#[expect(dead_code)]
 const META_COLUMN_KEY: &str = "__key";
 const META_COLUMN_LEDGER_ID: &str = "__ledgerId";
 const META_COLUMN_ENTRY_ID: &str = "__entryId";
@@ -510,7 +528,7 @@ impl PulsarIcebergReader {
         }
 
         let data_chunk = IcebergArrowConvert
-            .from_record_batch(&record_batch.project(&field_indices)?)
+            .chunk_from_record_batch(&record_batch.project(&field_indices)?)
             .context("failed to convert arrow record batch to data chunk")?;
 
         let stream_chunk = StreamChunk::from(data_chunk);

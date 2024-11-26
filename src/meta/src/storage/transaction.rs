@@ -15,11 +15,11 @@
 use crate::storage::{ColumnFamily, Key, Value};
 
 /// A `Transaction` executes several writes(aka. operations) to meta store atomically with optional
-/// preconditions checked. It executes as follow:
+/// preconditions checked. It executes as follows:
 /// 1. If all `preconditions` are valid, all `operations` are executed; Otherwise no operation
-/// is executed.
+///    is executed.
 /// 2. Upon `commit` the transaction, the `TransactionAbort` error will be returned if
-/// any precondition was not met in previous step.
+///    any precondition was not met in previous step.
 #[derive(Default)]
 pub struct Transaction {
     preconditions: Vec<Precondition>,
@@ -29,7 +29,7 @@ pub struct Transaction {
 impl Transaction {
     /// Check whether the key exists.
     ///
-    /// The check call will never failed, instead, it will only fail on commit.
+    /// The check call will never fail, instead, it will only fail on commit.
     #[inline(always)]
     pub fn check_exists(&mut self, cf: ColumnFamily, key: Key) {
         self.add_precondition(Precondition::KeyExists { cf, key })
@@ -37,7 +37,7 @@ impl Transaction {
 
     /// Check whether the key exists.
     ///
-    /// The check call will never failed, instead, it will only fail on commit.
+    /// The check call will never fail, instead, it will only fail on commit.
     #[inline(always)]
     pub fn check_equal(&mut self, cf: ColumnFamily, key: Key, value: Value) {
         self.add_precondition(Precondition::KeyEqual { cf, key, value })
@@ -75,10 +75,6 @@ impl Transaction {
     #[inline(always)]
     pub fn add_operations(&mut self, mut operations: impl AsMut<Vec<Operation>>) {
         self.operations.append(operations.as_mut());
-    }
-
-    pub(super) fn into_parts(self) -> (Vec<Precondition>, Vec<Operation>) {
-        (self.preconditions, self.operations)
     }
 
     #[cfg(test)]

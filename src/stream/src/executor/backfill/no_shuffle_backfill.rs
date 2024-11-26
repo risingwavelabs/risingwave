@@ -30,7 +30,7 @@ use crate::executor::backfill::utils::{
     METADATA_STATE_LEN,
 };
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::task::CreateMviewProgressReporter;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -76,7 +76,7 @@ pub struct BackfillExecutor<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// PTAL at the docstring for `CreateMviewProgress` to understand how we compute it.
-    progress: CreateMviewProgress,
+    progress: CreateMviewProgressReporter,
 
     actor_id: ActorId,
 
@@ -100,7 +100,7 @@ where
         upstream: Executor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
-        progress: CreateMviewProgress,
+        progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: Option<usize>,
@@ -140,9 +140,13 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut paused = first_barrier.is_pause_on_startup();
+        let first_epoch = first_barrier.epoch;
         let init_epoch = first_barrier.epoch.prev;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+
         if let Some(state_table) = self.state_table.as_mut() {
-            state_table.init_epoch(first_barrier.epoch);
+            state_table.init_epoch(first_epoch).await?;
         }
 
         let BackfillState {
@@ -161,9 +165,6 @@ where
         // Use this buffer to construct state,
         // which will then be persisted.
         let mut current_state: Vec<Datum> = vec![None; state_len];
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
@@ -209,21 +210,9 @@ where
             let mut pending_barrier: Option<Barrier> = None;
             let mut rate_limiter = rate_limit.and_then(create_limiter);
 
-            let backfill_snapshot_read_row_count_metric = self
+            let metrics = self
                 .metrics
-                .backfill_snapshot_read_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
-
-            let backfill_upstream_output_row_count_metric = self
-                .metrics
-                .backfill_upstream_output_row_count
-                .with_guarded_label_values(&[
-                    upstream_table_id.to_string().as_str(),
-                    self.actor_id.to_string().as_str(),
-                ]);
+                .new_backfill_metrics(upstream_table_id, self.actor_id);
 
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
@@ -311,9 +300,11 @@ where
                                                 &self.output_indices,
                                             ));
                                         }
-                                        backfill_snapshot_read_row_count_metric
+                                        metrics
+                                            .backfill_snapshot_read_row_count
                                             .inc_by(cur_barrier_snapshot_processed_rows);
-                                        backfill_upstream_output_row_count_metric
+                                        metrics
+                                            .backfill_upstream_output_row_count
                                             .inc_by(cur_barrier_upstream_processed_rows);
                                         break 'backfill_loop;
                                     }
@@ -416,15 +407,18 @@ where
                     upstream_chunk_buffer.clear()
                 }
 
-                backfill_snapshot_read_row_count_metric.inc_by(cur_barrier_snapshot_processed_rows);
-                backfill_upstream_output_row_count_metric
+                metrics
+                    .backfill_snapshot_read_row_count
+                    .inc_by(cur_barrier_snapshot_processed_rows);
+                metrics
+                    .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
 
                 self.progress.update(
-                    barrier.epoch.curr,
+                    barrier.epoch,
                     snapshot_read_epoch,
                     total_snapshot_processed_rows,
                 );
@@ -505,7 +499,10 @@ where
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     if is_finished {
-                        // If already finished, no need persist any state.
+                        // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                        if let Some(table) = &mut self.state_table {
+                            table.commit(barrier.epoch).await?;
+                        }
                     } else {
                         // If snapshot was empty, we do not need to backfill,
                         // but we still need to persist the finished state.
@@ -544,7 +541,7 @@ where
                     // and backfill which just finished, we need to update mview tracker,
                     // it does not persist this information.
                     self.progress
-                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                        .finish(barrier.epoch, total_snapshot_processed_rows);
                     tracing::trace!(
                         epoch = ?barrier.epoch,
                         "Updated CreateMaterializedTracker"
@@ -571,6 +568,13 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    // If already finished, no need persist any state, but we need to advance the epoch of the state table anyway.
+                    if let Some(table) = &mut self.state_table {
+                        table.commit(barrier.epoch).await?;
+                    }
+                }
+
                 yield msg;
             }
         }
@@ -649,13 +653,16 @@ where
         } else {
             // Checked the rate limit is not zero.
             #[for_await]
-            for r in Self::snapshot_read(upstream_table, epoch, current_pos) {
+            for r in
+                Self::snapshot_read(upstream_table, HummockReadEpoch::NoWait(epoch), current_pos)
+            {
                 if let Some(rate_limit) = &rate_limiter {
                     rate_limit.until_ready().await;
                 }
-                yield r?;
+                yield Some(r?);
             }
         }
+        yield None;
     }
 
     /// Snapshot read the upstream mv.
@@ -664,16 +671,15 @@ where
     /// remaining data in `builder` must be flushed manually.
     /// Otherwise when we scan a new snapshot, it is possible the rows in the `builder` would be
     /// present, Then when we flush we contain duplicate rows.
-    #[try_stream(ok = Option<OwnedRow>, error = StreamExecutorError)]
-    async fn snapshot_read(
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+    pub async fn snapshot_read(
         upstream_table: &StorageTable<S>,
-        epoch: u64,
+        epoch: HummockReadEpoch,
         current_pos: Option<OwnedRow>,
     ) {
         let range_bounds = compute_bounds(upstream_table.pk_indices(), current_pos);
         let range_bounds = match range_bounds {
             None => {
-                yield None;
                 return Ok(());
             }
             Some(range_bounds) => range_bounds,
@@ -683,7 +689,7 @@ where
         // together with the upstream mv.
         let iter = upstream_table
             .batch_iter_with_pk_bounds(
-                HummockReadEpoch::NoWait(epoch),
+                epoch,
                 row::empty(),
                 range_bounds,
                 true,
@@ -695,9 +701,8 @@ where
 
         #[for_await]
         for row in row_iter {
-            yield Some(row?);
+            yield row?;
         }
-        yield None;
     }
 
     async fn persist_state(

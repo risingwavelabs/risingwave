@@ -15,6 +15,7 @@ pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
+
 pub use manager::*;
 use thiserror_ext::AsReport;
 
@@ -23,11 +24,8 @@ mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
 pub mod model;
-#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;
-mod vacuum;
-
 use std::time::Duration;
 
 pub use compactor_manager::*;
@@ -35,30 +33,27 @@ pub use compactor_manager::*;
 pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-pub use vacuum::*;
 
+use crate::backup_restore::BackupManagerRef;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
-    vacuum_manager: VacuumManagerRef,
+    backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
     let workers = vec![
         start_checkpoint_loop(
-            hummock_manager,
+            hummock_manager.clone(),
+            backup_manager,
             Duration::from_secs(meta_opts.hummock_version_checkpoint_interval_sec),
             meta_opts.min_delta_log_num_for_hummock_version_checkpoint,
         ),
         start_vacuum_metadata_loop(
-            vacuum_manager.clone(),
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ),
-        start_vacuum_object_loop(
-            vacuum_manager,
+            hummock_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
     ];
@@ -67,7 +62,7 @@ pub fn start_hummock_workers(
 
 /// Starts a task to periodically vacuum stale metadata.
 pub fn start_vacuum_metadata_loop(
-    vacuum: VacuumManagerRef,
+    hummock_manager: HummockManagerRef,
     interval: Duration,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -84,35 +79,8 @@ pub fn start_vacuum_metadata_loop(
                     return;
                 }
             }
-            if let Err(err) = vacuum.vacuum_metadata().await {
+            if let Err(err) = hummock_manager.delete_metadata().await {
                 tracing::warn!(error = %err.as_report(), "Vacuum metadata error");
-            }
-        }
-    });
-    (join_handle, shutdown_tx)
-}
-
-/// Starts a task to periodically vacuum stale objects.
-pub fn start_vacuum_object_loop(
-    vacuum: VacuumManagerRef,
-    interval: Duration,
-) -> (JoinHandle<()>, Sender<()>) {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_trigger_interval = tokio::time::interval(interval);
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                // Wait for interval
-                _ = min_trigger_interval.tick() => {},
-                // Shutdown vacuum
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Vacuum object loop is stopped");
-                    return;
-                }
-            }
-            if let Err(err) = vacuum.vacuum_object().await {
-                tracing::warn!(error = %err.as_report(), "Vacuum object error");
             }
         }
     });
@@ -121,6 +89,7 @@ pub fn start_vacuum_object_loop(
 
 pub fn start_checkpoint_loop(
     hummock_manager: HummockManagerRef,
+    backup_manager: BackupManagerRef,
     interval: Duration,
     min_delta_log_num: u64,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -147,7 +116,18 @@ pub fn start_checkpoint_loop(
                 .create_version_checkpoint(min_delta_log_num)
                 .await
             {
-                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error");
+                tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
+            } else {
+                let backup_manager_2 = backup_manager.clone();
+                let hummock_manager_2 = hummock_manager.clone();
+                tokio::task::spawn(async move {
+                    let _ = hummock_manager_2
+                        .try_start_minor_gc(backup_manager_2)
+                        .await
+                        .inspect_err(|err| {
+                            tracing::warn!(error = %err.as_report(), "Hummock minor GC error.");
+                        });
+                });
             }
         }
     });

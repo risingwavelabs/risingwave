@@ -17,8 +17,9 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::parser::additional_columns::add_partition_offset_cols;
+use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
@@ -28,7 +29,7 @@ use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
@@ -46,12 +47,13 @@ impl StreamSource {
         if let Some(source_catalog) = &core.catalog
             && source_catalog.info.is_shared()
         {
-            let (columns_exist, additional_columns) =
-                add_partition_offset_cols(&core.column_catalog, &source_catalog.connector_name());
-            for (existed, mut c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                c.is_hidden = true;
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &core.column_catalog,
+                &source_catalog.connector_name(),
+            );
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
-                    core.column_catalog.push(c);
+                    core.column_catalog.push(ColumnCatalog::hidden(c));
                 }
             }
         }
@@ -62,6 +64,7 @@ impl StreamSource {
             core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
             FixedBitSet::with_capacity(core.column_catalog.len()),
+            MonotonicityMap::new(),
         );
         Self { base, core }
     }
@@ -89,24 +92,29 @@ impl Distill for StreamSource {
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let source_catalog = self.source_catalog();
-        let source_inner = source_catalog.map(|source_catalog| PbStreamSource {
-            source_id: source_catalog.id,
-            source_name: source_catalog.name.clone(),
-            state_table: Some(
-                generic::Source::infer_internal_table_catalog(false)
-                    .with_id(state.gen_table_id_wrapped())
-                    .to_internal_table_prost(),
-            ),
-            info: Some(source_catalog.info.clone()),
-            row_id_index: self.core.row_id_index.map(|index| index as _),
-            columns: self
-                .core
-                .column_catalog
-                .iter()
-                .map(|c| c.to_protobuf())
-                .collect_vec(),
-            with_properties: source_catalog.with_properties.clone().into_iter().collect(),
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+        let source_inner = source_catalog.map(|source_catalog| {
+            let (with_properties, secret_refs) =
+                source_catalog.with_properties.clone().into_parts();
+            PbStreamSource {
+                source_id: source_catalog.id,
+                source_name: source_catalog.name.clone(),
+                state_table: Some(
+                    generic::Source::infer_internal_table_catalog(false)
+                        .with_id(state.gen_table_id_wrapped())
+                        .to_internal_table_prost(),
+                ),
+                info: Some(source_catalog.info.clone()),
+                row_id_index: self.core.row_id_index.map(|index| index as _),
+                columns: self
+                    .core
+                    .column_catalog
+                    .iter()
+                    .map(|c| c.to_protobuf())
+                    .collect_vec(),
+                with_properties,
+                rate_limit: source_catalog.rate_limit,
+                secret_refs,
+            }
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

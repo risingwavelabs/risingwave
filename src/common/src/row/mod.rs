@@ -95,6 +95,12 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf.freeze()
     }
 
+    fn value_estimate_size(&self) -> usize {
+        self.iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum()
+    }
+
     /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
     /// different order type, a `serde` should be provided.
     #[inline]
@@ -181,7 +187,7 @@ pub trait RowExt: Row {
 
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
-        impl<'a, T: Row> Display for D<'a, T> {
+        impl<T: Row> Display for D<'_, T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,

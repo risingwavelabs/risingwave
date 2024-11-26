@@ -20,19 +20,18 @@ use crate::source::{SplitId, SplitMetaData};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct PubsubSplit {
+    // XXX: `index` and `subscription` seems also not useful. It's only for `SplitMetaData::id`.
+    // Is the split id useful?
     pub(crate) index: u32,
     pub(crate) subscription: String,
 
-    /// `start_offset` is a numeric timestamp.
-    /// When not `None`, the `PubsubReader` seeks to the timestamp described by the `start_offset`.
-    /// These offsets are taken from the `offset` property of the `SourceMessage` yielded by the
-    /// pubsub reader.
-    pub(crate) start_offset: Option<String>,
+    #[serde(rename = "start_offset")]
+    #[serde(skip_serializing)]
+    pub(crate) __deprecated_start_offset: Option<String>,
 
-    /// `stop_offset` is a numeric timestamp.
-    /// When not `None`, the `PubsubReader` stops reading messages when the `offset` property of
-    /// the `SourceMessage` is greater than or equal to the `stop_offset`.
-    pub(crate) stop_offset: Option<String>,
+    #[serde(rename = "stop_offset")]
+    #[serde(skip_serializing)]
+    pub(crate) __deprecated_stop_offset: Option<String>,
 }
 
 impl SplitMetaData for PubsubSplit {
@@ -48,8 +47,11 @@ impl SplitMetaData for PubsubSplit {
         format!("{}-{}", self.subscription, self.index).into()
     }
 
-    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.start_offset = Some(last_seen_offset);
+    /// No-op. Actually `PubsubSplit` doesn't maintain any state. It's fully managed by Pubsub.
+    /// One subscription is like one Kafka consumer group.
+    fn update_offset(&mut self, _last_seen_offset: String) -> ConnectorResult<()> {
+        // forcefully set previously persisted start_offset to None
+        self.__deprecated_start_offset = None;
         Ok(())
     }
 }

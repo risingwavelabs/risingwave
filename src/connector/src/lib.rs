@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(array_chunks)]
 #![feature(coroutines)]
@@ -20,8 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(lint_reasons)]
-#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
@@ -35,13 +32,13 @@
 #![feature(negative_impls)]
 #![feature(register_tool)]
 #![feature(assert_matches)]
+#![feature(never_type)]
 #![register_tool(rw)]
 #![recursion_limit = "256"]
 
 use std::time::Duration;
 
 use duration_str::parse_std;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
 pub mod aws_utils;
@@ -59,23 +56,10 @@ pub use paste::paste;
 pub use risingwave_jni_core::{call_method, call_static_method, jvm_runtime};
 
 mod with_options;
-pub use with_options::WithPropertiesExt;
+pub use with_options::{WithOptionsSecResolved, WithPropertiesExt};
 
 #[cfg(test)]
 mod with_options_test;
-
-#[derive(Clone, Debug, Default)]
-pub struct ConnectorParams {
-    pub sink_payload_format: SinkPayloadFormat,
-}
-
-impl ConnectorParams {
-    pub fn new(sink_payload_format: SinkPayloadFormat) -> Self {
-        Self {
-            sink_payload_format,
-        }
-    }
-}
 
 pub(crate) fn deserialize_u32_from_string<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
@@ -88,27 +72,6 @@ where
             &"integer greater than or equal to 0",
         )
     })
-}
-
-pub(crate) fn deserialize_optional_u64_from_string<'de, D>(
-    deserializer: D,
-) -> Result<Option<u64>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    let s: String = de::Deserialize::deserialize(deserializer)?;
-    if s.is_empty() {
-        Ok(None)
-    } else {
-        s.parse()
-            .map_err(|_| {
-                de::Error::invalid_value(
-                    de::Unexpected::Str(&s),
-                    &"integer greater than or equal to 0",
-                )
-            })
-            .map(Some)
-    }
 }
 
 pub(crate) fn deserialize_optional_string_seq_from_string<'de, D>(
@@ -127,6 +90,25 @@ where
     }
 }
 
+pub(crate) fn deserialize_optional_u64_seq_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<u64>>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let numbers = s
+            .split(',')
+            .map(|s| s.trim().parse())
+            .collect::<Result<Vec<u64>, _>>()
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"invalid number"));
+        Ok(Some(numbers?))
+    } else {
+        Ok(None)
+    }
+}
+
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -140,6 +122,28 @@ where
             de::Unexpected::Str(&s),
             &"true or false",
         )),
+    }
+}
+
+pub(crate) fn deserialize_optional_bool_from_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<bool>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let s = s.to_ascii_lowercase();
+        match s.as_str() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            _ => Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"true or false",
+            )),
+        }
+    } else {
+        Ok(None)
     }
 }
 
@@ -176,6 +180,8 @@ mod tests {
 
     /// Test some serde behavior we rely on.
     mod serde {
+        #![expect(dead_code)]
+
         use std::collections::BTreeMap;
 
         use expect_test::expect;

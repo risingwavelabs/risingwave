@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use core::fmt::Debug;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -20,7 +20,6 @@ use anyhow::{anyhow, Context as _};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::ConnectionError;
@@ -31,14 +30,13 @@ use with_options::WithOptions;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::{
-    DateHandlingMode, JsonEncoder, ProtoEncoder, ProtoHeader, RowEncoder, SerTo, TimeHandlingMode,
-    TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, JsonbHandlingMode, ProtoEncoder, ProtoHeader, RowEncoder, SerTo,
+    TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use super::writer::AsyncTruncateSinkWriterExt;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::connector_common::MqttCommon;
 use crate::deserialize_bool_from_string;
-use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter};
 use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
@@ -120,6 +118,7 @@ pub struct MqttSink {
 pub struct MqttSinkWriter {
     pub config: MqttConfig,
     payload_writer: MqttSinkPayloadWriter,
+    #[expect(dead_code)]
     schema: Schema,
     encoder: RowEncoderWrapper,
     stopped: Arc<AtomicBool>,
@@ -127,12 +126,12 @@ pub struct MqttSinkWriter {
 
 /// Basic data types for use with the mqtt interface
 impl MqttConfig {
-    pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<MqttConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
         if config.r#type != SINK_TYPE_APPEND_ONLY {
             Err(SinkError::Config(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "MQTT sink only supports append-only mode"
             )))
         } else {
             Ok(config)
@@ -145,7 +144,7 @@ impl TryFrom<SinkParam> for MqttSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = MqttConfig::from_hashmap(param.properties)?;
+        let config = MqttConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
@@ -164,18 +163,10 @@ impl Sink for MqttSink {
 
     const SINK_NAME: &'static str = MQTT_SINK;
 
-    fn is_sink_decouple(desc: &SinkDesc, user_specified: &SinkDecouple) -> Result<bool> {
-        match user_specified {
-            SinkDecouple::Default => Ok(desc.sink_type.is_append_only()),
-            SinkDecouple::Disable => Ok(false),
-            SinkDecouple::Enable => Ok(true),
-        }
-    }
-
     async fn validate(&self) -> Result<()> {
         if !self.is_append_only {
             return Err(SinkError::Mqtt(anyhow!(
-                "Mqtt sink only support append-only mode"
+                "MQTT sink only supports append-only mode"
             )));
         }
 
@@ -221,7 +212,7 @@ impl MqttSinkWriter {
         }
 
         let timestamptz_mode = TimestamptzHandlingMode::from_options(&format_desc.options)?;
-
+        let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
         let encoder = match format_desc.format {
             SinkFormat::AppendOnly => match format_desc.encode {
                 SinkEncode::Json => RowEncoderWrapper::Json(JsonEncoder::new(
@@ -231,6 +222,7 @@ impl MqttSinkWriter {
                     TimestampHandlingMode::Milli,
                     timestamptz_mode,
                     TimeHandlingMode::Milli,
+                    jsonb_handling_mode,
                 )),
                 SinkEncode::Protobuf => {
                     let (descriptor, sid) = crate::schema::protobuf::fetch_descriptor(
@@ -260,7 +252,7 @@ impl MqttSinkWriter {
             },
             _ => {
                 return Err(SinkError::Config(anyhow!(
-                    "Mqtt sink only support append-only mode"
+                    "MQTT sink only supports append-only mode"
                 )))
             }
         };
@@ -288,7 +280,7 @@ impl MqttSinkWriter {
                         }
                         err => {
                             tracing::error!("Failed to poll mqtt eventloop: {}", err.as_report());
-                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         }
                     },
                 }

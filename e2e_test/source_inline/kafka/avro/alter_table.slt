@@ -1,0 +1,97 @@
+control substitution on
+
+# https://github.com/risingwavelabs/risingwave/issues/16486
+
+# cleanup
+system ok
+rpk topic delete 'avro_alter_table_test' || true; \
+(rpk sr subject delete 'avro_alter_table_test-value' && rpk sr subject delete 'avro_alter_table_test-value' --permanent) || true;
+
+# create topic and sr subject
+system ok
+rpk topic create 'avro_alter_table_test'
+
+# create a schema and produce a message
+system ok
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+
+system ok
+echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_table_test
+
+statement ok
+create table t (*, gen_col int as bar + 1)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_alter_table_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+sleep 4s
+
+query ?
+select * from t
+----
+1 ABC 2
+
+# create a new version of schema that removed field bar
+system ok
+sr_register avro_alter_table_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
+
+# Refresh table schema should fail
+statement error
+ALTER TABLE t REFRESH SCHEMA;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: failed to refresh schema because some of the columns to drop are referenced by a generated column "gen_col"
+  2: fail to bind expression in generated column "gen_col"
+  3: Failed to bind expression: bar + 1
+  4: Item not found: Invalid column: bar
+
+
+# Can't drop non-generated column
+statement error
+ALTER TABLE t DROP COLUMN foo;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: alter table with schema registry
+HINT: try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead
+
+
+# Drop generated column
+statement ok
+ALTER TABLE t DROP COLUMN gen_col;
+
+# Refresh table schema
+statement ok
+ALTER TABLE t REFRESH SCHEMA;
+
+query ?
+select * from t
+----
+ABC
+
+statement ok
+drop table t;
+
+statement ok
+create table t (primary key (kafka_key))
+INCLUDE key as kafka_key
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'avro_alter_table_test'
+)
+FORMAT UPSERT ENCODE AVRO (
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}'
+);
+
+statement ok
+ALTER TABLE t REFRESH SCHEMA;
+
+statement ok
+drop table t;

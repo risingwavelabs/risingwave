@@ -12,42 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
     GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use risingwave_stream::task::LocalStreamManager;
 use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
+type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
+type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
+
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: LocalStreamManager,
     server_config: ServerConfig,
+    meta_cache: Option<MetaCache>,
+    block_cache: Option<BlockCache>,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(stream_mgr: LocalStreamManager, server_config: ServerConfig) -> Self {
+    pub fn new(
+        stream_mgr: LocalStreamManager,
+        server_config: ServerConfig,
+        meta_cache: Option<MetaCache>,
+        block_cache: Option<BlockCache>,
+    ) -> Self {
         Self {
             stream_mgr,
             server_config,
+            meta_cache,
+            block_cache,
         }
     }
 }
@@ -102,6 +118,12 @@ impl MonitorService for MonitorServiceImpl {
 
         let barrier_worker_state = self.stream_mgr.inspect_barrier_state().await?;
 
+        let jvm_stack_traces = match dump_jvm_stack_traces() {
+            Ok(None) => None,
+            Err(err) => Some(err.as_report().to_string()),
+            Ok(Some(stack_traces)) => Some(stack_traces),
+        };
+
         Ok(Response::new(StackTraceResponse {
             actor_traces,
             rpc_traces,
@@ -111,6 +133,12 @@ impl MonitorService for MonitorServiceImpl {
                 self.stream_mgr.env.worker_id(),
                 barrier_worker_state,
             )]),
+            jvm_stack_traces: match jvm_stack_traces {
+                Some(stack_traces) => {
+                    BTreeMap::from_iter([(self.stream_mgr.env.worker_id(), stack_traces)])
+                }
+                None => BTreeMap::new(),
+            },
         }))
     }
 
@@ -263,32 +291,148 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetBackPressureRequest>,
     ) -> Result<Response<GetBackPressureResponse>, Status> {
-        let metric_family = global_streaming_metrics(MetricLevel::Info)
+        let metrics = global_streaming_metrics(MetricLevel::Info);
+        let actor_output_buffer_blocking_duration_ns = metrics
             .actor_output_buffer_blocking_duration_ns
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+        let actor_count = metrics
+            .actor_count
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+
+        let actor_count: HashMap<_, _> = actor_count
+            .iter()
+            .filter_map(|m| {
+                let fragment_id = m
+                    .get_label()
+                    .iter()
+                    .find(|lp| lp.get_name() == "fragment_id")?
+                    .get_value()
+                    .parse::<u32>()
+                    .unwrap();
+                let count = m.get_gauge().get_value() as u32;
+                Some((fragment_id, count))
+            })
             .collect();
-        let metrics = metric_family.get(0).unwrap().get_metric();
-        let mut back_pressure_infos: Vec<BackPressureInfo> = Vec::new();
-        for label_pairs in metrics {
-            let mut back_pressure_info = BackPressureInfo::default();
+
+        let mut back_pressure_infos: HashMap<_, BackPressureInfo> = HashMap::new();
+
+        for label_pairs in actor_output_buffer_blocking_duration_ns {
+            let mut fragment_id = None;
+            let mut downstream_fragment_id = None;
             for label_pair in label_pairs.get_label() {
-                if label_pair.get_name() == "actor_id" {
-                    back_pressure_info.actor_id = label_pair.get_value().parse::<u32>().unwrap();
-                }
                 if label_pair.get_name() == "fragment_id" {
-                    back_pressure_info.fragment_id = label_pair.get_value().parse::<u32>().unwrap();
+                    fragment_id = label_pair.get_value().parse::<u32>().ok();
                 }
                 if label_pair.get_name() == "downstream_fragment_id" {
-                    back_pressure_info.downstream_fragment_id =
-                        label_pair.get_value().parse::<u32>().unwrap();
+                    downstream_fragment_id = label_pair.get_value().parse::<u32>().ok();
                 }
             }
-            back_pressure_info.value = label_pairs.get_counter().get_value();
-            back_pressure_infos.push(back_pressure_info);
+            let Some(fragment_id) = fragment_id else {
+                continue;
+            };
+            let Some(downstream_fragment_id) = downstream_fragment_id else {
+                continue;
+            };
+
+            // When metrics level is Debug, we may have multiple metrics with the same label pairs
+            // (fragment_id, downstream_fragment_id). We need to aggregate them locally.
+            //
+            // Metrics from different compute nodes should be aggregated by the caller.
+            let back_pressure_info = back_pressure_infos
+                .entry((fragment_id, downstream_fragment_id))
+                .or_insert_with(|| BackPressureInfo {
+                    fragment_id,
+                    downstream_fragment_id,
+                    actor_count: actor_count.get(&fragment_id).copied().unwrap_or_default(),
+                    value: 0.,
+                });
+
+            back_pressure_info.value += label_pairs.get_counter().get_value();
         }
 
         Ok(Response::new(GetBackPressureResponse {
-            back_pressure_infos,
+            back_pressure_infos: back_pressure_infos.into_values().collect(),
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn tiered_cache_tracing(
+        &self,
+        request: Request<TieredCacheTracingRequest>,
+    ) -> Result<Response<TieredCacheTracingResponse>, Status> {
+        let req = request.into_inner();
+
+        tracing::info!("Update tiered cache tracing config: {req:?}");
+
+        if let Some(cache) = &self.meta_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let mut options = TracingOptions::new();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                options = options
+                    .with_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                options =
+                    options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                options = options
+                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                options = options
+                    .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                options = options
+                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+            cache.update_tracing_options(options);
+        }
+
+        if let Some(cache) = &self.block_cache {
+            if req.enable {
+                cache.enable_tracing();
+            } else {
+                cache.disable_tracing();
+            }
+            let mut options = TracingOptions::new();
+            if let Some(threshold) = req.record_hybrid_insert_threshold_ms {
+                options = options
+                    .with_record_hybrid_insert_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_get_threshold_ms {
+                options =
+                    options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
+                options = options
+                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
+                options = options
+                    .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
+            }
+            if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
+                options = options
+                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+            }
+            cache.update_tracing_options(options);
+        }
+
+        Ok(Response::new(TieredCacheTracingResponse::default()))
     }
 }
 
@@ -301,8 +445,7 @@ pub mod grpc_middleware {
 
     use either::Either;
     use futures::Future;
-    use hyper::Body;
-    use tonic::transport::NamedService;
+    use tonic::body::BoxBody;
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
@@ -350,10 +493,9 @@ pub mod grpc_middleware {
         next_id: Arc<AtomicU64>,
     }
 
-    impl<S> Service<hyper::Request<Body>> for AwaitTreeMiddleware<S>
+    impl<S> Service<http::Request<BoxBody>> for AwaitTreeMiddleware<S>
     where
-        S: Service<hyper::Request<Body>> + Clone + Send + 'static,
-        S::Future: Send + 'static,
+        S: Service<http::Request<BoxBody>> + Clone,
     {
         type Error = S::Error;
         type Response = S::Response;
@@ -364,7 +506,7 @@ pub mod grpc_middleware {
             self.inner.poll_ready(cx)
         }
 
-        fn call(&mut self, req: hyper::Request<Body>) -> Self::Future {
+        fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
             let Some(registry) = self.registry.clone() else {
                 return Either::Left(self.inner.call(req));
             };
@@ -391,7 +533,8 @@ pub mod grpc_middleware {
         }
     }
 
-    impl<S: NamedService> NamedService for AwaitTreeMiddleware<S> {
+    #[cfg(not(madsim))]
+    impl<S: tonic::server::NamedService> tonic::server::NamedService for AwaitTreeMiddleware<S> {
         const NAME: &'static str = S::NAME;
     }
 }

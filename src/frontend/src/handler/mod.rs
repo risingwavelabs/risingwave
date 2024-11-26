@@ -46,6 +46,7 @@ mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
 mod alter_streaming_rate_limit;
+mod alter_swap_rename;
 mod alter_system;
 mod alter_table_column;
 mod alter_table_with_sr;
@@ -53,12 +54,14 @@ pub mod alter_user;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
+pub mod create_aggregate;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
+pub mod create_secret;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_sql_function;
@@ -76,6 +79,7 @@ pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_secret;
 pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_subscription;
@@ -96,6 +100,8 @@ mod transaction;
 pub mod util;
 pub mod variable;
 mod wait;
+
+pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -256,6 +262,9 @@ pub async fn handle(
         Statement::CreateConnection { stmt } => {
             create_connection::handle_create_connection(handler_args, stmt).await
         }
+        Statement::CreateSecret { stmt } => {
+            create_secret::handle_create_secret(handler_args, stmt).await
+        }
         Statement::CreateFunction {
             or_replace,
             temporary,
@@ -275,7 +284,6 @@ pub async fn handle(
                     .real_value()
                     .eq_ignore_ascii_case("sql")
             {
-                // User defined function with external source (e.g., language [ python / java ])
                 create_function::handle_create_function(
                     handler_args,
                     or_replace,
@@ -300,6 +308,24 @@ pub async fn handle(
                 .await
             }
         }
+        Statement::CreateAggregate {
+            or_replace,
+            name,
+            args,
+            returns,
+            params,
+            ..
+        } => {
+            create_aggregate::handle_create_aggregate(
+                handler_args,
+                or_replace,
+                name,
+                args,
+                returns,
+                params,
+            )
+            .await
+        }
         Statement::CreateTable {
             name,
             columns,
@@ -311,7 +337,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
-            source_schema,
+            format_encode,
             source_watermarks,
             append_only,
             on_conflict,
@@ -338,7 +364,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+            let format_encode = format_encode.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -346,7 +372,7 @@ pub async fn handle(
                 wildcard_idx,
                 constraints,
                 if_not_exists,
-                source_schema,
+                format_encode,
                 source_watermarks,
                 append_only,
                 on_conflict,
@@ -359,17 +385,25 @@ pub async fn handle(
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
+            owner,
+        } => {
+            create_database::handle_create_database(handler_args, db_name, if_not_exists, owner)
+                .await
+        }
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-        } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
+            owner,
+        } => {
+            create_schema::handle_create_schema(handler_args, schema_name, if_not_exists, owner)
+                .await
+        }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
         Statement::FetchCursor { stmt } => {
-            fetch_cursor::handle_fetch_cursor(handler_args, stmt).await
+            fetch_cursor::handle_fetch_cursor(handler_args, stmt, &formats).await
         }
         Statement::CloseCursor { stmt } => {
             close_cursor::handle_close_cursor(handler_args, stmt).await
@@ -414,7 +448,8 @@ pub async fn handle(
                     ObjectType::Schema
                     | ObjectType::Database
                     | ObjectType::User
-                    | ObjectType::Connection => {
+                    | ObjectType::Connection
+                    | ObjectType::Secret => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 };
@@ -481,6 +516,9 @@ pub async fn handle(
                     drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
                         .await
                 }
+                ObjectType::Secret => {
+                    drop_secret::handle_drop_secret(handler_args, object_name, if_exists).await
+                }
             }
         }
         // XXX: should we reuse Statement::Drop for DROP FUNCTION?
@@ -488,7 +526,18 @@ pub async fn handle(
             if_exists,
             func_desc,
             option,
-        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, false)
+                .await
+        }
+        Statement::DropAggregate {
+            if_exists,
+            func_desc,
+            option,
+        } => {
+            drop_function::handle_drop_function(handler_args, if_exists, func_desc, option, true)
+                .await
+        }
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
@@ -589,6 +638,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::SwapRenameSchema { target_schema },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_schema,
+                StatementType::ALTER_SCHEMA,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:
@@ -650,13 +711,37 @@ pub async fn handle(
         } => alter_table_with_sr::handle_refresh_schema(handler_args, name).await,
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterTableOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::TableWithSource,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::CdcTable,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SwapRenameTable { target_table },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_table,
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -767,7 +852,7 @@ pub async fn handle(
         Statement::AlterView {
             materialized,
             name,
-            operation: AlterViewOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterViewOperation::SetBackfillRateLimit { rate_limit },
         } if materialized => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
@@ -776,6 +861,19 @@ pub async fn handle(
                 rate_limit,
             )
             .await
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SwapRenameView { target_view },
+        } => {
+            let statement_type = if materialized {
+                StatementType::ALTER_MATERIALIZED_VIEW
+            } else {
+                StatementType::ALTER_VIEW
+            };
+            alter_swap_rename::handle_swap_rename(handler_args, name, target_view, statement_type)
+                .await
         }
         Statement::AlterSink {
             name,
@@ -824,6 +922,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SwapRenameSink { target_sink },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_sink,
+                StatementType::ALTER_SINK,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
@@ -850,6 +960,21 @@ pub async fn handle(
                 new_schema_name,
                 StatementType::ALTER_SUBSCRIPTION,
                 None,
+            )
+            .await
+        }
+        Statement::AlterSubscription {
+            name,
+            operation:
+                AlterSubscriptionOperation::SwapRenameSubscription {
+                    target_subscription,
+                },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_subscription,
+                StatementType::ALTER_SUBSCRIPTION,
             )
             .await
         }
@@ -888,9 +1013,9 @@ pub async fn handle(
         }
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::FormatEncode { connector_schema },
+            operation: AlterSourceOperation::FormatEncode { format_encode },
         } => {
-            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, connector_schema)
+            alter_source_with_sr::handle_alter_source_with_sr(handler_args, name, format_encode)
                 .await
         }
         Statement::AlterSource {
@@ -899,13 +1024,25 @@ pub async fn handle(
         } => alter_source_with_sr::handler_refresh_schema(handler_args, name).await,
         Statement::AlterSource {
             name,
-            operation: AlterSourceOperation::SetStreamingRateLimit { rate_limit },
+            operation: AlterSourceOperation::SetSourceRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::Source,
                 name,
                 rate_limit,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SwapRenameSource { target_source },
+        } => {
+            alter_swap_rename::handle_swap_rename(
+                handler_args,
+                name,
+                target_source,
+                StatementType::ALTER_SOURCE,
             )
             .await
         }

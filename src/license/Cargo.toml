@@ -1,0 +1,31 @@
+[package]
+name = "risingwave_license"
+description = "License validation and feature gating for RisingWave"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+jsonbb = { workspace = true }
+jsonwebtoken = "9"
+risingwave_pb = { workspace = true }
+risingwave_telemetry_event = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+thiserror-ext = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+expect-test = "1"
+
+[lints]
+workspace = true

@@ -16,13 +16,12 @@ use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
+use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
@@ -90,19 +89,19 @@ pub async fn handle_create_as(
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
-        let properties = handler_args
-            .with_options
-            .inner()
-            .clone()
-            .into_iter()
-            .collect();
-        let (plan, source, table) = gen_create_table_plan_without_bind(
+        let (_, secret_refs) = context.with_options().clone().into_parts();
+        if !secret_refs.is_empty() {
+            return Err(crate::error::ErrorCode::InvalidParameterValue(
+                "Secret reference is not allowed in options for CREATE TABLE AS".to_string(),
+            )
+            .into());
+        }
+        let (plan, table) = gen_create_table_plan_without_source(
             context,
             table_name.clone(),
             columns,
             vec![],
             vec![],
-            properties,
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             append_only,
@@ -110,15 +109,9 @@ pub async fn handle_create_as(
             with_version_column,
             Some(col_id_gen.into_version()),
         )?;
-        let mut graph = build_graph(plan)?;
-        graph.parallelism =
-            session
-                .config()
-                .streaming_parallelism()
-                .map(|parallelism| Parallelism {
-                    parallelism: parallelism.get(),
-                });
-        (graph, source, table)
+        let graph = build_graph(plan)?;
+
+        (graph, None, table)
     };
 
     tracing::trace!(

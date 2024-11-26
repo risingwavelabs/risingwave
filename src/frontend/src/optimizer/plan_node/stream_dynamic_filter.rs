@@ -12,22 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::generic::{DynamicFilter, GenericPlanRef};
+use super::generic::DynamicFilter;
 use super::stream::prelude::*;
-use super::stream::StreamPlanRef;
 use super::utils::{
     childless_record, column_names_pretty, plan_node_name, watermark_pretty, Distill,
 };
-use super::{generic, ExprRewritable, PlanTreeNodeUnary};
-use crate::expr::{Expr, ExprImpl};
+use super::{generic, ExprRewritable};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::MonotonicityMap;
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -36,74 +36,75 @@ pub struct StreamDynamicFilter {
     pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
-    condition_always_relax: bool,
 }
 
 impl StreamDynamicFilter {
     pub fn new(core: DynamicFilter<PlanRef>) -> Self {
-        let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
-
-        // TODO(st1page): here we just check if RHS
-        // is a `StreamNow`. It will be generalized to more cases
-        // by introducing monotonically increasing property of the node in https://github.com/risingwavelabs/risingwave/pull/13984.
-        let right_monotonically_increasing = {
-            if let Some(e) = core.right().as_stream_exchange()
-                && *e.distribution() == Distribution::Broadcast
-            {
-                if e.input().as_stream_now().is_some() {
-                    true
-                } else if let Some(proj) = e.input().as_stream_project() {
-                    proj.input().as_stream_now().is_some()
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
-        let condition_always_relax = right_monotonically_increasing
+        let right_non_decreasing = core.right().columns_monotonicity()[0].is_non_decreasing();
+        let condition_always_relax = right_non_decreasing
             && matches!(
                 core.comparator(),
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let append_only = if condition_always_relax {
+        let out_append_only = if condition_always_relax {
             core.left().append_only()
         } else {
             false
         };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
-            append_only,
+            out_append_only,
             false, // TODO(rc): decide EOWC property
-            watermark_columns,
+            Self::derive_watermark_columns(&core),
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
         Self {
             base,
             core,
             cleaned_by_watermark,
-            condition_always_relax,
         }
     }
 
-    pub fn left_index(&self) -> usize {
-        self.core.left_index()
+    fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> FixedBitSet {
+        let mut res = FixedBitSet::with_capacity(core.left().schema().len());
+        let rhs_watermark_columns = core.right().watermark_columns();
+        if rhs_watermark_columns.contains(0) {
+            match core.comparator() {
+                // We can derive output watermark only if the output is supposed to be always >= rhs.
+                // While we have to keep in mind that, the propagation of watermark messages from
+                // the right input must be delayed until `Update`/`Delete`s are sent to downstream,
+                // otherwise, we will have watermark messages sent before the `Delete` of old rows.
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    res.set(core.left_index(), true)
+                }
+                _ => {}
+            }
+        }
+        res
     }
 
-    /// 1. Check the comparator.
-    /// 2. RHS input should only have 1 columns, which is the watermark column.
-    ///    We check that the watermark should be set.
-    pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
-        let expr = core.predicate();
-        if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
-            match function_call.func_type() {
+    fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
+        let rhs_watermark_columns = core.right().watermark_columns();
+        if rhs_watermark_columns.contains(0) {
+            match core.comparator() {
                 ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                    let rhs_input = core.right();
-                    rhs_input.watermark_columns().contains(0)
+                    // For >= and >, watermark on rhs means there's no change that rows older than the watermark will
+                    // ever be `Insert`ed again. So, we can clean up the state table. In this case, future lhs inputs
+                    // that are less than the watermark can be safely ignored, and hence watermark can be propagated to
+                    // downstream. See `derive_watermark_columns`.
+                    true
                 }
-                _ => false,
+                ExprType::LessThan | ExprType::LessThanOrEqual => {
+                    // For <= and <, watermark on rhs means all rows older than the watermark should already be emitted,
+                    // and future lhs inputs should be directly passed to downstream without any state table operation.
+                    // So, the state table can be cleaned up.
+                    true
+                }
+                _ => unreachable!(),
             }
         } else {
             false
@@ -125,12 +126,6 @@ impl Distill for StreamDynamicFilter {
             vec.push((
                 "cleaned_by_watermark",
                 Pretty::display(&self.cleaned_by_watermark),
-            ));
-        }
-        if self.condition_always_relax {
-            vec.push((
-                "condition_always_relax",
-                Pretty::display(&self.condition_always_relax),
             ));
         }
         childless_record(
@@ -175,12 +170,13 @@ impl StreamNode for StreamDynamicFilter {
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
+        #[allow(deprecated)]
         NodeBody::DynamicFilter(DynamicFilterNode {
             left_key: left_index as u32,
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
-            condition_always_relax: self.condition_always_relax,
+            condition_always_relax: false, // deprecated
         })
     }
 }

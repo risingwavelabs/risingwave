@@ -1,0 +1,264 @@
+statement ok
+CREATE USER test_user;
+
+statement ok
+CREATE SCHEMA test_schema;
+
+statement ok
+CREATE TABLE foo (id INT, name VARCHAR);
+
+statement ok
+CREATE VIEW foo_view AS SELECT * FROM foo;
+
+statement ok
+CREATE INDEX foo_index ON foo(id);
+
+statement ok
+CREATE MATERIALIZED VIEW foo_mv AS SELECT * FROM foo;
+
+statement ok
+CREATE SOURCE foo_source (a int, b int) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '1',
+    datagen.split.num = '1'
+);
+
+statement ok
+CREATE TABLE bar (id INT);
+
+statement ok
+GRANT ALL PRIVILEGES ON foo TO test_user GRANTED BY root;
+
+statement ok
+GRANT INSERT ON bar TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
+GRANT INSERT ON foo_view TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
+GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
+GRANT SELECT ON ALL SOURCES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+
+statement ok
+GRANT CREATE ON SCHEMA test_schema TO test_user;
+
+query error table not found: bar_err
+GRANT INSERT ON bar_err TO test_user WITH GRANT OPTION GRANTED BY root;
+
+query error Invalid parameter user: User test_user_err not found
+SELECT has_table_privilege('test_user_err', 'foo', 'SELECT');
+
+query error Invalid parameter name: class not found: foo_err
+SELECT has_table_privilege('test_user', 'foo_err', 'SELECT');
+
+query error Invalid parameter privilege: unrecognized privilege type: "SELE CT"
+SELECT has_table_privilege('test_user', 'foo', 'SELE CT');
+
+query error Invalid parameter privilege: unrecognized privilege type: "SELECT INSERT"
+SELECT has_table_privilege('test_user', 'foo', 'SELECT INSERT');
+
+query error Invalid parameter privilege
+SELECT has_table_privilege('test_user', 'foo', 'SELECT, INSERT  WITH GRANT OPTION');
+
+query error Invalid parameter user: User test_user_err not found
+SELECT has_schema_privilege('test_user_err', 'test_schema', 'CREATE');
+
+query error Invalid parameter schema: schema not found: test_schema_err
+SELECT has_schema_privilege('test_user', 'test_schema_err', 'CREATE');
+
+query error Invalid parameter privilege: unrecognized privilege type: "INSERT"
+SELECT has_schema_privilege('test_user', 'test_schema', 'INSERT');
+
+query error Invalid parameter privilege: unrecognized privilege type: "DELETE"
+SELECT has_any_column_privilege('test_user', 'foo_mv'::regclass, 'DELETE');
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'INSERT WITH GRANT OPTION');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'INSERT, SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'DELETE, INSERT, SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo', 'DELETE WITH GRANT OPTION, INSERT, SELECT WITH GRANT OPTION');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'INSERT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view'::regclass, 'UPDATE');
+----
+f
+
+query I
+SELECT has_any_column_privilege('test_user', 'foo_view'::regclass, 'INSERT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_mv', 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_mv'::regclass, 'SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_any_column_privilege('test_user', 'foo_mv'::regclass, 'SELECT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_mv', 'INSERT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_source'::regclass, 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_source', 'INSERT');
+----
+f
+
+# Indexes are granted by `GRANT SELECT ON ALL MATERIALIZED VIEWS`
+query I
+SELECT has_table_privilege('test_user', 'foo_index'::regclass, 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'foo_index', 'INSERT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'bar', 'INSERT');
+----
+t
+
+query I
+SELECT has_table_privilege('bar', 'INSERT');
+----
+t
+
+query I
+SELECT has_table_privilege('bar'::regclass, 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('bar'::regclass, 'SELECT');
+----
+t
+
+query I
+SELECT has_table_privilege('test_user', 'bar', 'UPDATE');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'bar'::regclass, 'INSERT WITH GRANT OPTION');
+----
+t
+
+query I
+SELECT has_schema_privilege('public', 'USAGE');
+----
+t
+
+query I
+SELECT has_schema_privilege('test_user', 'test_schema', 'USAGE');
+----
+f
+
+query I
+SELECT has_schema_privilege('test_user', 'test_schema', 'CREATE');
+----
+t
+
+statement ok
+REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM test_user GRANTED BY root;
+
+query I
+SELECT has_table_privilege('test_user', 'bar'::regclass, 'SELECT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
+----
+f
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
+----
+t
+
+statement ok
+REVOKE INSERT ON foo_view FROM test_user GRANTED BY root;
+
+query I
+SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
+----
+f
+
+statement ok
+DROP SOURCE foo_source;
+
+statement ok
+DROP MATERIALIZED VIEW foo_mv;
+
+statement ok
+DROP INDEX foo_index;
+
+statement ok
+DROP VIEW foo_view;
+
+statement ok
+DROP TABLE foo;
+
+statement ok
+DROP TABLE bar;
+
+statement ok
+DROP SCHEMA test_schema;
+
+statement ok
+DROP USER test_user;

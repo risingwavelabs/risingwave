@@ -25,7 +25,7 @@ use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
 use crate::types::{
     hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
@@ -337,17 +337,14 @@ impl StructValue {
             .map(Self::new)
     }
 
-    /// Construct an array from literal string.
+    /// Construct a struct from literal string.
     ///
     /// # Example
     ///
     /// ```
     /// # use risingwave_common::types::{StructValue, StructType, DataType, ScalarImpl};
     ///
-    /// let ty = DataType::Struct(StructType::unnamed(vec![
-    ///     DataType::Int32,
-    ///     DataType::Float64,
-    /// ]));
+    /// let ty = StructType::unnamed(vec![DataType::Int32, DataType::Float64]);
     /// let s = StructValue::from_str("(1, 2.0)", &ty).unwrap();
     /// assert_eq!(s.fields()[0], Some(ScalarImpl::Int32(1)));
     /// assert_eq!(s.fields()[1], Some(ScalarImpl::Float64(2.0.into())));
@@ -356,11 +353,8 @@ impl StructValue {
     /// assert_eq!(s.fields()[0], None);
     /// assert_eq!(s.fields()[1], None);
     /// ```
-    pub fn from_str(s: &str, data_type: &DataType) -> Result<Self, BoxedError> {
+    pub fn from_str(s: &str, ty: &StructType) -> Result<Self, BoxedError> {
         // FIXME(runji): this is a trivial implementation which does not support nested struct.
-        let DataType::Struct(ty) = data_type else {
-            return Err(format!("Expect struct type, got {:?}", data_type).into());
-        };
         if !s.starts_with('(') {
             return Err("Missing left parenthesis".into());
         }
@@ -391,6 +385,15 @@ impl<'a> StructRef<'a> {
     /// Prefer using the macro `iter_fields_ref!` if possible to avoid the cost of enum dispatching.
     pub fn iter_fields_ref(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         iter_fields_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
+    }
+
+    /// # Panics
+    /// Panics if the index is out of bounds.
+    pub fn field_at(&self, i: usize) -> DatumRef<'a> {
+        match self {
+            StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
+            StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
+        }
     }
 
     pub fn memcmp_serialize(
@@ -498,15 +501,25 @@ impl ToText for StructRef<'_> {
 }
 
 /// Double quote a string if it contains any special characters.
-fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+pub fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+    // Note: for struct here, 'null' as a string is not quoted, but for list it's quoted:
+    // ```sql
+    // select row('a','a b','null'), array['a','a b','null'];
+    // ----
+    // (a,"a b",null) {a,"a b","null"}
+    // ```
     if !input.is_empty() // non-empty
-        && !input.contains([
-            '"', '\\', '(', ')', ',',
-            // PostgreSQL `array_isspace` includes '\x0B' but rust
-            // [`char::is_ascii_whitespace`] does not.
-            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
-        ])
-    {
+    && !input.contains(
+        [
+    '"', '\\', ',',
+    // whilespace:
+    // PostgreSQL `array_isspace` includes '\x0B' but rust
+    // [`char::is_ascii_whitespace`] does not.
+    ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+    // struct-specific:
+    '(',')'
+]
+    ) {
         return writer.write_str(input);
     }
 

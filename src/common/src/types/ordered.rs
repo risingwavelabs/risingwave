@@ -14,7 +14,7 @@
 
 //! `ScalarImpl` and `Datum` wrappers that implement `PartialOrd` and `Ord` with default order type.
 
-use std::cmp::{Ord, Ordering};
+use std::cmp::Ordering;
 use std::ops::Deref;
 
 use risingwave_common_estimate_size::EstimateSize;

@@ -62,7 +62,7 @@ impl StatelessSimpleAggExecutor {
         } = self;
         let input = input.execute();
         let mut is_dirty = false;
-        let mut states = aggs.iter().map(|agg| agg.create_state()).collect_vec();
+        let mut states: Vec<_> = aggs.iter().map(|agg| agg.create_state()).try_collect()?;
 
         #[for_await]
         for msg in input {
@@ -84,7 +84,7 @@ impl StatelessSimpleAggExecutor {
                             .zip_eq_fast(builders.iter_mut())
                         {
                             let data = agg.get_result(state).await?;
-                            *state = agg.create_state();
+                            *state = agg.create_state()?;
                             trace!("append: {:?}", data);
                             builder.append(data);
                         }
@@ -125,16 +125,13 @@ impl StatelessSimpleAggExecutor {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
     use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Execute, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {

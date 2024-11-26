@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::PbTableStats;
 
 use crate::version::HummockVersion;
@@ -28,6 +29,10 @@ pub struct TableStats {
     pub total_key_size: i64,
     pub total_value_size: i64,
     pub total_key_count: i64,
+
+    // `total_compressed_size`` represents the size that the table takes up in the output sst
+    //  and this field is only filled and used by CN flushes, not compactor compaction
+    pub total_compressed_size: u64,
 }
 
 impl From<&TableStats> for PbTableStats {
@@ -36,6 +41,7 @@ impl From<&TableStats> for PbTableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_compressed_size: value.total_compressed_size,
         }
     }
 }
@@ -52,6 +58,7 @@ impl From<&PbTableStats> for TableStats {
             total_key_size: value.total_key_size,
             total_value_size: value.total_value_size,
             total_key_count: value.total_key_count,
+            total_compressed_size: value.total_compressed_size,
         }
     }
 }
@@ -61,6 +68,7 @@ impl TableStats {
         self.total_key_size += other.total_key_size;
         self.total_value_size += other.total_value_size;
         self.total_key_count += other.total_key_count;
+        self.total_compressed_size += other.total_compressed_size;
     }
 }
 
@@ -68,6 +76,7 @@ pub fn add_prost_table_stats(this: &mut PbTableStats, other: &PbTableStats) {
     this.total_key_size += other.total_key_size;
     this.total_value_size += other.total_value_size;
     this.total_key_count += other.total_key_count;
+    this.total_compressed_size += other.total_compressed_size;
 }
 
 pub fn add_prost_table_stats_map(this: &mut PbTableStatsMap, other: &PbTableStatsMap) {
@@ -106,11 +115,12 @@ pub fn purge_prost_table_stats(
     table_stats: &mut PbTableStatsMap,
     hummock_version: &HummockVersion,
 ) -> bool {
-    let mut all_tables_in_version: HashSet<u32> = HashSet::default();
     let prev_count = table_stats.len();
-    for group in hummock_version.levels.values() {
-        all_tables_in_version.extend(group.member_table_ids.clone());
-    }
-    table_stats.retain(|k, _| all_tables_in_version.contains(k));
+    table_stats.retain(|table_id, _| {
+        hummock_version
+            .state_table_info
+            .info()
+            .contains_key(&TableId::new(*table_id))
+    });
     prev_count != table_stats.len()
 }

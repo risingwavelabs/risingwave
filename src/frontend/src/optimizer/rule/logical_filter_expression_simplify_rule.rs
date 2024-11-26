@@ -33,6 +33,7 @@ impl Rule for LogicalFilterExpressionSimplifyRule {
     /// The pattern we aim to optimize, e.g.,
     /// 1. (NOT (e)) OR (e) => True
     /// 2. (NOT (e)) AND (e) => False
+    ///
     /// NOTE: `e` should only contain at most a single column
     /// otherwise we will not conduct the optimization
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -153,6 +154,7 @@ fn check_optimizable_pattern(e1: ExprImpl, e2: ExprImpl) -> (bool, Option<ExprIm
 
 /// 1. True or (...) | (...) or True => True
 /// 2. False and (...) | (...) and False => False
+///
 /// NOTE: the `True` and `False` here not only represent a single `ExprImpl::Literal`
 /// but represent every `ExprImpl` that can be *evaluated* to `ScalarImpl::Bool`
 /// during optimization phase as well

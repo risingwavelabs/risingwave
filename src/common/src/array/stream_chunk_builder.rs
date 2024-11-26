@@ -14,7 +14,7 @@
 
 use crate::array::stream_record::Record;
 use crate::array::{ArrayBuilderImpl, Op, StreamChunk};
-use crate::buffer::BitmapBuilder;
+use crate::bitmap::BitmapBuilder;
 use crate::row::Row;
 use crate::types::{DataType, DatumRef};
 use crate::util::iter_util::ZipEqFast;
@@ -102,6 +102,11 @@ impl StreamChunkBuilder {
             initial_capacity,
             size: 0,
         }
+    }
+
+    /// Get the current number of rows in the builder.
+    pub fn size(&self) -> usize {
+        self.size
     }
 
     /// Append an iterator of output index and datum to the builder, return a chunk if the builder

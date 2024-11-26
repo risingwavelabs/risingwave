@@ -19,13 +19,14 @@ async-trait = "0.1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
+prost = { workspace = true }
 rand = { workspace = true }
 regex = "1"
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
-risingwave_meta_model_v2 = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 sea-orm = { workspace = true }
 serde_json = "1"
@@ -39,7 +40,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

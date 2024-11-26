@@ -108,6 +108,7 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
 /// The short topic name can be:
 /// - `<topic>`
 /// - `<tenant>/<namespace>/<topic>`
+///
 /// The fully qualified topic name can be:
 /// `<domain>://<tenant>/<namespace>/<topic>`
 pub fn parse_topic(topic: &str) -> Result<Topic> {

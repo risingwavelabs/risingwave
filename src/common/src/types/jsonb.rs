@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+use std::fmt::{self, Write};
 use std::hash::Hash;
 
-use bytes::Buf;
+use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
+use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::EstimateSize;
 
-use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
+use super::{
+    Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
+};
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
 use crate::util::iter_util::ZipEqDebug;
 
@@ -130,8 +133,8 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
-        Ok(Some(self.value_serialize().into()))
+    ) -> super::to_binary::Result<bytes::Bytes> {
+        Ok(self.value_serialize().into())
     }
 }
 
@@ -238,8 +241,13 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Returns a jsonb `null` value.
-    pub fn null() -> Self {
+    pub const fn null() -> Self {
         Self(ValueRef::Null)
+    }
+
+    /// Returns a value for empty string.
+    pub const fn empty_string() -> Self {
+        Self(ValueRef::String(""))
     }
 
     /// Returns true if this is a jsonb `null`.
@@ -293,6 +301,21 @@ impl<'a> JsonbRef<'a> {
         self.0
             .as_bool()
             .ok_or_else(|| format!("cannot cast jsonb {} to type boolean", self.type_name()))
+    }
+
+    /// If the JSON is a string, returns the associated string.
+    pub fn as_string(&self) -> Result<String, String> {
+        self.0
+            .as_str()
+            .map(|s| s.to_owned())
+            .ok_or_else(|| format!("cannot cast jsonb {} to type string", self.type_name()))
+    }
+
+    /// If the JSON is a string, returns the associated &str.
+    pub fn as_str(&self) -> Result<&str, String> {
+        self.0
+            .as_str()
+            .ok_or_else(|| format!("cannot cast jsonb {} to type &str", self.type_name()))
     }
 
     /// Attempt to read jsonb as a JSON number.
@@ -450,6 +473,28 @@ impl<'a> JsonbRef<'a> {
         Ok(StructValue::new(fields))
     }
 
+    pub fn to_map(self, ty: &MapType) -> Result<MapValue, String> {
+        let object = self
+            .0
+            .as_object()
+            .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
+        if !matches!(ty.key(), DataType::Varchar) {
+            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+        }
+
+        let mut keys: Vec<Datum> = Vec::with_capacity(object.len());
+        let mut values: Vec<Datum> = Vec::with_capacity(object.len());
+        for (k, v) in object.iter() {
+            let v = Self(v).to_datum(ty.value())?;
+            keys.push(Some(ScalarImpl::Utf8(k.to_owned().into())));
+            values.push(v);
+        }
+        MapValue::try_from_kv(
+            ListValue::from_datum_iter(ty.key(), keys),
+            ListValue::from_datum_iter(ty.value(), values),
+        )
+    }
+
     /// Expands the top-level JSON object to a row having the struct type of the `base` argument.
     pub fn populate_struct(
         self,
@@ -537,5 +582,40 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+impl ToSql for JsonbVal {
+    accepts!(JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        out.put_u8(1);
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
+    }
+}
+
+impl<'a> FromSql<'a> for JsonbVal {
+    fn from_sql(
+        _ty: &Type,
+        mut raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        if raw.is_empty() || raw.get_u8() != 1 {
+            return Err("invalid jsonb encoding".into());
+        }
+        Ok(JsonbVal::from(Value::from_text(raw)?))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::JSONB)
     }
 }

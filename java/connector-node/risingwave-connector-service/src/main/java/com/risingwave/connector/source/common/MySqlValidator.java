@@ -15,7 +15,6 @@
 package com.risingwave.connector.source.common;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -45,9 +44,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
         var dbHost = userProps.get(DbzConnectorConfig.HOST);
         var dbPort = userProps.get(DbzConnectorConfig.PORT);
-        var dbName = userProps.get(DbzConnectorConfig.DB_NAME);
-        var jdbcUrl = ValidatorUtils.getJdbcUrl(SourceTypeE.MYSQL, dbHost, dbPort, dbName);
-
+        var jdbcUrl = String.format("jdbc:mysql://%s:%s", dbHost, dbPort);
         var properties = new Properties();
         properties.setProperty("user", userProps.get(DbzConnectorConfig.USER));
         properties.setProperty("password", userProps.get(DbzConnectorConfig.PASSWORD));
@@ -63,7 +60,36 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateDbConfig() {
         try {
-            // TODO: check database server version
+            // Check whether MySQL version is less than 8.4,
+            // since MySQL 8.4 introduces some breaking changes:
+            // https://dev.mysql.com/doc/relnotes/mysql/8.4/en/news-8-4-0.html#mysqld-8-4-0-deprecation-removal
+            var major = jdbcConnection.getMetaData().getDatabaseMajorVersion();
+            var minor = jdbcConnection.getMetaData().getDatabaseMinorVersion();
+
+            if ((major > 8) || (major == 8 && minor >= 4)) {
+                throw ValidatorUtils.failedPrecondition("MySQL version should be less than 8.4");
+            }
+
+            // "database.name" is a comma-separated list of database names
+            var dbNames = userProps.get(DbzConnectorConfig.DB_NAME);
+            for (var dbName : dbNames.split(",")) {
+                // check the existence of the database
+                try (var stmt =
+                        jdbcConnection.prepareStatement(
+                                ValidatorUtils.getSql("mysql.check_db_exist"))) {
+                    stmt.setString(1, dbName.trim());
+                    var res = stmt.executeQuery();
+                    while (res.next()) {
+                        var ret = res.getInt(1);
+                        if (ret == 0) {
+                            throw ValidatorUtils.invalidArgument(
+                                    String.format(
+                                            "MySQL database '%s' doesn't exist", dbName.trim()));
+                        }
+                    }
+                }
+            }
+
             validateBinlogConfig();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
@@ -187,17 +213,17 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             stmt.setString(1, dbName);
             stmt.setString(2, tableName);
 
-            // Field name in lower case -> data type
-            var schema = new HashMap<String, String>();
+            // Field name in lower case -> data type, because MySQL column name is case-insensitive
+            // https://dev.mysql.com/doc/refman/5.7/en/identifier-case-sensitivity.html
+            var upstreamSchema = new HashMap<String, String>();
             var pkFields = new HashSet<String>();
             var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-                schema.put(field.toLowerCase(), dataType);
+                upstreamSchema.put(field.toLowerCase(), dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    // RisingWave always use lower case for column name
                     pkFields.add(field.toLowerCase());
                 }
             }
@@ -208,7 +234,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
+                var dataType = upstreamSchema.get(e.getKey().toLowerCase());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
@@ -219,9 +245,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
             }
 
-            if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
-                throw ValidatorUtils.invalidArgument("Primary key mismatch");
-            }
+            primaryKeyCheck(tableSchema, pkFields);
         }
     }
 
@@ -229,6 +253,26 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     public void close() throws Exception {
         if (null != jdbcConnection) {
             jdbcConnection.close();
+        }
+    }
+
+    private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)
+            throws RuntimeException {
+        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
+            throw ValidatorUtils.invalidArgument(
+                    "Primary key mismatch: the SQL schema defines "
+                            + sourceSchema.getPrimaryKeys().size()
+                            + " primary key columns, but the source table in MySQL has "
+                            + pkFields.size()
+                            + " columns.");
+        }
+        for (var colName : sourceSchema.getPrimaryKeys()) {
+            if (!pkFields.contains(colName.toLowerCase())) {
+                throw ValidatorUtils.invalidArgument(
+                        "Primary key mismatch: The primary key list of the source table in MySQL does not contain '"
+                                + colName
+                                + "'.");
+            }
         }
     }
 
@@ -248,7 +292,6 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                         && val <= Data.DataType.TypeName.INT64_VALUE;
             case "bigint":
                 return val == Data.DataType.TypeName.INT64_VALUE;
-
             case "float":
             case "real":
                 return val == Data.DataType.TypeName.FLOAT_VALUE
@@ -259,6 +302,12 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "date":
+                return val == Data.DataType.TypeName.DATE_VALUE;
+            case "time":
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "datetime":
+                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
             case "timestamp":
                 return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:

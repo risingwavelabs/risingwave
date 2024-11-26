@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, Criterion};
+use foyer::Engine;
 use moka::future::Cache;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
@@ -160,12 +161,12 @@ impl CacheBase for FoyerCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let entry = self
             .inner
-            .entry((sst_object_id, block_idx), || {
+            .fetch((sst_object_id, block_idx), || {
                 let latency = self.fake_io_latency;
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| (Arc::new(block), foyer::CacheContext::Default))
+                        .map(Arc::new)
                 }
             })
             .await?;
@@ -187,7 +188,7 @@ impl FoyerHybridCache {
                 high_priority_pool_ratio: 0.8,
             })
             .with_object_pool_capacity(8 * 1024)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .unwrap();
@@ -208,7 +209,7 @@ impl FoyerHybridCache {
                 cmsketch_confidence: 0.9,
             })
             .with_object_pool_capacity(8 * 1024)
-            .storage()
+            .storage(Engine::Large)
             .build()
             .await
             .unwrap();
@@ -224,12 +225,12 @@ impl CacheBase for FoyerHybridCache {
     async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let entry = self
             .inner
-            .entry((sst_object_id, block_idx), || {
+            .fetch((sst_object_id, block_idx), || {
                 let latency = self.fake_io_latency;
                 async move {
                     get_fake_block(sst_object_id, block_idx, latency)
                         .await
-                        .map(|block| (Arc::new(block), foyer::CacheContext::Default))
+                        .map(Arc::new)
                         .map_err(anyhow::Error::from)
                 }
             })

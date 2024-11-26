@@ -19,16 +19,16 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::statistics_compact_task;
+use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTask, CompactTaskAssignment, CompactTaskProgress,
-    SubscribeCompactionEventResponse,
+    CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::manager::{MetaSrvEnv, MetaStoreImpl};
-use crate::model::{MetadataModel, MetadataModelError};
+use crate::manager::MetaSrvEnv;
+use crate::model::MetadataModelError;
 use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
@@ -101,6 +101,13 @@ impl Compactor {
         Ok(())
     }
 
+    pub fn cancel_tasks(&self, task_ids: &Vec<u64>) -> MetaResult<()> {
+        for task_id in task_ids {
+            self.cancel_task(*task_id)?;
+        }
+        Ok(())
+    }
+
     pub fn context_id(&self) -> HummockContextId {
         self.context_id
     }
@@ -111,12 +118,12 @@ impl Compactor {
 /// `CompactTaskAssignment`.
 ///
 /// A compact task can be in one of these states:
-/// - 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
-///   the final state.
+/// 1. Success: an assigned task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 2. Failed: an Failed task is reported as success via `CompactStatus::report_compact_task`.
+///    It's the final state.
+/// 3. Cancelled: a task is reported as cancelled via `CompactStatus::report_compact_task`. It's
+///    the final state.
 pub struct CompactorManagerInner {
     pub task_expired_seconds: u64,
     pub heartbeat_expired_seconds: u64,
@@ -128,19 +135,16 @@ pub struct CompactorManagerInner {
 
 impl CompactorManagerInner {
     pub async fn with_meta(env: MetaSrvEnv) -> MetaResult<Self> {
-        use risingwave_meta_model_v2::compaction_task;
+        use risingwave_meta_model::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = match env.meta_store() {
-            MetaStoreImpl::Kv(meta_store) => CompactTaskAssignment::list(meta_store).await?,
-            MetaStoreImpl::Sql(sql_meta_store) => compaction_task::Entity::find()
-                .all(&sql_meta_store.conn)
-                .await
-                .map_err(MetadataModelError::from)?
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        };
+        let task_assignment: Vec<CompactTaskAssignment> = compaction_task::Entity::find()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .map_err(MetadataModelError::from)?
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let mut manager = Self {
             task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
             heartbeat_expired_seconds: env.opts.compaction_task_max_heartbeat_interval_secs,
@@ -149,7 +153,7 @@ impl CompactorManagerInner {
         };
         // Initialize heartbeat for existing tasks.
         task_assignment.into_iter().for_each(|assignment| {
-            manager.initiate_task_heartbeat(assignment.compact_task.unwrap());
+            manager.initiate_task_heartbeat(CompactTask::from(assignment.compact_task.unwrap()));
         });
         Ok(manager)
     }
@@ -295,7 +299,7 @@ impl CompactorManagerInner {
                         task.target_level,
                         task.base_level,
                         task.target_sub_level_id,
-                        task.task_type,
+                        task.task_type.as_str_name(),
                         compact_task_statistics
                 );
             }
@@ -469,23 +473,28 @@ impl CompactorManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::Duration;
 
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
+    use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
-    use crate::hummock::CompactorManager;
+    use crate::hummock::{CompactorManager, MockHummockMetaClient};
 
     #[tokio::test]
     async fn test_compactor_manager() {
         // Initialize metastore with task assignment.
         let (env, context_id) = {
-            let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-            let context_id = worker_node.id;
+            let (env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+            let context_id = worker_id as _;
+            let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(
+                MockHummockMetaClient::new(hummock_manager.clone(), context_id),
+            );
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             register_table_ids_to_compaction_group(
                 hummock_manager.as_ref(),
@@ -493,7 +502,8 @@ mod tests {
                 StaticCompactionGroupId::StateDefault.into(),
             )
             .await;
-            let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+            let _sst_infos =
+                add_ssts(1, hummock_manager.as_ref(), hummock_meta_client.clone()).await;
             let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(

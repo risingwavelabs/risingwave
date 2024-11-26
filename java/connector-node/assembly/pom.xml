@@ -54,6 +54,10 @@
             <groupId>com.risingwave</groupId>
             <artifactId>s3-common</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>tracing</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

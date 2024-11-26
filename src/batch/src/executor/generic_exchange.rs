@@ -35,7 +35,7 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-use crate::monitor::BatchMetricsWithTaskLabels;
+use crate::monitor::BatchMetrics;
 
 pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
@@ -45,12 +45,13 @@ pub struct GenericExchangeExecutor<CS, C> {
     context: C,
 
     schema: Schema,
+    #[expect(dead_code)]
     task_id: TaskId,
     identity: String,
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchMetricsWithTaskLabels>,
+    metrics: Option<BatchMetrics>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -211,7 +212,6 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                     source_creator,
                     self.context.clone(),
                     self.metrics.clone(),
-                    self.identity.clone(),
                 )
             });
 
@@ -236,25 +236,15 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         prost_source: PbExchangeSource,
         source_creator: CS,
         context: C,
-        metrics: Option<BatchMetricsWithTaskLabels>,
-        identity: String,
+        metrics: Option<BatchMetrics>,
     ) {
         let mut source = source_creator
             .create_source(context.clone(), &prost_source)
             .await?;
         // create the collector
-        let source_id = source.get_task_id();
-        let counter = metrics.as_ref().map(|metrics| {
-            metrics
-                .executor_metrics()
-                .exchange_recv_row_number
-                .with_guarded_label_values(&[
-                    source_id.query_id.as_str(),
-                    format!("{}", source_id.stage_id).as_str(),
-                    format!("{}", source_id.task_id).as_str(),
-                    identity.as_str(),
-                ])
-        });
+        let counter = metrics
+            .as_ref()
+            .map(|metrics| &metrics.executor_metrics().exchange_recv_row_number);
 
         loop {
             if let Some(res) = source.take_data().await? {
@@ -262,7 +252,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                     debug!("Exchange source {:?} output empty chunk.", source);
                 }
 
-                if let Some(ref counter) = counter {
+                if let Some(counter) = counter {
                     counter.inc_by(res.cardinality().try_into().unwrap());
                 }
 
@@ -277,9 +267,8 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
 #[cfg(test)]
 mod tests {
 
-    use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::{Array, DataChunk, I32Array};
+    use risingwave_common::array::{Array, I32Array};
     use risingwave_common::types::DataType;
 
     use super::*;

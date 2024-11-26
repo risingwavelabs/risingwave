@@ -19,19 +19,23 @@ use opendal::services::Fs;
 use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{EngineType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore};
+use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
     /// create opendal fs engine.
-    pub fn new_fs_engine(root: String, config: Arc<ObjectStoreConfig>) -> ObjectResult<Self> {
+    pub fn new_fs_engine(
+        root: String,
+        config: Arc<ObjectStoreConfig>,
+        metrics: Arc<ObjectStoreMetrics>,
+    ) -> ObjectResult<Self> {
         // Create fs backend builder.
-        let mut builder = Fs::default();
-        builder.root(&root);
-        if config.object_store_set_atomic_write_dir {
+        let mut builder = Fs::default().root(&root);
+        if config.set_atomic_write_dir {
             let atomic_write_dir = format!("{}/{}", root, ATOMIC_WRITE_DIR);
-            builder.atomic_write_dir(&atomic_write_dir);
+            builder = builder.atomic_write_dir(&atomic_write_dir);
         }
 
         let op: Operator = Operator::new(builder)?
@@ -39,8 +43,9 @@ impl OpendalObjectStore {
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Fs,
+            media_type: MediaType::Fs,
             config,
+            metrics,
         })
     }
 }

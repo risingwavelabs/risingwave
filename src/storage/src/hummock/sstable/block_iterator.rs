@@ -330,11 +330,10 @@ impl BlockIterator {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
-    use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();

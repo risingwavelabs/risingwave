@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Access, AccessResult, ChangeEvent};
+use super::{AccessResult, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::SourceColumnDesc;
@@ -24,8 +24,8 @@ pub fn apply_row_operation_on_stream_chunk_writer_with_op(
 ) -> AccessResult<()> {
     let f = |column: &SourceColumnDesc| row_op.access_field(column);
     match op {
-        ChangeEventOperation::Upsert => writer.insert(f),
-        ChangeEventOperation::Delete => writer.delete(f),
+        ChangeEventOperation::Upsert => writer.do_insert(f),
+        ChangeEventOperation::Delete => writer.do_delete(f),
     }
 }
 
@@ -35,11 +35,4 @@ pub fn apply_row_operation_on_stream_chunk_writer(
 ) -> AccessResult<()> {
     let op = row_op.op()?;
     apply_row_operation_on_stream_chunk_writer_with_op(row_op, writer, op)
-}
-
-pub fn apply_row_accessor_on_stream_chunk_writer(
-    accessor: impl Access,
-    writer: &mut SourceStreamChunkRowWriter<'_>,
-) -> AccessResult<()> {
-    writer.insert(|column| accessor.access(&[&column.name], Some(&column.data_type)))
 }

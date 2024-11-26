@@ -12,20 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::{key_with_epoch, map_table_key_range};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
+use risingwave_storage::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
 use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
@@ -39,16 +42,20 @@ use crate::test_utils::prepare_first_valid_version;
 
 #[tokio::test]
 async fn test_read_version_basic() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let (pinned_version, _, _) =
-        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+        prepare_first_valid_version(env, hummock_manager_ref, cluster_ctl_ref, worker_id).await;
 
     let mut epoch = test_epoch(1);
     let table_id = 0;
-    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
-    let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version, vnodes);
+    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
+    let mut read_version = HummockReadVersion::new(
+        TableId::from(table_id),
+        TEST_LOCAL_INSTANCE_ID,
+        pinned_version,
+        vnodes,
+    );
 
     {
         // single imm
@@ -146,39 +153,45 @@ async fn test_read_version_basic() {
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 1,
                     sst_id: 1,
-                    key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), test_epoch(1)),
-                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), test_epoch(2)),
+                    key_range: KeyRange {
+                        left: key_with_epoch(iterator_test_user_key_of(1).encode(), test_epoch(1))
+                            .into(),
+                        right: key_with_epoch(iterator_test_user_key_of(2).encode(), test_epoch(2))
+                            .into(),
                         right_exclusive: false,
-                    }),
+                    },
                     file_size: 1,
                     table_ids: vec![0],
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
+                    sst_size: 1,
                     ..Default::default()
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 2,
                     sst_id: 2,
-                    key_range: Some(KeyRange {
-                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
-                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3)),
+                    key_range: KeyRange {
+                        left: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3))
+                            .into(),
+                        right: key_with_epoch(iterator_test_user_key_of(3).encode(), test_epoch(3))
+                            .into(),
                         right_exclusive: false,
-                    }),
+                    },
                     file_size: 1,
                     table_ids: vec![0],
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
+                    sst_size: 1,
                     ..Default::default()
                 }),
             ],
             vec![],
             epoch_id_vec_for_clear,
-            batch_id_vec_for_clear,
+            HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, batch_id_vec_for_clear)]),
             1,
         ));
 
@@ -226,8 +239,8 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
-        assert_eq!(1, staging_ssts[0].get_object_id());
-        assert_eq!(2, staging_ssts[1].get_object_id());
+        assert_eq!(1, staging_ssts[0].object_id);
+        assert_eq!(2, staging_ssts[1].object_id);
     }
 
     {
@@ -250,23 +263,23 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
-        assert_eq!(2, staging_ssts[0].get_object_id());
+        assert_eq!(2, staging_ssts[0].object_id);
     }
 }
 
 #[tokio::test]
 async fn test_read_filter_basic() {
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
 
     let (pinned_version, _, _) =
-        prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
+        prepare_first_valid_version(env, hummock_manager_ref, cluster_ctl_ref, worker_id).await;
 
     let epoch = test_epoch(1);
     let table_id = 0;
-    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT));
+    let vnodes = Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST));
     let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
         TableId::from(table_id),
+        TEST_LOCAL_INSTANCE_ID,
         pinned_version,
         vnodes.clone(),
     )));
@@ -320,8 +333,8 @@ async fn test_read_filter_basic() {
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
             assert_eq!(
-                read_version.read().committed().max_committed_epoch(),
-                hummock_read_snapshot.2.max_committed_epoch()
+                read_version.read().committed().id,
+                hummock_read_snapshot.2.id,
             );
         }
     }

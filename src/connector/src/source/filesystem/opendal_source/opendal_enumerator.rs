@@ -14,6 +14,7 @@
 
 use std::marker::PhantomData;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::stream::{self, BoxStream};
@@ -23,16 +24,18 @@ use risingwave_common::types::Timestamptz;
 
 use super::OpendalSource;
 use crate::error::ConnectorResult;
+use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
 pub struct OpendalEnumerator<Src: OpendalSource> {
-    pub(crate) op: Operator,
+    pub op: Operator,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<Src>,
+    pub(crate) compression_format: CompressionFormat,
 }
 
 #[async_trait]
@@ -49,17 +52,22 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<OpendalFsSplit<Src>>> {
         let empty_split: OpendalFsSplit<Src> = OpendalFsSplit::empty_split();
+        let prefix = self.prefix.as_deref().unwrap_or("/");
 
-        Ok(vec![empty_split])
+        match self.op.list(prefix).await {
+            Ok(_) => return Ok(vec![empty_split]),
+            Err(e) => {
+                return Err(anyhow!(e)
+                    .context("fail to create source, please check your config.")
+                    .into())
+            }
+        }
     }
 }
 
 impl<Src: OpendalSource> OpendalEnumerator<Src> {
     pub async fn list(&self) -> ConnectorResult<ObjectMetadataIter> {
-        let prefix = match &self.prefix {
-            Some(prefix) => prefix,
-            None => "",
-        };
+        let prefix = self.prefix.as_deref().unwrap_or("/");
 
         let object_lister = self
             .op
@@ -99,6 +107,10 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
 
     pub fn get_matcher(&self) -> &Option<glob::Pattern> {
         &self.matcher
+    }
+
+    pub fn get_prefix(&self) -> &str {
+        self.prefix.as_deref().unwrap_or("/")
     }
 }
 pub type ObjectMetadataIter = BoxStream<'static, ConnectorResult<FsPageItem>>;

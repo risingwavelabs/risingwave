@@ -18,15 +18,12 @@
 )]
 #![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
-#![feature(lint_reasons)]
 #![feature(coroutines)]
 #![feature(map_try_insert)]
-#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
 #![feature(portable_simd)]
@@ -34,16 +31,12 @@
 #![feature(inline_const_pat)]
 #![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
-#![feature(round_ties_even)]
 #![feature(iter_order_by)]
-#![feature(exclusive_range_pattern)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(map_entry_replace)]
 #![feature(negative_impls)]
-#![feature(bound_map)]
-#![feature(array_methods)]
 #![feature(register_tool)]
+#![feature(btree_cursors)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -67,7 +60,7 @@ pub mod array;
 #[macro_use]
 pub mod util;
 pub mod acl;
-pub mod buffer;
+pub mod bitmap;
 pub mod cache;
 pub mod cast;
 pub mod catalog;
@@ -77,15 +70,20 @@ pub mod field_generator;
 pub mod hash;
 pub mod log;
 pub mod memory;
-pub use risingwave_common_metrics as metrics;
 pub use risingwave_common_metrics::{
     monitor, register_guarded_gauge_vec_with_registry,
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
+pub use {
+    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
+    risingwave_license as license,
+};
+pub mod lru;
 pub mod opts;
 pub mod range;
 pub mod row;
+pub mod sequence;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
@@ -93,6 +91,7 @@ pub mod test_utils;
 pub mod transaction;
 pub mod types;
 pub mod vnode_mapping;
+
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;

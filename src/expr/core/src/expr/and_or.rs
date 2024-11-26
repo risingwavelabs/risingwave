@@ -142,9 +142,6 @@ fn or(l: Option<bool>, r: Option<bool>) -> Option<bool> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::DataChunk;
-    use risingwave_common::test_prelude::DataChunkTestExt;
-
     use super::*;
     use crate::expr::build_from_pretty;
 

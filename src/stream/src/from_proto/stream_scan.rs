@@ -143,6 +143,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     new_executor!(BasicSerde)
                 }
             }
+            StreamScanType::SnapshotBackfill => {
+                unreachable!("SnapshotBackfillExecutor is handled specially when in `StreamActorManager::create_nodes_inner`")
+            }
             StreamScanType::Unspecified => unreachable!(),
         };
 

@@ -16,22 +16,27 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use educe::Educe;
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema, TableDesc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_hummock_sdk::HummockVersionId;
 
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 const OP_NAME: &str = "op";
-const OP_TYPE: DataType = DataType::Int16;
+const OP_TYPE: DataType = DataType::Varchar;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct LogScan {
     pub table_name: String,
-    /// Include `output_col_idx` and `op_column`
+    /// Include `output_col_idx_with_out_hidden` and `op_column`
+    pub output_col_idx_with_out_hidden: Vec<usize>,
+    /// Include `output_col_idx_with_out_hidden` and `op_column` and hidden pk
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
@@ -44,6 +49,7 @@ pub struct LogScan {
 
     pub old_epoch: u64,
     pub new_epoch: u64,
+    pub version_id: HummockVersionId,
 }
 
 impl LogScan {
@@ -79,6 +85,16 @@ impl LogScan {
         out_column_names
     }
 
+    pub(crate) fn column_names_without_hidden(&self) -> Vec<String> {
+        let mut out_column_names: Vec<_> = self
+            .output_col_idx_with_out_hidden
+            .iter()
+            .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect();
+        out_column_names.push(OP_NAME.to_string());
+        out_column_names
+    }
+
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
             .output_col_idx
@@ -96,20 +112,24 @@ impl LogScan {
     /// Create a logical scan node for log table scan
     pub(crate) fn new(
         table_name: String,
+        output_col_idx_with_out_hidden: Vec<usize>,
         output_col_idx: Vec<usize>,
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
         old_epoch: u64,
         new_epoch: u64,
+        version_id: HummockVersionId,
     ) -> Self {
         Self {
             table_name,
+            output_col_idx_with_out_hidden,
             output_col_idx,
             table_desc,
             chunk_size: None,
             ctx,
             old_epoch,
             new_epoch,
+            version_id,
         }
     }
 
@@ -139,6 +159,24 @@ impl LogScan {
             format!("{}.{}", &self.table_name, OP_NAME),
         ));
         Schema { fields }
+    }
+
+    pub(crate) fn out_fields(&self) -> FixedBitSet {
+        let mut out_fields_vec = self
+            .output_col_idx
+            .iter()
+            .enumerate()
+            .filter_map(|(index, idx)| {
+                if self.output_col_idx_with_out_hidden.contains(idx) {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+        // add op column
+        out_fields_vec.push(self.output_col_idx.len());
+        FixedBitSet::from_iter(out_fields_vec)
     }
 
     pub(crate) fn ctx(&self) -> OptimizerContextRef {

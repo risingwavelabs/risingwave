@@ -22,11 +22,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, EtcdConfig,
-    EtcdService, FrontendConfig, FrontendService, GrafanaConfig, GrafanaGen,
-    HummockInMemoryStrategy, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
-    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig, TempoConfig, TempoGen,
-    TempoService,
+    CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, FrontendConfig,
+    FrontendService, GrafanaConfig, GrafanaGen, HummockInMemoryStrategy, MetaNodeConfig,
+    MetaNodeService, MinioConfig, MinioService, PrometheusConfig, PrometheusGen, PrometheusService,
+    RedPandaConfig, TempoConfig, TempoGen, TempoService,
 };
 
 #[serde_with::skip_serializing_none]
@@ -56,7 +55,6 @@ pub struct HealthCheck {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ComposeFile {
-    pub version: String,
     pub services: BTreeMap<String, ComposeService>,
     pub volumes: BTreeMap<String, ComposeVolume>,
     pub name: String,
@@ -72,7 +70,6 @@ pub struct DockerImageConfig {
     pub tempo: String,
     pub minio: String,
     pub redpanda: String,
-    pub etcd: String,
 }
 
 #[derive(Debug)]
@@ -151,21 +148,6 @@ fn health_check_port(port: u16) -> HealthCheck {
                 "bash -c 'printf \"GET / HTTP/1.1\\n\\n\" > /dev/tcp/127.0.0.1/{}; exit $?;'",
                 port
             ),
-        ],
-        interval: "1s".to_string(),
-        timeout: "5s".to_string(),
-        retries: 5,
-    }
-}
-
-fn health_check_port_etcd(port: u16) -> HealthCheck {
-    HealthCheck {
-        test: vec![
-            "CMD".into(),
-            "etcdctl".into(),
-            format!("--endpoints=http://localhost:{port}"),
-            "endpoint".into(),
-            "health".into(),
         ],
         interval: "1s".to_string(),
         timeout: "5s".to_string(),
@@ -517,29 +499,6 @@ impl Compose for TempoConfig {
             expose: vec![self.port.to_string(), self.otlp_port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("./tempo.yaml:/etc/tempo.yaml")],
-            ..Default::default()
-        };
-
-        Ok(service)
-    }
-}
-
-impl Compose for EtcdConfig {
-    fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
-        let mut command = Command::new("/usr/local/bin/etcd");
-        EtcdService::apply_command_args(&mut command, self)?;
-        let command = get_cmd_args(&command, true)?;
-
-        let service = ComposeService {
-            image: config.image.etcd.clone(),
-            command,
-            expose: vec![self.port.to_string()],
-            ports: vec![
-                format!("{}:{}", self.port, self.port),
-                format!("{}:{}", self.peer_port, self.peer_port),
-            ],
-            volumes: vec![format!("{}:/etcd-data", self.id)],
-            healthcheck: Some(health_check_port_etcd(self.port)),
             ..Default::default()
         };
 

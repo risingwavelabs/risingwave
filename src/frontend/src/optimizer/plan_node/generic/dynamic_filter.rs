@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
@@ -31,9 +30,9 @@ pub struct DynamicFilter<PlanRef> {
     /// The predicate (formed with exactly one of < , <=, >, >=)
     comparator: ExprType,
     left_index: usize,
-    pub left: PlanRef,
+    left: PlanRef,
     /// The right input can only have one column.
-    pub right: PlanRef,
+    right: PlanRef,
 }
 impl<PlanRef> DynamicFilter<PlanRef> {
     pub fn comparator(&self) -> ExprType {
@@ -106,19 +105,6 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
                 .unwrap(),
             )],
         }
-    }
-
-    pub fn watermark_columns(&self, right_watermark: bool) -> FixedBitSet {
-        let mut watermark_columns = FixedBitSet::with_capacity(self.left.schema().len());
-        if right_watermark {
-            match self.comparator {
-                ExprType::Equal | ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                    watermark_columns.set(self.left_index, true)
-                }
-                _ => {}
-            }
-        }
-        watermark_columns
     }
 
     fn condition_display(&self) -> (Condition, Schema) {

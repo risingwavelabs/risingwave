@@ -15,8 +15,8 @@
 use std::ops::{Bound, RangeBounds};
 
 use paste::paste;
-use risingwave_pb::batch_plan::scan_range::Bound as BoundPb;
-use risingwave_pb::batch_plan::ScanRange as ScanRangePb;
+use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
+use risingwave_pb::batch_plan::ScanRange as PbScanRange;
 
 use super::value_encoding::serialize_datum;
 use crate::hash::table_distribution::TableDistribution;
@@ -24,20 +24,20 @@ use crate::hash::VirtualNode;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
 
-/// See also [`ScanRangePb`]
+/// See also [`PbScanRange`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
-fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundPb> {
+fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<PbBound> {
     match bound {
-        Bound::Included(literal) => Some(BoundPb {
+        Bound::Included(literal) => Some(PbBound {
             value: serialize_datum(Some(literal)),
             inclusive: true,
         }),
-        Bound::Excluded(literal) => Some(BoundPb {
+        Bound::Excluded(literal) => Some(PbBound {
             value: serialize_datum(Some(literal)),
             inclusive: false,
         }),
@@ -46,8 +46,8 @@ fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundPb> {
 }
 
 impl ScanRange {
-    pub fn to_protobuf(&self) -> ScanRangePb {
-        ScanRangePb {
+    pub fn to_protobuf(&self) -> PbScanRange {
+        PbScanRange {
             eq_conds: self
                 .eq_conds
                 .iter()
@@ -159,7 +159,7 @@ mod tests {
         let pk = vec![1, 3, 2];
         let dist_key_idx_in_pk =
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
-        let dist = TableDistribution::all(dist_key_idx_in_pk);
+        let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
@@ -173,7 +173,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[0, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[0, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }
@@ -185,7 +185,7 @@ mod tests {
         let pk = vec![1, 3, 2];
         let dist_key_idx_in_pk =
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
-        let dist = TableDistribution::all(dist_key_idx_in_pk);
+        let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
@@ -203,7 +203,7 @@ mod tests {
             Some(ScalarImpl::from(114514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row, &[2, 1]);
+        let vnode = VirtualNode::compute_row_for_test(&row, &[2, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist), Some(vnode));
     }

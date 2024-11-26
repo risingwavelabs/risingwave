@@ -16,9 +16,9 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
-use risingwave_meta_model_v2::prelude::{Object, User, UserPrivilege};
-use risingwave_meta_model_v2::user_privilege::Action;
-use risingwave_meta_model_v2::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
+use risingwave_meta_model::prelude::{Object, User, UserPrivilege};
+use risingwave_meta_model::user_privilege::Action;
+use risingwave_meta_model::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -34,8 +34,9 @@ use sea_orm::{
 use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
-    extract_grant_obj_id, get_object_owner, get_referring_privileges_cascade, get_user_privilege,
-    list_user_info_by_ids, PartialUserPrivilege,
+    extract_grant_obj_id, get_index_state_tables_by_table_id, get_internal_tables_by_id,
+    get_object_owner, get_referring_privileges_cascade, get_user_privilege, list_user_info_by_ids,
+    PartialUserPrivilege,
 };
 use crate::manager::{NotificationVersion, IGNORED_NOTIFICATION_VERSION};
 use crate::{MetaError, MetaResult};
@@ -230,14 +231,31 @@ impl CatalogController {
         let mut privileges = vec![];
         for gp in new_grant_privileges {
             let id = extract_grant_obj_id(gp.get_object()?);
+            let internal_table_ids = get_internal_tables_by_id(id, &txn).await?;
+            let index_state_table_ids = get_index_state_tables_by_table_id(id, &txn).await?;
             for action_with_opt in &gp.action_with_opts {
+                let action = action_with_opt.get_action()?.into();
                 privileges.push(user_privilege::ActiveModel {
                     oid: Set(id),
                     granted_by: Set(grantor),
-                    action: Set(action_with_opt.get_action()?.into()),
+                    action: Set(action),
                     with_grant_option: Set(action_with_opt.with_grant_option),
                     ..Default::default()
                 });
+                if action == Action::Select {
+                    privileges.extend(
+                        internal_table_ids
+                            .iter()
+                            .chain(index_state_table_ids.iter())
+                            .map(|&tid| user_privilege::ActiveModel {
+                                oid: Set(tid),
+                                granted_by: Set(grantor),
+                                action: Set(Action::Select),
+                                with_grant_option: Set(action_with_opt.with_grant_option),
+                                ..Default::default()
+                            }),
+                    );
+                }
             }
         }
 
@@ -254,7 +272,7 @@ impl CatalogController {
                 let filter = user_privilege::Column::UserId
                     .eq(grantor)
                     .and(user_privilege::Column::Oid.eq(*privilege.oid.as_ref()))
-                    .and(user_privilege::Column::Action.eq(privilege.action.as_ref().clone()))
+                    .and(user_privilege::Column::Action.eq(*privilege.action.as_ref()))
                     .and(user_privilege::Column::WithGrantOption.eq(true));
                 let privilege_id: Option<PrivilegeId> = UserPrivilege::find()
                     .select_only()
@@ -351,12 +369,29 @@ impl CatalogController {
         let mut revoke_items = HashMap::new();
         for privilege in revoke_grant_privileges {
             let obj = extract_grant_obj_id(privilege.get_object()?);
+            let internal_table_ids = get_internal_tables_by_id(obj, &txn).await?;
+            let index_state_table_ids = get_index_state_tables_by_table_id(obj, &txn).await?;
+            let mut include_select = false;
             let actions = privilege
                 .action_with_opts
                 .iter()
-                .map(|ao| Action::from(ao.get_action().unwrap()))
+                .map(|ao| {
+                    let action = Action::from(ao.get_action().unwrap());
+                    if action == Action::Select {
+                        include_select = true;
+                    }
+                    action
+                })
                 .collect_vec();
             revoke_items.insert(obj, actions);
+            if include_select {
+                revoke_items.extend(
+                    internal_table_ids
+                        .iter()
+                        .chain(index_state_table_ids.iter())
+                        .map(|&tid| (tid, vec![Action::Select])),
+                );
+            }
         }
 
         let filter = if !revoke_user.is_super {
@@ -468,9 +503,8 @@ impl CatalogController {
 }
 
 #[cfg(test)]
-#[cfg(not(madsim))]
 mod tests {
-    use risingwave_meta_model_v2::DatabaseId;
+    use risingwave_meta_model::DatabaseId;
     use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
 
     use super::*;
@@ -506,7 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_and_privilege() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test_with_sql_meta_store().await);
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         mgr.create_user(make_test_user("test_user_1")).await?;
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;

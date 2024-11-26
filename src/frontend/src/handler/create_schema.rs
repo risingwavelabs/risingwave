@@ -29,6 +29,7 @@ pub async fn handle_create_schema(
     handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_not_exist: bool,
+    owner: Option<ObjectName>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let database_name = session.database();
@@ -62,6 +63,19 @@ pub async fn handle_create_schema(
         (db.id(), db.owner())
     };
 
+    let schema_owner = if let Some(owner) = owner {
+        let owner = Binder::resolve_user_name(owner)?;
+        session
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name(&owner)
+            .map(|u| u.id)
+            .ok_or_else(|| CatalogError::NotFound("user", owner.to_string()))?
+    } else {
+        session.user_id()
+    };
+
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
         AclMode::Create,
@@ -70,7 +84,7 @@ pub async fn handle_create_schema(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_schema(db_id, &schema_name, session.user_id())
+        .create_schema(db_id, &schema_name, schema_owner)
         .await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
 }

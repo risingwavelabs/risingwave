@@ -1,5 +1,5 @@
 statement ok
-create table t(a int, b int);
+create table t(a int primary key, b int);
 
 statement ok
 create index idx1 on t(a);
@@ -12,6 +12,7 @@ select schemaname, tablename, indexname, tablespace, indexdef from pg_catalog.pg
 ----
 public t idx1 NULL CREATE INDEX idx1 ON t(a)
 public t idx2 NULL CREATE INDEX idx2 ON t(b)
+public t t_pkey NULL (empty)
 
 statement ok
 drop table t;

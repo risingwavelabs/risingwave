@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   fe:
     platform: linux/amd64
@@ -35,10 +34,10 @@ services:
     networks:
       mynetwork:
         ipv4_address: 172.21.0.4
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: etcd-0
+      service: postgres-0
     networks:
       mynetwork:
         ipv4_address: 172.21.0.5
@@ -86,7 +85,7 @@ services:
 volumes:
   risingwave-standalone:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

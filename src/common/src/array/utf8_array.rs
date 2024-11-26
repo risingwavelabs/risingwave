@@ -19,7 +19,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, BytesArray, BytesArrayBuilder, DataType};
-use crate::buffer::Bitmap;
+use crate::bitmap::Bitmap;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,15 +123,20 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn new(capacity: usize) -> Self {
+    /// Creates a new `Utf8ArrayBuilder`.
+    ///
+    /// `item_capacity` is the number of items to pre-allocate. The size of the preallocated
+    /// buffer of offsets is the number of items plus one.
+    /// No additional memory is pre-allocated for the data buffer.
+    fn new(item_capacity: usize) -> Self {
         Self {
-            bytes: BytesArrayBuilder::new(capacity),
+            bytes: BytesArrayBuilder::new(item_capacity),
         }
     }
 
-    fn with_type(capacity: usize, ty: DataType) -> Self {
+    fn with_type(item_capacity: usize, ty: DataType) -> Self {
         assert_eq!(ty, DataType::Varchar);
-        Self::new(capacity)
+        Self::new(item_capacity)
     }
 
     #[inline]
@@ -166,6 +171,17 @@ impl Utf8ArrayBuilder {
             bytes: self.bytes.writer(),
         }
     }
+
+    /// Append an element as the `Display` format to the array.
+    pub fn append_display(&mut self, value: Option<impl Display>) {
+        if let Some(s) = value {
+            let mut writer = self.writer().begin();
+            write!(writer, "{}", s).unwrap();
+            writer.finish();
+        } else {
+            self.append_null();
+        }
+    }
 }
 
 pub struct StringWriter<'a> {
@@ -188,7 +204,7 @@ pub struct PartialStringWriter<'a> {
     bytes: PartialBytesWriter<'a>,
 }
 
-impl<'a> PartialStringWriter<'a> {
+impl PartialStringWriter<'_> {
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) {

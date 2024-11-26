@@ -16,18 +16,13 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{
-    Field, Schema, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
-};
+use risingwave_common::catalog::{Field, Schema, RW_INTERNAL_TABLE_FUNCTION_NAME};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Function, FunctionArg, ObjectName, TableAlias};
+use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgList, ObjectName, TableAlias};
 
 use super::watermark::is_watermark_func;
 use super::{Binder, Relation, Result, WindowTableFunctionKind};
 use crate::binder::bind_context::Clause;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
-};
 use crate::error::ErrorCode;
 use crate::expr::{Expr, ExprImpl};
 
@@ -56,24 +51,6 @@ impl Binder {
                     );
                 }
                 return self.bind_internal_table(args, alias);
-            }
-            if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
-                || name.real_value().eq_ignore_ascii_case(
-                    format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME).as_str(),
-                )
-            {
-                if with_ordinality {
-                    bail_not_implemented!(
-                        "WITH ORDINALITY for internal/system table function {}",
-                        func_name
-                    );
-                }
-                return self.bind_relation_by_name_inner(
-                    Some(PG_CATALOG_SCHEMA_NAME),
-                    PG_KEYWORDS_TABLE_NAME,
-                    alias,
-                    None,
-                );
             }
         }
         // window table functions (tumble/hop)
@@ -106,12 +83,10 @@ impl Binder {
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
         let func = self.bind_function(Function {
+            scalar_as_agg: false,
             name,
-            args,
-            variadic: false,
+            arg_list: FunctionArgList::args_only(args),
             over: None,
-            distinct: false,
-            order_by: vec![],
             filter: None,
             within_group: None,
         });
@@ -143,7 +118,7 @@ impl Binder {
             // Note: named return value should take precedence over table alias.
             // But we don't support it yet.
             // e.g.,
-            // ```
+            // ```sql
             // > create function foo(ret out int) language sql as 'select 1';
             // > select t.ret from foo() as t;
             // ```

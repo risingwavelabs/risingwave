@@ -14,14 +14,17 @@
 
 use std::sync::Arc;
 
+use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
+pub use risingwave_telemetry_event::{
+    current_timestamp, post_telemetry_report_pb, TELEMETRY_REPORT_URL, TELEMETRY_TRACKING_ID,
+};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::{Result, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL};
+use super::{Result, TELEMETRY_REPORT_INTERVAL};
 use crate::telemetry::pb_compatible::TelemetryToProtobuf;
-use crate::telemetry::post_telemetry_report_pb;
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
@@ -61,19 +64,32 @@ where
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         // fetch telemetry tracking_id from the meta node only at the beginning
-        // There is only one case tracking_id updated at the runtime ---- etcd data has been
-        // cleaned. There is no way that etcd has been cleaned but nodes are still running
-        let tracking_id = match info_fetcher.fetch_telemetry_info().await {
-            Ok(Some(id)) => id,
-            Ok(None) => {
-                tracing::info!("Telemetry is disabled");
-                return;
-            }
-            Err(err) => {
-                tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                return;
+        // There is only one case tracking_id updated at the runtime ---- metastore data has been
+        // cleaned. There is no way that metastore has been cleaned but nodes are still running
+        let tracking_id = {
+            if let Some(cloud_uuid) = get_telemetry_risingwave_cloud_uuid() {
+                cloud_uuid
+            } else {
+                match info_fetcher.fetch_telemetry_info().await {
+                    Ok(Some(id)) => id,
+                    Ok(None) => {
+                        tracing::info!("Telemetry is disabled");
+                        return;
+                    }
+                    Err(err) => {
+                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                        return;
+                    }
+                }
             }
         };
+        TELEMETRY_TRACKING_ID
+            .set(tracking_id.clone())
+            .unwrap_or_else(|_| {
+                tracing::warn!(
+                    "Telemetry failed to set tracking_id, event reporting will be disabled"
+                )
+            });
 
         loop {
             tokio::select! {

@@ -15,7 +15,7 @@
 use futures::stream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::row::RowExt;
 
 use super::cache::DedupCache;
@@ -59,10 +59,10 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
         // Consume the first barrier message and initialize state table.
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -129,8 +129,6 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         }
                     }
 
-                    self.cache.update_epoch(barrier.epoch.curr);
-
                     yield Message::Barrier(barrier);
                 }
 
@@ -182,19 +180,16 @@ impl<S: StateStore> Execute for AppendOnlyDedupExecutor<S> {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::common::table::state_table::StateTable;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::ActorContext;
 
     #[tokio::test]
     async fn test_dedup_executor() {
@@ -212,12 +207,10 @@ mod tests {
         let order_types = vec![OrderType::ascending()];
 
         let state_store = MemoryStateStore::new();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(table_id, column_descs, order_types, pk_indices.clone(), 0),
             state_store,
-            table_id,
-            column_descs,
-            order_types,
-            pk_indices.clone(),
+            None,
         )
         .await;
 

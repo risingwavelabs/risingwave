@@ -1,5 +1,4 @@
 ---
-version: "3"
 services:
   risingwave-standalone:
     extends:
@@ -13,10 +12,10 @@ services:
     - echo "running command"; printf 'allow_anonymous true\nlistener 1883 0.0.0.0' > /mosquitto/config/mosquitto.conf; echo "starting service..."; cat /mosquitto/config/mosquitto.conf;/docker-entrypoint.sh;/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     ports:
       - 1883:1883
-  etcd-0:
+  postgres-0:
     extends:
       file: ../../docker/docker-compose.yml
-      service: etcd-0
+      service: postgres-0
   grafana-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -36,7 +35,7 @@ services:
 volumes:
   compute-node-0:
     external: false
-  etcd-0:
+  postgres-0:
     external: false
   grafana-0:
     external: false

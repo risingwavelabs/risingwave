@@ -24,6 +24,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_stream::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use tokio::runtime::Runtime;
 
 type TestStateTable<const USE_WATERMARK_CACHE: bool> =
@@ -72,12 +73,10 @@ async fn create_state_table<const USE_WATERMARK_CACHE: bool>(
     let pk_indices = (0..key_length).collect();
 
     let store = MemoryStateStore::new();
-    TestStateTable::<USE_WATERMARK_CACHE>::new_without_distribution_inconsistent_op(
+    TestStateTable::<USE_WATERMARK_CACHE>::from_table_catalog_inconsistent_op(
+        &gen_pbtable(TEST_TABLE_ID, column_descs, order_types, pk_indices, 0),
         store,
-        TEST_TABLE_ID,
-        column_descs,
-        order_types,
-        pk_indices,
+        None,
     )
     .await
 }
@@ -114,7 +113,7 @@ async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
     rows: Vec<OwnedRow>,
 ) {
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     for row in rows {
         state_table.insert(row);
     }
@@ -174,7 +173,7 @@ async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
     chunks: Vec<StreamChunk>,
 ) {
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     for chunk in chunks {
         state_table.write_chunk(chunk);
     }

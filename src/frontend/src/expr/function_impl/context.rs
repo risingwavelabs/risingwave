@@ -26,4 +26,5 @@ define_context! {
     pub(super) AUTH_CONTEXT: Arc<AuthContext>,
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,
+    pub(super) META_CLIENT: Arc<dyn crate::meta_client::FrontendMetaClient>,
 }

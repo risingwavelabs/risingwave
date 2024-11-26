@@ -4,7 +4,6 @@
 # It includes the following components:
 # - RisingWave cluster
 # - Minio
-# - Etcd
 # - Kafka
 # - Connector
 # - Compactor
@@ -20,17 +19,14 @@
 set -euo pipefail
 
 insert_json_kafka() {
-  echo $1 | \
-    $KAFKA_PATH/bin/kafka-console-producer.sh \
-      --topic source_kafka \
-      --bootstrap-server localhost:29092
+  echo $1 |
+    RPK_BROKERS=localhost:29092 \
+      rpk topic produce source_kafka -f "%v"
 }
 
 create_topic_kafka() {
-  "$KAFKA_PATH"/bin/kafka-topics.sh \
-    --create \
-    --topic source_kafka \
-    --bootstrap-server localhost:29092
+  RPK_BROKERS=localhost:29092 \
+    rpk topic create source_kafka
 }
 
 # Make sure we start on clean cluster
@@ -63,13 +59,6 @@ echo "--- Starting standalone cluster"
 STANDALONE_PID=$!
 
 sleep 15
-
-# FIXME: Integrate standalone into risedev, so we can reuse risedev-env functionality here.
-cat << EOF > "$RW_PREFIX"/config/risedev-env
-RW_META_ADDR="http://0.0.0.0:5690"
-RISEDEV_RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
-RISEDEV_RW_FRONTEND_PORT="4566"
-EOF
 
 echo "--- Setting up table"
 ./risedev psql -c "

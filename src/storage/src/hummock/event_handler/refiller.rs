@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 use std::task::{ready, Poll};
 use std::time::{Duration, Instant};
 
-use foyer::{HybridCacheEntry, RangeBoundsExt, Storage, StorageWriter};
+use foyer::{HybridCacheEntry, RangeBoundsExt};
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -287,23 +287,6 @@ impl CacheRefiller {
     pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
-
-    /// Clear the queue for cache refill and return an event that merges all pending cache refill events
-    /// into a single event that takes the earliest and latest version.
-    pub(crate) fn clear(&mut self) -> Option<CacheRefillerEvent> {
-        let Some(last_item) = self.queue.pop_back() else {
-            return None;
-        };
-        let mut event = last_item.event;
-        while let Some(item) = self.queue.pop_back() {
-            assert_eq!(
-                event.pinned_version.id(),
-                item.event.new_pinned_version.id()
-            );
-            event.pinned_version = item.event.pinned_version;
-        }
-        Some(event)
-    }
 }
 
 impl CacheRefiller {
@@ -374,6 +357,7 @@ impl CacheRefillTask {
 
                 let now = Instant::now();
                 let res = context.sstable_store.sstable(info, &mut stats).await;
+                stats.discard();
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());
@@ -612,9 +596,9 @@ impl CacheRefillTask {
                 block_idx: blk as u64,
             };
 
-            let mut writer = sstable_store.block_cache().store().writer(key);
+            let mut writer = sstable_store.block_cache().storage_writer(key);
 
-            if writer.judge() {
+            if writer.pick() {
                 admits += 1;
             }
 
@@ -638,20 +622,14 @@ impl CacheRefillTask {
                     .read(&sstable_store.get_sst_data_path(sst.id), range.clone())
                     .await?;
                 let mut futures = vec![];
-                for (mut writer, r, uncompressed_capacity) in contexts {
+                for (w, r, uc) in contexts {
                     let offset = r.start - range.start;
                     let len = r.end - r.start;
                     let bytes = data.slice(offset..offset + len);
-
                     let future = async move {
-                        let value = Box::new(Block::decode(bytes, uncompressed_capacity)?);
-                        writer.force();
-                        if writer
-                            .finish(value)
-                            .await
-                            .map_err(|e| HummockError::foyer_error(e.into()))?
-                            .is_some()
-                        {
+                        let value = Box::new(Block::decode(bytes, uc)?);
+                        // The entry should always be `Some(..)`, use if here for compatible.
+                        if let Some(_entry) = w.force().insert(value) {
                             GLOBAL_CACHE_REFILL_METRICS
                                 .data_refill_success_bytes
                                 .inc_by(len as u64);

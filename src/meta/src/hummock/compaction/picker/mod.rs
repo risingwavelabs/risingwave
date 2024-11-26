@@ -24,6 +24,7 @@ mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 mod compaction_task_validator;
+mod vnode_watermark_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use compaction_task_validator::{CompactionTaskValidator, ValidationRuleType};
@@ -31,8 +32,7 @@ pub use emergency_compaction_picker::EmergencyCompactionPicker;
 pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_hummock_sdk::level::{InputLevel, Levels};
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;
 pub use tombstone_reclaim_compaction_picker::{
@@ -40,10 +40,9 @@ pub use tombstone_reclaim_compaction_picker::{
 };
 pub use trivial_move_compaction_picker::TrivialMovePicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
+pub use vnode_watermark_picker::VnodeWatermarkCompactionPicker;
 
 use crate::hummock::level_handler::LevelHandler;
-
-pub const MAX_COMPACT_LEVEL_COUNT: usize = 42;
 
 #[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
@@ -96,19 +95,4 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct PartitionLevelInfo {
-    pub level_id: u32,
-    pub sub_level_id: u64,
-    pub left_idx: usize,
-    pub right_idx: usize,
-    pub total_file_size: u64,
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct LevelPartition {
-    pub sub_levels: Vec<PartitionLevelInfo>,
-    pub total_file_size: u64,
 }

@@ -40,6 +40,12 @@
   expected_outputs:
   - logical_plan
   - batch_plan
+- id : short_circuit_optimize_time
+  sql: |
+    select true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true and true;
+  expected_outputs:
+    - logical_plan
+    - batch_plan
 
 # should *not* be identified as const
 # otherwise the *semantic* will be inconsistent

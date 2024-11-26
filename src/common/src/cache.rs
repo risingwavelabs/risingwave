@@ -877,13 +877,13 @@ pub struct CleanCacheGuard<'a, K: LruKey + Clone + 'static, T: LruValue + 'stati
     hash: u64,
 }
 
-impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> CleanCacheGuard<'a, K, T> {
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static> CleanCacheGuard<'_, K, T> {
     fn mark_success(mut self) -> K {
         self.key.take().unwrap()
     }
 }
 
-impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuard<'a, K, T> {
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuard<'_, K, T> {
     fn drop(&mut self) {
         if let Some(key) = self.key.as_ref() {
             self.cache.clear_pending_request(key, self.hash);
@@ -1019,14 +1019,12 @@ impl<K: LruKey, T: LruValue> Clone for CacheableEntry<K, T> {
 #[cfg(test)]
 mod tests {
     use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
     use std::pin::Pin;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::Arc;
     use std::task::{Context, Poll};
 
-    use futures::FutureExt;
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
     use tokio::sync::oneshot::error::TryRecvError;
@@ -1035,6 +1033,7 @@ mod tests {
 
     pub struct Block {
         pub offset: u64,
+        #[allow(dead_code)]
         pub sst: u64,
     }
 

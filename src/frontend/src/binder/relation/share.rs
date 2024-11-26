@@ -13,24 +13,98 @@
 // limitations under the License.
 
 use either::Either;
+use itertools::Itertools;
+use risingwave_common::catalog::Field;
 
 use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{BoundQuery, ShareId};
+use crate::binder::{BoundQuery, Relation, ShareId};
+use crate::error::{ErrorCode, Result};
+use crate::optimizer::plan_node::generic::{CHANGELOG_OP, _CHANGELOG_ROW_ID};
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.
+
+#[derive(Debug, Clone)]
+pub enum BoundShareInput {
+    Query(Either<BoundQuery, RecursiveUnion>),
+    ChangeLog(Relation),
+}
+impl BoundShareInput {
+    pub fn fields(&self) -> Result<Vec<(bool, Field)>> {
+        match self {
+            BoundShareInput::Query(q) => match q {
+                Either::Left(q) => Ok(q
+                    .schema()
+                    .fields()
+                    .iter()
+                    .cloned()
+                    .map(|f| (false, f))
+                    .collect_vec()),
+                Either::Right(r) => Ok(r
+                    .schema
+                    .fields()
+                    .iter()
+                    .cloned()
+                    .map(|f| (false, f))
+                    .collect_vec()),
+            },
+            BoundShareInput::ChangeLog(r) => {
+                let (fields, _name) = if let Relation::BaseTable(bound_base_table) = r {
+                    (
+                        bound_base_table.table_catalog.columns().to_vec(),
+                        bound_base_table.table_catalog.name().to_string(),
+                    )
+                } else {
+                    return Err(ErrorCode::BindError(
+                        "Change log CTE must be a base table".to_string(),
+                    )
+                    .into());
+                };
+                let fields = fields
+                    .into_iter()
+                    .map(|x| {
+                        (
+                            x.is_hidden,
+                            Field::with_name(x.data_type().clone(), x.name()),
+                        )
+                    })
+                    .chain(vec![
+                        (
+                            false,
+                            Field::with_name(
+                                risingwave_common::types::DataType::Int16,
+                                CHANGELOG_OP.to_string(),
+                            ),
+                        ),
+                        (
+                            true,
+                            Field::with_name(
+                                risingwave_common::types::DataType::Serial,
+                                _CHANGELOG_ROW_ID.to_string(),
+                            ),
+                        ),
+                    ])
+                    .collect();
+                Ok(fields)
+            }
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub struct BoundShare {
     pub(crate) share_id: ShareId,
-    pub(crate) input: Either<BoundQuery, RecursiveUnion>,
+    pub(crate) input: BoundShareInput,
 }
 
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match &mut self.input {
-            Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
-            Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::Query(q) => match q {
+                Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
+                Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
+            },
+            BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
         };
     }
 }

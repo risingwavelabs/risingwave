@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
+use risingwave_common::session_config::sink_decouple::SinkDecouple;
 
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{
@@ -64,6 +65,11 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
     const SINK_NAME: &'static str = T::SINK_NAME;
 
+    // Disable sink decoupling for all trivial sinks because it introduces overhead without any benefit
+    fn is_sink_decouple(_user_specified: &SinkDecouple) -> Result<bool> {
+        Ok(false)
+    }
+
     async fn new_log_sinker(&self, _writer_env: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(Self(PhantomData))
     }
@@ -75,7 +81,7 @@ impl<T: TrivialSinkName> Sink for TrivialSink<T> {
 
 #[async_trait]
 impl<T: TrivialSinkName> LogSinker for TrivialSink<T> {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<()> {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {

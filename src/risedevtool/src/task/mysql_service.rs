@@ -29,16 +29,25 @@ impl DockerServiceConfig for MySqlConfig {
     }
 
     fn envs(&self) -> Vec<(String, String)> {
-        vec![
-            ("MYSQL_ALLOW_EMPTY_PASSWORD".to_owned(), "1".to_owned()),
-            ("MYSQL_USER".to_owned(), self.user.clone()),
-            ("MYSQL_PASSWORD".to_owned(), self.password.clone()),
-            ("MYSQL_DATABASE".to_owned(), self.database.clone()),
-        ]
+        let mut envs = vec![("MYSQL_DATABASE".to_owned(), self.database.clone())];
+        if self.user == "root" {
+            if self.password.is_empty() {
+                envs.push(("MYSQL_ALLOW_EMPTY_PASSWORD".to_owned(), "1".to_owned()));
+            } else {
+                envs.push(("MYSQL_ROOT_PASSWORD".to_owned(), self.password.clone()));
+            }
+        } else {
+            envs.extend([
+                ("MYSQL_ALLOW_EMPTY_PASSWORD".to_owned(), "1".to_owned()),
+                ("MYSQL_USER".to_owned(), self.user.clone()),
+                ("MYSQL_PASSWORD".to_owned(), self.password.clone()),
+            ]);
+        }
+        envs
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(format!("{}:{}", self.address, self.port), "3306".to_owned())]
+        vec![(self.port.to_string(), "3306".to_owned())]
     }
 
     fn data_path(&self) -> Option<String> {

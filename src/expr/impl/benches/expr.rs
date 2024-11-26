@@ -26,10 +26,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
-use risingwave_expr::aggregate::{build_append_only, AggArgs, AggCall, AggKind};
+use risingwave_expr::aggregate::{build_append_only, AggCall, PbAggKind};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
-use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 
@@ -387,7 +386,7 @@ fn bench_expr(c: &mut Criterion) {
     for sig in sigs {
         if matches!(
             sig.name.as_aggregate(),
-            AggKind::PercentileDisc | AggKind::PercentileCont
+            PbAggKind::PercentileDisc | PbAggKind::PercentileCont
         ) || (sig.inputs_type.iter())
             .chain([&sig.ret_type])
             .any(|t| !t.is_exact())
@@ -396,22 +395,12 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
         let agg = match build_append_only(&AggCall {
-            kind: sig.name.as_aggregate(),
-            args: match sig.inputs_type.as_slice() {
-                [] => AggArgs::None,
-                [t] => AggArgs::Unary(t.as_exact().clone(), input_index_for_type(t.as_exact())),
-                [t1, t2] => AggArgs::Binary(
-                    [t1.as_exact().clone(), t2.as_exact().clone()],
-                    [
-                        input_index_for_type(t1.as_exact()),
-                        input_index_for_type(t2.as_exact()),
-                    ],
-                ),
-                _ => {
-                    println!("todo: {sig:?}");
-                    continue;
-                }
-            },
+            agg_type: sig.name.as_aggregate().into(),
+            args: sig
+                .inputs_type
+                .iter()
+                .map(|t| (t.as_exact().clone(), input_index_for_type(t.as_exact())))
+                .collect(),
             return_type: sig.ret_type.as_exact().clone(),
             column_orders: vec![],
             filter: None,
@@ -434,9 +423,10 @@ fn bench_expr(c: &mut Criterion) {
             _ => unreachable!(),
         };
         c.bench_function(&format!("{sig:?}"), |bencher| {
-            bencher
-                .to_async(FuturesExecutor)
-                .iter(|| async { agg.update(&mut agg.create_state(), &input).await.unwrap() })
+            bencher.to_async(FuturesExecutor).iter(|| async {
+                let mut state = agg.create_state().unwrap();
+                agg.update(&mut state, &input).await.unwrap()
+            })
         });
     }
 }

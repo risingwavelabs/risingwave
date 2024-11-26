@@ -14,13 +14,16 @@
 
 // This is a stub lib.rs.
 
-#![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 
-pub mod metrics_manager;
-pub mod observer_manager;
+mod metrics_manager;
+mod observer_manager;
+mod tracing;
 
 pub use metrics_manager::MetricsManager;
-
-pub mod tracing;
+pub use observer_manager::{
+    Channel, NotificationClient, ObserverError, ObserverManager, ObserverState,
+    RpcNotificationClient,
+};
+pub use tracing::TracingExtractLayer;

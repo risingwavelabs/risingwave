@@ -21,9 +21,14 @@ use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader};
+use risingwave_connector::source::cdc::external::{
+    CdcOffset, ExternalTableReader, SchemaTableName,
+};
+use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::external::ExternalStorageTable;
 use crate::common::rate_limit::limited_chunk_size;
@@ -42,23 +47,32 @@ pub trait UpstreamTableRead {
     ) -> impl Future<Output = StreamExecutorResult<Option<CdcOffset>>> + Send + '_;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
     pub rate_limit_rps: Option<u32>,
-    pub pk_in_output_indices: Vec<usize>,
+    pub pk_indices: Vec<usize>,
+    pub additional_columns: Vec<ColumnDesc>,
+    pub schema_table_name: SchemaTableName,
+    pub database_name: String,
 }
 
 impl SnapshotReadArgs {
     pub fn new(
         current_pos: Option<OwnedRow>,
         rate_limit_rps: Option<u32>,
-        pk_in_output_indices: Vec<usize>,
+        pk_indices: Vec<usize>,
+        additional_columns: Vec<ColumnDesc>,
+        schema_table_name: SchemaTableName,
+        database_name: String,
     ) -> Self {
         Self {
             current_pos,
             rate_limit_rps,
-            pk_in_output_indices,
+            pk_indices,
+            additional_columns,
+            schema_table_name,
+            database_name,
         }
     }
 }
@@ -78,6 +92,50 @@ impl<T> UpstreamTableReader<T> {
     pub fn new(table: T) -> Self {
         Self { inner: table }
     }
+}
+
+/// Append additional columns with value as null to the snapshot chunk
+fn with_additional_columns(
+    snapshot_chunk: StreamChunk,
+    additional_columns: &[ColumnDesc],
+    schema_table_name: SchemaTableName,
+    database_name: String,
+) -> StreamChunk {
+    let (ops, mut columns, visibility) = snapshot_chunk.into_inner();
+    for desc in additional_columns {
+        let mut builder = desc.data_type.create_array_builder(visibility.len());
+        match *desc.additional_column.column_type.as_ref().unwrap() {
+            // set default value for timestamp
+            ColumnType::Timestamp(_) => builder.append_n(
+                visibility.len(),
+                Some(Timestamptz::default().to_scalar_value()),
+            ),
+            ColumnType::DatabaseName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(database_name.clone())),
+                );
+            }
+            ColumnType::SchemaName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(schema_table_name.schema_name.clone())),
+                );
+            }
+            ColumnType::TableName(_) => {
+                builder.append_n(
+                    visibility.len(),
+                    Some(ScalarImpl::from(schema_table_name.table_name.clone())),
+                );
+            }
+            // set null for other additional columns
+            _ => {
+                builder.append_n_null(visibility.len());
+            }
+        }
+        columns.push(builder.finish().into());
+    }
+    StreamChunk::with_visibility(ops, columns, visibility)
 }
 
 impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
@@ -110,6 +168,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         });
 
         let mut read_args = args;
+        let schema_table_name = read_args.schema_table_name.clone();
+        let database_name = read_args.database_name.clone();
         // loop to read all data from the table
         loop {
             tracing::debug!(
@@ -139,11 +199,16 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 let chunk = chunk?;
                 let chunk_size = chunk.capacity();
                 read_count += chunk.cardinality();
-                current_pk_pos = get_new_pos(&chunk, &read_args.pk_in_output_indices);
+                current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
 
                 if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
                     // no limit, or empty chunk
-                    yield Some(chunk);
+                    yield Some(with_additional_columns(
+                        chunk,
+                        &read_args.additional_columns,
+                        schema_table_name.clone(),
+                        database_name.clone(),
+                    ));
                     continue;
                 } else {
                     // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
@@ -160,7 +225,12 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                         .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
                         .await
                         .unwrap();
-                    yield Some(chunk);
+                    yield Some(with_additional_columns(
+                        chunk,
+                        &read_args.additional_columns,
+                        schema_table_name.clone(),
+                        database_name.clone(),
+                    ));
                 }
             }
 
@@ -185,6 +255,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use futures::pin_mut;
     use futures_async_stream::for_await;
@@ -193,8 +264,9 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_connector::source::cdc::external::mysql::MySqlExternalTableReader;
     use risingwave_connector::source::cdc::external::{
-        ExternalTableReader, MySqlExternalTableReader, SchemaTableName,
+        ExternalTableConfig, ExternalTableReader, SchemaTableName,
     };
 
     use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
@@ -210,7 +282,7 @@ mod tests {
         let rw_schema = Schema {
             fields: columns.iter().map(Field::from).collect(),
         };
-        let props = convert_args!(hashmap!(
+        let props: HashMap<String, String> = convert_args!(hashmap!(
                 "hostname" => "localhost",
                 "port" => "8306",
                 "username" => "root",
@@ -218,7 +290,10 @@ mod tests {
                 "database.name" => "mydb",
                 "table.name" => "orders_rw"));
 
-        let reader = MySqlExternalTableReader::new(props, rw_schema.clone())
+        let config =
+            serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
+                .unwrap();
+        let reader = MySqlExternalTableReader::new(config, rw_schema.clone())
             .await
             .unwrap();
 

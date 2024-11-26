@@ -23,11 +23,7 @@
 #![allow(non_snake_case)] // for `ctor` generated code
 #![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(lazy_cell)]
-#![feature(round_ties_even)]
 #![feature(coroutines)]
 #![feature(test)]
 #![feature(iter_array_chunks)]
@@ -37,6 +33,8 @@
 mod aggregate;
 mod scalar;
 mod table_function;
+mod udf;
+mod window_function;
 
 /// Enable functions in this crate.
 #[macro_export]

@@ -1,0 +1,54 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t1 (k1 INT);
+
+statement ok
+CREATE TABLE t2 (k2 INT);
+
+sleep 5s
+
+statement ok
+INSERT INTO t1 VALUES (1);
+
+statement ok
+INSERT INTO t2 VALUES (1);
+
+query I
+SELECT count(*) FROM t1 join t2 on t1.k1=t2.k2;
+----
+1
+
+query I
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
+----
+1
+
+query I
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
+----
+0
+
+query I
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() - '5' second on t1.k1=t2.k2;
+----
+0
+
+sleep 5s
+
+query I
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() - '5' second join t2  FOR SYSTEM_TIME AS OF now() on t1.k1=t2.k2;
+----
+1
+
+query I
+SELECT count(*) FROM t1 FOR SYSTEM_TIME AS OF now() join t2  FOR SYSTEM_TIME AS OF now() - '5' second on t1.k1=t2.k2;
+----
+1
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t1;

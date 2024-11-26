@@ -30,7 +30,7 @@ use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
 use risingwave_connector::source::SplitMetaData;
@@ -38,10 +38,10 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PlanNodePb,
+    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PbPlanNode,
     TaskOutputId,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
@@ -52,7 +52,7 @@ use crate::error::RwError;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{ReadSnapshot, SchedulerError, SchedulerResult};
+use crate::scheduler::{SchedulerError, SchedulerResult};
 use crate::session::{FrontendEnv, SessionImpl};
 
 // TODO(error-handling): use a concrete error type.
@@ -61,9 +61,7 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    // The snapshot will be released when LocalQueryExecution is dropped.
-    // TODO
-    snapshot: ReadSnapshot,
+    batch_query_epoch: BatchQueryEpoch,
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
     timeout: Option<Duration>,
@@ -74,21 +72,20 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: ReadSnapshot,
+        support_barrier_read: bool,
+        batch_query_epoch: BatchQueryEpoch,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
     ) -> Self {
         let sql = sql.into();
-        let worker_node_manager = WorkerNodeSelector::new(
-            front_env.worker_node_manager_ref(),
-            snapshot.support_barrier_read(),
-        );
+        let worker_node_manager =
+            WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
 
         Self {
             sql,
             query,
             front_env,
-            snapshot,
+            batch_query_epoch,
             session,
             worker_node_manager,
             timeout,
@@ -118,7 +115,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            self.snapshot.batch_query_epoch(),
+            self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
         let executor = executor.build().await?;
@@ -133,7 +130,7 @@ impl LocalQueryExecution {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
-            epoch = ?self.snapshot.batch_query_epoch(),
+            epoch = ?self.batch_query_epoch,
         );
         Box::pin(self.run_inner().instrument(span))
     }
@@ -150,6 +147,7 @@ impl LocalQueryExecution {
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let timeout = self.timeout;
+        let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
         let exec = async move {
@@ -171,7 +169,7 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::TIME_ZONE;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
@@ -181,6 +179,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
             let exec = async move {
@@ -274,7 +273,7 @@ impl LocalQueryExecution {
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
         next_executor_id: Arc<AtomicU32>,
-    ) -> SchedulerResult<PlanNodePb> {
+    ) -> SchedulerResult<PbPlanNode> {
         let identity = format!(
             "{:?}-{}",
             execution_plan_node.plan_node_type,
@@ -313,12 +312,12 @@ impl LocalQueryExecution {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
-                    let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
+                    let (worker_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self
                         .worker_node_manager
                         .manager
-                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                        .get_workers_by_worker_slot_ids(&worker_ids)?;
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
@@ -337,13 +336,13 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
-                                    task_id: idx as u32,
+                                    task_id: idx as u64,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
                                 }),
@@ -381,7 +380,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.batch_query_epoch()),
+                            epoch: Some(self.batch_query_epoch),
                             tracing_context: tracing_context.clone(),
                         };
                         // NOTE: select a random work node here.
@@ -389,7 +388,46 @@ impl LocalQueryExecution {
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(PbTaskId {
-                                    task_id: id as u32,
+                                    task_id: id as u64,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
+                                }),
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan)),
+                        };
+                        sources.push(exchange_source);
+                    }
+                } else if let Some(file_scan_info) = &second_stage.file_scan_info {
+                    let chunk_size = (file_scan_info.file_location.len() as f32
+                        / (self.worker_node_manager.schedule_unit_count()) as f32)
+                        .ceil() as usize;
+                    for (id, files) in file_scan_info.file_location.chunks(chunk_size).enumerate() {
+                        let second_stage_plan_node = self.convert_plan_node(
+                            &second_stage.root,
+                            &mut None,
+                            Some(PartitionInfo::File(files.to_vec())),
+                            next_executor_id.clone(),
+                        )?;
+                        let second_stage_plan_fragment = PlanFragment {
+                            root: Some(second_stage_plan_node),
+                            exchange_info: Some(ExchangeInfo {
+                                mode: DistributionMode::Single as i32,
+                                ..Default::default()
+                            }),
+                        };
+                        let local_execute_plan = LocalExecutePlan {
+                            plan: Some(second_stage_plan_fragment),
+                            epoch: Some(self.batch_query_epoch),
+                            tracing_context: tracing_context.clone(),
+                        };
+                        // NOTE: select a random work node here.
+                        let worker_node = self.worker_node_manager.next_random_worker()?;
+                        let exchange_source = ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(PbTaskId {
+                                    task_id: id as u64,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
                                 }),
@@ -417,7 +455,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.snapshot.batch_query_epoch()),
+                        epoch: Some(self.batch_query_epoch),
                         tracing_context,
                     };
 
@@ -429,7 +467,7 @@ impl LocalQueryExecution {
                             let exchange_source = ExchangeSource {
                                 task_output_id: Some(TaskOutputId {
                                     task_id: Some(PbTaskId {
-                                        task_id: idx as u32,
+                                        task_id: idx as u64,
                                         stage_id: exchange_source_stage_id,
                                         query_id: self.query.query_id.id.clone(),
                                     }),
@@ -443,7 +481,7 @@ impl LocalQueryExecution {
                         .collect();
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     // Since all the rest plan is embedded into the exchange node,
                     // there is no children any more.
                     children: vec![],
@@ -459,7 +497,7 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                             scan_node.scan_ranges = partition.scan_ranges;
                         }
                     }
@@ -467,7 +505,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -481,21 +519,39 @@ impl LocalQueryExecution {
                             let partition = partition
                                 .into_table()
                                 .expect("PartitionInfo should be TablePartitionInfo here");
-                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap.to_protobuf());
                         }
                     }
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
                 })
             }
-            PlanNodeType::BatchSource
-            | PlanNodeType::BatchKafkaScan
-            | PlanNodeType::BatchIcebergScan => {
+            PlanNodeType::BatchFileScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::FileScan(ref mut file_scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_file()
+                                .expect("PartitionInfo should be FilePartitionInfo here");
+                            file_scan_node.file_location = partition;
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchSource | PlanNodeType::BatchKafkaScan => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::Source(ref mut source_node) => {
@@ -512,7 +568,30 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
+                    children: vec![],
+                    identity,
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchIcebergScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::IcebergScan(ref mut iceberg_scan_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_source()
+                                .expect("PartitionInfo should be SourcePartitionInfo here");
+                            iceberg_scan_node.split = partition
+                                .into_iter()
+                                .map(|split| split.encode_to_bytes().into())
+                                .collect_vec();
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PbPlanNode {
                     children: vec![],
                     identity,
                     node_body: Some(node_body),
@@ -530,8 +609,9 @@ impl LocalQueryExecution {
                             self.get_fragment_id(&side_table_desc.table_id.into())?,
                         )?;
 
-                        // TODO: should we use `pb::ParallelUnitMapping` here?
-                        node.inner_side_vnode_mapping = mapping.to_expanded();
+                        // TODO: should we use `pb::WorkerSlotMapping` here?
+                        node.inner_side_vnode_mapping =
+                            mapping.to_expanded().into_iter().map(u64::from).collect();
                         node.worker_nodes = self.worker_node_manager.manager.list_worker_nodes();
                     }
                     _ => unreachable!(),
@@ -544,7 +624,7 @@ impl LocalQueryExecution {
                     next_executor_id,
                 )?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children: vec![left_child],
                     identity,
                     node_body: Some(node_body),
@@ -562,9 +642,9 @@ impl LocalQueryExecution {
                             next_executor_id.clone(),
                         )
                     })
-                    .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
+                    .collect::<SchedulerResult<Vec<PbPlanNode>>>()?;
 
-                Ok(PlanNodePb {
+                Ok(PbPlanNode {
                     children,
                     identity,
                     node_body: Some(execution_plan_node.node.clone()),
@@ -577,7 +657,7 @@ impl LocalQueryExecution {
     fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
         let reader = self.front_env.catalog_reader().read_guard();
         reader
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map(|table| table.fragment_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))
     }
@@ -586,11 +666,11 @@ impl LocalQueryExecution {
     fn get_table_dml_vnode_mapping(
         &self,
         table_id: &TableId,
-    ) -> SchedulerResult<ParallelUnitMapping> {
+    ) -> SchedulerResult<WorkerSlotMapping> {
         let guard = self.front_env.catalog_reader().read_guard();
 
         let table = guard
-            .get_table_by_id(table_id)
+            .get_any_table_by_id(table_id)
             .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
 
         let fragment_id = match table.dml_fragment_id.as_ref() {
@@ -610,11 +690,11 @@ impl LocalQueryExecution {
             // dml should use streaming vnode mapping
             let vnode_mapping = self.get_table_dml_vnode_mapping(table_id)?;
             let worker_node = {
-                let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                let worker_ids = vnode_mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .manager
-                    .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    .get_workers_by_worker_slot_ids(&worker_ids)?;
                 if candidates.is_empty() {
                     return Err(BatchError::EmptyWorkerNodes.into());
                 }

@@ -30,7 +30,7 @@ use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
 /// Generators
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     /// Generates query expression and returns its
     /// query schema as well.
     pub(crate) fn gen_query(&mut self) -> (Query, Vec<Column>) {
@@ -130,11 +130,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
         let alias = self.gen_table_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
-        let from = None;
         let cte = Cte {
             alias: alias.clone(),
-            query,
-            from,
+            cte_inner: risingwave_sqlparser::ast::CteInner::Query(query),
         };
 
         let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];

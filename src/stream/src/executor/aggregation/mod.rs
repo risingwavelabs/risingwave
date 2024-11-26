@@ -18,8 +18,8 @@ pub use distinct::*;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::buffer::Bitmap;
-use risingwave_expr::aggregate::{AggCall, AggKind};
+use risingwave_common::bitmap::Bitmap;
+use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_storage::StateStore;
 
@@ -38,8 +38,8 @@ pub async fn agg_call_filter_res(
 ) -> StreamExecutorResult<Bitmap> {
     let mut vis = chunk.visibility().clone();
     if matches!(
-        agg_call.kind,
-        AggKind::Min | AggKind::Max | AggKind::StringAgg
+        agg_call.agg_type,
+        AggType::Builtin(PbAggKind::Min | PbAggKind::Max | PbAggKind::StringAgg)
     ) {
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds

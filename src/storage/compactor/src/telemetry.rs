@@ -16,11 +16,33 @@ use prost::Message;
 use risingwave_common::telemetry::pb_compatible::TelemetryToProtobuf;
 use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    current_timestamp, SystemData, TelemetryNodeType, TelemetryReportBase, TelemetryResult,
+    current_timestamp, report_event_common, SystemData, TelemetryNodeType, TelemetryReportBase,
+    TelemetryResult,
 };
+use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use serde::{Deserialize, Serialize};
 
 const TELEMETRY_COMPACTOR_REPORT_TYPE: &str = "compactor";
+
+#[allow(dead_code)] // please remove when used
+pub(crate) fn report_event(
+    event_stage: PbTelemetryEventStage,
+    event_name: &str,
+    catalog_id: i64,
+    connector_name: Option<String>,
+    object: Option<PbTelemetryDatabaseObject>,
+    attributes: Option<jsonbb::Value>, // json object
+) {
+    report_event_common(
+        event_stage,
+        event_name,
+        catalog_id,
+        connector_name,
+        object,
+        attributes,
+        TELEMETRY_COMPACTOR_REPORT_TYPE.to_string(),
+    );
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct CompactorTelemetryCreator {}
@@ -33,6 +55,7 @@ impl CompactorTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for CompactorTelemetryCreator {
+    #[allow(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,

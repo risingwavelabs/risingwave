@@ -27,7 +27,7 @@ risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-similar = "2.5.0"
+similar = "2.6.0"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
@@ -39,7 +39,7 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 expect-test = "1"
-libtest-mimic = "0.7"
+libtest-mimic = "0.8"
 
 [[bin]]
 name = "sqlsmith"

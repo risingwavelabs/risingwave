@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
 use super::batch::prelude::*;
-use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::generic::{self, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::error::Result;
@@ -51,7 +52,15 @@ impl BatchSimpleAgg {
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.core.can_two_phase_agg() && self.two_phase_agg_enabled()
+        self.core.can_two_phase_agg()
+            && self
+                .core
+                // Ban two phase approx percentile.
+                .agg_calls
+                .iter()
+                .map(|agg_call| &agg_call.agg_type)
+                .all(|agg_type| !matches!(agg_type, AggType::Builtin(PbAggKind::ApproxPercentile)))
+            && self.two_phase_agg_enabled()
     }
 }
 

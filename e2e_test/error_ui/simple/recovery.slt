@@ -1,15 +1,15 @@
-# TODO: the test triggers a recovery caused by a known issue: https://github.com/risingwavelabs/risingwave/issues/12474.
+# TODO: the test triggers a recovery caused by a known issue: https://github.com/risingwavelabs/risingwave/issues/11915.
 # We should consider using a mechanism designed for testing recovery instead of depending on a bug.
 
 statement ok
-create table t (v int);
+create table t (v decimal);
 
 statement ok
-create materialized view mv as select generate_series(1, 10), coalesce(pg_sleep(2), v) / 0 bomb from t;
+create materialized view mv as select sum(coalesce(pg_sleep(1), v)) from t;
 
-# The bomb will be triggered after 2 seconds of sleep, so the insertion should return successfully.
+# The bomb will be triggered after 1 seconds of sleep, so the insertion should return successfully.
 statement ok
-insert into t values (1);
+insert into t values (4e28), (4e28);
 
 # Wait for recovery to complete.
 sleep 15s
@@ -25,7 +25,7 @@ with error as (
     limit 1
 )
 select
-case when error like '%Actor % exited unexpectedly: Executor error: Chunk operation error: Division by zero%' then 'ok'
+case when error like '%get error from control stream, in worker node %: %Actor % exited unexpectedly: Executor error: %Numeric out of range%' then 'ok'
      else error
 end as result
 from error;

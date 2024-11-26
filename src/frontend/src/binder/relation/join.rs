@@ -92,6 +92,8 @@ impl Binder {
                 JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
                 // Cross join equals to inner join with with no constraint.
                 JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+                JoinOperator::AsOfInner(constraint) => (constraint, JoinType::AsofInner),
+                JoinOperator::AsOfLeft(constraint) => (constraint, JoinType::AsofLeftOuter),
             };
             let right: Relation;
             let cond: ExprImpl;
@@ -164,10 +166,10 @@ impl Binder {
                     JoinConstraint::Using(cols) => {
                         // sanity check
                         for col in &cols {
-                            if old_context.indices_of.get(&col.real_value()).is_none() {
+                            if !old_context.indices_of.contains_key(&col.real_value()) {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in left table", col.real_value())).into());
                             }
-                            if self.context.indices_of.get(&col.real_value()).is_none() {
+                            if !self.context.indices_of.contains_key(&col.real_value()) {
                                 return Err(ErrorCode::ItemNotFound(format!("column \"{}\" specified in USING clause does not exist in right table", col.real_value())).into());
                             }
                         }

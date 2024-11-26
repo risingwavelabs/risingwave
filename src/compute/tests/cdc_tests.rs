@@ -33,15 +33,17 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
+use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
+    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::MockSource;
@@ -78,6 +80,8 @@ impl MockOffsetGenExecutor {
                 lsn: None,
                 txid: None,
                 tx_usec: None,
+                change_lsn: None,
+                commit_lsn: None,
             },
             is_heartbeat: false,
         };
@@ -169,7 +173,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MySqlOffset::new(binlog_file.clone(), 10),
     ];
 
-    let table_name = SchemaTableName::new("mock_table".to_string(), "public".to_string());
+    let table_name = SchemaTableName {
+        schema_name: "public".to_string(),
+        table_name: "mock_table".to_string(),
+    };
     let table_schema = Schema::new(vec![
         Field::with_name(DataType::Int64, "id"), // primary key
         Field::with_name(DataType::Float64, "price"),
@@ -179,11 +186,11 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
+        "mydb".to_string(),
         ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),
-        vec![0, 1],
     );
 
     let actor_id = 0x1a;
@@ -205,14 +212,23 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
     ];
 
-    let state_table = StateTable::new_without_distribution(
+    let state_table = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::from(0x42),
+            column_descs,
+            vec![OrderType::ascending()],
+            vec![0],
+            0,
+        ),
         memory_state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        vec![OrderType::ascending()],
-        vec![0_usize],
+        None,
     )
     .await;
+
+    let output_columns = vec![
+        ColumnDesc::named("id", ColumnId::new(1), DataType::Int64), // primary key
+        ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+    ];
 
     let cdc_backfill = StreamExecutor::new(
         ExecutorInfo {
@@ -225,6 +241,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             external_table,
             mock_offset_executor,
             vec![0, 1],
+            output_columns,
             None,
             Arc::new(StreamingMetrics::unused()),
             state_table,
@@ -301,6 +318,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
             added_actors: HashSet::new(),
             splits,
             pause: false,
+            subscriptions_to_add: vec![],
         }));
 
     tx.send_barrier(init_barrier);
@@ -366,9 +384,10 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_string(),
+        None,
         None,
         None,
     ));

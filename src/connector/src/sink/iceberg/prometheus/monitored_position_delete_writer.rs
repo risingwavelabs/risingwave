@@ -17,18 +17,19 @@ use icelake::io_v2::{
     PositionDeleteMetrics, PositionDeleteWriter, PositionDeleteWriterBuilder,
 };
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_schema_iceberg;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredPositionDeleteWriterBuilder<B: FileWriterBuilder> {
-    current_cache_number: LabelGuardedIntGauge<2>,
+    current_cache_number: LabelGuardedIntGauge<3>,
     inner: PositionDeleteWriterBuilder<B>,
 }
 
 impl<B: FileWriterBuilder> MonitoredPositionDeleteWriterBuilder<B> {
     pub fn new(
         inner: PositionDeleteWriterBuilder<B>,
-        current_cache_number: LabelGuardedIntGauge<2>,
+        current_cache_number: LabelGuardedIntGauge<3>,
     ) -> Self {
         Self {
             current_cache_number,
@@ -43,7 +44,7 @@ impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
 {
     type R = MonitoredPositionDeleteWriter<B>;
 
-    async fn build(self, schema: &arrow_schema::SchemaRef) -> Result<Self::R> {
+    async fn build(self, schema: &arrow_schema_iceberg::SchemaRef) -> Result<Self::R> {
         let writer = self.inner.build(schema).await?;
         Ok(MonitoredPositionDeleteWriter {
             writer,
@@ -59,7 +60,7 @@ pub struct MonitoredPositionDeleteWriter<B: FileWriterBuilder> {
     writer: PositionDeleteWriter<B>,
 
     // metrics
-    cache_number: LabelGuardedIntGauge<2>,
+    cache_number: LabelGuardedIntGauge<3>,
     current_metrics: PositionDeleteMetrics,
 }
 

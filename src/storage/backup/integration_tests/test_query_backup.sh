@@ -24,10 +24,6 @@ select * from t1;
 
 job_id=$(backup)
 echo "${job_id}"
-backup_mce=$(get_max_committed_epoch_in_backup "${job_id}")
-backup_safe_epoch=$(get_safe_epoch_in_backup "${job_id}")
-echo "backup MCE: ${backup_mce}"
-echo "backup safe_epoch: ${backup_safe_epoch}"
 
 execute_sql "
 SET RW_IMPLICIT_FLUSH TO true;
@@ -48,50 +44,16 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-min_pinned_snapshot=$(get_min_pinned_snapshot)
-while [ "${min_pinned_snapshot}" -le "${backup_mce}" ] ;
-do
-  echo "wait frontend to unpin snapshot. current: ${min_pinned_snapshot}, expect: ${backup_mce}"
-  sleep 5
-  min_pinned_snapshot=$(get_min_pinned_snapshot)
-done
-# safe epoch equals to 0 because no compaction has been done
-safe_epoch=$(get_safe_epoch)
-echo "safe epoch after unpin: ${safe_epoch}"
-[ "${safe_epoch}" -eq 0 ]
-# trigger a compaction to increase safe_epoch
-manual_compaction -c 3 -l 0
-# wait until compaction is done
-while [ "${safe_epoch}" -le "${backup_mce}" ] ;
-do
-  safe_epoch=$(get_safe_epoch)
-  sleep 5
-done
-echo "safe epoch after compaction: ${safe_epoch}"
-
-echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any backup"
-execute_sql_and_expect \
-"SET QUERY_EPOCH TO ${safe_epoch};
-select * from t1;" \
-"backup include epoch ${safe_epoch} not found"
-
 echo "QUERY_EPOCH=0 aka disabling query backup"
 execute_sql_and_expect \
 "SET QUERY_EPOCH TO 0;
 select * from t1;" \
 "1 row"
 
-echo "QUERY_EPOCH=backup_safe_epoch + 1<<16 + 1, it's < safe_epoch but covered by backup"
-epoch=$((backup_safe_epoch + (1<<16) + 1))
-[ ${epoch} -eq 65537 ]
+table_committed_epoch=$(get_table_committed_epoch_in_meta_snapshot)
+echo "QUERY_EPOCH=table committed epoch in meta snapshot, it's covered by backup"
 execute_sql_and_expect \
-"SET QUERY_EPOCH TO ${epoch};
-select * from t1;" \
-"0 row"
-
-echo "QUERY_EPOCH=backup_mce, it's < safe_epoch but covered by backup"
-execute_sql_and_expect \
-"SET QUERY_EPOCH TO ${backup_mce};
+"SET QUERY_EPOCH TO ${table_committed_epoch};
 select * from t1;" \
 "3 row"
 

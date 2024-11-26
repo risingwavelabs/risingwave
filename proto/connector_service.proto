@@ -4,7 +4,6 @@ package connector_service;
 
 import "catalog.proto";
 import "common.proto";
-import "data.proto";
 import "plan_common.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
@@ -30,40 +29,31 @@ message SinkParam {
   string sink_name = 8;
 }
 
-enum SinkPayloadFormat {
-  FORMAT_UNSPECIFIED = 0;
-  JSON = 1;
-  STREAM_CHUNK = 2;
-}
-
 message SinkWriterStreamRequest {
   message StartSink {
     SinkParam sink_param = 1;
-    SinkPayloadFormat format = 2;
+    // Deprecated: SinkPayloadFormat format = 2;
+    reserved "format";
+    reserved 2;
     TableSchema payload_schema = 3;
   }
 
   message WriteBatch {
-    message JsonPayload {
-      message RowOp {
-        data.Op op_type = 1;
-        string line = 2;
-      }
-      repeated RowOp row_ops = 1;
-    }
-
     message StreamChunkPayload {
       bytes binary_data = 1;
     }
 
     oneof payload {
-      JsonPayload json_payload = 1;
       StreamChunkPayload stream_chunk_payload = 2;
       // This is a reference pointer to a StreamChunk. The StreamChunk is owned
       // by the JniSinkWriterStreamRequest, which should handle the release of StreamChunk.
       // Index set to 5 because 3 and 4 have been occupied by `batch_id` and `epoch`
       int64 stream_chunk_ref_pointer = 5;
     }
+
+    // Deprecated in oneof payload: JsonPayload json_payload = 1;
+    reserved "json_payload";
+    reserved 1;
 
     uint64 batch_id = 3;
     uint64 epoch = 4;
@@ -157,13 +147,22 @@ message SinkCoordinatorStreamResponse {
 /* Source Service */
 
 message CdcMessage {
+  enum CdcMessageType {
+    UNSPECIFIED = 0;
+    HEARTBEAT = 1;
+    DATA = 2;
+    TRANSACTION_META = 3;
+    SCHEMA_CHANGE = 4;
+  }
+
   // The value of the Debezium message
   string payload = 1;
   string partition = 2;
   string offset = 3;
   string full_table_name = 4;
   int64 source_ts_ms = 5;
-  bool is_transaction_meta = 6;
+  CdcMessageType msg_type = 6;
+
   // The key of the Debezium message, which only used by `mongodb-cdc` connector.
   string key = 7;
 }
@@ -174,6 +173,7 @@ enum SourceType {
   POSTGRES = 2;
   CITUS = 3;
   MONGODB = 4;
+  SQL_SERVER = 5;
 }
 
 message GetEventStreamRequest {
@@ -229,9 +229,15 @@ message CoordinateRequest {
     SinkMetadata metadata = 2;
   }
 
+  message UpdateVnodeBitmapRequest {
+    common.Buffer vnode_bitmap = 1;
+  }
+
   oneof msg {
     StartCoordinationRequest start_request = 1;
     CommitRequest commit_request = 2;
+    UpdateVnodeBitmapRequest update_vnode_request = 3;
+    bool stop = 4;
   }
 }
 

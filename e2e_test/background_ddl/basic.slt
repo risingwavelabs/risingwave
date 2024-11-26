@@ -14,7 +14,7 @@ statement ok
 FLUSH;
 
 statement ok
-SET STREAMING_RATE_LIMIT=10000;
+SET BACKFILL_RATE_LIMIT=10000;
 
 statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
@@ -55,6 +55,48 @@ DROP MATERIALIZED VIEW m2;
 
 statement ok
 DROP TABLE t;
+
+################### Test stream now
+
+statement ok
+create table t (v1 timestamp with time zone, v2 timestamp with time zone);
+
+statement ok
+insert into t select to_timestamp(x) as z, to_timestamp(x) as y from generate_series(1, 1000) t(x);
+
+statement ok
+set backfill_rate_limit=1;
+
+statement ok
+create materialized view m1 as select * from t where v1 >= now() and v2 >= now();
+
+sleep 2s
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement ok
+recover;
+
+sleep 5s
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement ok
+drop materialized view m1;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+statement ok
+drop table t;
 
 statement ok
 SET BACKGROUND_DDL=false;

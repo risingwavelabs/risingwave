@@ -19,7 +19,6 @@ use paste::paste;
 use super::*;
 use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
-use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
@@ -30,14 +29,14 @@ pub trait PredicatePushdown {
     /// There are three kinds of predicates:
     ///
     /// 1. those can't be pushed down. We just create a `LogicalFilter` for them above the current
-    /// `PlanNode`. i.e.,
+    ///    `PlanNode`. i.e.,
     ///
     ///     ```ignore
     ///     LogicalFilter::create(self.clone().into(), predicate)
     ///     ```
     ///
     /// 2. those can be merged with current `PlanNode` (e.g., `LogicalJoin`). We just merge
-    /// the predicates with the `Condition` of it.
+    ///    the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
     fn predicate_pushdown(

@@ -1,4 +1,5 @@
 version: 1
+appendOnly: true
 
 # Match title
 labels:
@@ -30,6 +31,8 @@ labels:
   title: "^cherry-pick.*"
 - label: "cherry-pick"
   title: "^cherry pick.*"
+- label: "cherry-pick"
+  title: "^cherrypick.*"
 
 # Match body
 - label: "breaking-change"
@@ -37,5 +40,9 @@ labels:
 
 # Match File changes
 - label: "ci/run-e2e-single-node-tests"
+  files:
+  - "src\\/meta\\/.*.rs"
+
+- label: "ci/run-e2e-test-other-backends"
   files:
   - "src\\/meta\\/.*.rs"

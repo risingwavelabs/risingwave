@@ -28,15 +28,15 @@ host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 echo "--- e2e, ci-3cn-3fe-in-memory, streaming"
 risedev ci-start ci-3cn-3fe-in-memory
 sqllogictest --version
-sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-in-memory-streaming-${profile}" --label in-memory
+sqllogictest "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-in-memory-streaming-${profile}" --label "in-memory" --label "parallel"
 
 echo "--- Kill cluster"
 risedev ci-kill
 
 echo "--- e2e, ci-3cn-3fe-in-memory, batch"
 risedev ci-start ci-3cn-3fe-in-memory
-sqllogictest "${host_args[@]}" -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-in-memory-batch-ddl-${profile}" --label in-memory
-sqllogictest "${host_args[@]}" -d dev './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-in-memory-batch-${profile}" --label in-memory
+sqllogictest "${host_args[@]}" -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-in-memory-batch-ddl-${profile}" --label "in-memory" --label "parallel"
+sqllogictest "${host_args[@]}" -d dev './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-in-memory-batch-${profile}" --label "in-memory" --label "parallel"
 
 echo "--- Kill cluster"
 risedev ci-kill

@@ -15,17 +15,22 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
+use anyhow::anyhow;
 use downcast_rs::{impl_downcast, Downcast};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common_estimate_size::EstimateSize;
 
+use crate::expr::build_from_prost;
 use crate::sig::FuncBuilder;
 use crate::{ExprError, Result};
 
 // aggregate definition
 mod def;
+mod scalar_wrapper;
+// user defined aggregate function
+mod user_defined;
 
 pub use self::def::*;
 
@@ -36,8 +41,8 @@ pub trait AggregateFunction: Send + Sync + 'static {
     fn return_type(&self) -> DataType;
 
     /// Creates an initial state of the aggregate function.
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Datum(None)
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Datum(None))
     }
 
     /// Update the state with multiple rows.
@@ -58,7 +63,7 @@ pub trait AggregateFunction: Send + Sync + 'static {
     fn encode_state(&self, state: &AggregateState) -> Result<Datum> {
         match state {
             AggregateState::Datum(d) => Ok(d.clone()),
-            _ => panic!("cannot encode state"),
+            AggregateState::Any(_) => Err(ExprError::Internal(anyhow!("cannot encode state"))),
         }
     }
 
@@ -140,16 +145,22 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
 pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFunction> {
-    let sig = crate::sig::FUNCTION_REGISTRY
-        .get(agg.kind, agg.args.arg_types(), &agg.return_type)
-        .ok_or_else(|| {
-            ExprError::UnsupportedFunction(format!(
-                "{}({}) -> {}",
-                agg.kind.to_protobuf().as_str_name().to_ascii_lowercase(),
-                agg.args.arg_types().iter().format(", "),
-                agg.return_type,
-            ))
-        })?;
+    // handle special kinds
+    let kind = match &agg.agg_type {
+        AggType::UserDefined(udf) => {
+            return user_defined::new_user_defined(&agg.return_type, udf);
+        }
+        AggType::WrapScalar(scalar) => {
+            return Ok(Box::new(scalar_wrapper::ScalarWrapper::new(
+                agg.args.arg_types()[0].clone(),
+                build_from_prost(scalar)?,
+            )));
+        }
+        AggType::Builtin(kind) => kind,
+    };
+
+    // find the signature for builtin aggregation
+    let sig = crate::sig::FUNCTION_REGISTRY.get(*kind, agg.args.arg_types(), &agg.return_type)?;
 
     if let FuncBuilder::Aggregate {
         append_only: Some(f),

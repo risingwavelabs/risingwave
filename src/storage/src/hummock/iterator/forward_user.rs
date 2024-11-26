@@ -14,6 +14,7 @@
 
 use std::ops::Bound::*;
 
+use more_asserts::debug_assert_ge;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, UserKey, UserKeyRange};
@@ -124,20 +125,26 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         // Handle range scan
         match &self.key_range.0 {
-            Included(begin_key) => {
+            Included(begin_key) | Excluded(begin_key) => {
                 let full_key = FullKey {
-                    user_key: begin_key.clone(),
+                    user_key: begin_key.as_ref(),
                     epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
-                self.iterator.seek(full_key.to_ref()).await?;
+                self.iterator.seek(full_key).await?;
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
             }
         };
 
-        self.try_advance_to_next_valid().await
+        self.try_advance_to_next_valid().await?;
+        if let Excluded(begin_key) = &self.key_range.0
+            && self.is_valid()
+            && self.key().user_key == begin_key.as_ref()
+        {
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
@@ -147,8 +154,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.full_key_tracker = FullKeyTracker::new(FullKey::default());
 
         // Handle range scan when key < begin_key
-        let user_key = match &self.key_range.0 {
-            Included(begin_key) => {
+        let seek_key = match &self.key_range.0 {
+            Included(begin_key) | Excluded(begin_key) => {
                 let begin_key = begin_key.as_ref();
                 if begin_key > user_key {
                     begin_key
@@ -156,17 +163,24 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     user_key
                 }
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => user_key,
         };
 
         let full_key = FullKey {
-            user_key,
+            user_key: seek_key,
             epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
 
-        self.try_advance_to_next_valid().await
+        self.try_advance_to_next_valid().await?;
+        if let Excluded(begin_key) = &self.key_range.0
+            && self.is_valid()
+            && self.key().user_key == begin_key.as_ref()
+        {
+            debug_assert_ge!(begin_key.as_ref(), user_key);
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Indicates whether the iterator can be used.
@@ -274,7 +288,6 @@ mod tests {
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
     use crate::hummock::sstable_store::SstableStoreRef;
-    use crate::hummock::value::HummockValue;
     use crate::hummock::TableHolder;
 
     #[tokio::test]
@@ -557,7 +570,11 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table.clone(),
+            sstable_store.clone(),
+            read_options.clone(),
+        )];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -610,6 +627,35 @@ mod tests {
             .await
             .unwrap();
         assert!(!ui.is_valid());
+
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let mi = MergeIterator::new(iters);
+
+        let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
+        let end_key = Excluded(iterator_test_bytes_user_key_of(7));
+
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
+        // ----- after-end-range iterate -----
+        ui.seek(iterator_test_bytes_user_key_of(1).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(2).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(3).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        ui.seek(iterator_test_bytes_user_key_of(4).as_ref())
+            .await
+            .unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
     }
 
     // ..=right

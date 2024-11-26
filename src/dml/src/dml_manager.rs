@@ -170,7 +170,6 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;

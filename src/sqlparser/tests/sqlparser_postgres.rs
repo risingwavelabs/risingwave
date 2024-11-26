@@ -16,7 +16,6 @@
 #[macro_use]
 mod test_utils;
 use risingwave_sqlparser::ast::*;
-use risingwave_sqlparser::parser::ParserError;
 use test_utils::*;
 
 #[test]
@@ -314,19 +313,19 @@ fn parse_bad_if_not_exists() {
     for (sql, err_msg) in [
         (
             "CREATE TABLE NOT EXISTS uk_cities ()",
-            "Expected end of statement, found: EXISTS",
+            "expected end of statement, found: EXISTS",
         ),
         (
             "CREATE TABLE IF EXISTS uk_cities ()",
-            "Expected end of statement, found: EXISTS",
+            "expected end of statement, found: EXISTS",
         ),
         (
             "CREATE TABLE IF uk_cities ()",
-            "Expected end of statement, found: uk_cities",
+            "expected end of statement, found: uk_cities",
         ),
         (
             "CREATE TABLE IF NOT uk_cities ()",
-            "Expected end of statement, found: NOT",
+            "expected end of statement, found: NOT",
         ),
     ] {
         let res = parse_sql_statements(sql);
@@ -342,6 +341,7 @@ fn parse_create_schema_if_not_exists() {
         Statement::CreateSchema {
             if_not_exists: true,
             schema_name,
+            ..
         } => assert_eq!("schema_name", schema_name.to_string()),
         _ => unreachable!(),
     }
@@ -439,12 +439,14 @@ fn parse_set() {
     one_statement_parses_to("SET a TO b", "SET a = b");
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
     for (sql, err_msg) in [
-        ("SET", "Expected identifier, found: EOF"),
-        ("SET a b", "Expected equals sign or TO, found: b"),
-        ("SET a =", "Expected parameter value, found: EOF"),
+        ("SET", "expected identifier, found: EOF"),
+        ("SET a b", "expected equals sign or TO, found: b"),
+        ("SET a =", "expected parameter value"),
     ] {
-        let res = parse_sql_statements(sql);
-        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+        let error = parse_sql_statements(sql).unwrap_err().to_string();
+        if !error.contains(err_msg) {
+            panic!("expected error '{}' not found in '{}'", err_msg, error);
+        }
     }
 }
 
@@ -872,31 +874,6 @@ fn parse_create_function() {
             with_options: Default::default(),
         }
     );
-
-    let sql = "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;' ASYNC";
-    assert_eq!(
-        verified_stmt(sql),
-        Statement::CreateFunction {
-            or_replace: false,
-            temporary: false,
-            name: ObjectName(vec![Ident::new_unchecked("add")]),
-            args: Some(vec![
-                OperateFunctionArg::unnamed(DataType::Int),
-                OperateFunctionArg::unnamed(DataType::Int),
-            ]),
-            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
-            params: CreateFunctionBody {
-                language: Some("SQL".into()),
-                behavior: Some(FunctionBehavior::Immutable),
-                as_: Some(FunctionDefinition::SingleQuotedDef(
-                    "select $1 + $2;".into()
-                )),
-                function_type: Some(CreateFunctionType::Async),
-                ..Default::default()
-            },
-            with_options: Default::default(),
-        }
-    );
 }
 
 #[test]
@@ -909,7 +886,7 @@ fn parse_create_aggregate() {
             or_replace: true,
             name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![OperateFunctionArg::unnamed(DataType::Int)],
-            returns: Some(DataType::BigInt),
+            returns: DataType::BigInt,
             append_only: true,
             params: CreateFunctionBody {
                 language: Some("python".into()),
@@ -1286,10 +1263,8 @@ fn parse_variadic_argument() {
     _ = verified_stmt(sql);
 
     let sql = "SELECT foo(VARIADIC a, b, VARIADIC c)";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "VARIADIC argument must be last".to_string()
-        ))
-    );
+    assert!(parse_sql_statements(sql)
+        .unwrap_err()
+        .to_string()
+        .contains("VARIADIC argument must be the last"),);
 }

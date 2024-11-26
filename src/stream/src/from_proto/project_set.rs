@@ -14,11 +14,10 @@
 
 use multimap::MultiMap;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::*;
-use crate::executor::ProjectSetExecutor;
+use crate::executor::{ProjectSetExecutor, ProjectSetSelectItem};
 
 pub struct ProjectSetExecutorBuilder;
 
@@ -35,7 +34,11 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             .get_select_list()
             .iter()
             .map(|proto| {
-                ProjectSetSelectItem::from_prost(proto, params.env.config().developer.chunk_size)
+                ProjectSetSelectItem::from_prost(
+                    proto,
+                    params.eval_error_report.clone(),
+                    params.env.config().developer.chunk_size,
+                )
             })
             .try_collect()?;
         let watermark_derivations = MultiMap::from_iter(
@@ -62,6 +65,7 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,
+            params.eval_error_report,
         );
         Ok((params.info, exec).into())
     }

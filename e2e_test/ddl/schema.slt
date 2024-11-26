@@ -67,3 +67,45 @@ drop schema Myschema;
 
 statement ok
 drop schema "Myschema";
+
+# test derived schema name and authorization with user
+statement ok
+create user user_for_authorization;
+
+statement ok
+create schema if not exists authorization user_for_authorization;
+
+statement ok
+create schema myschema authorization user_for_authorization;
+
+query T rowsort
+show schemas;
+----
+information_schema
+myschema
+pg_catalog
+public
+rw_catalog
+user_for_authorization
+
+query T rowsort
+select schema_name from information_schema.schemata;
+----
+information_schema
+myschema
+pg_catalog
+public
+rw_catalog
+user_for_authorization
+
+statement error Permission denied
+drop user user_for_authorization;
+
+statement ok
+drop schema myschema;
+
+statement ok
+drop schema user_for_authorization;
+
+statement ok
+drop user user_for_authorization;

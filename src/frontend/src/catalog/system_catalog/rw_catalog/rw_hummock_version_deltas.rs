@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::types::{Fields, JsonbVal};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
 use serde_json::json;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -24,8 +27,6 @@ struct RwHummockVersionDelta {
     #[primary_key]
     id: i64,
     prev_id: i64,
-    max_committed_epoch: i64,
-    safe_epoch: i64,
     trivial_move: bool,
     group_deltas: JsonbVal,
 }
@@ -36,12 +37,15 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
     let rows = deltas
         .into_iter()
         .map(|d| RwHummockVersionDelta {
-            id: d.id as _,
-            prev_id: d.prev_id as _,
-            max_committed_epoch: d.max_committed_epoch as _,
-            safe_epoch: d.safe_epoch as _,
+            id: d.id.to_u64() as _,
+            prev_id: d.prev_id.to_u64() as _,
             trivial_move: d.trivial_move,
-            group_deltas: json!(d.group_deltas).into(),
+            group_deltas: json!(d
+                .group_deltas
+                .into_iter()
+                .map(|(group_id, deltas)| (group_id, PbGroupDeltas::from(deltas)))
+                .collect::<HashMap<u64, PbGroupDeltas>>())
+            .into(),
         })
         .collect();
     Ok(rows)

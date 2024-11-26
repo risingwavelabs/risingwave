@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::session_config::OverWindowCachePolicy;
-use risingwave_expr::aggregate::{AggArgs, AggKind};
+use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameExclusion, WindowFuncCall, WindowFuncKind,
 };
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{OverWindowExecutor, OverWindowExecutorArgs};
 
@@ -64,12 +65,16 @@ async fn create_executor<S: StateStore>(
         Schema { fields }
     };
 
-    let state_table = StateTable::new_without_distribution(
+    let state_table = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::new(1),
+            table_columns,
+            table_order_types,
+            table_pk_indices,
+            0,
+        ),
         store,
-        TableId::new(1),
-        table_columns,
-        table_order_types,
-        table_pk_indices,
+        None,
     )
     .await;
 
@@ -104,15 +109,15 @@ async fn test_over_window_lag_lead_append_only() {
     let calls = vec![
         // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
@@ -215,15 +220,15 @@ async fn test_over_window_lag_lead_with_updates() {
     let calls = vec![
         // lag(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
         },
         // lead(x, 1)
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::FirstValue),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int32,
             frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
         },
@@ -390,8 +395,8 @@ async fn test_over_window_sum() {
         //   rows between 1 preceding and 2 following exclude current row
         // )
         WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::Sum),
-            args: AggArgs::Unary(DataType::Int32, 3),
+            kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
             return_type: DataType::Int64,
             frame: Frame::rows_with_exclusion(
                 FrameBound::Preceding(1),

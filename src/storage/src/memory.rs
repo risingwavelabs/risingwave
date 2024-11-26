@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -22,7 +22,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::mem_table::MemtableLocalStateStore;
@@ -35,6 +35,12 @@ pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 #[allow(clippy::type_complexity)]
 pub trait RangeKv: Clone + Send + Sync + 'static {
     fn range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>>;
+
+    fn rev_range(
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
@@ -60,6 +66,21 @@ impl RangeKv for BTreeMapRangeKv {
         Ok(self
             .read()
             .range(range)
+            .take(limit)
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect())
+    }
+
+    fn rev_range(
+        &self,
+        range: BytesFullKeyRange,
+        limit: Option<usize>,
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
+        let limit = limit.unwrap_or(usize::MAX);
+        Ok(self
+            .read()
+            .range(range)
+            .rev()
             .take(limit)
             .map(|(key, value)| (key.clone(), value.clone()))
             .collect())
@@ -133,6 +154,43 @@ pub mod sled {
             let limit = limit.unwrap_or(usize::MAX);
             let mut ret = vec![];
             for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
+                let (key, value) = result?;
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
+                if !full_key_ref_bound.contains(&full_key.to_ref()) {
+                    continue;
+                }
+                let value = match value.as_ref() {
+                    [EMPTY] => None,
+                    [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
+                    _ => unreachable!("malformed value: {:?}", value),
+                };
+                ret.push((full_key, value))
+            }
+            Ok(ret)
+        }
+
+        fn rev_range(
+            &self,
+            range: BytesFullKeyRange,
+            limit: Option<usize>,
+        ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
+            let (left, right) = range;
+            let full_key_ref_bound = (
+                left.as_ref().map(FullKey::to_ref),
+                right.as_ref().map(FullKey::to_ref),
+            );
+            let left_encoded = left.as_ref().map(|key| key.to_ref().encode_reverse_epoch());
+            let right_encoded = right
+                .as_ref()
+                .map(|key| key.to_ref().encode_reverse_epoch());
+            let limit = limit.unwrap_or(usize::MAX);
+            let mut ret = vec![];
+            for result in self
+                .inner
+                .range((left_encoded, right_encoded))
+                .rev()
+                .take(limit)
+            {
                 let (key, value) = result?;
                 let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
                 if !full_key_ref_bound.contains(&full_key.to_ref()) {
@@ -279,7 +337,6 @@ pub mod sled {
 }
 
 mod batched_iter {
-    use itertools::Itertools;
 
     use super::*;
 
@@ -293,13 +350,15 @@ mod batched_iter {
         inner: R,
         range: BytesFullKeyRange,
         current: std::vec::IntoIter<(FullKey<Bytes>, Option<Bytes>)>,
+        rev: bool,
     }
 
     impl<R: RangeKv> Iter<R> {
-        pub fn new(inner: R, range: BytesFullKeyRange) -> Self {
+        pub fn new(inner: R, range: BytesFullKeyRange, rev: bool) -> Self {
             Self {
                 inner,
                 range,
+                rev,
                 current: Vec::new().into_iter(),
             }
         }
@@ -312,14 +371,17 @@ mod batched_iter {
         fn refill(&mut self) -> StorageResult<()> {
             assert!(self.current.is_empty());
 
-            let batch = self
-                .inner
-                .range(
+            let batch = if self.rev {
+                self.inner.rev_range(
                     (self.range.0.clone(), self.range.1.clone()),
                     Some(Self::BATCH_SIZE),
                 )?
-                .into_iter()
-                .collect_vec();
+            } else {
+                self.inner.range(
+                    (self.range.0.clone(), self.range.1.clone()),
+                    Some(Self::BATCH_SIZE),
+                )?
+            };
 
             if let Some((last_key, _)) = batch.last() {
                 let full_key = FullKey::new_with_gap_epoch(
@@ -327,7 +389,11 @@ mod batched_iter {
                     TableKey(last_key.user_key.table_key.0.clone()),
                     last_key.epoch_with_gap,
                 );
-                self.range.0 = Bound::Excluded(full_key);
+                if self.rev {
+                    self.range.1 = Bound::Excluded(full_key);
+                } else {
+                    self.range.0 = Bound::Excluded(full_key);
+                }
             }
             self.current = batch.into_iter();
             Ok(())
@@ -350,7 +416,6 @@ mod batched_iter {
     #[cfg(test)]
     mod tests {
         use rand::Rng;
-        use risingwave_hummock_sdk::key::FullKey;
 
         use super::*;
         use crate::memory::sled::SledRangeKv;
@@ -414,7 +479,7 @@ mod batched_iter {
 
                 let v1 = {
                     let mut v = vec![];
-                    let mut iter = Iter::new(map.clone(), range.clone());
+                    let mut iter = Iter::new(map.clone(), range.clone(), false);
                     while let Some((key, value)) = iter.next().unwrap() {
                         v.push((key, value));
                     }
@@ -540,21 +605,25 @@ impl<R: RangeKv> RangeKvStateStore<R> {
 impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
     type Iter = RangeKvStateStoreIter<R>;
+    type RevIter = RangeKvStateStoreRevIter<R>;
 
     #[allow(clippy::unused_async)]
-    async fn get(
+    async fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
         // We do not really care about vnodes here, so we just use the default value.
         let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
         Ok(match res.as_slice() {
             [] => None,
-            [(_, value)] => Some(value.clone()),
+            [(key, value)] => Some((
+                FullKey::decode(key.as_ref()).to_vec().into_bytes(),
+                value.clone(),
+            )),
             _ => unreachable!(),
         })
     }
@@ -570,6 +639,25 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(read_options.table_id, key_range),
+                false,
+            ),
+            epoch,
+            true,
+        ))
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn rev_iter(
+        &self,
+        key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<Self::RevIter> {
+        Ok(RangeKvStateStoreRevIter::new(
+            batched_iter::Iter::new(
+                self.inner.clone(),
+                to_full_key_range(read_options.table_id, key_range),
+                true,
             ),
             epoch,
             true,
@@ -586,6 +674,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(options.table_id, key_range.clone()),
+                false,
             ),
             max_epoch,
             true,
@@ -594,6 +683,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
             batched_iter::Iter::new(
                 self.inner.clone(),
                 to_full_key_range(options.table_id, key_range),
+                false,
             ),
             min_epoch,
             false,
@@ -648,34 +738,17 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = MemtableLocalStateStore<Self>;
 
     #[allow(clippy::unused_async)]
-    async fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+    async fn try_wait_epoch(
+        &self,
+        _epoch: HummockReadEpoch,
+        _options: TryWaitEpochOptions,
+    ) -> StorageResult<()> {
         // memory backend doesn't need to wait for epoch, so this is a no-op.
         Ok(())
     }
 
-    #[allow(clippy::unused_async)]
-    async fn sync(&self, _epoch: u64) -> StorageResult<SyncResult> {
-        self.inner.flush()?;
-        // memory backend doesn't need to push to S3, so this is a no-op
-        Ok(SyncResult::default())
-    }
-
-    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
-
-    #[allow(clippy::unused_async)]
-    async fn clear_shared_buffer(&self, prev_epoch: u64) {
-        for (key, _) in self.inner.range((Unbounded, Unbounded), None).unwrap() {
-            assert!(key.epoch_with_gap.pure_epoch() <= prev_epoch);
-        }
-    }
-
-    #[allow(clippy::unused_async)]
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         MemtableLocalStateStore::new(self.clone(), option)
-    }
-
-    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
-        Ok(())
     }
 }
 
@@ -687,7 +760,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     last_key: Option<UserKey<Bytes>>,
 
-    item_buffer: Option<StateStoreIterItem>,
+    item_buffer: Option<StateStoreKeyedRow>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -708,7 +781,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     #[allow(clippy::unused_async)]
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
             .item_buffer
@@ -734,6 +807,81 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
                     self.item_buffer = Some((key, value));
                     break;
                 }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct RangeKvStateStoreRevIter<R: RangeKv> {
+    inner: batched_iter::Iter<R>,
+
+    epoch: HummockEpoch,
+    is_inclusive_epoch: bool,
+
+    item_buffer: VecDeque<StateStoreKeyedRow>,
+}
+
+impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
+    pub fn new(
+        inner: batched_iter::Iter<R>,
+        epoch: HummockEpoch,
+        is_inclusive_epoch: bool,
+    ) -> Self {
+        Self {
+            inner,
+            epoch,
+            is_inclusive_epoch,
+            item_buffer: VecDeque::default(),
+        }
+    }
+}
+
+impl<R: RangeKv> StateStoreIter for RangeKvStateStoreRevIter<R> {
+    #[allow(clippy::unused_async)]
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
+        self.next_inner()?;
+        Ok(self
+            .item_buffer
+            .back()
+            .map(|(key, value)| (key.to_ref(), value.as_ref())))
+    }
+}
+
+impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
+    fn next_inner(&mut self) -> StorageResult<()> {
+        self.item_buffer.pop_back();
+        while let Some((key, value)) = self.inner.next()? {
+            let epoch = key.epoch_with_gap.pure_epoch();
+            if epoch > self.epoch {
+                continue;
+            }
+            if epoch == self.epoch && !self.is_inclusive_epoch {
+                continue;
+            }
+
+            let v = match value {
+                Some(v) => v,
+                None => {
+                    if let Some(last_key) = self.item_buffer.front()
+                        && key.user_key.as_ref() == last_key.0.user_key.as_ref()
+                    {
+                        self.item_buffer.clear();
+                    }
+                    continue;
+                }
+            };
+
+            if let Some(last_key) = self.item_buffer.front() {
+                if key.user_key.as_ref() != last_key.0.user_key.as_ref() {
+                    self.item_buffer.push_front((key, v));
+                    break;
+                } else {
+                    self.item_buffer.pop_front();
+                    self.item_buffer.push_front((key, v));
+                }
+            } else {
+                self.item_buffer.push_front((key, v));
             }
         }
         Ok(())

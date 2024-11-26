@@ -116,8 +116,8 @@ impl AggregateFunction for PercentileDisc {
         self.return_type.clone()
     }
 
-    fn create_state(&self) -> AggregateState {
-        AggregateState::Any(Box::<State>::default())
+    fn create_state(&self) -> Result<AggregateState> {
+        Ok(AggregateState::Any(Box::<State>::default()))
     }
 
     async fn update(&self, state: &mut AggregateState, input: &StreamChunk) -> Result<()> {

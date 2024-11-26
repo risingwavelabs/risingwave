@@ -21,7 +21,7 @@ use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
     HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
     ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
+    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
 use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
@@ -139,6 +139,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<GetBackPressureResponse>, Status> {
         Err(Status::unimplemented(
             "Get Back Pressure unimplemented in compactor",
+        ))
+    }
+
+    async fn tiered_cache_tracing(
+        &self,
+        _: Request<TieredCacheTracingRequest>,
+    ) -> Result<Response<TieredCacheTracingResponse>, Status> {
+        Err(Status::unimplemented(
+            "Tiered Cache Tracing unimplemented in compactor",
         ))
     }
 }

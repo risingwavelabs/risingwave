@@ -1,0 +1,179 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create table t2 (v1 int, v2 int);
+
+statement ok
+create table t3 (v1 int primary key, v2 int);
+
+# test public.t1 due to https://github.com/risingwavelabs/risingwave/issues/18747
+statement ok
+create materialized view mv1 as with sub as changelog from public.t1 select * from sub;
+
+statement ok
+create materialized view mv2 as with sub as changelog from t2 select * from sub;
+
+statement ok
+create materialized view mv3 as with sub as changelog from t1 select v1, v2 from sub;
+
+statement ok
+create materialized view mv4 as with sub1 as changelog from t1, sub2 as changelog from t2
+select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
+
+statement ok
+create materialized view mv5 as with sub1 as changelog from t1, sub2 as changelog from t2
+select sub1.v1 as v11, sub1.v2 as v12, sub2.v1 as v21, sub2.v2 as v22, sub1.changelog_op as op1, sub2.changelog_op as op2 from sub1 inner join sub2 on sub1.v1 = sub2.v1;
+
+statement ok
+create materialized view mv6 as with sub as changelog from t3 select * from sub;
+
+statement ok
+create materialized view mv7(col1,col2,col3) as with sub as changelog from t3 select * from sub;
+
+statement ok
+create materialized view mv8 as with sub as changelog from t2 select *, _changelog_row_id as row_id from sub;
+
+statement ok
+insert into t1 values(1,1),(2,2);
+
+statement ok
+insert into t2 values(1,10),(2,20);
+
+statement ok
+insert into t3 values(5,5),(6,6);
+
+statement ok
+update t1 set v2 = 100 where v1 = 1;
+
+statement ok
+update t2 set v2 = 100 where v1 = 1;
+
+statement ok
+update t3 set v2 = 500 where v1 = 5;
+
+statement ok
+delete from t1 where v1 = 2;
+
+statement ok
+alter materialized view mv7 rename to mv7_rename;
+
+statement ok
+alter table t3 rename to t3_rename;
+
+query III rowsort
+select * from mv1 order by v1;
+----
+1 1 1
+1 1 4
+1 100 3
+2 2 1
+2 2 2
+
+query III rowsort
+select * from mv2 order by v1;
+----
+1 10 1
+1 10 4
+1 100 3
+2 20 1
+
+query III rowsort
+select * from mv3 order by v1;
+----
+1 1
+1 1
+1 100
+2 2
+2 2
+
+query III rowsort
+select * from mv4 order by v11,v21;
+----
+1 1 1 10
+1 1 1 10
+1 1 1 10
+1 1 1 10
+1 1 1 100
+1 1 1 100
+1 100 1 10
+1 100 1 10
+1 100 1 100
+2 2 2 20
+2 2 2 20
+
+
+query III rowsort
+select * from mv5 order by v11,v21;
+----
+1 1 1 10 1 1
+1 1 1 10 1 4
+1 1 1 10 4 1
+1 1 1 10 4 4
+1 1 1 100 1 3
+1 1 1 100 4 3
+1 100 1 10 3 1
+1 100 1 10 3 4
+1 100 1 100 3 3
+2 2 2 20 1 1
+2 2 2 20 2 1
+
+query III rowsort
+select * from mv6 order by v1;
+----
+5 5 1
+5 5 4
+5 500 3
+6 6 1
+
+query III rowsort
+select * from mv7_rename order by col1;
+----
+5 5 1
+5 5 4
+5 500 3
+6 6 1
+
+query III rowsort
+select v1 from mv8 order by v1;
+----
+1
+1
+1
+2
+
+statement ok
+drop materialized view mv8;
+
+statement ok
+drop materialized view mv7_rename;
+
+statement ok
+drop materialized view mv6;
+
+statement ok
+drop materialized view mv5;
+
+statement ok
+drop materialized view mv4;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t3_rename;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t1;

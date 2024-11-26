@@ -715,7 +715,7 @@ where
                             break;
                         } else if prev_leader != election_row.id {
                             tracing::info!("leader is {}", election_row.id);
-                            prev_leader = election_row.id.clone();
+                            prev_leader.clone_from(&election_row.id)
                         }
 
                         timeout_ticker.reset();
@@ -781,7 +781,7 @@ where
             .collect())
     }
 
-    async fn is_leader(&self) -> bool {
+    fn is_leader(&self) -> bool {
         *self.is_leader_sender.borrow()
     }
 }
@@ -842,7 +842,7 @@ mod tests {
         loop {
             receiver.changed().await.unwrap();
             if *receiver.borrow() {
-                assert!(sql_election_client.is_leader().await);
+                assert!(sql_election_client.is_leader());
                 break;
             }
         }
@@ -874,7 +874,7 @@ mod tests {
         let mut is_leaders = vec![];
 
         for client in clients {
-            is_leaders.push(client.is_leader().await);
+            is_leaders.push(client.is_leader());
         }
 
         assert!(is_leaders.iter().filter(|&x| *x).count() <= 1);

@@ -23,7 +23,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
     LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
 
 pub type RecordId = u64;
@@ -146,10 +146,7 @@ pub enum Operation {
     IterNext(RecordId),
 
     /// Sync operation of Hummock.
-    Sync(u64),
-
-    /// Seal operation of Hummock.
-    Seal(u64, bool),
+    Sync(Vec<(u64, Vec<u32>)>),
 
     /// `MetaMessage` operation of Hummock.
     MetaMessage(Box<TracedSubResp>),
@@ -167,19 +164,13 @@ pub enum Operation {
     LocalStorageInit(TracedInitOptions),
 
     /// Try wait epoch
-    TryWaitEpoch(TracedHummockReadEpoch),
-
-    /// clear shared buffer
-    ClearSharedBuffer(u64),
+    TryWaitEpoch(TracedHummockReadEpoch, TracedTryWaitEpochOptions),
 
     /// Seal current epoch
     SealCurrentEpoch {
         epoch: u64,
         opts: TracedSealCurrentEpochOptions,
     },
-
-    /// validate read epoch
-    ValidateReadEpoch(TracedHummockReadEpoch),
 
     LocalStorageEpoch,
 
@@ -299,7 +290,6 @@ pub enum OperationResult {
     Sync(TraceResult<usize>),
     NotifyHummock(TraceResult<()>),
     TryWaitEpoch(TraceResult<()>),
-    ValidateReadEpoch(TraceResult<()>),
     LocalStorageEpoch(TraceResult<u64>),
     LocalStorageIsDirty(TraceResult<bool>),
 }

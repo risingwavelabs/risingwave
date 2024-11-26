@@ -288,8 +288,14 @@ export interface LayoutItemBase {
 
 export type FragmentBox = LayoutItemBase & {
   name: string
+  // Upstream Fragment Ids.
   externalParentIds: string[]
-  fragment?: TableFragments_Fragment
+  fragment: TableFragments_Fragment
+}
+
+export type RelationBox = LayoutItemBase & {
+  relationName: string
+  schemaName: string
 }
 
 export type RelationPoint = LayoutItemBase & {
@@ -304,6 +310,7 @@ export interface Position {
 
 export type FragmentBoxPosition = FragmentBox & Position
 export type RelationPointPosition = RelationPoint & Position
+export type RelationBoxPosition = RelationBox & Position
 
 export interface Edge {
   points: Array<Position>
@@ -489,7 +496,7 @@ export function generateFragmentEdges(
     // Simply draw a horizontal line here.
     // Typically, external parent is only applicable to `StreamScan` fragment,
     // and there'll be only one external parent due to `UpstreamShard` distribution
-    // and plan node sharing. So there's no overlapping issue.
+    // and plan node sharing. So we won't see multiple horizontal lines overlap each other.
     for (const externalParentId of fragment.externalParentIds) {
       links.push({
         points: [

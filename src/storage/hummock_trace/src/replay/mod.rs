@@ -33,7 +33,7 @@ use crate::error::Result;
 use crate::TraceError;
 use crate::{
     LocalStorageId, Record, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSealCurrentEpochOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
 
 pub type ReplayItem = (TracedBytes, TracedBytes);
@@ -115,13 +115,14 @@ pub trait ReplayWrite {
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait ReplayStateStore {
-    async fn sync(&self, id: u64) -> Result<usize>;
-    fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+    async fn sync(&self, sync_table_epochs: Vec<(u64, Vec<u32>)>) -> Result<usize>;
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
     async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
-    async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-    async fn clear_shared_buffer(&self, prev_epoch: u64);
-    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
+    async fn try_wait_epoch(
+        &self,
+        epoch: HummockReadEpoch,
+        options: TracedTryWaitEpochOptions,
+    ) -> Result<()>;
 }
 
 // define mock trait for replay interfaces
@@ -146,14 +147,11 @@ mock! {
     }
     #[async_trait::async_trait]
     impl ReplayStateStore for GlobalReplayInterface{
-        async fn sync(&self, id: u64) -> Result<usize>;
-        fn seal_epoch(&self, epoch_id: u64, is_checkpoint: bool);
+        async fn sync(&self, sync_table_epochs: Vec<(u64, Vec<u32>)>) -> Result<usize>;
         async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64,
         ) -> Result<u64>;
         async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
-        async fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
-        async fn clear_shared_buffer(&self, prev_epoch: u64);
-        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> Result<()>;
+        async fn try_wait_epoch(&self, epoch: HummockReadEpoch,options: TracedTryWaitEpochOptions) -> Result<()>;
     }
     impl GlobalReplay for GlobalReplayInterface{}
 }

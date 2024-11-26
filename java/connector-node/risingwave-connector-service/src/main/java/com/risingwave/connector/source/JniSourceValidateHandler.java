@@ -31,10 +31,6 @@ public class JniSourceValidateHandler {
             var request =
                     ConnectorServiceProto.ValidateSourceRequest.parseFrom(
                             validateSourceRequestBytes);
-
-            // For jni.rs
-            java.lang.Thread.currentThread()
-                    .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
             validateSource(request);
             // validate pass
             return ConnectorServiceProto.ValidateSourceResponse.newBuilder().build().toByteArray();

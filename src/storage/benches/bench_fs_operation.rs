@@ -217,6 +217,7 @@ fn gen_std_files(path: &Path) -> impl IntoIterator<Item = std::fs::File> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_path)
             .unwrap();
         ret

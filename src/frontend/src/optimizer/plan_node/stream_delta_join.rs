@@ -20,15 +20,14 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::generic::{self, GenericPlanRef};
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay, TryToStreamPb};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -69,6 +68,7 @@ impl StreamDeltaJoin {
             let watermark_columns = from_left.bitand(&from_right);
             core.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
+
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -76,6 +76,7 @@ impl StreamDeltaJoin {
             append_only,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
+            MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
         Self {
@@ -85,7 +86,7 @@ impl StreamDeltaJoin {
         }
     }
 
-    /// Get a reference to the batch hash join's eq join predicate.
+    /// Get a reference to the delta hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
     }

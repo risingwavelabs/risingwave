@@ -6,7 +6,7 @@ statement ok
 SET STREAMING_PARALLELISM=2;
 
 statement ok
-SET STREAMING_RATE_LIMIT=1;
+SET BACKFILL_RATE_LIMIT=1;
 
 statement ok
 CREATE TABLE table (i1 int);

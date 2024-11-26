@@ -96,7 +96,6 @@ mod tests {
     use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::RexNode::{self, Constant};
     use risingwave_pb::expr::expr_node::Type;
-    use risingwave_pb::expr::ExprNode;
 
     use super::*;
 

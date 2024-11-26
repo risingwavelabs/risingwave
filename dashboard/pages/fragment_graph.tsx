@@ -24,7 +24,12 @@ import {
   HStack,
   Input,
   Select,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
   Text,
+  Tr,
   VStack,
 } from "@chakra-ui/react"
 import * as d3 from "d3"
@@ -39,22 +44,28 @@ import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
-  BackPressureInfo,
   calculateBPRate,
+  calculateCumulativeBp,
   fetchEmbeddedBackPressure,
   fetchPrometheusBackPressure,
 } from "../lib/api/metric"
-import { getFragments, getStreamingJobs } from "../lib/api/streaming"
+import {
+  getFragmentsByJobId,
+  getRelationIdInfos,
+  getStreamingJobs,
+} from "../lib/api/streaming"
 import { FragmentBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
+import { BackPressureInfo } from "../proto/gen/monitor_service"
 import { Dispatcher, MergeNode, StreamNode } from "../proto/gen/stream_plan"
 
 interface DispatcherNode {
   [actorId: number]: Dispatcher[]
+  fragment: TableFragments_Fragment
 }
 
 // Refresh interval (ms) for back pressure stats
-const INTERVAL = 5000
+const INTERVAL_MS = 5000
 
 /** Associated data of each plan node in the fragment graph, including the dispatchers. */
 export interface PlanNodeDatum {
@@ -102,10 +113,14 @@ function buildPlanNodeDependency(
     dispatcherName = "noDispatcher"
   }
 
-  const dispatcherNode = fragment.actors.reduce((obj, actor) => {
+  let dispatcherNode = fragment.actors.reduce((obj, actor) => {
     obj[actor.actorId] = actor.dispatcher
     return obj
   }, {} as DispatcherNode)
+  dispatcherNode.fragment = {
+    ...fragment,
+    actors: [],
+  }
 
   return d3.hierarchy({
     name: dispatcherName,
@@ -174,7 +189,7 @@ function buildFragmentDependencyAsEdges(
   return nodes
 }
 
-const SIDEBAR_WIDTH = 200
+const SIDEBAR_WIDTH = 225
 
 type BackPressureDataSource = "Embedded" | "Prometheus"
 const backPressureDataSources: BackPressureDataSource[] = [
@@ -187,43 +202,56 @@ const backPressureDataSources: BackPressureDataSource[] = [
 interface EmbeddedBackPressureInfo {
   previous: BackPressureInfo[]
   current: BackPressureInfo[]
+  totalBackpressureNs: BackPressureInfo[]
+  totalDurationNs: number
 }
 
 export default function Streaming() {
-  const { response: relationList } = useFetch(getStreamingJobs)
-  const { response: fragmentList } = useFetch(getFragments)
+  const { response: streamingJobList } = useFetch(getStreamingJobs)
+  const { response: relationIdInfos } = useFetch(getRelationIdInfos)
 
-  const [relationId, setRelationId] = useQueryState("id", parseAsInteger)
+  const [jobId, setJobId] = useQueryState("id", parseAsInteger)
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
+  const [tableFragments, setTableFragments] = useState<TableFragments>()
+
+  const job = useMemo(
+    () => streamingJobList?.find((j) => j.id === jobId),
+    [streamingJobList, jobId]
+  )
 
   const toast = useErrorToast()
 
+  useEffect(() => {
+    if (jobId) {
+      setTableFragments(undefined)
+      getFragmentsByJobId(jobId).then((tf) => {
+        setTableFragments(tf)
+      })
+    }
+  }, [jobId])
+
   const fragmentDependencyCallback = useCallback(() => {
-    if (fragmentList) {
-      if (relationId) {
-        const fragments = fragmentList.find((x) => x.tableId === relationId)
-        if (fragments) {
-          const fragmentDep = buildFragmentDependencyAsEdges(fragments)
-          return {
-            fragments,
-            fragmentDep,
-            fragmentDepDag: dagStratify()(fragmentDep),
-          }
-        }
+    if (tableFragments) {
+      const fragmentDep = buildFragmentDependencyAsEdges(tableFragments)
+      return {
+        fragments: tableFragments,
+        fragmentDep,
+        fragmentDepDag: dagStratify()(fragmentDep),
       }
     }
-  }, [fragmentList, relationId])
+  }, [tableFragments])
 
   useEffect(() => {
-    if (relationList) {
-      if (!relationId) {
-        if (relationList.length > 0) {
-          setRelationId(relationList[0].id)
+    if (streamingJobList) {
+      if (!jobId) {
+        if (streamingJobList.length > 0) {
+          setJobId(streamingJobList[0].id)
         }
       }
     }
-  }, [relationId, relationList, setRelationId])
+  }, [jobId, streamingJobList, setJobId])
 
+  // The table fragments of the selected fragment id
   const fragmentDependency = fragmentDependencyCallback()?.fragmentDep
   const fragmentDependencyDag = fragmentDependencyCallback()?.fragmentDepDag
   const fragments = fragmentDependencyCallback()?.fragments
@@ -252,38 +280,38 @@ export default function Streaming() {
 
   const handleSearchFragment = () => {
     const searchFragIdInt = parseInt(searchFragId)
-    if (fragmentList) {
-      for (const tf of fragmentList) {
-        for (const fragmentId in tf.fragments) {
-          if (tf.fragments[fragmentId].fragmentId == searchFragIdInt) {
-            setRelationId(tf.tableId)
+    if (relationIdInfos) {
+      let map = relationIdInfos.map
+      for (const relationId in map) {
+        const fragmentIdToRelationId = map[relationId].map
+        for (const fragmentId in fragmentIdToRelationId) {
+          if (parseInt(fragmentId) == searchFragIdInt) {
+            setJobId(parseInt(relationId))
             setSelectedFragmentId(searchFragIdInt)
             return
           }
         }
       }
     }
-
     toast(new Error(`Fragment ${searchFragIdInt} not found`))
   }
 
   const handleSearchActor = () => {
     const searchActorIdInt = parseInt(searchActorId)
-    if (fragmentList) {
-      for (const tf of fragmentList) {
-        for (const fragmentId in tf.fragments) {
-          const fragment = tf.fragments[fragmentId]
-          for (const actor of fragment.actors) {
-            if (actor.actorId == searchActorIdInt) {
-              setRelationId(tf.tableId)
-              setSelectedFragmentId(fragment.fragmentId)
-              return
-            }
+    if (relationIdInfos) {
+      let map = relationIdInfos.map
+      for (const relationId in map) {
+        const fragmentIdToRelationId = map[relationId].map
+        for (const fragmentId in fragmentIdToRelationId) {
+          let actorIds = fragmentIdToRelationId[fragmentId].ids
+          if (actorIds.includes(searchActorIdInt)) {
+            setJobId(parseInt(relationId))
+            setSelectedFragmentId(parseInt(fragmentId))
+            return
           }
         }
       }
     }
-
     toast(new Error(`Actor ${searchActorIdInt} not found`))
   }
 
@@ -293,7 +321,7 @@ export default function Streaming() {
   // Periodically fetch Prometheus back-pressure from Meta node
   const { response: promethusMetrics } = useFetch(
     fetchPrometheusBackPressure,
-    INTERVAL,
+    INTERVAL_MS,
     backPressureDataSource === "Prometheus"
   )
 
@@ -312,10 +340,19 @@ export default function Streaming() {
                 ? {
                     previous: prev.current,
                     current: newBP,
+                    totalBackpressureNs: calculateCumulativeBp(
+                      prev.totalBackpressureNs,
+                      prev.current,
+                      newBP
+                    ),
+                    totalDurationNs:
+                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
                   }
                 : {
                     previous: newBP, // Use current value to show zero rate, but it's fine
                     current: newBP,
+                    totalBackpressureNs: [],
+                    totalDurationNs: 0,
                   }
             )
           },
@@ -324,7 +361,7 @@ export default function Streaming() {
             toast(e, "error")
           }
         )
-      }, INTERVAL)
+      }, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }
@@ -337,9 +374,8 @@ export default function Streaming() {
 
       if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
         const metrics = calculateBPRate(
-          embeddedBackPressureInfo.current,
-          embeddedBackPressureInfo.previous,
-          INTERVAL
+          embeddedBackPressureInfo.totalBackpressureNs,
+          embeddedBackPressureInfo.totalDurationNs
         )
         for (const m of metrics.outputBufferBlockingDuration) {
           map.set(
@@ -380,41 +416,70 @@ export default function Streaming() {
           height="full"
         >
           <FormControl>
-            <FormLabel>Relations</FormLabel>
+            <FormLabel>Streaming Jobs</FormLabel>
             <Input
               list="relationList"
               spellCheck={false}
               onChange={(event) => {
-                const id = relationList?.find(
+                const id = streamingJobList?.find(
                   (x) => x.name == event.target.value
                 )?.id
                 if (id) {
-                  setRelationId(id)
+                  setJobId(id)
                 }
               }}
               placeholder="Search..."
               mb={2}
             ></Input>
             <datalist id="relationList">
-              {relationList &&
-                relationList.map((r) => (
+              {streamingJobList &&
+                streamingJobList.map((r) => (
                   <option value={r.name} key={r.id}>
                     ({r.id}) {r.name}
                   </option>
                 ))}
             </datalist>
             <Select
-              value={relationId ?? undefined}
-              onChange={(event) => setRelationId(parseInt(event.target.value))}
+              value={jobId ?? undefined}
+              onChange={(event) => setJobId(parseInt(event.target.value))}
             >
-              {relationList &&
-                relationList.map((r) => (
+              {streamingJobList &&
+                streamingJobList.map((r) => (
                   <option value={r.id} key={r.name}>
                     ({r.id}) {r.name}
                   </option>
                 ))}
             </Select>
           </FormControl>
+          {job && (
+            <FormControl>
+              <FormLabel>Information</FormLabel>
+              <TableContainer>
+                <Table size="sm">
+                  <Tbody>
+                    <Tr>
+                      <Td fontWeight="medium">Type</Td>
+                      <Td isNumeric>{job.type}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Status</Td>
+                      <Td isNumeric>{job.jobStatus}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium">Parallelism</Td>
+                      <Td isNumeric>{job.parallelism}</Td>
+                    </Tr>
+                    <Tr>
+                      <Td fontWeight="medium" paddingEnd={0}>
+                        Max Parallelism
+                      </Td>
+                      <Td isNumeric>{job.maxParallelism}</Td>
+                    </Tr>
+                  </Tbody>
+                </Table>
+              </TableContainer>
+            </FormControl>
+          )}
           <FormControl>
             <FormLabel>Goto</FormLabel>
             <VStack spacing={2}>

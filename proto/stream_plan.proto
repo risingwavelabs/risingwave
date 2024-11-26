@@ -7,6 +7,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "secret.proto";
 import "source.proto";
 
 option java_package = "com.risingwave.proto";
@@ -22,11 +23,13 @@ message AddMutation {
   // All actors to be added (to the main connected component of the graph) in this update.
   repeated uint32 added_actors = 3;
   // We may embed a source change split mutation here.
+  // `Source` and `SourceBackfill` are handled together here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
   // We may embed a pause mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   bool pause = 4;
+  repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
 }
 
 message StopMutation {
@@ -68,6 +71,7 @@ message UpdateMutation {
   // All actors to be dropped in this update.
   repeated uint32 dropped_actors = 4;
   // Source updates.
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 5;
   // When modifying the Materialized View, we need to recreate the Dispatcher from the old upstream to the new TableFragment.
   // Consistent with the semantics in AddMutation.
@@ -75,6 +79,7 @@ message UpdateMutation {
 }
 
 message SourceChangeSplitMutation {
+  // `Source` and `SourceBackfill` are handled together here.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
@@ -94,14 +99,14 @@ message CombinedMutation {
   repeated BarrierMutation mutations = 1;
 }
 
-message CreateSubscriptionMutation {
-  uint32 subscription_id = 1;
+message SubscriptionUpstreamInfo {
+  // can either be subscription_id or table_id of creating TableFragments
+  uint32 subscriber_id = 1;
   uint32 upstream_mv_table_id = 2;
 }
 
-message DropSubscriptionMutation {
-  uint32 subscription_id = 1;
-  uint32 upstream_mv_table_id = 2;
+message DropSubscriptionsMutation {
+  repeated SubscriptionUpstreamInfo info = 1;
 }
 
 message BarrierMutation {
@@ -121,10 +126,8 @@ message BarrierMutation {
     ResumeMutation resume = 8;
     // Throttle specific source exec or chain exec.
     ThrottleMutation throttle = 10;
-    // Create subscription on mv
-    CreateSubscriptionMutation create_subscription = 11;
     // Drop subscription on mv
-    DropSubscriptionMutation drop_subscription = 12;
+    DropSubscriptionsMutation drop_subscriptions = 12;
     // Combined mutation.
     CombinedMutation combined = 100;
   }
@@ -186,8 +189,9 @@ message StreamSource {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Streaming rate limit
+  // Source rate limit
   optional uint32 rate_limit = 9;
+  map<string, secret.SecretRef> secret_refs = 10;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -201,8 +205,9 @@ message StreamFsFetch {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Streaming rate limit
+  // Source rate limit
   optional uint32 rate_limit = 9;
+  map<string, secret.SecretRef> secret_refs = 10;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -226,13 +231,14 @@ message SourceBackfillNode {
   catalog.StreamSourceInfo info = 4;
   string source_name = 5;
   map<string, string> with_properties = 6;
-  // Streaming rate limit
+  // Backfill rate limit
   optional uint32 rate_limit = 7;
 
   // fields above are the same as StreamSource
 
   // `| partition_id | backfill_progress |`
   catalog.Table state_table = 8;
+  map<string, secret.SecretRef> secret_refs = 9;
 }
 
 message SinkDesc {
@@ -254,6 +260,7 @@ message SinkDesc {
   catalog.SinkFormatDesc format_desc = 13;
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
+  map<string, secret.SecretRef> secret_refs = 16;
 }
 
 enum SinkLogStoreType {
@@ -278,10 +285,18 @@ message ProjectNode {
   repeated uint32 watermark_input_cols = 2;
   repeated uint32 watermark_output_cols = 3;
   repeated uint32 nondecreasing_exprs = 4;
+  // Whether there are likely no-op updates in the output chunks, so that eliminating them with
+  // `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
+  bool noop_update_hint = 5;
 }
 
 message FilterNode {
   expr.ExprNode search_condition = 1;
+}
+
+message ChangeLogNode {
+  // Whether or not there is an op in the final output.
+  bool need_op = 1;
 }
 
 message CdcFilterNode {
@@ -353,6 +368,9 @@ message SimpleAggNode {
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
   AggNodeVersion version = 8;
+  // Required by the downstream `RowMergeNode`,
+  // currently only used by the `approx_percentile`'s two phase plan
+  bool must_output_per_barrier = 9;
 }
 
 message HashAggNode {
@@ -437,6 +455,28 @@ message HashJoinNode {
   bool is_append_only = 14;
 }
 
+message AsOfJoinNode {
+  plan_common.AsOfJoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  // Used for internal table states.
+  catalog.Table left_table = 4;
+  // Used for internal table states.
+  catalog.Table right_table = 5;
+  // The output indices of current node
+  repeated uint32 output_indices = 6;
+  // Left deduped input pk indices. The pk of the left_table and
+  // The pk of the left_table is  [left_join_key | left_inequality_key | left_deduped_input_pk_indices]
+  // left_inequality_key is not used but for forward compatibility.
+  repeated uint32 left_deduped_input_pk_indices = 7;
+  // Right deduped input pk indices.
+  // The pk of the right_table is  [right_join_key | right_inequality_key | right_deduped_input_pk_indices]
+  // right_inequality_key is not used but for forward compatibility.
+  repeated uint32 right_deduped_input_pk_indices = 8;
+  repeated bool null_safe = 9;
+  optional plan_common.AsOfJoinDesc asof_desc = 10;
+}
+
 message TemporalJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -451,6 +491,8 @@ message TemporalJoinNode {
   repeated uint32 table_output_indices = 8;
   // The state table used for non-append-only temporal join.
   optional catalog.Table memo_table = 9;
+  // If it is a nested lool temporal join
+  bool is_nested_loop = 10;
 }
 
 message DynamicFilterNode {
@@ -467,7 +509,7 @@ message DynamicFilterNode {
   // When the condition changes, we will tell downstream to insert the LHS records which now match the condition.
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
-  bool condition_always_relax = 5;
+  bool condition_always_relax = 5 [deprecated = true];
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -532,6 +574,9 @@ enum StreamScanType {
 
   // ArrangementBackfillExecutor
   STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL = 5;
+
+  // SnapshotBackfillExecutor
+  STREAM_SCAN_TYPE_SNAPSHOT_BACKFILL = 6;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -564,7 +609,7 @@ message StreamScanNode {
   // Used iff `ChainType::Backfill`.
   plan_common.StorageTableDesc table_desc = 7;
 
-  // The rate limit for the stream scan node.
+  // The backfill rate limit for the stream scan node.
   optional uint32 rate_limit = 8;
 
   // Snapshot read every N barriers
@@ -601,7 +646,7 @@ message StreamCdcScanNode {
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
 
-  // The rate limit for the stream cdc scan node.
+  // The backfill rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
 
   // Whether skip the backfill and only consume from upstream.
@@ -722,9 +767,21 @@ message RowIdGenNode {
   uint64 row_id_index = 1;
 }
 
+message NowModeUpdateCurrent {}
+
+message NowModeGenerateSeries {
+  data.Datum start_timestamp = 1;
+  data.Datum interval = 2;
+}
+
 message NowNode {
   // Persists emitted 'now'.
   catalog.Table state_table = 1;
+
+  oneof mode {
+    NowModeUpdateCurrent update_current = 101;
+    NowModeGenerateSeries generate_series = 102;
+  }
 }
 
 message ValuesNode {
@@ -763,6 +820,23 @@ message OverWindowNode {
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
   OverWindowCachePolicy cache_policy = 5;
+}
+
+message LocalApproxPercentileNode {
+  double base = 1;
+  uint32 percentile_index = 2;
+}
+
+message GlobalApproxPercentileNode {
+  double base = 1;
+  double quantile = 2;
+  catalog.Table bucket_state_table = 3;
+  catalog.Table count_state_table = 4;
+}
+
+message RowMergeNode {
+  catalog.ColIndexMapping lhs_mapping = 1;
+  catalog.ColIndexMapping rhs_mapping = 2;
 }
 
 message StreamNode {
@@ -809,6 +883,11 @@ message StreamNode {
     StreamCdcScanNode stream_cdc_scan = 139;
     CdcFilterNode cdc_filter = 140;
     SourceBackfillNode source_backfill = 142;
+    ChangeLogNode changelog = 143;
+    LocalApproxPercentileNode local_approx_percentile = 144;
+    GlobalApproxPercentileNode global_approx_percentile = 145;
+    RowMergeNode row_merge = 146;
+    AsOfJoinNode as_of_join = 147;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -905,6 +984,9 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_DML = 128;
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
+  FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
+  // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
+  FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
 }
 
 // The streaming context associated with a stream plan
@@ -913,6 +995,10 @@ message StreamContext {
   string timezone = 1;
 }
 
+// Representation of a graph of stream fragments.
+// Generated by the fragmenter in the frontend, only used in DDL requests and never persisted.
+//
+// For the persisted form, see `TableFragments`.
 message StreamFragmentGraph {
   message StreamFragment {
     // 0-based on frontend, and will be rewritten to global id on meta.
@@ -959,4 +1045,15 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+
+  // Specified max parallelism, i.e., expected vnode count for the graph.
+  //
+  // The scheduler on the meta service will use this as a hint to decide the vnode count
+  // for each fragment.
+  //
+  // Note that the actual vnode count may be different from this value.
+  // For example, a no-shuffle exchange between current fragment graph and an existing
+  // upstream fragment graph requires two fragments to be in the same distribution,
+  // thus the same vnode count.
+  uint32 max_parallelism = 7;
 }

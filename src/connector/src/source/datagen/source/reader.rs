@@ -18,6 +18,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt, TryStreamExt};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
+use risingwave_common_estimate_size::EstimateSize;
 use thiserror_ext::AsReport;
 
 use super::generator::DatagenEventGenerator;
@@ -27,12 +28,13 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, CommonSplitReader, DataType, SourceContextRef,
-    SourceMessage, SplitId, SplitMetaData, SplitReader,
+    into_chunk_stream, BoxChunkSourceStream, Column, DataType, SourceContextRef, SourceMessage,
+    SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
+    #[expect(dead_code)]
     assigned_split: DatagenSplit,
 
     split_id: SplitId,
@@ -155,20 +157,30 @@ impl SplitReader for DatagenSplitReader {
                 let source_name = self.source_ctx.source_name.to_string();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
+                let partition_input_count_metric =
+                    metrics.partition_input_count.with_guarded_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ]);
+                let partition_input_bytes_metric =
+                    metrics.partition_input_bytes.with_guarded_label_values(&[
+                        &actor_id,
+                        &source_id,
+                        &split_id,
+                        &source_name,
+                        &fragment_id,
+                    ]);
+
                 spawn_data_generation_stream(
                     self.generator
                         .into_native_stream()
                         .inspect_ok(move |stream_chunk| {
-                            metrics
-                                .partition_input_count
-                                .with_label_values(&[
-                                    &actor_id,
-                                    &source_id,
-                                    &split_id,
-                                    &source_name,
-                                    &fragment_id,
-                                ])
-                                .inc_by(stream_chunk.cardinality() as u64);
+                            partition_input_count_metric.inc_by(stream_chunk.cardinality() as u64);
+                            partition_input_bytes_metric
+                                .inc_by(stream_chunk.estimated_size() as u64);
                         }),
                     BUFFER_SIZE,
                 )
@@ -177,13 +189,13 @@ impl SplitReader for DatagenSplitReader {
             _ => {
                 let parser_config = self.parser_config.clone();
                 let source_context = self.source_ctx.clone();
-                into_chunk_stream(self, parser_config, source_context)
+                into_chunk_stream(self.into_data_stream(), parser_config, source_context)
             }
         }
     }
 }
 
-impl CommonSplitReader for DatagenSplitReader {
+impl DatagenSplitReader {
     fn into_data_stream(self) -> impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
@@ -398,7 +410,6 @@ mod tests {
             state,
             ParserConfig {
                 specific: SpecificParserConfig {
-                    key_encoding_config: None,
                     encoding_config: EncodingProperties::Native,
                     protocol_config: ProtocolProperties::Native,
                 },
@@ -456,7 +467,6 @@ mod tests {
         };
         let parser_config = ParserConfig {
             specific: SpecificParserConfig {
-                key_encoding_config: None,
                 encoding_config: EncodingProperties::Native,
                 protocol_config: ProtocolProperties::Native,
             },

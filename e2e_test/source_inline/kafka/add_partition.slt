@@ -1,11 +1,11 @@
-# Note: control substitution on will force us to use "\\n" instead of "\n" in commands
+# Note: control substitution on will force us to use "\n" instead of "\n" in commands
 control substitution on
 
 system ok
 rpk topic create test_add_partition -p 3
 
 system ok
-cat <<EOF | rpk topic produce test_add_partition -f "%p %v\\n" -p 0
+cat <<EOF | rpk topic produce test_add_partition -f "%p %v\n" -p 0
 0 {"x":"a"}
 1 {"x":"b"}
 2 {"x":"c"}
@@ -42,7 +42,7 @@ system ok
 rpk topic add-partitions test_add_partition --num 1
 
 system ok
-cat <<EOF | rpk topic produce test_add_partition -f "%p %v\\n" -p 0
+cat <<EOF | rpk topic produce test_add_partition -f "%p %v\n" -p 0
 3 {"x":"d"}
 EOF
 

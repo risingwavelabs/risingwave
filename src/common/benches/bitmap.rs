@@ -14,7 +14,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use itertools::Itertools;
-use risingwave_common::buffer::{Bitmap, BitmapIter};
+use risingwave_common::bitmap::{Bitmap, BitmapIter};
 
 fn bench_bitmap(c: &mut Criterion) {
     const CHUNK_SIZE: usize = 1024;

@@ -20,12 +20,12 @@ use futures::stream::select_with_strategy;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
-    DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
-    SourceStreamChunkBuilder, SpecificParserConfig,
+    ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
+    ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
@@ -40,8 +40,10 @@ use crate::executor::backfill::utils::{
     get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message, mark_cdc_chunk,
 };
 use crate::executor::backfill::CdcScanOptions;
+use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::task::CreateMviewProgress;
+use crate::executor::UpdateMutation;
+use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
@@ -56,17 +58,19 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     upstream: Executor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
-    /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
+
+    /// The schema of output chunk, including additional columns if any
+    output_columns: Vec<ColumnDesc>,
 
     /// State table of the `CdcBackfill` executor
     state_impl: CdcBackfillState<S>,
 
     // TODO: introduce a CdcBackfillProgress to report finish to Meta
     // This object is just a stub right now
-    progress: Option<CreateMviewProgress>,
+    progress: Option<CreateMviewProgressReporter>,
 
-    metrics: Arc<StreamingMetrics>,
+    metrics: CdcBackfillMetrics,
 
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
@@ -81,25 +85,29 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         external_table: ExternalStorageTable,
         upstream: Executor,
         output_indices: Vec<usize>,
-        progress: Option<CreateMviewProgress>,
+        output_columns: Vec<ColumnDesc>,
+        progress: Option<CreateMviewProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
         options: CdcScanOptions,
     ) -> Self {
-        let pk_in_output_indices = external_table.pk_in_output_indices().clone().unwrap();
+        let pk_indices = external_table.pk_indices();
         let upstream_table_id = external_table.table_id().table_id;
         let state_impl = CdcBackfillState::new(
             upstream_table_id,
             state_table,
-            pk_in_output_indices.len() + METADATA_STATE_LEN,
+            pk_indices.len() + METADATA_STATE_LEN,
         );
+
+        let metrics = metrics.new_cdc_backfill_metrics(external_table.table_id(), actor_ctx.id);
 
         Self {
             actor_ctx,
             external_table,
             upstream,
             output_indices,
+            output_columns,
             state_impl,
             progress,
             metrics,
@@ -109,39 +117,37 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     }
 
     fn report_metrics(
-        metrics: &Arc<StreamingMetrics>,
-        upstream_table_id: u32,
-        actor_id: u32,
+        metrics: &CdcBackfillMetrics,
         snapshot_processed_row_count: u64,
         upstream_processed_row_count: u64,
     ) {
         metrics
             .cdc_backfill_snapshot_read_row_count
-            .with_label_values(&[
-                upstream_table_id.to_string().as_str(),
-                actor_id.to_string().as_str(),
-            ])
             .inc_by(snapshot_processed_row_count);
 
         metrics
             .cdc_backfill_upstream_output_row_count
-            .with_label_values(&[
-                upstream_table_id.to_string().as_str(),
-                actor_id.to_string().as_str(),
-            ])
             .inc_by(upstream_processed_row_count);
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // The primary key columns, in the output columns of the upstream_table scan.
-        let pk_in_output_indices = self.external_table.pk_in_output_indices().unwrap();
+        // The indices to primary key columns
+        let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
 
-        let upstream_table_id = self.external_table.table_id().table_id;
+        let table_id = self.external_table.table_id().table_id;
         let upstream_table_name = self.external_table.qualified_table_name();
-        let upstream_table_schema = self.external_table.schema().clone();
+        let schema_table_name = self.external_table.schema_table_name().clone();
+        let external_database_name = self.external_table.database_name().to_owned();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
+
+        let additional_columns = self
+            .output_columns
+            .iter()
+            .filter(|col| col.additional_column.column_type.is_some())
+            .cloned()
+            .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -152,26 +158,27 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
 
-        let mut paused = first_barrier.is_pause_on_startup();
+        let mut is_snapshot_paused = first_barrier.is_pause_on_startup();
+        let first_barrier_epoch = first_barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
-        let mut upstream = transform_upstream(upstream, &upstream_table_schema)
+        let mut upstream = transform_upstream(upstream, &self.output_columns)
             .boxed()
             .peekable();
 
-        state_impl.init_epoch(first_barrier.epoch);
+        state_impl.init_epoch(first_barrier_epoch).await?;
 
         // restore backfill state
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
         let to_backfill = !self.options.disable_backfill && !state.is_finished;
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
@@ -187,11 +194,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
-            upstream_table_id,
+            table_id,
             upstream_table_name,
             initial_binlog_offset = ?last_binlog_offset,
             ?current_pk_pos,
             is_finished = state.is_finished,
+            is_snapshot_paused,
             snapshot_row_count = total_snapshot_row_count,
             rate_limit = self.rate_limit_rps,
             disable_backfill = self.options.disable_backfill,
@@ -229,6 +237,27 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             for msg in upstream.by_ref() {
                 match msg? {
                     Message::Barrier(barrier) => {
+                        match barrier.mutation.as_deref() {
+                            Some(crate::executor::Mutation::Pause) => {
+                                is_snapshot_paused = true;
+                                tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is paused by barrier"
+                                );
+                            }
+                            Some(crate::executor::Mutation::Resume) => {
+                                is_snapshot_paused = false;
+                                tracing::info!(
+                                    table_id,
+                                    upstream_table_name,
+                                    "snapshot is resumed by barrier"
+                                );
+                            }
+                            _ => {
+                                // ignore other mutations
+                            }
+                        }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
                         yield Message::Barrier(barrier);
@@ -243,10 +272,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            tracing::info!(upstream_table_id,
+            tracing::info!(table_id,
                 upstream_table_name,
                 initial_binlog_offset = ?last_binlog_offset,
                 ?current_pk_pos,
+                is_snapshot_paused,
                 "start cdc backfill loop");
 
             // the buffer will be drained when a barrier comes
@@ -259,16 +289,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
                     self.rate_limit_rps,
-                    pk_in_output_indices.clone(),
+                    pk_indices.clone(),
+                    additional_columns.clone(),
+                    schema_table_name.clone(),
+                    external_database_name.clone(),
                 );
 
                 let right_snapshot = pin!(upstream_table_reader
                     .snapshot_read_full_table(read_args, self.options.snapshot_batch_size)
                     .map(Either::Right));
 
-                let (right_snapshot, valve) = pausable(right_snapshot);
-                if paused {
-                    valve.pause();
+                let (right_snapshot, snapshot_valve) = pausable(right_snapshot);
+                if is_snapshot_paused {
+                    snapshot_valve.pause();
                 }
 
                 // Prefer to select upstream, so we can stop snapshot stream when barrier comes.
@@ -298,12 +331,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         use crate::executor::Mutation;
                                         match mutation {
                                             Mutation::Pause => {
-                                                paused = true;
-                                                valve.pause();
+                                                is_snapshot_paused = true;
+                                                snapshot_valve.pause();
                                             }
                                             Mutation::Resume => {
-                                                paused = false;
-                                                valve.resume();
+                                                is_snapshot_paused = false;
+                                                snapshot_valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
                                                 if let Some(new_rate_limit) =
@@ -311,8 +344,39 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;
-                                                    // rebuild the new reader stream with new rate limit
+                                                    rate_limit_to_zero = self
+                                                        .rate_limit_rps
+                                                        .is_some_and(|val| val == 0);
+
+                                                    // update and persist current backfill progress without draining the buffered upstream chunks
+                                                    state_impl
+                                                        .mutate_state(
+                                                            current_pk_pos.clone(),
+                                                            last_binlog_offset.clone(),
+                                                            total_snapshot_row_count,
+                                                            false,
+                                                        )
+                                                        .await?;
+                                                    state_impl.commit_state(barrier.epoch).await?;
+                                                    yield Message::Barrier(barrier);
+
+                                                    // rebuild the snapshot stream with new rate limit
                                                     continue 'backfill_loop;
+                                                }
+                                            }
+                                            Mutation::Update(UpdateMutation {
+                                                dropped_actors,
+                                                ..
+                                            }) => {
+                                                if dropped_actors.contains(&self.actor_ctx.id) {
+                                                    // the actor has been dropped, exit the backfill loop
+                                                    tracing::info!(
+                                                        table_id,
+                                                        upstream_table_name,
+                                                        "CdcBackfill has been dropped due to config change"
+                                                    );
+                                                    yield Message::Barrier(barrier);
+                                                    break 'backfill_loop;
                                                 }
                                             }
                                             _ => (),
@@ -321,8 +385,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     Self::report_metrics(
                                         &self.metrics,
-                                        upstream_table_id,
-                                        self.actor_ctx.id,
                                         cur_barrier_snapshot_processed_rows,
                                         cur_barrier_upstream_processed_rows,
                                     );
@@ -333,7 +395,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
-                                            upstream_table_id,
+                                            table_id,
                                             ?current_pk_pos,
                                             ?snapshot_read_row_cnt,
                                             "Prepare to start a new snapshot"
@@ -400,7 +462,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             match msg? {
                                 None => {
                                     tracing::info!(
-                                        upstream_table_id,
+                                        table_id,
                                         ?last_binlog_offset,
                                         ?current_pk_pos,
                                         "snapshot read stream ends"
@@ -423,8 +485,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Raise the current position.
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
-                                    current_pk_pos =
-                                        Some(get_new_pos(&chunk, &pk_in_output_indices));
+                                    current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
 
                                     tracing::trace!(
                                         "got a snapshot chunk: len {}, current_pk_pos {:?}",
@@ -452,14 +513,22 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // Otherwise, the result set of the new snapshot stream may become empty.
                 // It maybe a cancellation bug of the mysql driver.
                 let (_, mut snapshot_stream) = backfill_stream.into_inner();
-                if let Some(msg) = snapshot_stream.next().await {
+
+                // skip consume the snapshot stream if it is paused or rate limit to 0
+                if !is_snapshot_paused
+                    && !rate_limit_to_zero
+                    && let Some(msg) = snapshot_stream
+                        .next()
+                        .instrument_await("consume_snapshot_stream_once")
+                        .await
+                {
                     let Either::Right(msg) = msg else {
                         bail!("BUG: snapshot_read contains upstream messages");
                     };
                     match msg? {
                         None => {
                             tracing::info!(
-                                upstream_table_id,
+                                table_id,
                                 ?last_binlog_offset,
                                 ?current_pk_pos,
                                 "snapshot read stream ends in the force emit branch"
@@ -488,7 +557,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                         Some(chunk) => {
                             // Raise the current pk position.
-                            current_pk_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
+                            current_pk_pos = Some(get_new_pos(&chunk, &pk_indices));
 
                             let row_count = chunk.cardinality() as u64;
                             cur_barrier_snapshot_processed_rows += row_count;
@@ -496,7 +565,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             snapshot_read_row_cnt += row_count as usize;
 
                             tracing::debug!(
-                                upstream_table_id,
+                                table_id,
                                 ?current_pk_pos,
                                 ?snapshot_read_row_cnt,
                                 "force emit a snapshot chunk"
@@ -522,7 +591,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 &offset_parse_func,
                                 chunk,
                                 current_pos,
-                                &pk_in_output_indices,
+                                &pk_indices,
                                 &pk_order,
                                 last_binlog_offset.clone(),
                             )?,
@@ -542,8 +611,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 Self::report_metrics(
                     &self.metrics,
-                    upstream_table_id,
-                    self.actor_ctx.id,
                     cur_barrier_snapshot_processed_rows,
                     cur_barrier_upstream_processed_rows,
                 );
@@ -564,7 +631,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         } else if self.options.disable_backfill {
             // If backfill is disabled, we just mark the backfill as finished
             tracing::info!(
-                upstream_table_id,
+                table_id,
                 upstream_table_name,
                 "CdcBackfill has been disabled"
             );
@@ -582,7 +649,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         drop(upstream_table_reader);
 
         tracing::info!(
-            upstream_table_id,
+            table_id,
             upstream_table_name,
             "CdcBackfill has already finished and will forward messages directly to the downstream"
         );
@@ -607,7 +674,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr, total_snapshot_row_count);
+                        progress.finish(barrier.epoch, total_snapshot_row_count);
                     }
                     yield msg;
                     // break after the state have been saved
@@ -636,9 +703,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
+pub async fn transform_upstream(upstream: BoxedMessageStream, output_columns: &[ColumnDesc]) {
     let props = SpecificParserConfig {
-        key_encoding_config: None,
         encoding_config: EncodingProperties::Json(JsonProperties {
             use_schema_registry: false,
             timestamptz_handling: None,
@@ -646,9 +712,16 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
         // the cdc message is generated internally so the key must exist.
         protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
     };
+
+    // convert to source column desc to feed into parser
+    let columns_with_meta = output_columns
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
     let mut parser = DebeziumParser::new(
         props,
-        get_rw_columns(schema),
+        columns_with_meta.clone(),
         Arc::new(SourceContext::dummy()),
     )
     .await
@@ -659,7 +732,7 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
     for msg in upstream {
         let mut msg = msg?;
         if let Message::Chunk(chunk) = &mut msg {
-            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk).await?;
             let _ = std::mem::replace(chunk, parsed_chunk);
         }
         yield msg;
@@ -669,14 +742,13 @@ pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
 async fn parse_debezium_chunk(
     parser: &mut DebeziumParser,
     chunk: &StreamChunk,
-    schema: &Schema,
 ) -> StreamExecutorResult<StreamChunk> {
     // here we transform the input chunk in (payload varchar, _rw_offset varchar, _rw_table_name varchar) schema
     // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
     // table job with `_rw_offset` in the end
     // see `gen_create_table_plan_for_cdc_source` for details
-    let column_descs = get_rw_columns(schema);
-    let mut builder = SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
+    let mut builder =
+        SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), chunk.capacity());
 
     // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)
     // We should use the debezium parser to parse the first column,
@@ -715,10 +787,10 @@ async fn parse_debezium_chunk(
         new_rows.push(combined);
     }
 
-    let data_types = schema
-        .fields
+    let data_types = parser
+        .columns()
         .iter()
-        .map(|field| field.data_type.clone())
+        .map(|col| col.data_type.clone())
         .chain(std::iter::once(DataType::Varchar)) // _rw_offset column
         .collect_vec();
 
@@ -726,21 +798,6 @@ async fn parse_debezium_chunk(
         ops,
         DataChunk::from_rows(new_rows.as_slice(), data_types.as_slice()),
     ))
-}
-
-fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
-    schema
-        .fields
-        .iter()
-        .map(|field| {
-            let column_desc = ColumnDesc::named(
-                field.name.clone(),
-                ColumnId::placeholder(),
-                field.data_type.clone(),
-            );
-            SourceColumnDesc::from(&column_desc)
-        })
-        .collect_vec()
 }
 
 impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
@@ -755,7 +812,7 @@ mod tests {
 
     use futures::{pin_mut, StreamExt};
     use risingwave_common::array::{DataChunk, Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -798,16 +855,17 @@ mod tests {
         tx.push_chunk(chunk);
         let upstream = Box::new(source).execute();
 
-        // schema of the CDC table
-        let rw_schema = Schema::new(vec![
-            Field::with_name(DataType::Int64, "O_ORDERKEY"), // orderkey
-            Field::with_name(DataType::Int64, "O_CUSTKEY"),  // custkey
-            Field::with_name(DataType::Varchar, "O_ORDERSTATUS"), // orderstatus
-            Field::with_name(DataType::Decimal, "O_TOTALPRICE"), // totalprice
-            Field::with_name(DataType::Date, "O_ORDERDATE"), // orderdate
-        ]);
+        // schema to the debezium parser
+        let columns = vec![
+            ColumnDesc::named("O_ORDERKEY", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("O_CUSTKEY", ColumnId::new(2), DataType::Int64),
+            ColumnDesc::named("O_ORDERSTATUS", ColumnId::new(3), DataType::Varchar),
+            ColumnDesc::named("O_TOTALPRICE", ColumnId::new(4), DataType::Decimal),
+            ColumnDesc::named("O_ORDERDATE", ColumnId::new(5), DataType::Date),
+            ColumnDesc::named("commit_ts", ColumnId::new(6), DataType::Timestamptz),
+        ];
 
-        let parsed_stream = transform_upstream(upstream, &rw_schema);
+        let parsed_stream = transform_upstream(upstream, &columns);
         pin_mut!(parsed_stream);
         // the output chunk must contain the offset column
         if let Some(message) = parsed_stream.next().await {

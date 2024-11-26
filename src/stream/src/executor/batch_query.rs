@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::TryStreamExt;
 use risingwave_common::array::Op;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
@@ -52,6 +53,7 @@ where
                 PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .await?;
+        let iter = iter.map_ok(|keyed_row| keyed_row.into_owned_row());
         pin_mut!(iter);
 
         while let Some(data_chunk) =

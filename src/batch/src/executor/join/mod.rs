@@ -30,7 +30,7 @@ use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::plan_common::JoinType as JoinTypePb;
+use risingwave_pb::plan_common::JoinType as PbJoinType;
 
 use crate::error::Result;
 
@@ -52,26 +52,33 @@ pub enum JoinType {
 }
 
 impl JoinType {
+    pub fn from_prost(prost: PbJoinType) -> Self {
+        match prost {
+            PbJoinType::Inner => JoinType::Inner,
+            PbJoinType::LeftOuter => JoinType::LeftOuter,
+            PbJoinType::LeftSemi => JoinType::LeftSemi,
+            PbJoinType::LeftAnti => JoinType::LeftAnti,
+            PbJoinType::RightOuter => JoinType::RightOuter,
+            PbJoinType::RightSemi => JoinType::RightSemi,
+            PbJoinType::RightAnti => JoinType::RightAnti,
+            PbJoinType::FullOuter => JoinType::FullOuter,
+            PbJoinType::AsofInner | PbJoinType::AsofLeftOuter | PbJoinType::Unspecified => {
+                unreachable!()
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl JoinType {
+    #![allow(dead_code)]
+
     #[inline(always)]
     pub(super) fn need_join_remaining(self) -> bool {
         matches!(
             self,
             JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
         )
-    }
-
-    pub fn from_prost(prost: JoinTypePb) -> Self {
-        match prost {
-            JoinTypePb::Inner => JoinType::Inner,
-            JoinTypePb::LeftOuter => JoinType::LeftOuter,
-            JoinTypePb::LeftSemi => JoinType::LeftSemi,
-            JoinTypePb::LeftAnti => JoinType::LeftAnti,
-            JoinTypePb::RightOuter => JoinType::RightOuter,
-            JoinTypePb::RightSemi => JoinType::RightSemi,
-            JoinTypePb::RightAnti => JoinType::RightAnti,
-            JoinTypePb::FullOuter => JoinType::FullOuter,
-            JoinTypePb::Unspecified => unreachable!(),
-        }
     }
 
     fn need_build(self) -> bool {
@@ -173,7 +180,7 @@ fn convert_row_to_chunk(
 mod tests {
 
     use risingwave_common::array::{Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder};
-    use risingwave_common::buffer::Bitmap;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};

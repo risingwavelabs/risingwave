@@ -36,8 +36,8 @@ where
     visit_inner(stream_node, &mut f)
 }
 
-/// A utility for to accessing the [`StreamNode`]. The returned bool is used to determine whether the access needs to continue.
-pub fn visit_stream_node_cont<F>(stream_node: &mut StreamNode, mut f: F)
+/// A utility for to accessing the [`StreamNode`] mutably. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont_mut<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut StreamNode) -> bool,
 {
@@ -49,6 +49,26 @@ where
             return;
         }
         for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(stream_node, &mut f)
+}
+
+/// A utility for to accessing the [`StreamNode`] immutably. The returned bool is used to determine whether the access needs to continue.
+pub fn visit_stream_node_cont<F>(stream_node: &StreamNode, mut f: F)
+where
+    F: FnMut(&StreamNode) -> bool,
+{
+    fn visit_inner<F>(stream_node: &StreamNode, f: &mut F)
+    where
+        F: FnMut(&StreamNode) -> bool,
+    {
+        if !f(stream_node) {
+            return;
+        }
+        for input in &stream_node.input {
             visit_inner(input, f);
         }
     }
@@ -113,12 +133,7 @@ pub fn visit_stream_node_tables_inner<F>(
                 optional!(node.memo_table, "TemporalJoinMemo");
             }
             NodeBody::DynamicFilter(node) => {
-                if node.condition_always_relax {
-                    always!(node.left_table, "DynamicFilterLeftNotSatisfy");
-                } else {
-                    always!(node.left_table, "DynamicFilterLeft");
-                }
-
+                always!(node.left_table, "DynamicFilterLeft");
                 always!(node.right_table, "DynamicFilterRight");
             }
 
@@ -249,6 +264,17 @@ pub fn visit_stream_node_tables_inner<F>(
             NodeBody::Materialize(node) if !internal_tables_only => {
                 always!(node.table, "Materialize")
             }
+
+            NodeBody::GlobalApproxPercentile(node) => {
+                always!(node.bucket_state_table, "GlobalApproxPercentileBucketState");
+                always!(node.count_state_table, "GlobalApproxPercentileCountState");
+            }
+
+            // AsOf join
+            NodeBody::AsOfJoin(node) => {
+                always!(node.left_table, "AsOfJoinLeft");
+                always!(node.right_table, "AsOfJoinRight");
+            }
             _ => {}
         }
     };
@@ -266,7 +292,6 @@ where
     visit_stream_node_tables_inner(stream_node, true, true, f)
 }
 
-#[allow(dead_code)]
 pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
 where
     F: FnMut(&mut Table, &str),
@@ -280,4 +305,14 @@ where
     F: FnMut(&mut Table, &str),
 {
     visit_stream_node_internal_tables(fragment.node.as_mut().unwrap(), f)
+}
+
+/// Visit the tables of a [`StreamFragment`].
+///
+/// Compared to [`visit_internal_tables`], this function also visits the table of `Materialize` node.
+pub fn visit_tables<F>(fragment: &mut StreamFragment, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables(fragment.node.as_mut().unwrap(), f)
 }

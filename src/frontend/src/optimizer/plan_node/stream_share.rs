@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
+
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
-use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
 use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
@@ -45,10 +46,18 @@ impl StreamShare {
                 input.append_only(),
                 input.emit_on_window_close(),
                 input.watermark_columns().clone(),
+                input.columns_monotonicity().clone(),
             )
         };
 
         StreamShare { base, core }
+    }
+
+    pub fn new_from_input(input: PlanRef) -> Self {
+        let core = generic::Share {
+            input: RefCell::new(input),
+        };
+        Self::new(core)
     }
 }
 

@@ -40,6 +40,7 @@ public class JDBCSink implements SinkWriter {
 
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
+    public static final String JDBC_TYPE_NAME_KEY = "TYPE_NAME";
 
     private boolean updateFlag = false;
 
@@ -53,9 +54,8 @@ public class JDBCSink implements SinkWriter {
         this.config = config;
         try {
             conn = JdbcUtils.getConnection(config.getJdbcUrl());
-            // Retrieve primary keys and column type mappings from the database
-            this.pkColumnNames =
-                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // Table schema has been validated before, so we get the PK from it directly
+            this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
@@ -72,11 +72,13 @@ public class JDBCSink implements SinkWriter {
                             .collect(Collectors.toList());
 
             LOG.info(
-                    "schema = {}, table = {}, columnSqlTypes = {}, pkIndices = {}",
+                    "schema = {}, table = {}, tableSchema = {}, columnSqlTypes = {}, pkIndices = {}, queryTimeout = {}",
                     config.getSchemaName(),
                     config.getTableName(),
+                    tableSchema,
                     columnSqlTypes,
-                    pkIndices);
+                    pkIndices,
+                    config.getQueryTimeout());
 
             if (factory.isPresent()) {
                 this.jdbcDialect = factory.get().create(columnSqlTypes, pkIndices);
@@ -89,8 +91,10 @@ public class JDBCSink implements SinkWriter {
                     "JDBC connection: autoCommit = {}, trxn = {}",
                     conn.getAutoCommit(),
                     conn.getTransactionIsolation());
+            // Commit the `getTransactionIsolation`
+            conn.commit();
 
-            jdbcStatements = new JdbcStatements(conn);
+            jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -107,9 +111,16 @@ public class JDBCSink implements SinkWriter {
                     conn.getMetaData().getColumns(null, schemaName, tableName, null);
 
             while (columnResultSet.next()) {
-                columnTypeMap.put(
-                        columnResultSet.getString(JDBC_COLUMN_NAME_KEY),
-                        columnResultSet.getInt(JDBC_DATA_TYPE_KEY));
+                var typeName = columnResultSet.getString(JDBC_TYPE_NAME_KEY);
+                int dt = columnResultSet.getInt(JDBC_DATA_TYPE_KEY);
+                // NOTE: Workaround a known issue of pgjdbc
+                // See also https://github.com/pgjdbc/pgjdbc/issues/1766
+                if (dt == Types.TIMESTAMP
+                        && (typeName.equalsIgnoreCase("timestamptz")
+                                || typeName.equalsIgnoreCase("timestamp with time zone"))) {
+                    dt = Types.TIMESTAMP_WITH_TIMEZONE;
+                }
+                columnTypeMap.put(columnResultSet.getString(JDBC_COLUMN_NAME_KEY), dt);
             }
         } catch (SQLException e) {
             throw Status.INTERNAL
@@ -123,28 +134,6 @@ public class JDBCSink implements SinkWriter {
                 tableName,
                 columnTypeMap);
         return columnTypeMap;
-    }
-
-    private static List<String> getPkColumnNames(
-            Connection conn, String tableName, String schemaName) {
-        List<String> pkColumnNames = new ArrayList<>();
-        try {
-            var pks = conn.getMetaData().getPrimaryKeys(null, schemaName, tableName);
-            while (pks.next()) {
-                pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
-            }
-        } catch (SQLException e) {
-            throw Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
-        }
-        LOG.info(
-                "schema = {}, table = {}: detected pk column = {}",
-                schemaName,
-                tableName,
-                pkColumnNames);
-        return pkColumnNames;
     }
 
     @Override
@@ -193,7 +182,7 @@ public class JDBCSink implements SinkWriter {
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
-                        jdbcStatements = new JdbcStatements(conn);
+                        jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());
                     } else {
                         throw io.grpc.Status.INTERNAL
                                 .withDescription(
@@ -226,13 +215,15 @@ public class JDBCSink implements SinkWriter {
      * across multiple batches if only the JDBC connection is valid.
      */
     class JdbcStatements implements AutoCloseable {
+        private final int queryTimeoutSecs;
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
         private PreparedStatement insertStatement;
 
         private final Connection conn;
 
-        public JdbcStatements(Connection conn) throws SQLException {
+        public JdbcStatements(Connection conn, int queryTimeoutSecs) throws SQLException {
+            this.queryTimeoutSecs = queryTimeoutSecs;
             this.conn = conn;
             var schemaTableName =
                     jdbcDialect.createSchemaTableName(
@@ -274,10 +265,7 @@ public class JDBCSink implements SinkWriter {
                         break;
                     case UPDATE_INSERT:
                         if (!updateFlag) {
-                            throw Status.FAILED_PRECONDITION
-                                    .withDescription(
-                                            "an UPDATE_DELETE should precede an UPDATE_INSERT")
-                                    .asRuntimeException();
+                            LOG.warn("Missing an UPDATE_DELETE precede an UPDATE_INSERT");
                         }
                         jdbcDialect.bindUpsertStatement(upsertStatement, conn, tableSchema, row);
                         updateFlag = false;
@@ -311,7 +299,7 @@ public class JDBCSink implements SinkWriter {
                         .asRuntimeException();
             }
             try {
-                jdbcDialect.bindDeleteStatement(deleteStatement, row);
+                jdbcDialect.bindDeleteStatement(deleteStatement, tableSchema, row);
                 deleteStatement.addBatch();
             } catch (SQLException e) {
                 throw Status.INTERNAL
@@ -362,6 +350,9 @@ public class JDBCSink implements SinkWriter {
             if (stmt == null) {
                 return;
             }
+            // if timeout occurs, a SQLTimeoutException will be thrown
+            // and we will retry to write the stream chunk in `JDBCSink.write`
+            stmt.setQueryTimeout(queryTimeoutSecs);
             LOG.debug("Executing statement: {}", stmt);
             stmt.executeBatch();
             stmt.clearParameters();
@@ -384,10 +375,7 @@ public class JDBCSink implements SinkWriter {
     @Override
     public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
         if (updateFlag) {
-            throw Status.FAILED_PRECONDITION
-                    .withDescription(
-                            "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
-                    .asRuntimeException();
+            LOG.warn("expect an UPDATE_INSERT to complete an UPDATE operation, got `sync`");
         }
         return Optional.empty();
     }

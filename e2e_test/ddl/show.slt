@@ -26,6 +26,7 @@ v1                 integer  false  turpis vehicula
 v2                 integer  false  Lorem ipsum dolor sit amet
 v3                 integer  false  NULL
 _row_id             serial   true  consectetur adipiscing elit
+_rw_timestamp timestamp with time zone true NULL
 primary key        _row_id   NULL  NULL
 distribution key   _row_id   NULL  NULL
 table description       t3   NULL  volutpat vitae
@@ -37,6 +38,7 @@ v1 integer false turpis vehicula
 v2 integer false Lorem ipsum dolor sit amet
 v3 integer false NULL
 _row_id serial true consectetur adipiscing elit
+_rw_timestamp timestamp with time zone true NULL
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -65,6 +67,7 @@ v1                 integer  false  Nemo enim ipsam
 v2                 integer  false  NULL
 v3                 integer  false  NULL
 _row_id             serial   true  NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key        _row_id   NULL  NULL
 distribution key   _row_id   NULL  NULL
 idx1               index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
@@ -102,12 +105,12 @@ show tables from public;
 t3
 
 query T
-show tables from public like "t_";
+show tables from public like 't_';
 ----
 t3
 
 query T
-show tables from public like "_t";
+show tables from public like '_t';
 ----
 
 query T
@@ -215,3 +218,37 @@ tablespace character varying false NULL
 hasindexes boolean false NULL
 ispopulated boolean false NULL
 definition character varying false NULL
+
+# show tables according to search path
+
+statement ok
+create schema show_another_schema;
+
+statement ok
+create table show_another_schema.t_another (v1 int);
+
+statement ok
+create table t4 (v1 int);
+
+query T
+show tables;
+----
+t4
+
+statement ok
+set search_path to show_another_schema, public;
+
+query T
+show tables;
+----
+t_another
+t4
+
+statement ok
+drop table t4;
+
+statement ok
+drop table show_another_schema.t_another;
+
+statement ok
+drop schema show_another_schema;

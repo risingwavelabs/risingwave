@@ -32,13 +32,15 @@ struct RwSource {
     format: Option<String>,
     row_encode: Option<String>,
     append_only: bool,
+    associated_table_id: Option<i32>,
     connection_id: Option<i32>,
     definition: String,
-    acl: String,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    is_shared: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sources")]
@@ -51,40 +53,39 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
 
     Ok(schemas
         .flat_map(|schema| {
-            schema
-                .iter_source()
-                .filter(|s| s.associated_table_id.is_none())
-                .map(|source| RwSource {
-                    id: source.id as i32,
-                    name: source.name.clone(),
-                    schema_id: schema.id() as i32,
-                    owner: source.owner as i32,
-                    connector: source
-                        .with_properties
-                        .get(UPSTREAM_SOURCE_KEY)
-                        .cloned()
-                        .unwrap_or("".to_string())
-                        .to_uppercase(),
-                    columns: source.columns.iter().map(|c| c.name().into()).collect(),
-                    format: source
-                        .info
-                        .get_format()
-                        .ok()
-                        .map(|format| format.as_str_name().into()),
-                    row_encode: source
-                        .info
-                        .get_row_encode()
-                        .ok()
-                        .map(|row_encode| row_encode.as_str_name().into()),
-                    append_only: source.append_only,
-                    connection_id: source.connection_id.map(|id| id as i32),
-                    definition: source.create_sql(),
-                    acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
-                    initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: source.created_at_cluster_version.clone(),
-                })
+            schema.iter_source().map(|source| RwSource {
+                id: source.id as i32,
+                name: source.name.clone(),
+                schema_id: schema.id() as i32,
+                owner: source.owner as i32,
+                connector: source
+                    .with_properties
+                    .get(UPSTREAM_SOURCE_KEY)
+                    .cloned()
+                    .unwrap_or("".to_string())
+                    .to_uppercase(),
+                columns: source.columns.iter().map(|c| c.name().into()).collect(),
+                format: source
+                    .info
+                    .get_format()
+                    .ok()
+                    .map(|format| format.as_str_name().into()),
+                row_encode: source
+                    .info
+                    .get_row_encode()
+                    .ok()
+                    .map(|row_encode| row_encode.as_str_name().into()),
+                append_only: source.append_only,
+                associated_table_id: source.associated_table_id.map(|id| id.table_id as i32),
+                connection_id: source.connection_id.map(|id| id as i32),
+                definition: source.create_sql(),
+                acl: get_acl_items(&Object::SourceId(source.id), false, &users, username_map),
+                initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
+                initialized_at_cluster_version: source.initialized_at_cluster_version.clone(),
+                created_at_cluster_version: source.created_at_cluster_version.clone(),
+                is_shared: source.info.is_shared(),
+            })
         })
         .collect())
 }

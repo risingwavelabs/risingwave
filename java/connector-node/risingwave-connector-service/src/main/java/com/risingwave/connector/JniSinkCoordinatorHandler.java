@@ -23,9 +23,6 @@ public class JniSinkCoordinatorHandler {
     private static final Logger LOG = LoggerFactory.getLogger(JniSinkCoordinatorHandler.class);
 
     public static void runJniSinkCoordinatorThread(long requestRxPtr, long responseTxPtr) {
-        // For jni.rs
-        java.lang.Thread.currentThread()
-                .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
         JniSinkCoordinatorResponseObserver responseObserver =
                 new JniSinkCoordinatorResponseObserver(responseTxPtr);
         SinkCoordinatorStreamObserver sinkCoordinatorStreamObserver =

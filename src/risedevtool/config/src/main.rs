@@ -61,12 +61,11 @@ pub enum Components {
     Minio,
     Hdfs,
     PrometheusAndGrafana,
-    Etcd,
-    Kafka,
     Pubsub,
     Redis,
     Tracing,
     RustComponents,
+    UseSystem,
     BuildConnectorNode,
     Dashboard,
     Release,
@@ -75,6 +74,10 @@ pub enum Components {
     HummockTrace,
     Coredump,
     NoBacktrace,
+    ExternalUdf,
+    WasmUdf,
+    JsUdf,
+    PythonUdf,
 }
 
 impl Components {
@@ -83,12 +86,11 @@ impl Components {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
-            Self::Etcd => "[Component] Etcd",
-            Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
+            Self::UseSystem => "[Build] Use system RisingWave",
             Self::Dashboard => "[Build] Dashboard",
             Self::Tracing => "[Component] Tracing: Grafana Tempo",
             Self::Release => "[Build] Enable release mode",
@@ -97,6 +99,10 @@ impl Components {
             Self::HummockTrace => "[Build] Hummock Trace",
             Self::Coredump => "[Runtime] Enable coredump",
             Self::NoBacktrace => "[Runtime] Disable backtrace",
+            Self::ExternalUdf => "[Build] Enable external UDF",
+            Self::WasmUdf => "[Build] Enable Wasm UDF",
+            Self::JsUdf => "[Build] Enable JS UDF",
+            Self::PythonUdf => "[Build] Enable Python UDF",
         }
         .into()
     }
@@ -115,16 +121,6 @@ Required by Hummock state store."
                 "
 Required if you want to view metrics."
             }
-            Self::Etcd => {
-                "
-Required if you want to persistent meta-node data.
-                "
-            }
-            Self::Kafka => {
-                "
-Required if you want to create source from Kafka.
-                "
-            }
             Self::Pubsub => {
                 "
 Required if you want to create source from Emulated Google Pub/sub.
@@ -133,8 +129,14 @@ Required if you want to create source from Emulated Google Pub/sub.
             Self::RustComponents => {
                 "
 Required if you want to build compute-node and meta-node.
-Otherwise you will need to manually download and copy it
-to RiseDev directory."
+Otherwise you will need to enable `USE_SYSTEM_RISINGWAVE`, or
+manually download a binary and copy it to RiseDev directory."
+            }
+            Self::UseSystem => {
+                "
+Use the RisingWave installed in the PATH, instead of building it
+from source. This implies `ENABLE_BUILD_RUST` to be false.
+                "
             }
             Self::Dashboard => {
                 "
@@ -194,11 +196,15 @@ the binaries will also be codesigned with `get-task-allow` enabled.
 As a result, RisingWave will dump the core on panics.
                 "
             }
-            Components::NoBacktrace => {
+            Self::NoBacktrace => {
                 "
 With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching nodes.
                 "
             }
+            Self::ExternalUdf => "Required if you want to support external UDF.",
+            Self::WasmUdf => "Required if you want to support WASM UDF.",
+            Self::JsUdf => "Required if you want to support JS UDF.",
+            Self::PythonUdf => "Required if you want to support Python UDF.",
         }
         .into()
     }
@@ -208,10 +214,9 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_MINIO" => Some(Self::Minio),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
-            "ENABLE_ETCD" => Some(Self::Etcd),
-            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
+            "USE_SYSTEM_RISINGWAVE" => Some(Self::UseSystem),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
@@ -222,6 +227,10 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             "ENABLE_HUMMOCK_TRACE" => Some(Self::HummockTrace),
             "ENABLE_COREDUMP" => Some(Self::Coredump),
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
+            "ENABLE_EXTERNAL_UDF" => Some(Self::ExternalUdf),
+            "ENABLE_WASM_UDF" => Some(Self::WasmUdf),
+            "ENABLE_JS_UDF" => Some(Self::JsUdf),
+            "ENABLE_PYTHON_UDF" => Some(Self::PythonUdf),
             _ => None,
         }
     }
@@ -231,11 +240,10 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::Minio => "ENABLE_MINIO",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
-            Self::Etcd => "ENABLE_ETCD",
-            Self::Kafka => "ENABLE_KAFKA",
             Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
+            Self::UseSystem => "USE_SYSTEM_RISINGWAVE",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
@@ -245,6 +253,10 @@ With this option enabled, RiseDev will not set `RUST_BACKTRACE` when launching n
             Self::HummockTrace => "ENABLE_HUMMOCK_TRACE",
             Self::Coredump => "ENABLE_COREDUMP",
             Self::NoBacktrace => "DISABLE_BACKTRACE",
+            Self::ExternalUdf => "ENABLE_EXTERNAL_UDF",
+            Self::WasmUdf => "ENABLE_WASM_UDF",
+            Self::JsUdf => "ENABLE_JS_UDF",
+            Self::PythonUdf => "ENABLE_PYTHON_UDF",
         }
         .into()
     }

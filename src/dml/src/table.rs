@@ -283,14 +283,11 @@ impl TableStreamReader {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array, Op, StreamChunk};
+    use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;

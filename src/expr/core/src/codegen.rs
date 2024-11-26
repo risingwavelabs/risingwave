@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This module contains imports that are used in the generated code for the `#[function]` macro.
+
 pub use async_trait::async_trait;
 pub use futures_async_stream::try_stream;
 pub use futures_util::stream::BoxStream;
-pub use itertools::multizip;
 pub use linkme;
+pub use thiserror_ext::AsReport;

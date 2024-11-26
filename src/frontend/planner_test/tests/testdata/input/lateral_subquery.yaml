@@ -119,3 +119,27 @@
     ) AS b ON TRUE;
   expected_outputs:
     - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/17382
+  sql: |
+    CREATE TABLE r(ts TIMESTAMPTZ, src_id int, dev_id int);
+    SELECT e.ts AS e_ts, d.*
+    FROM (
+      SELECT '2024-06-20T19:01:00Z'::TIMESTAMPTZ ts, 1::INT AS src_id) e
+    JOIN LATERAL
+    (
+      SELECT DISTINCT ON(src_id, dev_id) *
+      FROM r
+      WHERE r.src_id = e.src_id AND r.ts <= e.ts
+      ORDER BY src_id, dev_id, ts DESC
+    )d on true;
+  expected_outputs:
+    - batch_plan
+- name: lateral join with CTE
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1, lateral (
+        with cte as (select * from t2 where t2.y = t1.y)  select x from cte
+    );
+  expected_outputs:
+    - batch_plan

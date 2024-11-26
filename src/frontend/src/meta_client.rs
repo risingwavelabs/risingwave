@@ -17,7 +17,9 @@ use std::collections::HashMap;
 use anyhow::Context;
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
@@ -25,17 +27,20 @@ use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{EventLog, PbThrottleTarget};
+use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+
+use crate::catalog::DatabaseId;
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -44,11 +49,9 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot>;
+    async fn try_unregister(&self);
 
-    async fn get_snapshot(&self) -> Result<HummockSnapshot>;
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+    async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
 
     async fn wait(&self) -> Result<()>;
 
@@ -67,11 +70,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
-
-    async fn unpin_snapshot(&self) -> Result<()>;
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -87,15 +88,12 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
     async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>>;
 
     /// Returns vector of (worker_id, min_pinned_version_id)
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(u32, u64)>>;
-
-    /// Returns vector of (worker_id, min_pinned_snapshot_id)
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
@@ -124,22 +122,24 @@ pub trait FrontendMetaClient: Send + Sync {
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
+
+    async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.pin_snapshot().await
+    async fn try_unregister(&self) {
+        self.0.try_unregister().await;
     }
 
-    async fn get_snapshot(&self) -> Result<HummockSnapshot> {
-        self.0.get_snapshot().await
-    }
-
-    async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
-        self.0.flush(checkpoint).await
+    async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId> {
+        self.0.flush(database_id).await
     }
 
     async fn wait(&self) -> Result<()> {
@@ -173,16 +173,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_actor_states().await
     }
 
+    async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
+        self.0.list_actor_splits().await
+    }
+
     async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
         self.0.list_object_dependencies().await
-    }
-
-    async fn unpin_snapshot(&self) -> Result<()> {
-        self.0.unpin_snapshot().await
-    }
-
-    async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot_before(epoch).await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -213,7 +209,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.set_session_param(param, value).await
     }
 
-    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+    async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let ddl_progress = self.0.get_ddl_progress().await?;
         Ok(ddl_progress)
     }
@@ -238,21 +234,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(ret)
     }
 
-    async fn list_hummock_pinned_snapshots(&self) -> Result<Vec<(u32, u64)>> {
-        let pinned_snapshots = self
-            .0
-            .risectl_get_pinned_snapshots_summary()
-            .await?
-            .summary
-            .unwrap()
-            .pinned_snapshots;
-        let ret = pinned_snapshots
-            .into_iter()
-            .map(|s| (s.context_id, s.minimal_pinned_snapshot))
-            .collect();
-        Ok(ret)
-    }
-
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
     }
@@ -266,7 +247,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
-        self.0.list_version_deltas(0, u32::MAX, u64::MAX).await
+        self.0
+            .list_version_deltas(HummockVersionId::new(0), u32::MAX, u64::MAX)
+            .await
     }
 
     async fn list_branched_objects(&self) -> Result<Vec<BranchedObject>> {
@@ -311,5 +294,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .apply_throttle(kind, id, rate_limit)
             .await
             .map(|_| ())
+    }
+
+    async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus> {
+        self.0.get_cluster_recovery_status().await
+    }
+
+    async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {
+        self.0.get_cluster_limits().await
+    }
+
+    async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
+        self.0.list_rate_limits().await
     }
 }

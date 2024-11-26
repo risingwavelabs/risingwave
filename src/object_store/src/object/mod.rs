@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(madsim)]
+#![expect(
+    unexpected_cfgs,
+    reason = "feature(hdfs-backend) is banned https://github.com/risingwavelabs/risingwave/pull/7875"
+)]
+
 pub mod sim;
 use std::ops::{Range, RangeBounds};
 use std::sync::Arc;
@@ -47,25 +51,9 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use self::sim::SimObjectStore;
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
-pub type ObjectStreamingUploader = MonitoredStreamingUploader;
-
-type BoxedStreamingUploader = Box<dyn StreamingUploader>;
+pub type ObjectStreamingUploader = StreamingUploaderImpl;
 
 pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fmt::Debug + 'static;
-
-/// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
-/// the second contains all remote paths.
-fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
-    // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
-    //       partition instead?
-    let mut vec_rem = vec![];
-
-    for path in paths {
-        vec_rem.push(path.to_string());
-    }
-
-    vec_rem
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectMetadata {
@@ -76,11 +64,12 @@ pub struct ObjectMetadata {
     pub total_size: usize,
 }
 
-#[async_trait::async_trait]
 pub trait StreamingUploader: Send {
+    #[expect(async_fn_in_trait)]
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()>;
+    #[expect(async_fn_in_trait)]
+    async fn finish(self) -> ObjectResult<()>;
 
     fn get_memory_usage(&self) -> u64;
 }
@@ -88,13 +77,14 @@ pub trait StreamingUploader: Send {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
-    /// Get the key prefix for object
-    fn get_object_prefix(&self, obj_id: u64) -> String;
+    type StreamingUploader: StreamingUploader;
+    /// Get the key prefix for object, the prefix is determined by the type of object store and `devise_object_prefix`.
+    fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String;
 
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader>;
 
     /// If objects are PUT using a multipart upload, it's a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
@@ -131,97 +121,190 @@ pub trait ObjectStore: Send + Sync {
         MonitoredObjectStore::new(self, metrics, config)
     }
 
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter>;
+    async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter>;
 
     fn store_media_type(&self) -> &'static str;
-}
 
-pub enum ObjectStoreImpl {
-    InMem(MonitoredObjectStore<InMemObjectStore>),
-    Opendal(MonitoredObjectStore<OpendalObjectStore>),
-    S3(MonitoredObjectStore<S3ObjectStore>),
-    #[cfg(madsim)]
-    Sim(MonitoredObjectStore<SimObjectStore>),
-}
-
-macro_rules! dispatch_async {
-    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
-        $object_store.$method_name($($args, )*).await
+    fn support_streaming_upload(&self) -> bool {
+        true
     }
 }
+
+#[cfg(not(madsim))]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+#[cfg(madsim)]
+macro_rules! for_all_object_store {
+    ($macro:ident $($args:tt)*) => {
+        $macro! {
+            {
+                { InMem, InMemObjectStore },
+                { Opendal, OpendalObjectStore },
+                { S3, S3ObjectStore },
+                { Sim, SimObjectStore }
+            }
+            $($args)*
+        }
+    }
+}
+
+macro_rules! enum_map {
+    (
+        {
+            $(
+                {$variant:ident, $_type_name:ty}
+            ),*
+        },
+        $object_store:expr,
+        $var_name:ident,
+        $func:expr
+    ) => {
+        match $object_store {
+            $(
+                ObjectStoreEnum::$variant($var_name) => ObjectStoreEnum::$variant({
+                    $func
+                }),
+            )*
+        }
+    };
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
+        for_all_object_store! {
+            enum_map, $object_store, $var_name, $func
+        }
+    };
+}
+
+macro_rules! dispatch_object_store_enum {
+    (
+        {
+            $(
+                {$variant:ident, $_type_name:ty}
+            ),*
+        },
+        $object_store:expr,
+        $var_name:ident,
+        $func:expr
+    ) => {
+        match $object_store {
+            $(
+                ObjectStoreEnum::$variant($var_name) => {
+                    $func
+                },
+            )*
+        }
+    };
+    ($object_store:expr, |$var_name:ident| $func:expr) => {
+        for_all_object_store! {
+            dispatch_object_store_enum, $object_store, $var_name, $func
+        }
+    };
+}
+
+macro_rules! define_object_store_impl {
+    () => {
+        for_all_object_store! {
+            define_object_store_impl
+        }
+    };
+    (
+        {$(
+            {$variant:ident, $type_name:ty}
+        ),*}
+    ) => {
+        pub enum ObjectStoreEnum<
+            $($variant),*
+        > {
+            $(
+                $variant($variant),
+            )*
+        }
+
+        pub type ObjectStoreImpl = ObjectStoreEnum<
+            $(
+                MonitoredObjectStore<$type_name>,
+            )*
+        >;
+
+        pub type StreamingUploaderImpl = ObjectStoreEnum<
+            $(
+                MonitoredStreamingUploader<<$type_name as ObjectStore>::StreamingUploader>
+            ),*
+        >;
+    };
+}
+
+define_object_store_impl!();
 
 /// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///
 /// Except for `InMem`,the operation should be performed on remote object store.
 macro_rules! object_store_impl_method_body {
-    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $path:expr $(, $args:expr)*) => {
+    // with await
+    ($object_store:expr, $method_name:ident ($($args:expr),*).await) => {
         {
-            let path = $path;
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, path $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
-                },
-            }
-
+            dispatch_object_store_enum! {$object_store, |os| {
+                os.$method_name($($args),*).await
+            }}
+        }
+    };
+    // no await
+    ($object_store:expr, $method_name:ident ($(, $args:expr)*)) => {
+        {
+            dispatch_object_store_enum! {$object_store, |os| {
+                os.$method_name($($args),*)
+            }}
         }
     };
 }
 
-/// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
-/// enum type and the `paths`. It is a modification of the macro above to work with a slice of
-/// strings instead of just a single one.
-///
-/// Except for `InMem`, the operation should be performed on remote object store.
-macro_rules! object_store_impl_method_body_slice {
-    ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
-        {
-            let paths_rem = partition_object_store_paths($paths);
+impl StreamingUploaderImpl {
+    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, write_bytes(data).await)
+    }
 
-            match $object_store {
-                ObjectStoreImpl::InMem(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::Opendal(opendal) => {
-                    $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::S3(s3) => {
-                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                },
-                #[cfg(madsim)]
-                ObjectStoreImpl::Sim(in_mem) => {
-                    $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
-                },
-            }
-        }
-    };
+    pub async fn finish(self) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, finish().await)
+    }
+
+    pub fn get_memory_usage(&self) -> u64 {
+        object_store_impl_method_body!(self, get_memory_usage())
+    }
 }
 
 impl ObjectStoreImpl {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, upload, dispatch_async, path, obj)
+        object_store_impl_method_body!(self, upload(path, obj).await)
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<ObjectStreamingUploader> {
+        Ok(enum_map!(self, |store| {
+            store.streaming_upload(path).await?
+        }))
     }
 
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
-        object_store_impl_method_body!(self, read, dispatch_async, path, range)
+        object_store_impl_method_body!(self, read(path, range).await)
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        object_store_impl_method_body!(self, metadata, dispatch_async, path)
+        object_store_impl_method_body!(self, metadata(path).await)
     }
 
     /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
@@ -232,11 +315,11 @@ impl ObjectStoreImpl {
         path: &str,
         start_loc: Range<usize>,
     ) -> ObjectResult<MonitoredStreamingReader> {
-        object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
+        object_store_impl_method_body!(self, streaming_read(path, start_loc).await)
     }
 
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
-        object_store_impl_method_body!(self, delete, dispatch_async, path)
+        object_store_impl_method_body!(self, delete(path).await)
     }
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
@@ -245,36 +328,30 @@ impl ObjectStoreImpl {
     /// If a hybrid storage is used, the method will first attempt to delete objects in local
     /// storage. Only if that is successful, it will remove objects from remote storage.
     pub async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        object_store_impl_method_body_slice!(self, delete_objects, dispatch_async, paths)
+        object_store_impl_method_body!(self, delete_objects(paths).await)
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        object_store_impl_method_body!(self, list, dispatch_async, prefix)
+    pub async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
+        object_store_impl_method_body!(self, list(prefix, start_after, limit).await)
     }
 
-    pub fn get_object_prefix(&self, obj_id: u64) -> String {
-        // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
-        // trait. Macro object_store_impl_method_body routes to local or remote only depending on
-        // the path
-        match self {
-            ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(store) => store.inner.get_object_prefix(obj_id),
-        }
+    pub fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
+        dispatch_object_store_enum!(self, |store| store
+            .inner
+            .get_object_prefix(obj_id, use_new_object_prefix_strategy))
     }
 
     pub fn support_streaming_upload(&self) -> bool {
-        match self {
-            ObjectStoreImpl::InMem(_) => true,
-            ObjectStoreImpl::Opendal(store) => {
-                store.inner.op.info().native_capability().write_can_multi
-            }
-            ObjectStoreImpl::S3(_) => true,
-            #[cfg(madsim)]
-            ObjectStoreImpl::Sim(_) => true,
-        }
+        dispatch_object_store_enum!(self, |store| store.inner.support_streaming_upload())
+    }
+
+    pub fn media_type(&self) -> &'static str {
+        object_store_impl_method_body!(self, media_type())
     }
 }
 
@@ -303,40 +380,30 @@ fn try_update_failure_metric<T>(
 ///   - `streaming_upload_finish`: The time spent calling `finish`.
 /// - `failure_count`: `streaming_upload_start`, `streaming_upload_write_bytes`,
 ///   `streaming_upload_finish`
-pub struct MonitoredStreamingUploader {
-    inner: BoxedStreamingUploader,
+pub struct MonitoredStreamingUploader<U: StreamingUploader> {
+    inner: U,
     object_store_metrics: Arc<ObjectStoreMetrics>,
     /// Length of data uploaded with this uploader.
     operation_size: usize,
-    media_type: &'static str,
 }
 
-impl MonitoredStreamingUploader {
-    pub fn new(
-        media_type: &'static str,
-        handle: BoxedStreamingUploader,
-        object_store_metrics: Arc<ObjectStoreMetrics>,
-    ) -> Self {
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
+    pub fn new(handle: U, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
             inner: handle,
             object_store_metrics,
             operation_size: 0,
-            media_type,
         }
     }
 }
 
-impl MonitoredStreamingUploader {
-    pub async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+/// NOTICE: after #16231, streaming uploader implemented via aws-sdk-s3 will maintain metrics internally in s3.rs
+/// so `MonitoredStreamingUploader` will only be used when the inner object store is opendal.
+impl<U: StreamingUploader> MonitoredStreamingUploader<U> {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUpload;
         let operation_type_str = operation_type.as_str();
         let data_len = data.len();
-
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type, operation_type_str])
-            .start_timer();
 
         let res = self
             .inner
@@ -346,6 +413,7 @@ impl MonitoredStreamingUploader {
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
 
+        // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
         self.object_store_metrics
             .write_bytes
             .inc_by(data_len as u64);
@@ -358,22 +426,20 @@ impl MonitoredStreamingUploader {
         res
     }
 
-    pub async fn finish(self) -> ObjectResult<()> {
+    async fn finish(self) -> ObjectResult<()> {
         let operation_type = OperationType::StreamingUploadFinish;
         let operation_type_str = operation_type.as_str();
-        let _timer = self
-            .object_store_metrics
-            .operation_latency
-            .with_label_values(&[self.media_type, operation_type_str])
-            .start_timer();
 
-        let res = self
-            .inner
-            .finish()
-            .verbose_instrument_await(operation_type_str)
-            .await;
+        let res =
+            // TODO: we should avoid this special case after fully migrating to opeandal for s3.
+            self.inner
+                .finish()
+                .verbose_instrument_await(operation_type_str)
+                .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
+        // duration metrics is collected and reported inside the specific implementation of the streaming uploader.
         self.object_store_metrics
             .operation_size
             .with_label_values(&[operation_type_str])
@@ -381,7 +447,7 @@ impl MonitoredStreamingUploader {
         res
     }
 
-    pub fn get_memory_usage(&self) -> u64 {
+    fn get_memory_usage(&self) -> u64 {
         self.inner.get_memory_usage()
     }
 }
@@ -511,6 +577,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let operation_type = OperationType::Upload;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
 
         self.object_store_metrics
             .write_bytes
@@ -522,7 +589,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -537,6 +604,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -544,7 +612,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+    pub async fn streaming_upload(
+        &self,
+        path: &str,
+    ) -> ObjectResult<MonitoredStreamingUploader<OS::StreamingUploader>> {
         let operation_type = OperationType::StreamingUploadInit;
         let operation_type_str = operation_type.as_str();
         let media_type = self.media_type();
@@ -561,8 +632,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type_str);
+
         Ok(MonitoredStreamingUploader::new(
-            media_type,
             res?,
             self.object_store_metrics.clone(),
         ))
@@ -571,10 +642,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let operation_type = OperationType::Read;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -589,6 +662,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -642,6 +716,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -660,10 +735,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let operation_type = OperationType::Metadata;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -678,6 +754,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -688,10 +765,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub async fn delete(&self, path: &str) -> ObjectResult<()> {
         let operation_type = OperationType::Delete;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
@@ -706,6 +785,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -716,6 +796,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         let operation_type = OperationType::DeleteObjects;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
+
         let _timer = self
             .object_store_metrics
             .operation_latency
@@ -734,6 +816,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -741,19 +824,25 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    pub async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
+    pub async fn list(
+        &self,
+        prefix: &str,
+        start_after: Option<String>,
+        limit: Option<usize>,
+    ) -> ObjectResult<ObjectMetadataIter> {
         let operation_type = OperationType::List;
         let operation_type_str = operation_type.as_str();
+        let media_type = self.media_type();
 
         let _timer = self
             .object_store_metrics
             .operation_latency
-            .with_label_values(&[self.media_type(), operation_type_str])
+            .with_label_values(&[media_type, operation_type_str])
             .start_timer();
 
         let builder = || async {
             self.inner
-                .list(prefix)
+                .list(prefix, start_after.clone(), limit)
                 .verbose_instrument_await(operation_type_str)
                 .await
         };
@@ -763,6 +852,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             &self.config,
             operation_type,
             self.object_store_metrics.clone(),
+            media_type,
         )
         .await;
 
@@ -789,9 +879,13 @@ pub async fn build_remote_object_store(
                 let bucket = s3.strip_prefix("s3://").unwrap();
                 tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_s3_engine(bucket.to_string(), config.clone())
-                        .unwrap()
-                        .monitored(metrics, config),
+                    OpendalObjectStore::new_s3_engine(
+                        bucket.to_string(),
+                        config.clone(),
+                        metrics.clone(),
+                    )
+                    .unwrap()
+                    .monitored(metrics, config),
                 )
             } else {
                 ObjectStoreImpl::S3(
@@ -814,6 +908,7 @@ pub async fn build_remote_object_store(
                     namenode.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -827,6 +922,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -840,6 +936,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -854,6 +951,7 @@ pub async fn build_remote_object_store(
                     bucket.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -867,6 +965,7 @@ pub async fn build_remote_object_store(
                     namenode.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -880,6 +979,7 @@ pub async fn build_remote_object_store(
                     container_name.to_string(),
                     root.to_string(),
                     config.clone(),
+                    metrics.clone(),
                 )
                 .unwrap()
                 .monitored(metrics, config),
@@ -888,7 +988,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone())
+                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone(), metrics.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )
@@ -904,7 +1004,7 @@ pub async fn build_remote_object_store(
             if config.s3.developer.use_opendal {
                 tracing::info!("Using OpenDAL to access minio.");
                 ObjectStoreImpl::Opendal(
-                    OpendalObjectStore::new_minio_engine(minio, config.clone())
+                    OpendalObjectStore::new_minio_engine(minio, config.clone(), metrics.clone())
                         .unwrap()
                         .monitored(metrics, config),
                 )
@@ -1032,20 +1132,26 @@ struct RetryCondition {
     operation_type: OperationType,
     retry_count: usize,
     metrics: Arc<ObjectStoreMetrics>,
+    retry_opendal_s3_unknown_error: bool,
 }
 
 impl RetryCondition {
-    fn new(operation_type: OperationType, metrics: Arc<ObjectStoreMetrics>) -> Self {
+    fn new(
+        operation_type: OperationType,
+        metrics: Arc<ObjectStoreMetrics>,
+        retry_opendal_s3_unknown_error: bool,
+    ) -> Self {
         Self {
             operation_type,
             retry_count: 0,
             metrics,
+            retry_opendal_s3_unknown_error,
         }
     }
 
     #[inline(always)]
     fn should_retry_inner(&mut self, err: &ObjectError) -> bool {
-        let should_retry = err.should_retry();
+        let should_retry = err.should_retry(self.retry_opendal_s3_unknown_error);
         if should_retry {
             self.retry_count += 1;
         }
@@ -1076,6 +1182,7 @@ async fn retry_request<F, T, B>(
     config: &ObjectStoreConfig,
     operation_type: OperationType,
     object_store_metrics: Arc<ObjectStoreMetrics>,
+    media_type: &'static str,
 ) -> ObjectResult<T>
 where
     B: Fn() -> F,
@@ -1086,7 +1193,13 @@ where
         Duration::from_millis(get_attempt_timeout_by_type(config, operation_type));
     let operation_type_str = operation_type.as_str();
 
-    let retry_condition = RetryCondition::new(operation_type, object_store_metrics);
+    let retry_condition = RetryCondition::new(
+        operation_type,
+        object_store_metrics,
+        (config.s3.developer.retry_unknown_service_error || config.s3.retry_unknown_service_error)
+            && (media_type == opendal_engine::MediaType::S3.as_str()
+                || media_type == opendal_engine::MediaType::Minio.as_str()),
+    );
 
     let f = || async {
         let future = builder();

@@ -13,31 +13,35 @@
 // limitations under the License.
 
 use std::alloc::Global;
-use std::ops::{Bound, Deref, DerefMut};
+use std::cmp::Ordering;
+use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::future::{join, try_join};
-use futures::StreamExt;
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::for_await;
+use join_row_set::JoinRowSet;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use thiserror_ext::AsReport;
 
 use super::row::{DegreeType, EncodedJoinRow};
-use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::consistency::{consistency_error, enable_strict_consistency};
+use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -45,6 +49,7 @@ use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
 type PkType = Vec<u8>;
+type InequalKeyType = Vec<u8>;
 
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
@@ -103,9 +108,9 @@ pub struct JoinHashMapMetrics {
     insert_cache_miss_count: usize,
 
     // Metrics
-    join_lookup_total_count_metric: LabelGuardedIntCounter<5>,
-    join_lookup_miss_count_metric: LabelGuardedIntCounter<5>,
-    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<5>,
+    join_lookup_total_count_metric: LabelGuardedIntCounter<4>,
+    join_lookup_miss_count_metric: LabelGuardedIntCounter<4>,
+    join_insert_cache_miss_count_metrics: LabelGuardedIntCounter<4>,
 }
 
 impl JoinHashMapMetrics {
@@ -115,37 +120,19 @@ impl JoinHashMapMetrics {
         fragment_id: FragmentId,
         side: &'static str,
         join_table_id: u32,
-        degree_table_id: u32,
     ) -> Self {
         let actor_id = actor_id.to_string();
         let fragment_id = fragment_id.to_string();
         let join_table_id = join_table_id.to_string();
-        let degree_table_id = degree_table_id.to_string();
-        let join_lookup_total_count_metric =
-            metrics.join_lookup_total_count.with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
-        let join_lookup_miss_count_metric =
-            metrics.join_lookup_miss_count.with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
+        let join_lookup_total_count_metric = metrics
+            .join_lookup_total_count
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
+        let join_lookup_miss_count_metric = metrics
+            .join_lookup_miss_count
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
         let join_insert_cache_miss_count_metrics = metrics
             .join_insert_cache_miss_count
-            .with_guarded_label_values(&[
-                (side),
-                &join_table_id,
-                &degree_table_id,
-                &actor_id,
-                &fragment_id,
-            ]);
+            .with_guarded_label_values(&[(side), &join_table_id, &actor_id, &fragment_id]);
 
         Self {
             lookup_miss_count: 0,
@@ -167,6 +154,21 @@ impl JoinHashMapMetrics {
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
         self.insert_cache_miss_count = 0;
+    }
+}
+
+/// Inequality key description for `AsOf` join.
+struct InequalityKeyDesc {
+    idx: usize,
+    serializer: OrderedRowSerde,
+}
+
+impl InequalityKeyDesc {
+    /// Serialize the inequality key from a row.
+    pub fn serialize_inequal_key_from_row(&self, row: impl Row) -> InequalKeyType {
+        let indices = vec![self.idx];
+        let inequality_key = row.project(&indices);
+        inequality_key.memcmp_serialize(&self.serializer)
     }
 }
 
@@ -192,30 +194,41 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// - Full Outer: both side
     /// - Left Outer/Semi/Anti: left side
     /// - Right Outer/Semi/Anti: right side
-    /// - Inner: None.
-    degree_state: TableInner<S>,
+    /// - Inner: neither side.
+    ///
+    /// Should be set to `None` if `need_degree_table` was set to `false`.
+    degree_state: Option<TableInner<S>>,
     /// If degree table is need
     need_degree_table: bool,
     /// Pk is part of the join key.
     pk_contained_in_jk: bool,
+    /// Inequality key description for `AsOf` join.
+    inequality_key_desc: Option<InequalityKeyDesc>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
 
-struct TableInner<S: StateStore> {
+pub struct TableInner<S: StateStore> {
     /// Indices of the (cache) pk in a state row
     pk_indices: Vec<usize>,
     /// Indices of the join key in a state row
     join_key_indices: Vec<usize>,
     // This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
-    // This should be identical to the data types in table schema.
-    #[expect(dead_code)]
-    all_data_types: Vec<DataType>,
     pub(crate) table: StateTable<S>,
 }
 
 impl<S: StateStore> TableInner<S> {
+    pub fn new(pk_indices: Vec<usize>, join_key_indices: Vec<usize>, table: StateTable<S>) -> Self {
+        let order_key_indices = table.pk_indices().to_vec();
+        Self {
+            pk_indices,
+            join_key_indices,
+            order_key_indices,
+            table,
+        }
+    }
+
     fn error_context(&self, row: &impl Row) -> String {
         let pk = row.project(&self.pk_indices);
         let jk = row.project(&self.join_key_indices);
@@ -233,19 +246,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        watermark_epoch: AtomicU64Ref,
+        watermark_sequence: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
         state_join_key_indices: Vec<usize>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
         state_pk_indices: Vec<usize>,
-        degree_join_key_indices: Vec<usize>,
-        degree_all_data_types: Vec<DataType>,
-        degree_table: StateTable<S>,
-        degree_pk_indices: Vec<usize>,
+        degree_state: Option<TableInner<S>>,
         null_matched: K::Bitmap,
-        need_degree_table: bool,
         pk_contained_in_jk: bool,
+        inequality_key_idx: Option<usize>,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         fragment_id: FragmentId,
@@ -262,33 +272,37 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
+        let inequality_key_desc = inequality_key_idx.map(|idx| {
+            let serializer = OrderedRowSerde::new(
+                vec![state_all_data_types[idx].clone()],
+                vec![OrderType::ascending()],
+            );
+            InequalityKeyDesc { idx, serializer }
+        });
+
         let join_table_id = state_table.table_id();
-        let degree_table_id = degree_table.table_id();
         let state = TableInner {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
             order_key_indices: state_table.pk_indices().to_vec(),
-            all_data_types: state_all_data_types,
             table: state_table,
         };
 
-        let degree_state = TableInner {
-            pk_indices: degree_pk_indices,
-            join_key_indices: degree_join_key_indices,
-            order_key_indices: degree_table.pk_indices().to_vec(),
-            all_data_types: degree_all_data_types,
-            table: degree_table,
-        };
+        let need_degree_table = degree_state.is_some();
 
         let metrics_info = MetricsInfo::new(
             metrics.clone(),
             join_table_id,
             actor_id,
-            &format!("hash join {}", side),
+            format!("hash join {}", side),
         );
 
-        let cache =
-            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
+        let cache = ManagedLruCache::unbounded_with_hasher_in(
+            watermark_sequence,
+            metrics_info,
+            PrecomputedBuildHasher,
+            alloc,
+        );
 
         Self {
             inner: cache,
@@ -299,33 +313,27 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             degree_state,
             need_degree_table,
             pk_contained_in_jk,
-            metrics: JoinHashMapMetrics::new(
-                &metrics,
-                actor_id,
-                fragment_id,
-                side,
-                join_table_id,
-                degree_table_id,
-            ),
+            inequality_key_desc,
+            metrics: JoinHashMapMetrics::new(&metrics, actor_id, fragment_id, side, join_table_id),
         }
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.update_epoch(epoch.curr);
-        self.state.table.init_epoch(epoch);
-        self.degree_state.table.init_epoch(epoch);
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        // Update the current epoch in `ManagedLruCache`
-        self.inner.update_epoch(epoch)
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state.table.init_epoch(epoch).await?;
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.init_epoch(epoch).await?;
+        }
+        Ok(())
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
     pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
         let (_previous_vnode_bitmap, cache_may_stale) =
             self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
+        let _ = self
+            .degree_state
+            .as_mut()
+            .map(|degree_state| degree_state.table.update_vnode_bitmap(vnode_bitmap.clone()));
 
         if cache_may_stale {
             self.inner.clear();
@@ -336,8 +344,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
-        self.state.table.update_watermark(watermark.clone(), false);
-        self.degree_state.table.update_watermark(watermark, false);
+        self.state.table.update_watermark(watermark.clone());
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.update_watermark(watermark);
+        }
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
@@ -376,50 +386,135 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 self.state
                     .table
                     .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
-            let degree_table_iter_fut = self.degree_state.table.iter_with_prefix(
-                &key,
-                sub_range,
-                PrefetchOptions::default(),
-            );
+            let degree_state = self.degree_state.as_ref().unwrap();
+            let degree_table_iter_fut =
+                degree_state
+                    .table
+                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
 
             let mut pinned_table_iter = std::pin::pin!(table_iter);
             let mut pinned_degree_table_iter = std::pin::pin!(degree_table_iter);
+
+            // For better tolerating inconsistent stream, we have to first buffer all rows and
+            // degree rows, and check the number of them, then iterate on them.
+            let mut rows = vec![];
+            let mut degree_rows = vec![];
+            let mut inconsistency_happened = false;
             loop {
-                // Iterate on both iterators and ensure they have same size. Basically `zip_eq()`.
-                let (row, degree) =
+                let (row, degree_row) =
                     join(pinned_table_iter.next(), pinned_degree_table_iter.next()).await;
-                let (row, degree) = match (row, degree) {
+                let (row, degree_row) = match (row, degree_row) {
                     (None, None) => break,
-                    (None, Some(_)) | (Some(_), None) => {
-                        panic!("mismatched row and degree table of join key: {:?}", &key)
+                    (None, Some(_)) => {
+                        inconsistency_happened = true;
+                        consistency_panic!(
+                            "mismatched row and degree table of join key: {:?}, degree table has more rows",
+                            &key
+                        );
+                        break;
+                    }
+                    (Some(_), None) => {
+                        inconsistency_happened = true;
+                        consistency_panic!(
+                            "mismatched row and degree table of join key: {:?}, input table has more rows",
+                            &key
+                        );
+                        break;
                     }
                     (Some(r), Some(d)) => (r, d),
                 };
 
                 let row = row?;
-                let degree_row = degree?;
-                let pk1 = row.key();
-                let pk2 = degree_row.key();
-                debug_assert_eq!(
-                    pk1, pk2,
-                    "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
-                );
-                let pk = row
-                    .as_ref()
-                    .project(&self.state.pk_indices)
-                    .memcmp_serialize(&self.pk_serializer);
-                let degree_i64 = degree_row
-                    .datum_at(degree_row.len() - 1)
-                    .expect("degree should not be NULL");
-                entry_state
-                    .insert(
-                        pk,
-                        JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
-                    )
-                    .with_context(|| self.state.error_context(row.row()))?;
+                let degree_row = degree_row?;
+                rows.push(row);
+                degree_rows.push(degree_row);
+            }
+
+            if inconsistency_happened {
+                // Pk-based row-degree pairing.
+                assert_ne!(rows.len(), degree_rows.len());
+
+                let row_iter = stream::iter(rows.into_iter()).peekable();
+                let degree_row_iter = stream::iter(degree_rows.into_iter()).peekable();
+                pin_mut!(row_iter);
+                pin_mut!(degree_row_iter);
+
+                loop {
+                    match join(row_iter.as_mut().peek(), degree_row_iter.as_mut().peek()).await {
+                        (None, _) | (_, None) => break,
+                        (Some(row), Some(degree_row)) => match row.key().cmp(degree_row.key()) {
+                            Ordering::Greater => {
+                                degree_row_iter.next().await;
+                            }
+                            Ordering::Less => {
+                                row_iter.next().await;
+                            }
+                            Ordering::Equal => {
+                                let row = row_iter.next().await.unwrap();
+                                let degree_row = degree_row_iter.next().await.unwrap();
+
+                                let pk = row
+                                    .as_ref()
+                                    .project(&self.state.pk_indices)
+                                    .memcmp_serialize(&self.pk_serializer);
+                                let degree_i64 = degree_row
+                                    .datum_at(degree_row.len() - 1)
+                                    .expect("degree should not be NULL");
+                                let inequality_key = self
+                                    .inequality_key_desc
+                                    .as_ref()
+                                    .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
+                                entry_state
+                                    .insert(
+                                        pk,
+                                        JoinRow::new(row.row(), degree_i64.into_int64() as u64)
+                                            .encode(),
+                                        inequality_key,
+                                    )
+                                    .with_context(|| self.state.error_context(row.row()))?;
+                            }
+                        },
+                    }
+                }
+            } else {
+                // 1 to 1 row-degree pairing.
+                // Actually it's possible that both the input data table and the degree table missed
+                // some equal number of rows, but let's ignore this case because it should be rare.
+
+                assert_eq!(rows.len(), degree_rows.len());
+
+                #[for_await]
+                for (row, degree_row) in
+                    stream::iter(rows.into_iter().zip_eq_fast(degree_rows.into_iter()))
+                {
+                    let pk1 = row.key();
+                    let pk2 = degree_row.key();
+                    debug_assert_eq!(
+                        pk1, pk2,
+                        "mismatched pk in degree table: pk1: {pk1:?}, pk2: {pk2:?}",
+                    );
+                    let pk = row
+                        .as_ref()
+                        .project(&self.state.pk_indices)
+                        .memcmp_serialize(&self.pk_serializer);
+                    let inequality_key = self
+                        .inequality_key_desc
+                        .as_ref()
+                        .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
+                    let degree_i64 = degree_row
+                        .datum_at(degree_row.len() - 1)
+                        .expect("degree should not be NULL");
+                    entry_state
+                        .insert(
+                            pk,
+                            JoinRow::new(row.row(), degree_i64.into_int64() as u64).encode(),
+                            inequality_key,
+                        )
+                        .with_context(|| self.state.error_context(row.row()))?;
+                }
             }
         } else {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
@@ -437,8 +532,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                     .as_ref()
                     .project(&self.state.pk_indices)
                     .memcmp_serialize(&self.pk_serializer);
+                let inequality_key = self
+                    .inequality_key_desc
+                    .as_ref()
+                    .map(|desc| desc.serialize_inequal_key_from_row(row.row()));
                 entry_state
-                    .insert(pk, JoinRow::new(row.row(), 0).encode())
+                    .insert(pk, JoinRow::new(row.row(), 0).encode(), inequality_key)
                     .with_context(|| self.state.error_context(row.row()))?;
             }
         };
@@ -449,22 +548,28 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
-        self.degree_state.table.commit(epoch).await?;
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.commit(epoch).await?;
+        }
         Ok(())
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
         self.state.table.try_flush().await?;
-        self.degree_state.table.try_flush().await?;
+        if let Some(degree_state) = &mut self.degree_state {
+            degree_state.table.try_flush().await?;
+        }
         Ok(())
     }
 
     /// Insert a join row
-    #[allow(clippy::unused_async)]
-    pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
-        let pk = (&value.row)
-            .project(&self.state.pk_indices)
-            .memcmp_serialize(&self.pk_serializer);
+    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        let pk = self.serialize_pk_from_row(&value.row);
+
+        let inequality_key = self
+            .inequality_key_desc
+            .as_ref()
+            .map(|desc| desc.serialize_inequal_key_from_row(&value.row));
 
         // TODO(yuhao): avoid this `contains`.
         // https://github.com/risingwavelabs/risingwave/issues/9233
@@ -472,54 +577,34 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             let mut entry = self.inner.get_mut(key).unwrap();
             entry
-                .insert(pk, value.encode())
+                .insert(pk, value.encode(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
         } else if self.pk_contained_in_jk {
             // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
             state
-                .insert(pk, value.encode())
+                .insert(pk, value.encode(), inequality_key)
                 .with_context(|| self.state.error_context(&value.row))?;
             self.update_state(key, state.into());
         }
 
         // Update the flush buffer.
-        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
-        self.state.table.insert(row);
-        self.degree_state.table.insert(degree);
+        if let Some(degree_state) = self.degree_state.as_mut() {
+            let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
+            self.state.table.insert(row);
+            degree_state.table.insert(degree);
+        } else {
+            self.state.table.insert(value.row);
+        }
         Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    #[allow(clippy::unused_async)]
-    pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
+    pub fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(&value, 0);
-        let pk = (&value)
-            .project(&self.state.pk_indices)
-            .memcmp_serialize(&self.pk_serializer);
-
-        // TODO(yuhao): avoid this `contains`.
-        // https://github.com/risingwavelabs/risingwave/issues/9233
-        if self.inner.contains(key) {
-            // Update cache
-            let mut entry = self.inner.get_mut(key).unwrap();
-            entry
-                .insert(pk, join_row.encode())
-                .with_context(|| self.state.error_context(&value))?;
-        } else if self.pk_contained_in_jk {
-            // Refill cache when the join key exist in neither cache or storage.
-            self.metrics.insert_cache_miss_count += 1;
-            let mut state = JoinEntryState::default();
-            state
-                .insert(pk, join_row.encode())
-                .with_context(|| self.state.error_context(&value))?;
-            self.update_state(key, state.into());
-        }
-
-        // Update the flush buffer.
-        self.state.table.insert(value);
+        self.insert(key, join_row)?;
         Ok(())
     }
 
@@ -529,15 +614,20 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
+            let inequality_key = self
+                .inequality_key_desc
+                .as_ref()
+                .map(|desc| desc.serialize_inequal_key_from_row(&value.row));
             entry
-                .remove(pk)
+                .remove(pk, inequality_key.as_ref())
                 .with_context(|| self.state.error_context(&value.row))?;
         }
 
         // If no cache maintained, only update the state table.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
-        self.degree_state.table.delete(degree);
+        let degree_state = self.degree_state.as_mut().unwrap();
+        degree_state.table.delete(degree);
         Ok(())
     }
 
@@ -548,8 +638,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let pk = (&value)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
+
+            let inequality_key = self
+                .inequality_key_desc
+                .as_ref()
+                .map(|desc| desc.serialize_inequal_key_from_row(&value));
             entry
-                .remove(pk)
+                .remove(pk, inequality_key.as_ref())
                 .with_context(|| self.state.error_context(&value))?;
         }
 
@@ -581,8 +676,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         action(&mut join_row.degree);
 
         let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
-
-        self.degree_state.table.update(old_degree, new_degree);
+        let degree_state = self.degree_state.as_mut().unwrap();
+        degree_state.table.update(old_degree, new_degree);
     }
 
     /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
@@ -603,9 +698,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         join_row: &mut JoinRow<OwnedRow>,
     ) {
         self.manipulate_degree(join_row_ref, join_row, |d| {
-            *d = d
-                .checked_sub(1)
-                .expect("Tried to decrement zero join row degree")
+            *d = d.checked_sub(1).unwrap_or_else(|| {
+                consistency_panic!("Tried to decrement zero join row degree");
+                0
+            });
         })
     }
 
@@ -626,6 +722,33 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn table_id(&self) -> u32 {
         self.state.table.table_id()
     }
+
+    pub fn join_key_data_types(&self) -> &[DataType] {
+        &self.join_key_data_types
+    }
+
+    /// Return true if the inequality key is null.
+    /// # Panics
+    /// Panics if the inequality key is not set.
+    pub fn check_inequal_key_null(&self, row: &impl Row) -> bool {
+        let desc = self.inequality_key_desc.as_ref().unwrap();
+        row.datum_at(desc.idx).is_none()
+    }
+
+    /// Serialize the inequality key from a row.
+    /// # Panics
+    /// Panics if the inequality key is not set.
+    pub fn serialize_inequal_key_from_row(&self, row: impl Row) -> InequalKeyType {
+        self.inequality_key_desc
+            .as_ref()
+            .unwrap()
+            .serialize_inequal_key_from_row(&row)
+    }
+
+    pub fn serialize_pk_from_row(&self, row: impl Row) -> PkType {
+        row.project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer)
+    }
 }
 
 use risingwave_common_estimate_size::KvSize;
@@ -641,7 +764,9 @@ use super::*;
 #[derive(Default)]
 pub struct JoinEntryState {
     /// The full copy of the state.
-    cached: join_row_set::JoinRowSet<PkType, StateValueType>,
+    cached: JoinRowSet<PkType, StateValueType>,
+    /// Index used for AS OF join. The key is inequal column value. The value is the primary key in `cached`.
+    inequality_index: JoinRowSet<InequalKeyType, JoinRowSet<PkType, ()>>,
     kv_heap_size: KvSize,
 }
 
@@ -656,9 +781,11 @@ impl EstimateSize for JoinEntryState {
 #[derive(Error, Debug)]
 pub enum JoinEntryError {
     #[error("double inserting a join state entry")]
-    OccupiedError,
+    Occupied,
     #[error("removing a join state entry but it is not in the cache")]
-    RemoveError,
+    Remove,
+    #[error("retrieving a pk from the inequality index but it is not in the cache")]
+    InequalIndex,
 }
 
 impl JoinEntryState {
@@ -667,11 +794,15 @@ impl JoinEntryState {
         &mut self,
         key: PkType,
         value: StateValueType,
+        inequality_key: Option<InequalKeyType>,
     ) -> Result<&mut StateValueType, JoinEntryError> {
         let mut removed = false;
         if !enable_strict_consistency() {
             // strict consistency is off, let's remove existing (if any) first
             if let Some(old_value) = self.cached.remove(&key) {
+                if let Some(inequality_key) = inequality_key.as_ref() {
+                    self.remove_pk_from_inequality_index(&key, inequality_key);
+                }
                 self.kv_heap_size.sub(&key, &old_value);
                 removed = true;
             }
@@ -679,6 +810,9 @@ impl JoinEntryState {
 
         self.kv_heap_size.add(&key, &value);
 
+        if let Some(inequality_key) = inequality_key {
+            self.insert_pk_to_inequality_index(key.clone(), inequality_key);
+        }
         let ret = self.cached.try_insert(key.clone(), value);
 
         if !enable_strict_consistency() {
@@ -689,20 +823,75 @@ impl JoinEntryState {
             }
         }
 
-        ret.map_err(|_| JoinEntryError::OccupiedError)
+        ret.map_err(|_| JoinEntryError::Occupied)
     }
 
     /// Delete from the cache.
-    pub fn remove(&mut self, pk: PkType) -> Result<(), JoinEntryError> {
+    pub fn remove(
+        &mut self,
+        pk: PkType,
+        inequality_key: Option<&InequalKeyType>,
+    ) -> Result<(), JoinEntryError> {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size.sub(&pk, &value);
+            if let Some(inequality_key) = inequality_key {
+                self.remove_pk_from_inequality_index(&pk, inequality_key);
+            }
             Ok(())
         } else if enable_strict_consistency() {
-            Err(JoinEntryError::RemoveError)
+            Err(JoinEntryError::Remove)
         } else {
             consistency_error!(?pk, "removing a join state entry but it's not in the cache");
             Ok(())
         }
+    }
+
+    fn remove_pk_from_inequality_index(&mut self, pk: &PkType, inequality_key: &InequalKeyType) {
+        if let Some(pk_set) = self.inequality_index.get_mut(inequality_key) {
+            if pk_set.remove(pk).is_none() {
+                if enable_strict_consistency() {
+                    panic!("removing a pk that it not in the inequality index");
+                } else {
+                    consistency_error!(?pk, "removing a pk that it not in the inequality index");
+                };
+            } else {
+                self.kv_heap_size.sub(pk, &());
+            }
+            if pk_set.is_empty() {
+                self.inequality_index.remove(inequality_key);
+            }
+        }
+    }
+
+    fn insert_pk_to_inequality_index(&mut self, pk: PkType, inequality_key: InequalKeyType) {
+        if let Some(pk_set) = self.inequality_index.get_mut(&inequality_key) {
+            let pk_size = pk.estimated_size();
+            if pk_set.try_insert(pk, ()).is_err() {
+                if enable_strict_consistency() {
+                    panic!("inserting a pk that it already in the inequality index");
+                } else {
+                    consistency_error!("inserting a pk that it already in the inequality index");
+                };
+            } else {
+                self.kv_heap_size.add_size(pk_size);
+            }
+        } else {
+            let mut pk_set = JoinRowSet::default();
+            pk_set.try_insert(pk, ()).unwrap();
+            self.inequality_index
+                .try_insert(inequality_key, pk_set)
+                .unwrap();
+        }
+    }
+
+    pub fn get(
+        &self,
+        pk: &PkType,
+        data_types: &[DataType],
+    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+        self.cached
+            .get(pk)
+            .map(|encoded| encoded.decode(data_types))
     }
 
     /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
@@ -728,13 +917,98 @@ impl JoinEntryState {
     pub fn len(&self) -> usize {
         self.cached.len()
     }
+
+    /// Range scan the cache using the inequality index.
+    pub fn range_by_inequality<'a, R>(
+        &'a self,
+        range: R,
+        data_types: &'a [DataType],
+    ) -> impl Iterator<Item = StreamExecutorResult<JoinRow<OwnedRow>>> + 'a
+    where
+        R: RangeBounds<InequalKeyType> + 'a,
+    {
+        self.inequality_index.range(range).flat_map(|(_, pk_set)| {
+            pk_set
+                .keys()
+                .flat_map(|pk| self.get_by_indexed_pk(pk, data_types))
+        })
+    }
+
+    /// Get the records whose inequality key upper bound satisfy the given bound.
+    pub fn upper_bound_by_inequality<'a>(
+        &'a self,
+        bound: Bound<&InequalKeyType>,
+        data_types: &'a [DataType],
+    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+        if let Some((_, pk_set)) = self.inequality_index.upper_bound(bound) {
+            if let Some(pk) = pk_set.first_key_sorted() {
+                self.get_by_indexed_pk(pk, data_types)
+            } else {
+                panic!("pk set for a index record must has at least one element");
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get_by_indexed_pk(
+        &self,
+        pk: &PkType,
+        data_types: &[DataType],
+    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>>
+where {
+        if let Some(value) = self.cached.get(pk) {
+            Some(value.decode(data_types))
+        } else if enable_strict_consistency() {
+            Some(Err(anyhow!(JoinEntryError::InequalIndex).into()))
+        } else {
+            consistency_error!(?pk, "{}", JoinEntryError::InequalIndex.as_report());
+            None
+        }
+    }
+
+    /// Get the records whose inequality key lower bound satisfy the given bound.
+    pub fn lower_bound_by_inequality<'a>(
+        &'a self,
+        bound: Bound<&InequalKeyType>,
+        data_types: &'a [DataType],
+    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+        if let Some((_, pk_set)) = self.inequality_index.lower_bound(bound) {
+            if let Some(pk) = pk_set.first_key_sorted() {
+                self.get_by_indexed_pk(pk, data_types)
+            } else {
+                panic!("pk set for a index record must has at least one element");
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get_first_by_inequality<'a>(
+        &'a self,
+        inequality_key: &InequalKeyType,
+        data_types: &'a [DataType],
+    ) -> Option<StreamExecutorResult<JoinRow<OwnedRow>>> {
+        if let Some(pk_set) = self.inequality_index.get(inequality_key) {
+            if let Some(pk) = pk_set.first_key_sorted() {
+                self.get_by_indexed_pk(pk, data_types)
+            } else {
+                panic!("pk set for a index record must has at least one element");
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn inequality_index(&self) -> &JoinRowSet<InequalKeyType, JoinRowSet<PkType, ()>> {
+        &self.inequality_index
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
@@ -742,16 +1016,36 @@ mod tests {
     fn insert_chunk(
         managed_state: &mut JoinEntryState,
         pk_indices: &[usize],
+        col_types: &[DataType],
+        inequality_key_idx: Option<usize>,
         data_chunk: &DataChunk,
     ) {
+        let pk_col_type = pk_indices
+            .iter()
+            .map(|idx| col_types[*idx].clone())
+            .collect_vec();
+        let pk_serializer =
+            OrderedRowSerde::new(pk_col_type, vec![OrderType::ascending(); pk_indices.len()]);
+        let inequality_key_type = inequality_key_idx.map(|idx| col_types[idx].clone());
+        let inequality_key_serializer = inequality_key_type
+            .map(|data_type| OrderedRowSerde::new(vec![data_type], vec![OrderType::ascending()]));
         for row_ref in data_chunk.rows() {
             let row: OwnedRow = row_ref.into_owned_row();
             let value_indices = (0..row.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.
-            let pk = OwnedRow::new(pk).project(&value_indices).value_serialize();
+            let pk = OwnedRow::new(pk)
+                .project(&value_indices)
+                .memcmp_serialize(&pk_serializer);
+            let inequality_key = inequality_key_idx.map(|idx| {
+                (&row)
+                    .project(&[idx])
+                    .memcmp_serialize(inequality_key_serializer.as_ref().unwrap())
+            });
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(pk, join_row.encode()).unwrap();
+            managed_state
+                .insert(pk, join_row.encode(), inequality_key)
+                .unwrap();
         }
     }
 
@@ -773,7 +1067,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_managed_all_or_none_state() {
+    async fn test_managed_join_state() {
         let mut managed_state = JoinEntryState::default();
         let col_types = vec![DataType::Int64, DataType::Int64];
         let pk_indices = [0];
@@ -788,7 +1082,13 @@ mod tests {
         );
 
         // `Vec` in state
-        insert_chunk(&mut managed_state, &pk_indices, &data_chunk1);
+        insert_chunk(
+            &mut managed_state,
+            &pk_indices,
+            &col_types,
+            None,
+            &data_chunk1,
+        );
         check(&mut managed_state, &col_types, &col1, &col2);
 
         // `BtreeMap` in state
@@ -799,7 +1099,76 @@ mod tests {
              5 8
              4 9",
         );
-        insert_chunk(&mut managed_state, &pk_indices, &data_chunk2);
+        insert_chunk(
+            &mut managed_state,
+            &pk_indices,
+            &col_types,
+            None,
+            &data_chunk2,
+        );
         check(&mut managed_state, &col_types, &col1, &col2);
+    }
+
+    #[tokio::test]
+    async fn test_managed_join_state_w_inequality_index() {
+        let mut managed_state = JoinEntryState::default();
+        let col_types = vec![DataType::Int64, DataType::Int64];
+        let pk_indices = [0];
+        let inequality_key_idx = Some(1);
+        let inequality_key_serializer =
+            OrderedRowSerde::new(vec![DataType::Int64], vec![OrderType::ascending()]);
+
+        let col1 = [3, 2, 1];
+        let col2 = [4, 5, 5];
+        let data_chunk1 = DataChunk::from_pretty(
+            "I I
+             3 4
+             2 5
+             1 5",
+        );
+
+        // `Vec` in state
+        insert_chunk(
+            &mut managed_state,
+            &pk_indices,
+            &col_types,
+            inequality_key_idx,
+            &data_chunk1,
+        );
+        check(&mut managed_state, &col_types, &col1, &col2);
+        let bound = OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])
+            .memcmp_serialize(&inequality_key_serializer);
+        let row = managed_state
+            .upper_bound_by_inequality(Bound::Included(&bound), &col_types)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.row[0], Some(ScalarImpl::Int64(1)));
+        let row = managed_state
+            .upper_bound_by_inequality(Bound::Excluded(&bound), &col_types)
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.row[0], Some(ScalarImpl::Int64(3)));
+
+        // `BtreeMap` in state
+        let col1 = [1, 2, 3, 4, 5];
+        let col2 = [5, 5, 4, 4, 8];
+        let data_chunk2 = DataChunk::from_pretty(
+            "I I
+             5 8
+             4 4",
+        );
+        insert_chunk(
+            &mut managed_state,
+            &pk_indices,
+            &col_types,
+            inequality_key_idx,
+            &data_chunk2,
+        );
+        check(&mut managed_state, &col_types, &col1, &col2);
+
+        let bound = OwnedRow::new(vec![Some(ScalarImpl::Int64(8))])
+            .memcmp_serialize(&inequality_key_serializer);
+        let row = managed_state.lower_bound_by_inequality(Bound::Excluded(&bound), &col_types);
+        assert!(row.is_none());
     }
 }

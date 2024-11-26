@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::convert::TryFrom;
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 
 use risingwave_connector::source::kafka::private_link::{
-    insert_privatelink_broker_rewrite_map, CONNECTION_NAME_KEY, PRIVATELINK_ENDPOINT_KEY,
+    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
+pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_sqlparser::ast::{
     CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, SqlOption, Statement, Value,
+    CreateSubscriptionStatement, SecretRef, SecretRefAsType, SqlOption, Statement, Value,
 };
 
 use super::OverwriteOptions;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::SessionImpl;
+use crate::Binder;
 
 mod options {
 
@@ -40,6 +42,7 @@ mod options {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
     inner: BTreeMap<String, String>,
+    secret_ref: BTreeMap<String, SecretRef>,
 }
 
 impl std::ops::Deref for WithOptions {
@@ -57,37 +60,42 @@ impl std::ops::DerefMut for WithOptions {
 }
 
 impl WithOptions {
-    /// Create a new [`WithOptions`] from a [`HashMap`].
-    pub fn new(inner: HashMap<String, String>) -> Self {
+    /// Create a new [`WithOptions`] from a [`BTreeMap`].
+    pub fn new_with_options(inner: BTreeMap<String, String>) -> Self {
         Self {
-            inner: inner.into_iter().collect(),
+            inner,
+            secret_ref: Default::default(),
         }
     }
 
-    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
-        Self { inner }
-    }
-
-    /// Get the reference of the inner map.
-    pub fn inner(&self) -> &BTreeMap<String, String> {
-        &self.inner
+    /// Create a new [`WithOptions`] from a option [`BTreeMap`] and secret ref.
+    pub fn new(inner: BTreeMap<String, String>, secret_ref: BTreeMap<String, SecretRef>) -> Self {
+        Self { inner, secret_ref }
     }
 
     pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
         &mut self.inner
     }
 
-    /// Take the value of the inner map.
-    pub fn into_inner(self) -> BTreeMap<String, String> {
-        self.inner
+    /// Take the value of the option map and secret refs.
+    pub fn into_parts(self) -> (BTreeMap<String, String>, BTreeMap<String, SecretRef>) {
+        (self.inner, self.secret_ref)
     }
 
     /// Convert to connector props, remove the key-value pairs used in the top-level.
-    pub fn into_connector_props(self) -> HashMap<String, String> {
-        self.inner
+    pub fn into_connector_props(self) -> WithOptions {
+        let inner = self
+            .inner
             .into_iter()
-            .filter(|(key, _)| key != OverwriteOptions::STREAMING_RATE_LIMIT_KEY)
-            .collect()
+            .filter(|(key, _)| {
+                key != OverwriteOptions::SOURCE_RATE_LIMIT_KEY && key != options::RETENTION_SECONDS
+            })
+            .collect();
+
+        Self {
+            inner,
+            secret_ref: self.secret_ref,
+        }
     }
 
     /// Parse the retention seconds from the options.
@@ -108,7 +116,10 @@ impl WithOptions {
             })
             .collect();
 
-        Self { inner }
+        Self {
+            inner,
+            secret_ref: self.secret_ref.clone(),
+        }
     }
 
     pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
@@ -119,12 +130,61 @@ impl WithOptions {
         }
         false
     }
+
+    pub fn secret_ref(&self) -> &BTreeMap<String, SecretRef> {
+        &self.secret_ref
+    }
+
+    pub fn encode_options_to_map(sql_options: &[SqlOption]) -> RwResult<BTreeMap<String, String>> {
+        let WithOptions { inner, secret_ref } = WithOptions::try_from(sql_options)?;
+        if secret_ref.is_empty() {
+            Ok(inner)
+        } else {
+            Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Secret reference is not allowed in encode options".to_string(),
+            )))
+        }
+    }
+
+    pub fn oauth_options_to_map(sql_options: &[SqlOption]) -> RwResult<BTreeMap<String, String>> {
+        let WithOptions { inner, secret_ref } = WithOptions::try_from(sql_options)?;
+        if secret_ref.is_empty() {
+            Ok(inner)
+        } else {
+            Err(RwError::from(ErrorCode::InvalidParameterValue(
+                "Secret reference is not allowed in OAuth options".to_string(),
+            )))
+        }
+    }
+}
+
+/// Get the secret id from the name.
+pub(crate) fn resolve_secret_ref_in_with_options(
+    with_options: WithOptions,
+    session: &SessionImpl,
+) -> RwResult<WithOptionsSecResolved> {
+    let (options, secret_refs) = with_options.into_parts();
+    let mut resolved_secret_refs = BTreeMap::new();
+    let db_name: &str = session.database();
+    for (key, secret_ref) in secret_refs {
+        let (schema_name, secret_name) =
+            Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+        let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+        let ref_as = match secret_ref.ref_as {
+            SecretRefAsType::Text => PbRefAsType::Text,
+            SecretRefAsType::File => PbRefAsType::File,
+        };
+        let pb_secret_ref = PbSecretRef {
+            secret_id: secret_catalog.id.secret_id(),
+            ref_as: ref_as.into(),
+        };
+        resolved_secret_refs.insert(key.clone(), pb_secret_ref);
+    }
+    Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(
     with_options: &mut WithOptions,
-    schema_name: &Option<String>,
-    session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
     let is_kafka = with_options.is_kafka_connector();
     let privatelink_endpoint = with_options.remove(PRIVATELINK_ENDPOINT_KEY);
@@ -138,28 +198,8 @@ pub(crate) fn resolve_privatelink_in_with_option(
         }
         insert_privatelink_broker_rewrite_map(with_options.inner_mut(), None, Some(endpoint))
             .map_err(RwError::from)?;
-        return Ok(None);
     }
-
-    let connection_name = with_options
-        .remove(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase());
-    let connection_id = match connection_name {
-        Some(connection_name) => {
-            let connection = session
-                .get_connection_by_name(schema_name.clone(), &connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Connection is only supported in kafka connector".to_string(),
-                )));
-            }
-            resolve_private_link_connection(&connection, with_options.inner_mut())?;
-            Some(connection.id)
-        }
-        None => None,
-    };
-    Ok(connection_id)
+    Ok(None)
 }
 
 impl TryFrom<&[SqlOption]> for WithOptions {
@@ -167,8 +207,18 @@ impl TryFrom<&[SqlOption]> for WithOptions {
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
         let mut inner: BTreeMap<String, String> = BTreeMap::new();
+        let mut secret_ref: BTreeMap<String, SecretRef> = BTreeMap::new();
         for option in options {
             let key = option.name.real_value();
+            if let Value::Ref(r) = &option.value {
+                if secret_ref.insert(key.clone(), r.clone()).is_some() || inner.contains_key(&key) {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "Duplicated option: {}",
+                        key
+                    ))));
+                }
+                continue;
+            }
             let value: String = match option.value.clone() {
                 Value::CstyleEscapedString(s) => s.value,
                 Value::SingleQuotedString(s) => s,
@@ -181,7 +231,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     )))
                 }
             };
-            if inner.insert(key.clone(), value).is_some() {
+            if inner.insert(key.clone(), value).is_some() || secret_ref.contains_key(&key) {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
                     "Duplicated option: {}",
                     key
@@ -189,7 +239,7 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             }
         }
 
-        Ok(Self { inner })
+        Ok(Self { inner, secret_ref })
     }
 }
 

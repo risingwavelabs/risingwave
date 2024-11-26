@@ -18,20 +18,16 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
-#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
-#![feature(bound_map)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
 
 mod compaction_test_runner;
-mod delete_range_runner;
 
 use clap::Parser;
-pub use delete_range_runner::start_delete_range;
 
 use crate::compaction_test_runner::compaction_test_main;
 
@@ -45,7 +41,7 @@ pub struct CompactionTestOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
-    /// The state store string e.g. hummock+s3://test-bucket
+    /// The state store string e.g. `hummock+s3://test-bucket`
     #[clap(short, long)]
     pub state_store: String,
 

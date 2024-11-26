@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -21,7 +21,7 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
@@ -35,7 +35,9 @@ use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS,
     POOL_IDLE_TIMEOUT,
 };
-use super::{Result, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{
+    Result, SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkWriterParam};
@@ -54,6 +56,8 @@ pub struct DorisCommon {
     pub database: String,
     #[serde(rename = "doris.table")]
     pub table: String,
+    #[serde(rename = "doris.partial_update")]
+    pub partial_update: Option<String>,
 }
 
 impl DorisCommon {
@@ -77,7 +81,7 @@ pub struct DorisConfig {
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl DorisConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<DorisConfig>(serde_json::to_value(properties).unwrap())
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
@@ -125,8 +129,11 @@ impl DorisSink {
             .collect();
 
         let rw_fields_name = self.schema.fields();
-        if rw_fields_name.len().ne(&doris_columns_desc.len()) {
-            return Err(SinkError::Doris("The length of the RisingWave column must be equal to the length of the doris column".to_string()));
+        if rw_fields_name.len() > doris_columns_desc.len() {
+            return Err(SinkError::Doris(
+                "The columns of the sink must be equal to or a superset of the target table's columns."
+                    .to_string(),
+            ));
         }
 
         for i in rw_fields_name {
@@ -183,6 +190,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("doris can not support Int256".to_string()))
             }
+            risingwave_common::types::DataType::Map(_) => {
+                Err(SinkError::Doris("doris can not support Map".to_string()))
+            }
         }
     }
 }
@@ -201,7 +211,7 @@ impl Sink for DorisSink {
             self.is_append_only,
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -225,7 +235,9 @@ impl Sink for DorisSink {
 
 pub struct DorisSinkWriter {
     pub config: DorisConfig,
+    #[expect(dead_code)]
     schema: Schema,
+    #[expect(dead_code)]
     pk_indices: Vec<usize>,
     inserter_inner_builder: InserterInnerBuilder,
     is_append_only: bool,
@@ -238,7 +250,7 @@ impl TryFrom<SinkParam> for DorisSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = DorisConfig::from_hashmap(param.properties)?;
+        let config = DorisConfig::from_btreemap(param.properties)?;
         DorisSink::new(
             config,
             schema,
@@ -261,16 +273,17 @@ impl DorisSinkWriter {
             .build_get_client()
             .get_schema_from_doris()
             .await?;
-        doris_schema.properties.iter().for_each(|s| {
-            if let Some(v) = s.get_decimal_pre_scale() {
+        for s in &doris_schema.properties {
+            if let Some(v) = s.get_decimal_pre_scale()? {
                 decimal_map.insert(s.name.clone(), v);
             }
-        });
+        }
 
         let header_builder = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(config.common.user.clone(), config.common.password.clone())
             .add_json_format()
+            .set_partial_columns(config.common.partial_update.clone())
             .add_read_json_by_line();
         let header = if !is_append_only {
             header_builder.add_hidden_column().build()
@@ -483,11 +496,27 @@ pub struct DorisField {
     aggregation_type: String,
 }
 impl DorisField {
-    pub fn get_decimal_pre_scale(&self) -> Option<u8> {
+    pub fn get_decimal_pre_scale(&self) -> Result<Option<u8>> {
         if self.r#type.contains("DECIMAL") {
-            Some(self.scale.clone().unwrap().parse::<u8>().unwrap())
+            let scale = self
+                .scale
+                .as_ref()
+                .ok_or_else(|| {
+                    SinkError::Doris(format!(
+                        "In doris, the type of {} is DECIMAL, but `scale` is not found",
+                        self.name
+                    ))
+                })?
+                .parse::<u8>()
+                .map_err(|err| {
+                    SinkError::Doris(format!(
+                        "Unable to convert decimal's scale to u8. error: {:?}",
+                        err.kind()
+                    ))
+                })?;
+            Ok(Some(scale))
         } else {
-            None
+            Ok(None)
         }
     }
 }

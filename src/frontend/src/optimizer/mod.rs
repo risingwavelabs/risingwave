@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::num::NonZeroU32;
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 pub mod plan_node;
 
@@ -29,7 +30,8 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, ReadStorageTableVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use risingwave_sqlparser::ast::OnConflict;
 
@@ -40,7 +42,7 @@ mod plan_expr_visitor;
 mod rule;
 
 use std::assert_matches::assert_matches;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -50,7 +52,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -79,10 +81,10 @@ use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
     ToStream, VisitExprsRecursive,
 };
-use crate::optimizer::plan_visitor::TemporalJoinValidator;
+use crate::optimizer::plan_visitor::{RwTimestampValidator, TemporalJoinValidator};
 use crate::optimizer::property::Distribution;
-use crate::utils::ColIndexMappingRewriteExt;
-use crate::WithOptions;
+use crate::utils::{ColIndexMappingRewriteExt, WithOptionsSecResolved};
+use crate::TableCatalog;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
@@ -230,7 +232,7 @@ impl PlanRoot {
         use generic::Agg;
         use plan_node::PlanAggCall;
         use risingwave_common::types::ListValue;
-        use risingwave_expr::aggregate::AggKind;
+        use risingwave_expr::aggregate::PbAggKind;
 
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
@@ -244,7 +246,7 @@ impl PlanRoot {
         let return_type = DataType::List(input_column_type.clone().into());
         let agg = Agg::new(
             vec![PlanAggCall {
-                agg_kind: AggKind::ArrayAgg,
+                agg_type: PbAggKind::ArrayAgg.into(),
                 return_type: return_type.clone(),
                 inputs: vec![InputRef::new(select_idx, input_column_type.clone())],
                 distinct: false,
@@ -334,7 +336,7 @@ impl PlanRoot {
             "Merge BatchProject",
             vec![BatchProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
@@ -400,7 +402,15 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
+
+        // For iceberg scan, we do iceberg predicate pushdown
+        // BatchFilter -> BatchIcebergScan
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Iceberg Predicate Pushdown",
+            vec![BatchIcebergPredicatePushDownRule::create()],
+            ApplyOrder::BottomUp,
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
@@ -443,17 +453,23 @@ impl PlanRoot {
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         assert_eq!(plan.convention(), Convention::Batch);
         Ok(plan)
     }
 
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    fn gen_optimized_stream_plan(
+        &mut self,
+        emit_on_window_close: bool,
+        allow_snapshot_backfill: bool,
+    ) -> Result<PlanRef> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_scan_type = if self.should_use_arrangement_backfill() {
+        let stream_scan_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+            StreamScanType::SnapshotBackfill
+        } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
             StreamScanType::Backfill
@@ -477,7 +493,7 @@ impl PlanRoot {
             "Merge StreamProject",
             vec![StreamProjectMergeRule::create()],
             ApplyOrder::BottomUp,
-        ));
+        ))?;
 
         if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
@@ -486,7 +502,7 @@ impl PlanRoot {
                 "To IndexDeltaJoin",
                 vec![IndexDeltaJoinRule::create()],
                 ApplyOrder::BottomUp,
-            ));
+            ))?;
         }
 
         // Inline session timezone
@@ -512,6 +528,13 @@ impl PlanRoot {
             return Err(ErrorCode::NotSupported(
                 "exist dangling temporal scan".to_string(),
                 "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
+
+        if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "selecting `_rw_timestamp` in a streaming query is not allowed".to_string(),
+                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_string(),
             ).into());
         }
 
@@ -547,7 +570,6 @@ impl PlanRoot {
                     ).into());
                 }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
-
                 let (plan, out_col_change) = {
                     let (plan, out_col_change) =
                         plan.logical_rewrite_for_stream(&mut Default::default())?;
@@ -633,10 +655,12 @@ impl PlanRoot {
         version: Option<TableVersion>,
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
+        cdc_table_id: Option<String>,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        // Snapshot backfill is not allowed for create table
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
 
@@ -669,8 +693,8 @@ impl PlanRoot {
         #[derive(PartialEq, Debug, Copy, Clone)]
         enum PrimaryKeyKind {
             UserDefinedPrimaryKey,
-            RowIdAsPrimaryKey,
-            AppendOnly,
+            NonAppendOnlyRowIdPk,
+            AppendOnlyRowIdPk,
         }
 
         fn inject_dml_node(
@@ -687,32 +711,35 @@ impl PlanRoot {
             dml_node = inject_project_for_generated_column_if_needed(columns, dml_node)?;
 
             dml_node = match kind {
-                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::RowIdAsPrimaryKey => {
+                PrimaryKeyKind::UserDefinedPrimaryKey | PrimaryKeyKind::NonAppendOnlyRowIdPk => {
                     RequiredDist::hash_shard(pk_column_indices)
                         .enforce_if_not_satisfies(dml_node, &Order::any())?
                 }
-                PrimaryKeyKind::AppendOnly => StreamExchange::new_no_shuffle(dml_node).into(),
+                PrimaryKeyKind::AppendOnlyRowIdPk => {
+                    StreamExchange::new_no_shuffle(dml_node).into()
+                }
             };
 
             Ok(dml_node)
         }
 
-        let kind = if append_only {
-            assert!(row_id_index.is_some());
-            PrimaryKeyKind::AppendOnly
-        } else if let Some(row_id_index) = row_id_index {
+        let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
                 pk_column_indices.iter().exactly_one().copied().unwrap(),
                 row_id_index
             );
-            PrimaryKeyKind::RowIdAsPrimaryKey
+            if append_only {
+                PrimaryKeyKind::AppendOnlyRowIdPk
+            } else {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk
+            }
         } else {
             PrimaryKeyKind::UserDefinedPrimaryKey
         };
 
         let column_descs = columns
             .iter()
-            .filter(|&c| (!c.is_generated()))
+            .filter(|&c| c.can_dml())
             .map(|c| c.column_desc.clone())
             .collect();
 
@@ -732,7 +759,7 @@ impl PlanRoot {
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
 
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -808,7 +835,7 @@ impl PlanRoot {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     unreachable!()
                 }
-                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
                     stream_plan = StreamRowIdGen::new_with_dist(
                         stream_plan,
                         row_id_index,
@@ -821,9 +848,9 @@ impl PlanRoot {
 
         let conflict_behavior = match on_conflict {
             Some(on_conflict) => match on_conflict {
-                OnConflict::OverWrite => ConflictBehavior::Overwrite,
-                OnConflict::Ignore => ConflictBehavior::IgnoreConflict,
-                OnConflict::DoUpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
+                OnConflict::UpdateFull => ConflictBehavior::Overwrite,
+                OnConflict::Nothing => ConflictBehavior::IgnoreConflict,
+                OnConflict::UpdateIfNotNull => ConflictBehavior::DoUpdateIfNotNull,
             },
             None => match append_only {
                 true => ConflictBehavior::NoCheck,
@@ -862,6 +889,7 @@ impl PlanRoot {
             row_id_index,
             version,
             retention_seconds,
+            cdc_table_id,
         )
     }
 
@@ -875,10 +903,9 @@ impl PlanRoot {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, true)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
-
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -903,7 +930,7 @@ impl PlanRoot {
         let cardinality = self.compute_cardinality();
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
-        let stream_plan = self.gen_optimized_stream_plan(false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
 
@@ -927,17 +954,21 @@ impl PlanRoot {
         &mut self,
         sink_name: String,
         definition: String,
-        properties: WithOptions,
+        properties: WithOptionsSecResolved,
         emit_on_window_close: bool,
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
         without_backfill: bool,
-        target_table: Option<TableId>,
+        target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
+        user_specified_columns: bool,
     ) -> Result<StreamSink> {
         let stream_scan_type = if without_backfill {
             StreamScanType::UpstreamOnly
+        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+            // Snapshot backfill on sink-into-table is not allowed
+            StreamScanType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
             StreamScanType::ArrangementBackfill
         } else {
@@ -949,12 +980,17 @@ impl PlanRoot {
             self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
         assert_eq!(self.phase, PlanPhase::Stream);
         assert_eq!(stream_plan.convention(), Convention::Stream);
+        let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
+            let columns = t.columns_without_rw_timestamp();
+            self.target_columns_to_plan_mapping(&columns, user_specified_columns)
+        });
         StreamSink::create(
             stream_plan,
             sink_name,
             db_name,
             sink_from_table_name,
             target_table,
+            target_columns_to_plan_mapping,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
@@ -975,6 +1011,47 @@ impl PlanRoot {
             .developer
             .enable_arrangement_backfill;
         arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
+    }
+
+    pub fn should_use_snapshot_backfill(&self) -> bool {
+        self.plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_use_snapshot_backfill()
+    }
+
+    /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
+    pub fn target_columns_to_plan_mapping(
+        &self,
+        tar_cols: &[ColumnCatalog],
+        user_specified_columns: bool,
+    ) -> Vec<Option<usize>> {
+        #[allow(clippy::disallowed_methods)]
+        let visible_cols: Vec<(usize, String)> = self
+            .out_fields
+            .ones()
+            .zip_eq(self.out_names.iter().cloned())
+            .collect_vec();
+
+        let visible_col_idxes = visible_cols.iter().map(|(i, _)| *i).collect_vec();
+        let visible_col_idxes_by_name = visible_cols
+            .iter()
+            .map(|(i, name)| (name.as_ref(), *i))
+            .collect::<BTreeMap<_, _>>();
+
+        tar_cols
+            .iter()
+            .enumerate()
+            .filter(|(_, tar_col)| tar_col.can_dml())
+            .map(|(tar_i, tar_col)| {
+                if user_specified_columns {
+                    visible_col_idxes_by_name.get(tar_col.name()).cloned()
+                } else {
+                    (tar_i < visible_col_idxes.len()).then(|| visible_cols[tar_i].0)
+                }
+            })
+            .collect()
     }
 }
 
@@ -1099,11 +1176,7 @@ fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::Field;
-    use risingwave_common::types::DataType;
-
     use super::*;
-    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
 
     #[tokio::test]

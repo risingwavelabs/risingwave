@@ -20,9 +20,10 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_sqlparser::ast::AsOf;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{childless_record, to_pb_time_travel_as_of, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::error::Result;
@@ -39,6 +40,7 @@ pub struct BatchSeqScan {
     core: generic::TableScan,
     scan_ranges: Vec<ScanRange>,
     limit: Option<u64>,
+    as_of: Option<AsOf>,
 }
 
 impl BatchSeqScan {
@@ -68,12 +70,14 @@ impl BatchSeqScan {
                 );
             })
         }
+        let as_of = core.as_of.clone();
 
         Self {
             base,
             core,
             scan_ranges,
             limit,
+            as_of,
         }
     }
 
@@ -248,6 +252,7 @@ impl TryToBatchPb for BatchSeqScan {
             vnode_bitmap: None,
             ordered: !self.order().is_any(),
             limit: *self.limit(),
+            as_of: to_pb_time_travel_as_of(&self.as_of)?,
         }))
     }
 }

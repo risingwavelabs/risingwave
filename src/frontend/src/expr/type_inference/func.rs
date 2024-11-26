@@ -18,8 +18,9 @@ use risingwave_common::bail_no_function;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::aggregate::AggKind;
 pub use risingwave_expr::sig::*;
+use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
+use risingwave_pb::expr::table_function::PbType as PbTableFuncType;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::error::{ErrorCode, Result};
@@ -30,19 +31,31 @@ use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, Funct
 /// is not supported on backend.
 ///
 /// It also mutates the `inputs` by adding necessary casts.
+#[tracing::instrument(level = "trace", skip(sig_map))]
 pub fn infer_type_with_sigmap(
     func_name: FuncName,
     inputs: &mut [ExprImpl],
     sig_map: &FunctionRegistry,
 ) -> Result<DataType> {
     // special cases
-    if let FuncName::Scalar(func_type) = func_name
-        && let Some(res) = infer_type_for_special(func_type, inputs).transpose()
-    {
-        return res;
-    }
-    if let FuncName::Aggregate(AggKind::Grouping) = func_name {
-        return Ok(DataType::Int32);
+    match &func_name {
+        FuncName::Scalar(func_type) => {
+            if let Some(res) = infer_type_for_special(*func_type, inputs).transpose() {
+                return res;
+            }
+        }
+        FuncName::Table(func_type) => {
+            if let Some(res) = infer_type_for_special_table_function(*func_type, inputs).transpose()
+            {
+                return res;
+            }
+        }
+        FuncName::Aggregate(agg_kind) => {
+            if *agg_kind == PbAggKind::Grouping {
+                return Ok(DataType::Int32);
+            }
+        }
+        _ => {}
     }
 
     let actuals = inputs
@@ -53,6 +66,7 @@ pub fn infer_type_with_sigmap(
         })
         .collect_vec();
     let sig = infer_type_name(sig_map, func_name, &actuals)?;
+    tracing::trace!(?actuals, ?sig, "infer_type_name");
 
     // add implicit casts to inputs
     for (expr, t) in inputs.iter_mut().zip_eq_fast(&sig.inputs_type) {
@@ -70,6 +84,7 @@ pub fn infer_type_with_sigmap(
 
     let input_types = inputs.iter().map(|expr| expr.return_type()).collect_vec();
     let return_type = (sig.type_infer)(&input_types)?;
+    tracing::trace!(?input_types, ?return_type, "finished type inference");
     Ok(return_type)
 }
 
@@ -596,8 +611,61 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
-        ExprType::Vnode => {
-            ensure_arity!("vnode", 1 <= | inputs |);
+        ExprType::MapAccess => {
+            ensure_arity!("map_access", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            // We do not align the map's key type with the input type here, but cast the latter to the former instead.
+            // e.g., for {1:'a'}[1.0], if we align them, we will get "numeric" as the key type, which violates the map type's restriction.
+            match inputs[1].cast_implicit_mut(map_type.key().clone()) {
+                Ok(()) => Ok(Some(map_type.value().clone())),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot access {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapCat => {
+            ensure_arity!("map_contains", | inputs | == 2);
+            Ok(Some(align_types(inputs.iter_mut())?))
+        }
+        ExprType::MapInsert => {
+            ensure_arity!("map_insert", | inputs | == 3);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            let rv = inputs[2].cast_implicit_mut(map_type.value().clone());
+            match (rk, rv) {
+                (Ok(()), Ok(())) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot insert ({},{}) to {}",
+                    inputs[1].return_type(),
+                    inputs[2].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::MapDelete => {
+            ensure_arity!("map_delete", | inputs | == 2);
+            let map_type = inputs[0].try_into_map_type()?;
+            let rk = inputs[1].cast_implicit_mut(map_type.key().clone());
+            match rk {
+                Ok(()) => Ok(Some(map_type.into())),
+                _ => Err(ErrorCode::BindError(format!(
+                    "Cannot delete {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        // internal use only
+        ExprType::Vnode => Ok(Some(VirtualNode::RW_TYPE)),
+        // user-facing `rw_vnode`
+        ExprType::VnodeUser => {
+            ensure_arity!("rw_vnode", 2 <= | inputs |);
+            inputs[0].cast_explicit_mut(DataType::Int32)?; // vnode count
             Ok(Some(VirtualNode::RW_TYPE))
         }
         ExprType::Greatest | ExprType::Least => {
@@ -629,6 +697,42 @@ fn infer_type_for_special(
                 input.cast_implicit_mut(DataType::Varchar)?;
             }
             Ok(Some(DataType::Varchar))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn infer_type_for_special_table_function(
+    func_type: PbTableFuncType,
+    inputs: &mut [ExprImpl],
+) -> Result<Option<DataType>> {
+    match func_type {
+        PbTableFuncType::GenerateSeries => {
+            if inputs.len() < 3 || !inputs[1].is_now() {
+                // let signature map handle this
+                return Ok(None);
+            }
+            // Now we are inferring type for `generate_series(start, now(), step)`, which will
+            // be further handled by `GenerateSeriesWithNowRule`.
+            if inputs[0].is_untyped() {
+                inputs[0].cast_implicit_mut(DataType::Timestamptz)?;
+            }
+            if inputs[2].is_untyped() {
+                inputs[2].cast_implicit_mut(DataType::Interval)?;
+            }
+            match (
+                inputs[0].return_type(),
+                inputs[1].return_type(),
+                inputs[2].return_type(),
+            ) {
+                (DataType::Timestamptz, DataType::Timestamptz, DataType::Interval) => {
+                    // This is to allow `generate_series('2024-06-20 00:00:00'::timestamptz, now(), interval '1 day')`,
+                    // which in streaming mode will be further converted to `StreamNow`.
+                    Ok(Some(DataType::Timestamptz))
+                }
+                // let signature map handle the rest
+                _ => Ok(None),
+            }
         }
         _ => Ok(None),
     }
@@ -690,6 +794,8 @@ pub fn infer_type_name<'a>(
     };
 
     if candidates.is_empty() {
+        // TODO: when type mismatches, show what are supported signatures for the
+        // function with the given name.
         bail_no_function!("{}", sig());
     }
 
@@ -735,7 +841,7 @@ fn implicit_ok(source: &DataType, target: &SigDataType, eq_ok: bool) -> bool {
 /// Find the top `candidates` that match `inputs` on most non-null positions. This covers Rule 2,
 /// 4a, 4c and 4d in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
-/// * Rule 2 & 4c: Keep candidates that have most exact type matches. Exact match on all posistions
+/// * Rule 2 & 4c: Keep candidates that have most exact type matches. Exact match on all positions
 ///   is just a special case.
 /// * Rule 4d: Break ties by selecting those that accept preferred types at most positions.
 /// * Rule 4a: If the input cannot implicit cast to expected type at any position, this candidate is
@@ -936,7 +1042,7 @@ fn narrow_same_type<'a>(
 }
 
 struct TypeDisplay<'a>(&'a Option<DataType>);
-impl<'a> std::fmt::Display for TypeDisplay<'a> {
+impl std::fmt::Display for TypeDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Some(t) => t.fmt(f),

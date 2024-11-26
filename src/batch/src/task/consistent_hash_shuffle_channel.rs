@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::option::Option;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::batch_plan::exchange_info::ConsistentHashInfo;
 use risingwave_pb::batch_plan::*;
@@ -60,6 +59,7 @@ fn generate_hash_values(
             .iter()
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>(),
+        consistent_hash_info.vmap.len(),
     );
 
     let hash_values = vnodes

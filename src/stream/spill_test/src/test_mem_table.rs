@@ -19,7 +19,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochPair};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_stream::common::table::state_table::StateTable;
-use risingwave_stream::common::table::test_utils::gen_prost_table;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 
 #[tokio::test]
 async fn test_mem_table_spill_in_streaming() {
@@ -51,7 +51,7 @@ async fn test_mem_table_spill_in_streaming() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -65,7 +65,7 @@ async fn test_mem_table_spill_in_streaming() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -181,7 +181,7 @@ async fn test_mem_table_spill_in_streaming_multiple_times() {
     let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
-    let table = gen_prost_table(
+    let table = gen_pbtable(
         TEST_TABLE_ID,
         column_descs,
         order_types,
@@ -195,7 +195,7 @@ async fn test_mem_table_spill_in_streaming_multiple_times() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

@@ -29,7 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::query_log::*;
 use risingwave_common::{PG_VERSION, SERVER_ENCODING, STANDARD_CONFORMING_STRINGS};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RedactSqlOptionKeywordsRef, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
@@ -101,6 +101,8 @@ where
 
     // Client Address
     peer_addr: AddressRef,
+
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
 }
 
 /// Configures TLS encryption for connections.
@@ -152,14 +154,29 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 }
 
 /// Record `sql` in the current tracing span.
-fn record_sql_in_span(sql: &str) {
+fn record_sql_in_span(sql: &str, redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>) {
+    let redacted_sql = if let Some(keywords) = redact_sql_option_keywords {
+        redact_sql(sql, keywords)
+    } else {
+        sql.to_owned()
+    };
     tracing::Span::current().record(
         "sql",
         tracing::field::display(truncated_fmt::TruncatedFmt(
-            &sql,
+            &redacted_sql,
             *RW_QUERY_LOG_TRUNCATE_LEN,
         )),
     );
+}
+
+fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> String {
+    match Parser::parse_sql(sql) {
+        Ok(sqls) => sqls
+            .into_iter()
+            .map(|sql| sql.to_redacted_string(keywords.clone()))
+            .join(";"),
+        Err(_) => sql.to_owned(),
+    }
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -172,6 +189,7 @@ where
         session_mgr: Arc<SM>,
         tls_config: Option<TlsConfig>,
         peer_addr: AddressRef,
+        redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
     ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
@@ -193,6 +211,7 @@ where
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
             peer_addr,
+            redact_sql_option_keywords,
         }
     }
 
@@ -395,7 +414,7 @@ where
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
             FeMessage::Parse(m) => {
-                if let Err(err) = self.process_parse_msg(m) {
+                if let Err(err) = self.process_parse_msg(m).await {
                     self.ignore_util_sync = true;
                     return Err(err);
                 }
@@ -555,7 +574,7 @@ where
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
             Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
-        record_sql_in_span(&sql);
+        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -639,6 +658,34 @@ where
                     stmt_type: res.stmt_type(),
                     rows_cnt,
                 }))?;
+        } else if res.stmt_type().is_dml() && !res.stmt_type().is_returning() {
+            let first_row_set = res.values_stream().next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(PsqlError::Uncategorized(
+                        anyhow::anyhow!("no affected rows in output").into(),
+                    ));
+                }
+                Some(row) => row.map_err(PsqlError::SimpleQueryError)?,
+            };
+            let affected_rows_str = first_row_set[0].values()[0]
+                .as_ref()
+                .expect("compute node should return affected rows in output");
+
+            assert!(matches!(res.row_cnt_format(), Some(Format::Text)));
+            let affected_rows_cnt = String::from_utf8(affected_rows_str.to_vec())
+                .unwrap()
+                .parse()
+                .unwrap_or_default();
+
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.stmt_type(),
+                    rows_cnt: affected_rows_cnt,
+                }))?;
         } else {
             // Run the callback before sending the `CommandComplete` message.
             res.run_callback().await?;
@@ -646,7 +693,7 @@ where
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.stmt_type(),
-                    rows_cnt: res.affected_rows_cnt().expect("row count should be set"),
+                    rows_cnt: 0,
                 }))?;
         }
 
@@ -662,16 +709,17 @@ where
         self.is_terminate = true;
     }
 
-    fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
+    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        record_sql_in_span(sql);
+        record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
 
         self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
+            .await
     }
 
-    fn inner_process_parse_msg(
+    async fn inner_process_parse_msg(
         &mut self,
         session: Arc<SM::Session>,
         sql: &str,
@@ -718,6 +766,7 @@ where
 
         let prepare_statement = session
             .parse(stmt, param_types)
+            .await
             .map_err(PsqlError::ExtendedPrepareError)?;
 
         if statement_name.is_empty() {
@@ -767,7 +816,7 @@ where
             self.unnamed_portal.replace(portal);
         } else {
             assert!(
-                self.result_cache.get(&portal_name).is_none(),
+                !self.result_cache.contains_key(&portal_name),
                 "Named portal never can be overridden."
             );
             self.portal_store.insert(portal_name.clone(), portal);
@@ -798,7 +847,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
-            record_sql_in_span(&sql);
+            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
 
             session.check_idle_in_transaction_timeout()?;
             let _exec_context_guard = session.init_exec_context(sql.clone());
@@ -831,7 +880,6 @@ where
                 .unwrap()
                 .describe_statement(prepare_statement)
                 .map_err(PsqlError::Uncategorized)?;
-
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
                     &param_types.iter().map(|t| t.to_oid()).collect_vec(),
@@ -1142,7 +1190,7 @@ pub mod truncated_fmt {
         finished: bool,
         f: &'a mut Formatter<'b>,
     }
-    impl<'a, 'b> Write for TruncatedFormatter<'a, 'b> {
+    impl Write for TruncatedFormatter<'_, '_> {
         fn write_str(&mut self, s: &str) -> Result {
             if self.finished {
                 return Ok(());
@@ -1164,7 +1212,7 @@ pub mod truncated_fmt {
 
     pub struct TruncatedFmt<'a, T>(pub &'a T, pub usize);
 
-    impl<'a, T> Debug for TruncatedFmt<'a, T>
+    impl<T> Debug for TruncatedFmt<'_, T>
     where
         T: Debug,
     {
@@ -1178,7 +1226,7 @@ pub mod truncated_fmt {
         }
     }
 
-    impl<'a, T> Display for TruncatedFmt<'a, T>
+    impl<T> Display for TruncatedFmt<'_, T>
     where
         T: Display,
     {
@@ -1203,5 +1251,27 @@ pub mod truncated_fmt {
                 "select '...(truncated)",
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn test_redact_parsable_sql() {
+        let keywords = Arc::new(HashSet::from(["v2".into(), "v4".into(), "b".into()]));
+        let sql = r"
+        create source temp (k bigint, v varchar) with (
+            connector = 'datagen',
+            v1 = 123,
+            v2 = 'with',
+            v3 = false,
+            v4 = '',
+        ) FORMAT plain ENCODE json (a='1',b='2')
+        ";
+        assert_eq!(redact_sql(sql, keywords), "CREATE SOURCE temp (k BIGINT, v CHARACTER VARYING) WITH (connector = 'datagen', v1 = 123, v2 = [REDACTED], v3 = false, v4 = [REDACTED]) FORMAT PLAIN ENCODE JSON (a = '1', b = [REDACTED])");
     }
 }

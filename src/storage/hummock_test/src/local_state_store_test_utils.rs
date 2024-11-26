@@ -22,5 +22,13 @@ pub trait LocalStateStoreTestExt: LocalStateStore {
     fn init_for_test(&mut self, epoch: u64) -> impl Future<Output = StorageResult<()>> + Send + '_ {
         self.init(InitOptions::new(EpochPair::new_test_epoch(epoch)))
     }
+
+    fn init_for_test_with_prev_epoch(
+        &mut self,
+        epoch: u64,
+        prev_epoch: u64,
+    ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+        self.init(InitOptions::new(EpochPair::new(epoch, prev_epoch)))
+    }
 }
 impl<T: LocalStateStore> LocalStateStoreTestExt for T {}

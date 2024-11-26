@@ -19,8 +19,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, *};
-use risingwave_pb::hummock::SstableInfo;
 
 pub mod block_cache;
 pub use block_cache::*;
@@ -29,7 +29,6 @@ pub mod sstable;
 pub use sstable::*;
 
 pub mod compactor;
-pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
@@ -45,7 +44,6 @@ pub mod local_version;
 pub mod observer_manager;
 pub mod store;
 pub use store::*;
-pub mod vacuum;
 mod validator;
 pub mod value;
 pub mod write_limiter;
@@ -54,6 +52,7 @@ pub mod recent_filter;
 pub use recent_filter::*;
 
 pub mod block_stream;
+mod time_travel_version_cache;
 
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
@@ -89,16 +88,6 @@ pub async fn get_from_sstable_info(
             local_stats,
         )
     {
-        if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(&sstable, full_key.user_key);
-            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((
-                    HummockValue::Delete,
-                    EpochWithGap::new_from_epoch(delete_epoch),
-                )));
-            }
-        }
-
         return Ok(None);
     }
 
@@ -112,17 +101,6 @@ pub async fn get_from_sstable_info(
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
-        if !read_options.ignore_range_tombstone {
-            let delete_epoch =
-                get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
-            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((
-                    HummockValue::Delete,
-                    EpochWithGap::new_from_epoch(delete_epoch),
-                )));
-            }
-        }
-
         return Ok(None);
     }
 
@@ -130,16 +108,6 @@ pub async fn get_from_sstable_info(
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
         Some((iter.value().to_bytes(), iter.key().epoch_with_gap))
-    } else if !read_options.ignore_range_tombstone {
-        let delete_epoch = get_min_delete_range_epoch_from_sstable(iter.sst(), full_key.user_key);
-        if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-            Some((
-                HummockValue::Delete,
-                EpochWithGap::new_from_epoch(delete_epoch),
-            ))
-        } else {
-            None
-        }
     } else {
         None
     };
@@ -171,8 +139,7 @@ pub fn get_from_batch(
     read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
-    imm.get(table_key, read_epoch, read_options).map(|v| {
+    imm.get(table_key, read_epoch, read_options).inspect(|_| {
         local_stats.get_shared_buffer_hit_counts += 1;
-        v
     })
 }

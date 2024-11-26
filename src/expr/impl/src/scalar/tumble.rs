@@ -38,7 +38,7 @@ pub fn tumble_start_date(timestamp: Date, window_size: Interval) -> Result<Times
 
 #[function("tumble_start(timestamp, interval) -> timestamp")]
 pub fn tumble_start_date_time(timestamp: Timestamp, window_size: Interval) -> Result<Timestamp> {
-    let timestamp_micro_second = timestamp.0.timestamp_micros();
+    let timestamp_micro_second = timestamp.0.and_utc().timestamp_micros();
     let window_start_micro_second = get_window_start(timestamp_micro_second, window_size)?;
     Ok(Timestamp::from_timestamp_uncheck(
         window_start_micro_second / 1_000_000,
@@ -72,7 +72,7 @@ pub fn tumble_start_offset_date_time(
     window_size: Interval,
     offset: Interval,
 ) -> Result<Timestamp> {
-    let timestamp_micro_second = time.0.timestamp_micros();
+    let timestamp_micro_second = time.0.and_utc().timestamp_micros();
     let window_start_micro_second =
         get_window_start_with_offset(timestamp_micro_second, window_size, offset)?;
 

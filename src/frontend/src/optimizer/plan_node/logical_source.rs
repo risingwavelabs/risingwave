@@ -44,7 +44,7 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::Distribution::HashShard;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, MonotonicityMap, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
@@ -70,6 +70,12 @@ impl LogicalSource {
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
     ) -> Result<Self> {
+        // XXX: should we reorder the columns?
+        // The order may be strange if the schema is changed, e.g., [foo:Varchar, _rw_kafka_timestamp:Timestamptz, _row_id:Serial, bar:Int32]
+        // related: https://github.com/risingwavelabs/risingwave/issues/16486
+        // The order does not matter much. The columns field is essentially a map indexed by the column id.
+        // It will affect what users will see in `SELECT *`.
+        // But not sure if we rely on the position of hidden column like `_row_id` somewhere. For `projected_row_id` we do so...
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
@@ -223,6 +229,7 @@ impl LogicalSource {
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
+                MonotonicityMap::new(),
             ),
             core: logical_source,
         }
@@ -347,7 +354,7 @@ impl ToStream for LogicalSource {
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 // Create MV on source.
-                // We only check rw_enable_shared_source is true when `CREATE SOURCE`.
+                // We only check streaming_use_shared_source is true when `CREATE SOURCE`.
                 // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
                 let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared());
                 if use_shared_source {

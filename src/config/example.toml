@@ -14,14 +14,17 @@ threshold_auto = 0.8999999761581421
 dir = "./"
 
 [meta]
-min_sst_retention_time_sec = 86400
-full_gc_interval_sec = 86400
-collect_gc_watermark_spin_interval_sec = 5
+min_sst_retention_time_sec = 10800
+full_gc_interval_sec = 600
+full_gc_object_limit = 100000
+gc_history_retention_time_sec = 21600
+max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 60
 vacuum_interval_sec = 30
-vacuum_spin_interval_ms = 10
+vacuum_spin_interval_ms = 200
 hummock_version_checkpoint_interval_sec = 30
 enable_hummock_data_archive = false
+hummock_time_travel_snapshot_interval = 100
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 60
 disable_recovery = false
@@ -38,20 +41,28 @@ backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_tombstone_reclaim_compaction_interval_sec = 600
-periodic_split_compact_group_interval_sec = 10
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
-table_write_throughput_threshold = 16777216
-min_table_split_write_throughput = 4194304
+table_high_write_throughput_threshold = 16777216
+table_low_write_throughput_threshold = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
-hybird_partition_vnode_count = 4
+hybrid_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
 enable_dropped_column_reclaim = false
+split_group_size_ratio = 0.9
+table_stat_high_write_throughput_ratio_for_split = 0.5
+table_stat_low_write_throughput_ratio_for_merge = 0.7
+table_stat_throuput_window_seconds_for_split = 60
+table_stat_throuput_window_seconds_for_merge = 240
+compact_task_table_size_partition_threshold_low = 134217728
+compact_task_table_size_partition_threshold_high = 536870912
+periodic_scheduling_compaction_group_split_interval_sec = 10
+periodic_scheduling_compaction_group_merge_interval_sec = 600
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -69,6 +80,7 @@ max_space_reclaim_bytes = 536870912
 level0_max_compact_file_number = 100
 tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
+max_level = 6
 
 [meta.developer]
 meta_cached_traces_num = 256
@@ -77,12 +89,24 @@ meta_enable_trivial_move = true
 meta_enable_check_task_level_overlap = false
 meta_max_trivial_move_task_count_per_loop = 256
 meta_max_get_task_probe_times = 5
+meta_actor_cnt_per_worker_parallelism_soft_limit = 100
+meta_actor_cnt_per_worker_parallelism_hard_limit = 400
+meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
+
+[meta.meta_store_config]
+max_connections = 10
+min_connections = 1
+connection_timeout_sec = 10
+idle_timeout_sec = 30
+acquire_timeout_sec = 30
 
 [batch]
 enable_barrier_read = false
 statement_timeout_in_sec = 3600
 frontend_compute_runtime_worker_threads = 4
 mask_worker_temporary_secs = 30
+redact_sql_option_keywords = ["credential", "key", "password", "private", "secret", "token"]
+enable_spill = true
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -107,24 +131,37 @@ stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
 stream_hash_agg_max_dirty_groups_heap_size = 67108864
 stream_memory_controller_threshold_aggressive = 0.9
-stream_memory_controller_threshold_graceful = 0.8
-stream_memory_controller_threshold_stable = 0.7
+stream_memory_controller_threshold_graceful = 0.81
+stream_memory_controller_threshold_stable = 0.72
+stream_memory_controller_eviction_factor_aggressive = 2.0
+stream_memory_controller_eviction_factor_graceful = 1.5
+stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_update_interval_ms = 100
+stream_memory_controller_sequence_tls_step = 128
+stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
+stream_high_join_amplification_threshold = 2048
+stream_enable_actor_tokio_metrics = false
+stream_exchange_connection_pool_size = 1
+stream_enable_auto_schema_change = true
+stream_enable_shared_source = true
 
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
 shared_buffer_flush_ratio = 0.800000011920929
+shared_buffer_min_batch_flush_size_mb = 800
 imm_merge_threshold = 0
 write_conflict_detection_enabled = true
+max_cached_recent_versions_number = 60
 max_prefetch_block_number = 16
 disable_remote_compactor = false
 share_buffer_upload_concurrency = 8
 compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
+min_sstable_size_mb = 32
 min_sst_size_for_streaming_upload = 33554432
-max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
 max_version_pinning_duration_sec = 10800
@@ -137,7 +174,11 @@ max_preload_io_retry_times = 3
 compactor_fast_max_compact_delete_ratio = 40
 compactor_fast_max_compact_task_size = 2147483648
 compactor_iter_max_io_retry_times = 8
+table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
+compactor_max_overlap_sst_count = 64
+compactor_max_preload_meta_file_count = 32
+time_travel_version_cache_capacity = 2
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"
@@ -149,31 +190,33 @@ algorithm = "Lru"
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
-compression = "none"
+indexer_shards = 64
+compression = "None"
+recover_mode = "None"
+
+[storage.data_file_cache.runtime_config.Unified]
+worker_threads = 0
+max_blocking_threads = 0
 
 [storage.meta_file_cache]
 dir = ""
 capacity_mb = 1024
 file_capacity_mb = 64
-device_align = 4096
-device_io_size = 16384
 flushers = 4
 reclaimers = 4
 recover_concurrency = 8
-lfu_window_to_cache_size_ratio = 1
-lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-catalog_bits = 6
-compression = "none"
+indexer_shards = 64
+compression = "None"
+recover_mode = "None"
+
+[storage.meta_file_cache.runtime_config.Unified]
+worker_threads = 0
+max_blocking_threads = 0
 
 [storage.cache_refill]
 data_refill_levels = []
@@ -185,7 +228,10 @@ recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 
 [storage.object_store]
-object_store_set_atomic_write_dir = false
+set_atomic_write_dir = false
+opendal_upload_concurrency = 256
+opendal_writer_abort_on_err = false
+upload_part_size = 16777216
 
 [storage.object_store.retry]
 req_backoff_interval_ms = 1000
@@ -209,16 +255,16 @@ list_attempt_timeout_ms = 600000
 list_retry_attempts = 3
 
 [storage.object_store.s3]
-object_store_keepalive_ms = 600000
-object_store_recv_buffer_size = 2097152
-object_store_nodelay = true
+keepalive_ms = 600000
+recv_buffer_size = 2097152
+nodelay = true
 retry_unknown_service_error = false
 identity_resolution_timeout_s = 5
 
 [storage.object_store.s3.developer]
-object_store_retry_unknown_service_error = false
-object_store_retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
-use_opendal = false
+retry_unknown_service_error = false
+retryable_service_error_codes = ["SlowDown", "TooManyRequests"]
+use_opendal = true
 
 [system]
 barrier_interval_ms = 1000
@@ -230,3 +276,5 @@ bloom_false_positive = 0.001
 max_concurrent_creating_streaming_jobs = 1
 pause_on_next_bootstrap = false
 enable_tracing = false
+license_key = ""
+time_travel_retention_ms = 600000

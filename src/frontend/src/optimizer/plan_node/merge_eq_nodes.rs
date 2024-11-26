@@ -92,7 +92,7 @@ impl VisitPlan for Counter {
     where
         F: FnMut(&mut Self),
     {
-        if !self.counts.get(&plan.id()).is_some_and(|c| *c > 1) {
+        if self.counts.get(&plan.id()).is_none_or(|c| *c <= 1) {
             f(self);
         }
     }

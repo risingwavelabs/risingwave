@@ -1,5 +1,5 @@
-version: "3.9"
 services:
+  # TODO: Rename this to `postgres`
   db:
     image: postgres:15-alpine
     environment:
@@ -13,7 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    command: [ "postgres", "-c", "wal_level=logical" ]
+    command: [ "postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=30" ]
 
   mysql:
     image: mysql:8.0
@@ -35,7 +35,7 @@ services:
       retries: 5
 
   message_queue:
-    image: "docker.vectorized.io/vectorized/redpanda:latest"
+    image: "redpandadata/redpanda:latest"
     command:
       - redpanda
       - start
@@ -61,7 +61,8 @@ services:
       - "29092:29092"
       - "9092:9092"
       - "9644:9644"
-      - "8081:8081"
+      # Don't use Redpanda's schema registry, use the separated service instead
+      # - "8081:8081"
     environment: {}
     container_name: message_queue
     healthcheck:
@@ -71,9 +72,10 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240424_x
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     depends_on:
       - mysql
+      - sqlserver-server
       - db
       - message_queue
       - schemaregistry
@@ -84,11 +86,12 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240424_x
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     depends_on:
       - mysql
       - db
       - message_queue
+      - schemaregistry
       - elasticsearch
       - clickhouse-server
       - redis-server
@@ -98,17 +101,28 @@ services:
       - doris-server
       - starrocks-fe-server
       - starrocks-be-server
+      - mongodb
+      - mongodb-setup
+      - sqlserver-server
     volumes:
       - ..:/risingwave
 
 
   rw-build-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240424_x
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
+    volumes:
+      - ..:/risingwave
+
+  pg-mysql-backend-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
+    depends_on:
+      - mysql
+      - db
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240424_x
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -119,7 +133,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240424_x
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     depends_on:
       db:
         condition: service_healthy
@@ -202,6 +216,17 @@ services:
       timeout: 5s
       retries: 30
 
+  sqlserver-server:
+    container_name: sqlserver-server
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    hostname: sqlserver-server
+    ports:
+      - 1433:1433
+    environment:
+      ACCEPT_EULA: 'Y'
+      SA_PASSWORD: 'SomeTestOnly@SA'
+      MSSQL_AGENT_ENABLED: "true"
+
   starrocks-fe-server:
     container_name: starrocks-fe-server
     image: starrocks/fe-ubuntu:3.1.7
@@ -238,43 +263,18 @@ services:
 # # protobuf/avro schema registry. Should be removed after the support.
 # # Related tracking issue:
 # # https://github.com/redpanda-data/redpanda/issues/1878
-  zookeeper:
-    container_name: zookeeper
-    image: confluentinc/cp-zookeeper:latest
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
   schemaregistry:
     container_name: schemaregistry
     hostname: schemaregistry
     image: confluentinc/cp-schema-registry:latest
     depends_on:
-      - kafka
+      - message_queue
     ports:
       - "8082:8082"
     environment:
       SCHEMA_REGISTRY_HOST_NAME: schemaregistry
-      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: 'zookeeper:2181'
       SCHEMA_REGISTRY_LISTENERS: http://schemaregistry:8082
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
-      SCHEMA_REGISTRY_DEBUG: 'true'
-
-  kafka:
-    container_name: kafka
-    image: confluentinc/cp-kafka:latest
-    ports:
-      - "29093:29093"
-    depends_on:
-      - zookeeper
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9093,PLAINTEXT_INTERNAL://localhost:29093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: message_queue:29092
 
   pulsar-server:
     container_name: pulsar-server

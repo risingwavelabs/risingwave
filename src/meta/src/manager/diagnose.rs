@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use std::collections::{BTreeMap, BinaryHeap};
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -21,25 +21,29 @@ use itertools::Itertools;
 use prometheus_http_query::response::Data::Vector;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
+use risingwave_hummock_sdk::level::Level;
+use risingwave_meta_model::table::TableType;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::hummock::Level;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::monitor_service::StackTraceResponse;
 use risingwave_rpc_client::ComputeClientPool;
+use risingwave_sqlparser::ast::{CompatibleFormatEncode, Statement, Value};
+use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
 
 use crate::hummock::HummockManagerRef;
-use crate::manager::event_log::EventLogMangerRef;
+use crate::manager::event_log::EventLogManagerRef;
 use crate::manager::MetadataManager;
+use crate::MetaResult;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
 
 pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
     hummock_manger: HummockManagerRef,
-    event_log_manager: EventLogMangerRef,
+    event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
 }
@@ -48,7 +52,7 @@ impl DiagnoseCommand {
     pub fn new(
         metadata_manager: MetadataManager,
         hummock_manger: HummockManagerRef,
-        event_log_manager: EventLogMangerRef,
+        event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
     ) -> Self {
@@ -66,8 +70,9 @@ impl DiagnoseCommand {
         let mut report = String::new();
         let _ = writeln!(
             report,
-            "report created at: {}",
-            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now())
+            "report created at: {}\nversion: {}",
+            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now()),
+            risingwave_common::current_cluster_version(),
         );
         let _ = writeln!(report);
         self.write_catalog(&mut report).await;
@@ -86,70 +91,22 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_catalog(&self, s: &mut String) {
-        match &self.metadata_manager {
-            MetadataManager::V1(_) => self.write_catalog_v1(s).await,
-            MetadataManager::V2(_) => self.write_catalog_v2(s).await,
-        }
+        self.write_catalog_inner(s).await;
+        let _ = self.write_table_definition(s).await.inspect_err(|e| {
+            tracing::warn!(
+                error = e.to_report_string(),
+                "failed to display table definition"
+            )
+        });
     }
 
     #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v1(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let _ = writeln!(s, "number of fragment: {}", self.fragment_num().await);
-        let _ = writeln!(s, "number of actor: {}", self.actor_num().await);
-        let _ = writeln!(
-            s,
-            "number of source: {}",
-            mgr.catalog_manager.source_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of table: {}",
-            mgr.catalog_manager.table_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of materialized view: {}",
-            mgr.catalog_manager.materialized_view_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of sink: {}",
-            mgr.catalog_manager.sink_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of index: {}",
-            mgr.catalog_manager.index_count().await
-        );
-        let _ = writeln!(
-            s,
-            "number of function: {}",
-            mgr.catalog_manager.function_count().await
-        );
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn fragment_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments().len()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn actor_num(&self) -> usize {
-        let mgr = self.metadata_manager.as_v1_ref();
-        let core = mgr.fragment_manager.get_fragment_read_guard().await;
-        core.table_fragments()
-            .values()
-            .map(|t| t.actor_status.len())
-            .sum()
-    }
-
-    #[cfg_attr(coverage, coverage(off))]
-    async fn write_catalog_v2(&self, s: &mut String) {
-        let mgr = self.metadata_manager.as_v2_ref();
-        let guard = mgr.catalog_controller.get_inner_read_guard().await;
+    async fn write_catalog_inner(&self, s: &mut String) {
+        let guard = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
         let stat = match guard.stats().await {
             Ok(stat) => stat,
             Err(err) => {
@@ -214,7 +171,7 @@ impl DiagnoseCommand {
                 &mut row,
                 worker_node.get_state().ok().map(|s| s.as_str_name()),
             );
-            row.add_cell(worker_node.parallel_units.len().into());
+            row.add_cell(worker_node.parallelism().into());
             try_add_cell(
                 &mut row,
                 worker_node.property.as_ref().map(|p| p.is_streaming),
@@ -247,7 +204,7 @@ impl DiagnoseCommand {
                 {
                     None
                 } else {
-                    match worker_actor_count.get(&worker_node.id) {
+                    match worker_actor_count.get(&(worker_node.id as _)) {
                         None => Some(0),
                         Some(c) => Some(*c),
                     }
@@ -402,10 +359,8 @@ impl DiagnoseCommand {
 
     #[cfg_attr(coverage, coverage(off))]
     async fn write_storage(&self, s: &mut String) {
-        let version = self.hummock_manger.get_current_version().await;
         let mut sst_num = 0;
         let mut sst_total_file_size = 0;
-        let compaction_group_num = version.levels.len();
         let back_pressured_compaction_groups = self
             .hummock_manger
             .write_limits()
@@ -458,44 +413,41 @@ impl DiagnoseCommand {
 
         let top_k = 10;
         let mut top_tombstone_delete_sst = BinaryHeap::with_capacity(top_k);
-        let mut top_range_delete_sst = BinaryHeap::with_capacity(top_k);
-        for compaction_group in version.levels.values() {
-            let mut visit_level = |level: &Level| {
-                sst_num += level.table_infos.len();
-                sst_total_file_size += level.table_infos.iter().map(|t| t.file_size).sum::<u64>();
-                for sst in &level.table_infos {
-                    if sst.total_key_count == 0 {
-                        continue;
+        let compaction_group_num = self
+            .hummock_manger
+            .on_current_version(|version| {
+                for compaction_group in version.levels.values() {
+                    let mut visit_level = |level: &Level| {
+                        sst_num += level.table_infos.len();
+                        sst_total_file_size +=
+                            level.table_infos.iter().map(|t| t.sst_size).sum::<u64>();
+                        for sst in &level.table_infos {
+                            if sst.total_key_count == 0 {
+                                continue;
+                            }
+                            let tombstone_delete_ratio =
+                                sst.stale_key_count * 10000 / sst.total_key_count;
+                            let e = SstableSort {
+                                compaction_group_id: compaction_group.group_id,
+                                sst_id: sst.sst_id,
+                                delete_ratio: tombstone_delete_ratio,
+                            };
+                            top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
+                        }
+                    };
+                    let l0 = &compaction_group.l0;
+                    // FIXME: why chaining levels iter leads to segmentation fault?
+                    for level in &l0.sub_levels {
+                        visit_level(level);
                     }
-                    let tombstone_delete_ratio = sst.stale_key_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: tombstone_delete_ratio,
-                    };
-                    top_k_sstables(top_k, &mut top_tombstone_delete_sst, e);
-
-                    let range_delete_ratio =
-                        sst.range_tombstone_count * 10000 / sst.total_key_count;
-                    let e = SstableSort {
-                        compaction_group_id: compaction_group.group_id,
-                        sst_id: sst.sst_id,
-                        delete_ratio: range_delete_ratio,
-                    };
-                    top_k_sstables(top_k, &mut top_range_delete_sst, e);
+                    for level in &compaction_group.levels {
+                        visit_level(level);
+                    }
                 }
-            };
-            let Some(ref l0) = compaction_group.l0 else {
-                continue;
-            };
-            // FIXME: why chaining levels iter leads to segmentation fault?
-            for level in &l0.sub_levels {
-                visit_level(level);
-            }
-            for level in &compaction_group.levels {
-                visit_level(level);
-            }
-        }
+                version.levels.len()
+            })
+            .await;
+
         let _ = writeln!(s, "number of SSTables: {sst_num}");
         let _ = writeln!(s, "total size of SSTables (byte): {sst_total_file_size}");
         let _ = writeln!(s, "number of compaction groups: {compaction_group_num}");
@@ -522,8 +474,6 @@ impl DiagnoseCommand {
         let _ = writeln!(s, "top tombstone delete ratio");
         let _ = writeln!(s, "{}", format_table(top_tombstone_delete_sst));
         let _ = writeln!(s);
-        let _ = writeln!(s, "top range delete ratio");
-        let _ = writeln!(s, "{}", format_table(top_range_delete_sst));
 
         let _ = writeln!(s);
         self.write_storage_prometheus(s).await;
@@ -667,7 +617,7 @@ impl DiagnoseCommand {
 
         let mut all = StackTraceResponse::default();
 
-        let compute_clients = ComputeClientPool::default();
+        let compute_clients = ComputeClientPool::adhoc();
         for worker_node in &worker_nodes {
             if let Ok(client) = compute_clients.get(worker_node).await
                 && let Ok(result) = client.stack_trace().await
@@ -677,6 +627,82 @@ impl DiagnoseCommand {
         }
 
         write!(s, "{}", all.output()).unwrap();
+    }
+
+    async fn write_table_definition(&self, s: &mut String) -> MetaResult<()> {
+        let sources = self
+            .metadata_manager
+            .catalog_controller
+            .list_sources()
+            .await?
+            .into_iter()
+            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .collect::<BTreeMap<_, _>>();
+        let tables = self
+            .metadata_manager
+            .catalog_controller
+            .list_tables_by_type(TableType::Table)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
+            .collect::<BTreeMap<_, _>>();
+        let mvs = self
+            .metadata_manager
+            .catalog_controller
+            .list_tables_by_type(TableType::MaterializedView)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
+            .collect::<BTreeMap<_, _>>();
+        let indexes = self
+            .metadata_manager
+            .catalog_controller
+            .list_tables_by_type(TableType::Index)
+            .await?
+            .into_iter()
+            .map(|t| (t.id, (t.name, t.schema_id, t.definition)))
+            .collect::<BTreeMap<_, _>>();
+        let sinks = self
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await?
+            .into_iter()
+            .map(|s| (s.id, (s.name, s.schema_id, s.definition)))
+            .collect::<BTreeMap<_, _>>();
+        let catalogs = [
+            ("SOURCE", sources),
+            ("TABLE", tables),
+            ("MATERIALIZED VIEW", mvs),
+            ("INDEX", indexes),
+            ("SINK", sinks),
+        ];
+        for (title, items) in catalogs {
+            use comfy_table::{Row, Table};
+            let mut table = Table::new();
+            table.set_header({
+                let mut row = Row::new();
+                row.add_cell("id".into());
+                row.add_cell("name".into());
+                row.add_cell("schema_id".into());
+                row.add_cell("definition".into());
+                row
+            });
+            for (id, (name, schema_id, definition)) in items {
+                let mut row = Row::new();
+                let may_redact =
+                    redact_all_sql_options(&definition).unwrap_or_else(|| "[REDACTED]".into());
+                row.add_cell(id.into());
+                row.add_cell(name.into());
+                row.add_cell(schema_id.into());
+                row.add_cell(may_redact.into());
+                table.add_row(row);
+            }
+            let _ = writeln!(s);
+            let _ = writeln!(s, "{title}");
+            let _ = writeln!(s, "{table}");
+        }
+        Ok(())
     }
 }
 
@@ -695,4 +721,53 @@ fn try_add_cell<T: Into<comfy_table::Cell>>(row: &mut comfy_table::Row, t: Optio
 #[cfg_attr(coverage, coverage(off))]
 fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -> String {
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
+}
+
+fn redact_all_sql_options(sql: &str) -> Option<String> {
+    let Ok(mut statements) = Parser::parse_sql(sql) else {
+        return None;
+    };
+    let mut redacted = String::new();
+    for statement in &mut statements {
+        let options = match statement {
+            Statement::CreateTable {
+                with_options,
+                format_encode,
+                ..
+            } => {
+                let format_encode = match format_encode {
+                    Some(CompatibleFormatEncode::V2(cs)) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(with_options), format_encode)
+            }
+            Statement::CreateSource { stmt } => {
+                let format_encode = match &mut stmt.format_encode {
+                    CompatibleFormatEncode::V2(cs) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(&mut stmt.with_properties.0), format_encode)
+            }
+            Statement::CreateSink { stmt } => {
+                let format_encode = match &mut stmt.sink_schema {
+                    Some(cs) => Some(&mut cs.row_options),
+                    _ => None,
+                };
+                (Some(&mut stmt.with_properties.0), format_encode)
+            }
+            _ => (None, None),
+        };
+        if let Some(options) = options.0 {
+            for option in options {
+                option.value = Value::SingleQuotedString("[REDACTED]".into());
+            }
+        }
+        if let Some(options) = options.1 {
+            for option in options {
+                option.value = Value::SingleQuotedString("[REDACTED]".into());
+            }
+        }
+        writeln!(&mut redacted, "{statement}").unwrap();
+    }
+    Some(redacted)
 }

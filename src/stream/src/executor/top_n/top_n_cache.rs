@@ -13,20 +13,25 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::future::Future;
 
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 
-use super::topn_cache_state::TopNCacheState;
-use super::{CacheKey, GroupKey, ManagedTopNState};
+use super::{GroupKey, ManagedTopNState};
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
+
+/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
+pub type CacheKey = (Vec<u8>, Vec<u8>);
+pub type Cache = EstimatedBTreeMap<CacheKey, CompactedRow>;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 const TOPN_CACHE_MIN_CAPACITY: usize = 10;
@@ -43,19 +48,32 @@ const TOPN_CACHE_MIN_CAPACITY: usize = 10;
 /// `OFFSET m FETCH FIRST n ROWS WITH TIES` and `m <= RANK() <= n` are not supported now,
 /// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
-    /// Rows in the range `[0, offset)`
-    pub low: TopNCacheState,
-    /// Rows in the range `[offset, offset+limit)`
+    /// Rows in the range `[0, offset)`. Should always be synced with state table.
+    pub low: Option<Cache>,
+
+    /// Rows in the range `[offset, offset+limit)`. Should always be synced with state table.
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `limit`.
-    pub middle: TopNCacheState,
-    /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
+    pub middle: Cache,
+
+    /// Cache of the beginning rows in the range `[offset+limit, ...)`.
     ///
-    /// When `WITH_TIES` is true, it also stores ties for the last element,
-    /// and thus the size can be larger than `high_capacity`.
-    pub high: TopNCacheState,
-    pub high_capacity: usize,
+    /// This is very similar to [`TopNStateCache`], which only caches the top-N rows in the table
+    /// and only accepts new records that are less than the largest in the cache.
+    ///
+    /// When `WITH_TIES` is true, it guarantees that the ties of the last element are in the cache,
+    /// and thus the size can be larger than `rest_cache_capacity`.
+    ///
+    /// When the cache becomes empty, if the `table_row_count` is not matched, we need to view the cache
+    /// as unsynced and refill it from the state table.
+    ///
+    /// TODO(rc): later we should reuse [`TopNStateCache`] here.
+    ///
+    /// [`TopNStateCache`]: crate::common::state_cache::TopNStateCache
+    pub high: Cache,
+    pub high_cache_capacity: usize,
+
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
@@ -83,13 +101,13 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "TopNCache {{\n  offset: {}, limit: {}, high_capacity: {},\n",
-            self.offset, self.limit, self.high_capacity
+            "TopNCache {{\n  offset: {}, limit: {}, high_cache_capacity: {},\n",
+            self.offset, self.limit, self.high_cache_capacity
         )?;
 
         fn format_cache(
             f: &mut std::fmt::Formatter<'_>,
-            cache: &TopNCacheState,
+            cache: &Cache,
             data_types: &[DataType],
         ) -> std::fmt::Result {
             if cache.is_empty() {
@@ -109,7 +127,11 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
         }
 
         writeln!(f, "  low:")?;
-        format_cache(f, &self.low, &self.data_types)?;
+        if let Some(low) = &self.low {
+            format_cache(f, low, &self.data_types)?;
+        } else {
+            writeln!(f, "    <none>")?;
+        }
         writeln!(f, "\n  middle:")?;
         format_cache(f, &self.middle, &self.data_types)?;
         writeln!(f, "\n  high:")?;
@@ -128,53 +150,45 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    #[allow(clippy::too_many_arguments)]
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    );
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging);
 
     /// Delete input row from the cache.
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
     ///
-    /// Because we may need to add data from the state table to `self.high` during the delete
+    /// Because we may need to refill data from the state table to `self.high` during the delete
     /// operation, we need to pass in `group_key`, `epoch` and `managed_state` to do a prefix
     /// scan of the state table.
-    #[allow(clippy::too_many_arguments)]
     fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `data_types` -- Data types for the full row.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
-        assert!(limit != 0);
+        assert!(limit > 0);
         if WITH_TIES {
             // It's trickier to support.
             // Also `OFFSET WITH TIES` has different semantic with `a < RANK() < b`
             assert!(offset == 0, "OFFSET is not supported with WITH TIES");
         }
+        let high_cache_capacity = offset
+            .checked_add(limit)
+            .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
+            .unwrap_or(usize::MAX)
+            .max(TOPN_CACHE_MIN_CAPACITY);
         Self {
-            low: TopNCacheState::new(),
-            middle: TopNCacheState::new(),
-            high: TopNCacheState::new(),
-            high_capacity: offset
-                .checked_add(limit)
-                .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
-                .unwrap_or(usize::MAX)
-                .max(TOPN_CACHE_MIN_CAPACITY),
+            low: if offset > 0 { Some(Cache::new()) } else { None },
+            middle: Cache::new(),
+            high: Cache::new(),
+            high_cache_capacity,
             offset,
             limit,
             table_row_count: None,
@@ -185,37 +199,35 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// Clear the cache. After this, the cache must be `init` again before use.
     #[allow(dead_code)]
     pub fn clear(&mut self) {
-        self.low.clear();
+        self.low.as_mut().map(Cache::clear);
         self.middle.clear();
         self.high.clear();
     }
 
     /// Get total count of entries in the cache.
     pub fn len(&self) -> usize {
-        self.low.len() + self.middle.len() + self.high.len()
+        self.low.as_ref().map(Cache::len).unwrap_or(0) + self.middle.len() + self.high.len()
     }
 
     pub(super) fn update_table_row_count(&mut self, table_row_count: usize) {
         self.table_row_count = Some(table_row_count)
     }
 
-    fn table_row_count_matched(&self) -> bool {
-        self.table_row_count
-            .map(|n| n == self.len())
-            .unwrap_or(false)
-    }
-
-    pub fn is_low_cache_full(&self) -> bool {
-        assert!(self.low.len() <= self.offset);
-        let full = self.low.len() == self.offset;
-        if !full {
-            assert!(self.middle.is_empty());
-            assert!(self.high.is_empty());
+    pub fn low_is_full(&self) -> bool {
+        if let Some(low) = &self.low {
+            assert!(low.len() <= self.offset);
+            let full = low.len() == self.offset;
+            if !full {
+                assert!(self.middle.is_empty());
+                assert!(self.high.is_empty());
+            }
+            full
+        } else {
+            true
         }
-        full
     }
 
-    pub fn is_middle_cache_full(&self) -> bool {
+    pub fn middle_is_full(&self) -> bool {
         // For WITH_TIES, the middle cache can exceed the capacity.
         if !WITH_TIES {
             assert!(
@@ -225,7 +237,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         }
         let full = self.middle.len() >= self.limit;
         if full {
-            assert!(self.is_low_cache_full());
+            assert!(self.low_is_full());
         } else {
             assert!(
                 self.high.is_empty(),
@@ -235,121 +247,123 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         full
     }
 
-    pub fn is_high_cache_full(&self) -> bool {
+    pub fn high_is_full(&self) -> bool {
         // For WITH_TIES, the high cache can exceed the capacity.
         if !WITH_TIES {
-            assert!(self.high.len() <= self.high_capacity);
+            assert!(self.high.len() <= self.high_cache_capacity);
         }
-        self.high.len() >= self.high_capacity
+        self.high.len() >= self.high_cache_capacity
+    }
+
+    fn high_is_synced(&self) -> bool {
+        if !self.high.is_empty() {
+            true
+        } else {
+            // check if table row count matches
+            self.table_row_count
+                .map(|n| n == self.len())
+                .unwrap_or(false)
+        }
     }
 
     fn last_cache_key_before_high(&self) -> Option<&CacheKey> {
         let middle_last_key = self.middle.last_key_value().map(|(k, _)| k);
-        middle_last_key.or_else(|| self.low.last_key_value().map(|(k, _)| k))
-    }
-
-    /// Use this method instead of `self.high.insert` directly when possible.
-    ///
-    /// It only inserts into high cache if the key is smaller than the largest key in the high
-    /// cache. Otherwise, we simply ignore the row. We will wait until the high cache becomes
-    /// empty and fill it at that time.
-    fn insert_high_cache(&mut self, cache_key: CacheKey, row: CompactedRow, is_from_middle: bool) {
-        if !self.is_high_cache_full() {
-            if is_from_middle {
-                self.high.insert(cache_key, row);
-                return;
-            }
-            // For direct insert, we need to check if the key is smaller than the largest key
-            if let Some(high_last) = self.high.last_key_value()
-                && cache_key <= *high_last.0
-            {
-                debug_assert!(cache_key != *high_last.0, "cache_key should be unique");
-                self.high.insert(cache_key, row);
-            }
-        } else {
-            let high_last = self.high.last_entry().unwrap();
-            if cache_key <= *high_last.key() {
-                debug_assert!(cache_key != *high_last.key(), "cache_key should be unique");
-                high_last.remove_entry();
-                self.high.insert(cache_key, row);
-            }
-        }
+        middle_last_key.or_else(|| {
+            self.low
+                .as_ref()
+                .and_then(Cache::last_key_value)
+                .map(|(k, _)| k)
+        })
     }
 }
 
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    ) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
 
-        if !self.is_low_cache_full() {
-            self.low.insert(cache_key, (&row).into());
-            return;
-        }
-        let elem_to_compare_with_middle = if let Some(low_last) = self.low.last_entry()
-            && cache_key <= *low_last.key()
-        {
-            // Take the last element of `cache.low` and insert input row to it.
-            let low_last = low_last.remove_entry();
-            self.low.insert(cache_key, (&row).into());
-            low_last
-        } else {
-            (cache_key, (&row).into())
-        };
+        let mut to_insert = (cache_key, (&row).into());
+        let mut is_last_of_lower_cache = false; // for saving one key comparison
 
-        if !self.is_middle_cache_full() {
-            self.middle.insert(
-                elem_to_compare_with_middle.0,
-                elem_to_compare_with_middle.1.clone(),
-            );
-            res_ops.push(Op::Insert);
-            res_rows.push(elem_to_compare_with_middle.1);
-            return;
-        }
+        let low_is_full = self.low_is_full();
+        if let Some(low) = &mut self.low {
+            // try insert into low cache
 
-        let mut is_from_middle = false;
-        let elem_to_compare_with_high = {
-            let middle_last = self.middle.last_entry().unwrap();
-            if elem_to_compare_with_middle.0 <= *middle_last.key() {
-                // If the row in the range of [offset, offset+limit), the largest row in
-                // `cache.middle` needs to be moved to `cache.high`
-                let res = middle_last.remove_entry();
-                res_ops.push(Op::Delete);
-                res_rows.push(res.1.clone());
-                res_ops.push(Op::Insert);
-                res_rows.push(elem_to_compare_with_middle.1.clone());
-                self.middle
-                    .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
-                is_from_middle = true;
-                res
-            } else {
-                elem_to_compare_with_middle
+            if !low_is_full {
+                low.insert(to_insert.0, to_insert.1);
+                return;
             }
-        };
 
-        self.insert_high_cache(
-            elem_to_compare_with_high.0,
-            elem_to_compare_with_high.1,
-            is_from_middle,
-        );
+            // low cache is full
+            let low_last = low.last_entry().unwrap();
+            if &to_insert.0 < low_last.key() {
+                // make space for the new entry
+                let low_last = low_last.remove_entry();
+                low.insert(to_insert.0, to_insert.1);
+                to_insert = low_last; // move the last entry to the middle cache
+                is_last_of_lower_cache = true;
+            }
+        }
+
+        // try insert into middle cache
+
+        if !self.middle_is_full() {
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
+            return;
+        }
+
+        // middle cache is full
+        let middle_last = self.middle.last_entry().unwrap();
+        if is_last_of_lower_cache || &to_insert.0 < middle_last.key() {
+            // make space for the new entry
+            let middle_last = middle_last.remove_entry();
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+
+            staging.delete(middle_last.0.clone(), middle_last.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
+
+            to_insert = middle_last; // move the last entry to the high cache
+            is_last_of_lower_cache = true;
+        }
+
+        // try insert into high cache
+
+        // The logic is a bit different from the other two caches, because high cache is not
+        // guaranteed to be fully synced with the "high part" of the table.
+
+        if is_last_of_lower_cache || self.high_is_synced() {
+            // For `is_last_of_lower_cache`, an obvious observation is that the key to insert is
+            // always smaller than any key in the high part of the table.
+
+            if self.high.is_empty() {
+                // if high cache is empty, we can insert directly
+                self.high.insert(to_insert.0, to_insert.1);
+                return;
+            }
+
+            let high_is_full = self.high_is_full();
+            let high_last = self.high.last_entry().unwrap();
+
+            if is_last_of_lower_cache || &to_insert.0 < high_last.key() {
+                // we can only insert if the key is smaller than the largest key in the high cache
+                if high_is_full {
+                    // make space for the new entry
+                    high_last.remove_entry();
+                }
+                self.high.insert(to_insert.0, to_insert.1);
+            }
+        }
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
             // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
@@ -361,67 +375,92 @@ impl TopNCacheTrait for TopNCache<false> {
             *row_count -= 1;
         }
 
-        if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
-            // The row is in high
+        if self.middle_is_full() && &cache_key > self.middle.last_key_value().unwrap().0 {
+            // the row is in high
             self.high.remove(&cache_key);
-        } else if self.is_low_cache_full()
-            && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
+        } else if self.low_is_full()
+            && self
+                .low
+                .as_ref()
+                .map(|low| &cache_key > low.last_key_value().unwrap().0)
+                .unwrap_or(
+                    true, // if low is None, `cache_key` should be in middle
+                )
         {
-            // The row is in mid
-            self.middle.remove(&cache_key);
-            res_ops.push(Op::Delete);
-            res_rows.push((&row).into());
+            // the row is in middle
+            let removed = self.middle.remove(&cache_key);
+            staging.delete(cache_key.clone(), (&row).into());
 
-            // Try to fill the high cache if it is empty
-            if self.high.is_empty() && !self.table_row_count_matched() {
+            if removed.is_none() {
+                // the middle cache should always be synced, if the key is not found, then it also doesn't
+                // exist in the state table
+                consistency_error!(
+                    ?group_key,
+                    ?cache_key,
+                    "cache key not found in middle cache"
+                );
+                return Ok(());
+            }
+
+            // refill the high cache if it's not synced
+            if !self.high_is_synced() {
+                self.high.clear();
                 managed_state
                     .fill_high_cache(
                         group_key,
                         self,
                         self.last_cache_key_before_high().cloned(),
-                        self.high_capacity,
+                        self.high_cache_capacity,
                     )
                     .await?;
             }
 
-            // Bring one element, if any, from high cache to middle cache
+            // bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                res_ops.push(Op::Insert);
-                res_rows.push(high_first.1.clone());
-                self.middle.insert(high_first.0, high_first.1);
+                self.middle
+                    .insert(high_first.0.clone(), high_first.1.clone());
+                staging.insert(high_first.0, high_first.1);
             }
 
             assert!(self.high.is_empty() || self.middle.len() == self.limit);
         } else {
-            // The row is in low
-            self.low.remove(&cache_key);
+            // the row is in low
+            let low = self.low.as_mut().unwrap();
+            let removed = low.remove(&cache_key);
 
-            // Bring one element, if any, from middle cache to low cache
+            if removed.is_none() {
+                // the low cache should always be synced, if the key is not found, then it also doesn't
+                // exist in the state table
+                consistency_error!(?group_key, ?cache_key, "cache key not found in low cache");
+                return Ok(());
+            }
+
+            // bring one element, if any, from middle cache to low cache
             if !self.middle.is_empty() {
                 let middle_first = self.middle.pop_first().unwrap();
-                res_ops.push(Op::Delete);
-                res_rows.push(middle_first.1.clone());
-                self.low.insert(middle_first.0, middle_first.1);
+                staging.delete(middle_first.0.clone(), middle_first.1.clone());
+                low.insert(middle_first.0, middle_first.1);
 
-                // Try to fill the high cache if it is empty
-                if self.high.is_empty() && !self.table_row_count_matched() {
+                // fill the high cache if it's not synced
+                if !self.high_is_synced() {
+                    self.high.clear();
                     managed_state
                         .fill_high_cache(
                             group_key,
                             self,
                             self.last_cache_key_before_high().cloned(),
-                            self.high_capacity,
+                            self.high_cache_capacity,
                         )
                         .await?;
                 }
 
-                // Bring one element, if any, from high cache to middle cache
+                // bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
                     let high_first = self.high.pop_first().unwrap();
-                    res_ops.push(Op::Insert);
-                    res_rows.push(high_first.1.clone());
-                    self.middle.insert(high_first.0, high_first.1);
+                    self.middle
+                        .insert(high_first.0.clone(), high_first.1.clone());
+                    staging.insert(high_first.0, high_first.1);
                 }
             }
         }
@@ -431,44 +470,37 @@ impl TopNCacheTrait for TopNCache<false> {
 }
 
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    ) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
 
         assert!(
-            self.low.is_empty(),
-            "Offset is not supported yet for WITH TIES, so low cache should be empty"
+            self.low.is_none(),
+            "Offset is not supported yet for WITH TIES, so low cache should be None"
         );
 
-        let elem_to_compare_with_middle = (cache_key, row);
+        let to_insert: (CacheKey, CompactedRow) = (cache_key, (&row).into());
 
-        if !self.is_middle_cache_full() {
-            self.middle.insert(
-                elem_to_compare_with_middle.0.clone(),
-                (&elem_to_compare_with_middle.1).into(),
-            );
-            res_ops.push(Op::Insert);
-            res_rows.push((&elem_to_compare_with_middle.1).into());
+        // try insert into middle cache
+
+        if !self.middle_is_full() {
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+            staging.insert(to_insert.0.clone(), to_insert.1);
             return;
         }
 
-        let sort_key = &elem_to_compare_with_middle.0 .0;
-        let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = &middle_last.0 .0.clone();
+        // middle cache is full
 
-        match sort_key.cmp(middle_last_order_by) {
+        let to_insert_sort_key = &(to_insert.0).0;
+        let middle_last_sort_key = self.middle.last_key().unwrap().0.clone();
+
+        match to_insert_sort_key.cmp(&middle_last_sort_key) {
             Ordering::Less => {
-                // The row is in middle.
-                let num_ties = self
+                // the row is in middle
+                let n_ties_of_last = self
                     .middle
-                    .range((middle_last_order_by.clone(), vec![])..)
+                    .range((middle_last_sort_key.clone(), vec![])..)
                     .count();
                 // We evict the last row and its ties only if the number of remaining rows still is
                 // still larger than limit, i.e., there are limit-1 other rows.
@@ -477,59 +509,74 @@ impl TopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,1,1,1,1]
                 // insert 0 -> [0,0,1,1,1,1]
                 // insert 0 -> [0,0,0]
-                if self.middle.len() - num_ties + 1 >= self.limit {
+                if self.middle.len() + 1 - n_ties_of_last >= self.limit {
+                    // Middle will be full without the last element and its ties after insertion.
+                    // Let's move the last element and its ties to high cache first.
                     while let Some(middle_last) = self.middle.last_entry()
-                        && middle_last.key().0 == middle_last_order_by.clone()
+                        && middle_last.key().0 == middle_last_sort_key
                     {
                         let middle_last = middle_last.remove_entry();
-                        res_ops.push(Op::Delete);
-                        res_rows.push(middle_last.1.clone());
+                        staging.delete(middle_last.0.clone(), middle_last.1.clone());
+                        // we can blindly move entries from middle cache to high cache no matter high cache is synced or not
                         self.high.insert(middle_last.0, middle_last.1);
                     }
                 }
-                if self.high.len() >= self.high_capacity {
+                if self.high.len() > self.high_cache_capacity {
+                    // evict some entries from high cache if it exceeds the capacity
                     let high_last = self.high.pop_last().unwrap();
-                    let high_last_order_by = high_last.0 .0;
-                    self.high.retain(|k, _| k.0 != high_last_order_by);
+                    let high_last_sort_key = (high_last.0).0;
+                    // Remove all ties of the last element in high cache, for the sake of simplicity.
+                    // This may cause repeatedly refill the high cache if number of ties is large.
+                    self.high.retain(|k, _| k.0 != high_last_sort_key);
                 }
 
-                res_ops.push(Op::Insert);
-                res_rows.push((&elem_to_compare_with_middle.1).into());
-                self.middle.insert(
-                    elem_to_compare_with_middle.0,
-                    (&elem_to_compare_with_middle.1).into(),
-                );
+                self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+                staging.insert(to_insert.0, to_insert.1);
             }
             Ordering::Equal => {
-                // The row is in middle and is a tie with the last row.
-                res_ops.push(Op::Insert);
-                res_rows.push((&elem_to_compare_with_middle.1).into());
-                self.middle.insert(
-                    elem_to_compare_with_middle.0,
-                    (&elem_to_compare_with_middle.1).into(),
-                );
+                // the row is in middle and is a tie of the last row
+                self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+                staging.insert(to_insert.0, to_insert.1);
             }
             Ordering::Greater => {
-                // The row is in high.
-                let elem_to_compare_with_high = elem_to_compare_with_middle;
-                self.insert_high_cache(
-                    elem_to_compare_with_high.0,
-                    elem_to_compare_with_high.1.into(),
-                    false,
-                );
+                // the row is in high
+
+                if self.high_is_synced() {
+                    // only insert into high cache if it is synced
+
+                    if self.high.is_empty() {
+                        // if high cache is empty, we can insert directly
+                        self.high.insert(to_insert.0, to_insert.1);
+                        return;
+                    }
+
+                    if to_insert_sort_key <= &self.high.last_key().unwrap().0 {
+                        // We can only insert if the key is <= the largest key in the high cache.
+                        // Note that we have all ties of the last element in the high cache, so we can
+                        // safely compare only the sort key.
+                        self.high.insert(to_insert.0, to_insert.1);
+                    }
+
+                    if self.high.len() > self.high_cache_capacity {
+                        // evict some entries from high cache if it exceeds the capacity
+                        let high_last = self.high.pop_last().unwrap();
+                        let high_last_sort_key = (high_last.0).0;
+                        // Remove all ties of the last element in high cache, for the sake of simplicity.
+                        // This may cause repeatedly refill the high cache if number of ties is large.
+                        self.high.retain(|k, _| k.0 != high_last_sort_key);
+                    }
+                }
             }
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
             // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
@@ -540,56 +587,61 @@ impl TopNCacheTrait for TopNCache<true> {
             *row_count -= 1;
         }
 
-        // Since low cache is always empty for WITH_TIES, this unwrap is safe.
-        let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = middle_last.0 .0.clone();
+        assert!(
+            self.low.is_none(),
+            "Offset is not supported yet for WITH TIES, so low cache should be None"
+        );
 
-        let sort_key = cache_key.0.clone();
-        if sort_key > middle_last_order_by {
-            // The row is in high.
+        if self.middle.is_empty() {
+            consistency_error!(
+                ?group_key,
+                ?cache_key,
+                "middle cache is empty, but we receive a DELETE operation"
+            );
+            staging.delete(cache_key, (&row).into());
+            return Ok(());
+        }
+
+        let middle_last_sort_key = self.middle.last_key().unwrap().0.clone();
+
+        let to_delete_sort_key = cache_key.0.clone();
+        if to_delete_sort_key > middle_last_sort_key {
+            // the row is in high
             self.high.remove(&cache_key);
         } else {
-            // The row is in middle
+            // the row is in middle
             self.middle.remove(&cache_key);
-            res_ops.push(Op::Delete);
-            res_rows.push((&row).into());
+            staging.delete(cache_key.clone(), (&row).into());
             if self.middle.len() >= self.limit {
-                // This can happen when there are ties.
+                // this can happen when there are ties
                 return Ok(());
             }
 
-            // Try to fill the high cache if it is empty
-            if self.high.is_empty() && !self.table_row_count_matched() {
+            // refill the high cache if it's not synced
+            if !self.high_is_synced() {
                 managed_state
                     .fill_high_cache(
                         group_key,
                         self,
                         self.last_cache_key_before_high().cloned(),
-                        self.high_capacity,
+                        self.high_cache_capacity,
                     )
                     .await?;
             }
 
-            // Bring elements with the same sort key, if any, from high cache to middle cache.
+            // bring the first element and its ties, if any, from high cache to middle cache
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                let high_first_order_by = high_first.0 .0.clone();
-                assert!(high_first_order_by > middle_last_order_by);
+                let high_first_sort_key = (high_first.0).0.clone();
+                assert!(high_first_sort_key > middle_last_sort_key);
 
-                res_ops.push(Op::Insert);
-                res_rows.push(high_first.1.clone());
-                self.middle.insert(high_first.0, high_first.1);
+                self.middle
+                    .insert(high_first.0.clone(), high_first.1.clone());
+                staging.insert(high_first.0, high_first.1);
 
-                // We need to trigger insert for all rows with prefix `high_first_order_by`
-                // in high cache.
-                for (ordered_pk_row, row) in self.high.extract_if(|k, _| k.0 == high_first_order_by)
-                {
-                    if ordered_pk_row.0 != high_first_order_by {
-                        break;
-                    }
-                    res_ops.push(Op::Insert);
-                    res_rows.push(row.clone());
-                    self.middle.insert(ordered_pk_row, row);
+                for (cache_key, row) in self.high.extract_if(|k, _| k.0 == high_first_sort_key) {
+                    self.middle.insert(cache_key.clone(), row.clone());
+                    staging.insert(cache_key, row);
                 }
             }
         }
@@ -611,8 +663,7 @@ pub trait AppendOnlyTopNCacheTrait {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()>;
@@ -623,56 +674,54 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()> {
-        if self.is_middle_cache_full() && &cache_key >= self.middle.last_key_value().unwrap().0 {
+        if self.middle_is_full() && &cache_key >= self.middle.last_key().unwrap() {
             return Ok(());
         }
         managed_state.insert(row_ref);
 
-        // Then insert input row to corresponding cache range according to its order key
-        if !self.is_low_cache_full() {
-            self.low.insert(cache_key, row_ref.into());
-            return Ok(());
+        // insert input row into corresponding cache according to its sort key
+        let mut to_insert = (cache_key, row_ref.into());
+
+        let low_is_full = self.low_is_full();
+        if let Some(low) = &mut self.low {
+            // try insert into low cache
+
+            if !low_is_full {
+                low.insert(to_insert.0, to_insert.1);
+                return Ok(());
+            }
+
+            // low cache is full
+            let low_last = low.last_entry().unwrap();
+            if &to_insert.0 < low_last.key() {
+                // make space for the new entry
+                let low_last = low_last.remove_entry();
+                low.insert(to_insert.0, to_insert.1);
+                to_insert = low_last; // move the last entry to the middle cache
+            }
         }
 
-        let elem_to_insert_into_middle = if let Some(low_last) = self.low.last_entry()
-            && &cache_key <= low_last.key()
-        {
-            // Take the last element of `cache.low` and insert input row to it.
-            let low_last = low_last.remove_entry();
-            self.low.insert(cache_key, row_ref.into());
-            low_last
-        } else {
-            (cache_key, row_ref.into())
-        };
+        // try insert into middle cache
 
-        if !self.is_middle_cache_full() {
-            self.middle.insert(
-                elem_to_insert_into_middle.0,
-                elem_to_insert_into_middle.1.clone(),
-            );
-            res_ops.push(Op::Insert);
-            res_rows.push(elem_to_insert_into_middle.1);
+        if !self.middle_is_full() {
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
             return Ok(());
         }
 
         // The row must be in the range of [offset, offset+limit).
         // the largest row in `cache.middle` needs to be removed.
         let middle_last = self.middle.pop_last().unwrap();
-        debug_assert!(elem_to_insert_into_middle.0 < middle_last.0);
-
-        res_ops.push(Op::Delete);
-        res_rows.push(middle_last.1.clone());
+        debug_assert!(to_insert.0 < middle_last.0);
         managed_state.delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+        staging.delete(middle_last.0, middle_last.1);
 
-        res_ops.push(Op::Insert);
-        res_rows.push(elem_to_insert_into_middle.1.clone());
-        self.middle
-            .insert(elem_to_insert_into_middle.0, elem_to_insert_into_middle.1);
+        self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+        staging.insert(to_insert.0, to_insert.1);
 
         // Unlike normal topN, append only topN does not use the high part of the cache.
 
@@ -685,37 +734,38 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()> {
         assert!(
-            self.low.is_empty(),
+            self.low.is_none(),
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
         );
-        let elem_to_compare_with_middle = (cache_key, row_ref);
 
-        if !self.is_middle_cache_full() {
-            let row: CompactedRow = elem_to_compare_with_middle.1.into();
-            managed_state.insert(elem_to_compare_with_middle.1);
-            self.middle
-                .insert(elem_to_compare_with_middle.0.clone(), row.clone());
-            res_ops.push(Op::Insert);
-            res_rows.push(row);
+        let to_insert = (cache_key, row_ref);
+
+        // try insert into middle cache
+
+        if !self.middle_is_full() {
+            managed_state.insert(to_insert.1);
+            let row: CompactedRow = to_insert.1.into();
+            self.middle.insert(to_insert.0.clone(), row.clone());
+            staging.insert(to_insert.0, row);
             return Ok(());
         }
 
-        let sort_key = &elem_to_compare_with_middle.0 .0;
-        let middle_last = self.middle.last_key_value().unwrap();
-        let middle_last_order_by = &middle_last.0 .0.clone();
+        // middle cache is full
 
-        match sort_key.cmp(middle_last_order_by) {
+        let to_insert_sort_key = &(to_insert.0).0;
+        let middle_last_sort_key = self.middle.last_key().unwrap().0.clone();
+
+        match to_insert_sort_key.cmp(&middle_last_sort_key) {
             Ordering::Less => {
-                // The row is in middle.
-                let num_ties = self
+                // the row is in middle
+                let n_ties_of_last = self
                     .middle
-                    .range((middle_last_order_by.clone(), vec![])..)
+                    .range((middle_last_sort_key.clone(), vec![])..)
                     .count();
                 // We evict the last row and its ties only if the number of remaining rows is
                 // still larger than limit, i.e., there are limit-1 other rows.
@@ -724,41 +774,125 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,1,1,1,1]
                 // insert 0 -> [0,0,1,1,1,1]
                 // insert 0 -> [0,0,0]
-                if self.middle.len() - num_ties + 1 >= self.limit {
+                if self.middle.len() + 1 - n_ties_of_last >= self.limit {
+                    // middle will be full without the last element and its ties after insertion
                     while let Some(middle_last) = self.middle.last_entry()
-                        && &middle_last.key().0 == middle_last_order_by
+                        && middle_last.key().0 == middle_last_sort_key
                     {
                         let middle_last = middle_last.remove_entry();
-                        res_ops.push(Op::Delete);
-                        res_rows.push(middle_last.1.clone());
+                        // we don't need to maintain the high part so just delete it from state table
                         managed_state
                             .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+                        staging.delete(middle_last.0, middle_last.1);
                     }
                 }
 
-                managed_state.insert(elem_to_compare_with_middle.1);
-                res_ops.push(Op::Insert);
-                res_rows.push((&elem_to_compare_with_middle.1).into());
-                self.middle.insert(
-                    elem_to_compare_with_middle.0,
-                    (&elem_to_compare_with_middle.1).into(),
-                );
+                managed_state.insert(to_insert.1);
+                let row: CompactedRow = to_insert.1.into();
+                self.middle.insert(to_insert.0.clone(), row.clone());
+                staging.insert(to_insert.0, row);
             }
             Ordering::Equal => {
-                // The row is in middle and is a tie with the last row.
-                managed_state.insert(elem_to_compare_with_middle.1);
-                res_ops.push(Op::Insert);
-                res_rows.push((&elem_to_compare_with_middle.1).into());
-                self.middle.insert(
-                    elem_to_compare_with_middle.0,
-                    (&elem_to_compare_with_middle.1).into(),
-                );
+                // the row is in middle and is a tie of the last row
+                managed_state.insert(to_insert.1);
+                let row: CompactedRow = to_insert.1.into();
+                self.middle.insert(to_insert.0.clone(), row.clone());
+                staging.insert(to_insert.0, row);
             }
             Ordering::Greater => {
-                // The row is in high. Do nothing.
+                // the row is in high, do nothing
             }
         }
 
         Ok(())
+    }
+}
+
+/// Used to build diff between before and after applying an input chunk, for `TopNCache` (of one group).
+/// It should be maintained when an entry is inserted or deleted from the `middle` cache.
+#[derive(Debug, Default)]
+pub struct TopNStaging {
+    to_delete: BTreeMap<CacheKey, CompactedRow>,
+    to_insert: BTreeMap<CacheKey, CompactedRow>,
+    to_update: BTreeMap<CacheKey, (CompactedRow, CompactedRow)>,
+}
+
+impl TopNStaging {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a row into the staging changes. This method must be called when a row is
+    /// added to the `middle` cache.
+    fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
+        if let Some(old_row) = self.to_delete.remove(&cache_key) {
+            if old_row != row {
+                self.to_update.insert(cache_key, (old_row, row));
+            }
+        } else {
+            self.to_insert.insert(cache_key, row);
+        }
+    }
+
+    /// Delete a row from the staging changes. This method must be called when a row is
+    /// removed from the `middle` cache.
+    fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
+        if self.to_insert.remove(&cache_key).is_some() {
+            // do nothing more
+        } else if let Some((old_row, _)) = self.to_update.remove(&cache_key) {
+            self.to_delete.insert(cache_key, old_row);
+        } else {
+            self.to_delete.insert(cache_key, row);
+        }
+    }
+
+    /// Get the count of effective changes in the staging.
+    pub fn len(&self) -> usize {
+        self.to_delete.len() + self.to_insert.len() + self.to_update.len()
+    }
+
+    /// Check if the staging is empty.
+    pub fn is_empty(&self) -> bool {
+        self.to_delete.is_empty() && self.to_insert.is_empty() && self.to_update.is_empty()
+    }
+
+    /// Iterate over the changes in the staging.
+    pub fn into_changes(self) -> impl Iterator<Item = (Op, CompactedRow)> {
+        #[cfg(debug_assertions)]
+        {
+            let keys = self
+                .to_delete
+                .keys()
+                .chain(self.to_insert.keys())
+                .chain(self.to_update.keys())
+                .unique()
+                .count();
+            assert_eq!(
+                keys,
+                self.to_delete.len() + self.to_insert.len() + self.to_update.len(),
+                "should not have duplicate keys with different operations",
+            );
+        }
+
+        // We expect one `CacheKey` to appear at most once in the staging, and, the order of
+        // the outputs of `TopN` doesn't really matter, so we can simply chain the three maps.
+        // Although the output order is not important, we still ensure that `Delete`s are emitted
+        // before `Insert`s, so that we can avoid temporary violation of the `LIMIT` constraint.
+        self.to_update
+            .into_values()
+            .flat_map(|(old_row, new_row)| {
+                [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)]
+            })
+            .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
+            .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
+    }
+
+    /// Iterate over the changes in the staging, and deserialize the rows.
+    pub fn into_deserialized_changes(
+        self,
+        deserializer: &RowDeserializer,
+    ) -> impl Iterator<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_ {
+        self.into_changes()
+            .map(|(op, row)| Ok((op, deserializer.deserialize(row.row.as_ref())?)))
     }
 }

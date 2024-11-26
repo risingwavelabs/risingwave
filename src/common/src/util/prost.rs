@@ -32,7 +32,7 @@ impl TypeUrl for batch_plan::ExchangeNode {
 
 pub struct StackTraceResponseOutput<'a>(&'a StackTraceResponse);
 
-impl<'a> Deref for StackTraceResponseOutput<'a> {
+impl Deref for StackTraceResponseOutput<'_> {
     type Target = StackTraceResponse;
 
     fn deref(&self) -> &Self::Target {
@@ -40,7 +40,7 @@ impl<'a> Deref for StackTraceResponseOutput<'a> {
     }
 }
 
-impl<'a> Display for StackTraceResponseOutput<'a> {
+impl Display for StackTraceResponseOutput<'_> {
     fn fmt(&self, s: &mut Formatter<'_>) -> std::fmt::Result {
         if !self.actor_traces.is_empty() {
             writeln!(s, "--- Actor Traces ---")?;
@@ -77,6 +77,15 @@ impl<'a> Display for StackTraceResponseOutput<'a> {
             writeln!(s, ">> Worker {worker_id}")?;
             writeln!(s, "{state}\n")?;
         }
+
+        if !self.jvm_stack_traces.is_empty() {
+            writeln!(s, "\n\n--- JVM Stack Traces ---")?;
+            for (worker_id, state) in &self.jvm_stack_traces {
+                writeln!(s, ">> Worker {worker_id}")?;
+                writeln!(s, "{state}\n")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -95,6 +104,19 @@ impl StackTraceResponse {
                     warn!(
                         worker_id,
                         worker_state, "duplicate barrier worker state. skipped"
+                    );
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(worker_state);
+                }
+            }
+        }
+        for (worker_id, worker_state) in b.jvm_stack_traces {
+            match self.jvm_stack_traces.entry(worker_id) {
+                Entry::Occupied(_entry) => {
+                    warn!(
+                        worker_id,
+                        worker_state, "duplicate jvm stack trace. skipped"
                     );
                 }
                 Entry::Vacant(entry) => {

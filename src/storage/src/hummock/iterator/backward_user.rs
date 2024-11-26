@@ -15,6 +15,7 @@
 use std::ops::Bound::*;
 
 use bytes::Bytes;
+use more_asserts::debug_assert_le;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
@@ -62,8 +63,7 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
 
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
-    #[cfg(test)]
-    pub(crate) fn with_epoch(
+    pub fn new(
         iterator: I,
         key_range: UserKeyRange,
         read_epoch: u64,
@@ -196,15 +196,15 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &FullKey<Bytes> {
+    pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        &self.last_key
+        self.last_key.to_ref()
     }
 
     /// The returned value is in the form of user value.
     ///
-    /// Note: before calling the function you need to ensure that the iterator is valid.
-    pub fn value(&self) -> &Bytes {
+    /// Note: before call the function you need to ensure that the iterator is valid.
+    pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
         &self.last_val
     }
@@ -213,28 +213,34 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Handle range scan
         match &self.key_range.1 {
-            Included(end_key) => {
+            Included(end_key) | Excluded(end_key) => {
                 let full_key = FullKey {
-                    user_key: end_key.clone(),
+                    user_key: end_key.as_ref(),
                     epoch_with_gap: EpochWithGap::new_min_epoch(),
                 };
-                self.iterator.seek(full_key.to_ref()).await?;
+                self.iterator.seek(full_key).await?;
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => self.iterator.rewind().await?,
         };
 
         // Handle multi-version
         self.reset();
         // Handle range scan when key < begin_key
-        self.next().await
+        self.next().await?;
+        if let Excluded(end_key) = &self.key_range.1
+            && self.is_valid()
+            && self.key().user_key == end_key.as_ref()
+        {
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key > end_key
-        let user_key = match &self.key_range.1 {
-            Included(end_key) => {
+        let seek_key = match &self.key_range.1 {
+            Included(end_key) | Excluded(end_key) => {
                 let end_key = end_key.as_ref();
                 if end_key < user_key {
                     end_key
@@ -242,11 +248,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                     user_key
                 }
             }
-            Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => user_key,
         };
         let full_key = FullKey {
-            user_key,
+            user_key: seek_key,
             epoch_with_gap: EpochWithGap::new_min_epoch(),
         };
         self.iterator.seek(full_key).await?;
@@ -254,7 +259,15 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         // Handle multi-version
         self.reset();
         // Handle range scan when key < begin_key
-        self.next().await
+        self.next().await?;
+        if let Excluded(end_key) = &self.key_range.1
+            && self.is_valid()
+            && self.key().user_key == end_key.as_ref()
+        {
+            debug_assert_le!(end_key.as_ref(), user_key);
+            self.next().await?;
+        }
+        Ok(())
     }
 
     /// Indicates whether the iterator can be used.
@@ -277,7 +290,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
+        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
     }
 
     /// Creates [`BackwardUserIterator`] with maximum epoch.
@@ -286,11 +299,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
+        Self::new(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
     }
 }
 
-#[expect(unused_variables)]
 #[cfg(test)]
 mod tests {
     use std::cmp::Reverse;
@@ -313,7 +325,6 @@ mod tests {
     };
     use crate::hummock::iterator::MergeIterator;
     use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::value::HummockValue;
     use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
 
     #[tokio::test]
@@ -357,7 +368,7 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let val = ui.value();
-            assert_eq!(key, &iterator_test_bytes_key_of(i));
+            assert_eq!(key, iterator_test_bytes_key_of(i).to_ref());
             assert_eq!(val, iterator_test_value_of(i).as_slice());
             i -= 1;
             ui.next().await.unwrap();
@@ -417,7 +428,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(TEST_KEYS_COUNT + 4).as_slice());
-        assert_eq!(k, &iterator_test_bytes_key_of(TEST_KEYS_COUNT + 4));
+        assert_eq!(k, iterator_test_bytes_key_of(TEST_KEYS_COUNT + 4).to_ref());
         bui.seek(iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).as_ref())
             .await
             .unwrap();
@@ -427,7 +438,10 @@ mod tests {
             v,
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 5).as_slice()
         );
-        assert_eq!(k, &iterator_test_bytes_key_of(2 * TEST_KEYS_COUNT + 5));
+        assert_eq!(
+            k,
+            iterator_test_bytes_key_of(2 * TEST_KEYS_COUNT + 5).to_ref()
+        );
 
         // left edge case
         bui.seek(iterator_test_user_key_of(3 * TEST_KEYS_COUNT).as_ref())
@@ -436,7 +450,7 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
         assert_eq!(v, iterator_test_value_of(3 * TEST_KEYS_COUNT).as_slice());
-        assert_eq!(k, &iterator_test_bytes_key_of(3 * TEST_KEYS_COUNT));
+        assert_eq!(k, iterator_test_bytes_key_of(3 * TEST_KEYS_COUNT).to_ref());
     }
 
     #[tokio::test]
@@ -469,8 +483,8 @@ mod tests {
         let k = bui.key();
         let v = bui.value();
 
-        assert_eq!(k, &iterator_test_bytes_key_of_epoch(1, 400));
-        assert_eq!(v, &Bytes::from(iterator_test_value_of(1)));
+        assert_eq!(k, iterator_test_bytes_key_of_epoch(1, 400).to_ref());
+        assert_eq!(v, iterator_test_value_of(1).as_slice());
 
         // only one valid kv pair
         bui.next().await.unwrap();
@@ -512,11 +526,11 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 300).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -524,11 +538,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 300).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -536,11 +550,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 300).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -579,7 +593,10 @@ mod tests {
         ];
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            sstable.clone(),
+            sstable_store.clone(),
+        )];
         let bmi = MergeIterator::new(backward_iters);
 
         let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
@@ -589,11 +606,11 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -601,11 +618,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -613,11 +630,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(7, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(7, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -632,6 +649,26 @@ mod tests {
             .await
             .unwrap();
         assert!(!bui.is_valid());
+
+        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let bmi = MergeIterator::new(backward_iters);
+
+        let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
+        let end_key = Excluded(iterator_test_bytes_user_key_of(7));
+
+        let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
+        bui.rewind().await.unwrap();
+        assert!(bui.is_valid());
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
+        // ----- end-range iterate -----
+        bui.seek(iterator_test_user_key_of(7).as_ref())
+            .await
+            .unwrap();
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
+        bui.seek(iterator_test_user_key_of(5).as_ref())
+            .await
+            .unwrap();
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
     }
 
     // ..=right
@@ -657,21 +694,25 @@ mod tests {
         ];
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(
+            sstable.clone(),
+            sstable_store.clone(),
+        )];
         let bmi = MergeIterator::new(backward_iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
-        let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
+        let mut bui = BackwardUserIterator::for_test(
+            bmi,
+            (Included(iterator_test_bytes_user_key_of(2)), end_key),
+        );
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
-        bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -679,13 +720,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
-        bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -693,13 +732,11 @@ mod tests {
         bui.seek(iterator_test_user_key_of(6).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
-        bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(1, 200));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -708,6 +745,27 @@ mod tests {
             .await
             .unwrap();
         assert!(!bui.is_valid());
+
+        let end_key = Excluded(iterator_test_bytes_user_key_of(6));
+        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
+        let bmi = MergeIterator::new(backward_iters);
+        let mut bui = BackwardUserIterator::for_test(
+            bmi,
+            (Excluded(iterator_test_bytes_user_key_of(2)), end_key),
+        );
+        // ----- basic iterate -----
+        bui.seek(iterator_test_user_key_of(6).as_ref())
+            .await
+            .unwrap();
+        assert!(bui.is_valid());
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
+        bui.next().await.unwrap();
+        assert!(!bui.is_valid());
+        bui.seek(iterator_test_user_key_of(7).as_ref())
+            .await
+            .unwrap();
+        assert!(bui.is_valid());
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
     }
 
     // left..
@@ -741,13 +799,13 @@ mod tests {
 
         // ----- basic iterate -----
         bui.rewind().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(8, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -755,7 +813,7 @@ mod tests {
         bui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -763,9 +821,9 @@ mod tests {
         bui.seek(iterator_test_user_key_of(5).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -773,13 +831,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(8, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
 
@@ -787,13 +845,13 @@ mod tests {
         bui.seek(iterator_test_user_key_of(9).as_ref())
             .await
             .unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(8, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(8, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(6, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(6, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(3, 100));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(3, 100).to_ref());
         bui.next().await.unwrap();
-        assert_eq!(bui.key(), &iterator_test_bytes_key_of_epoch(2, 300));
+        assert_eq!(bui.key(), iterator_test_bytes_key_of_epoch(2, 300).to_ref());
         bui.next().await.unwrap();
         assert!(!bui.is_valid());
     }
@@ -851,12 +909,12 @@ mod tests {
             if *key > end_key || *key <= start_key {
                 continue;
             }
-            let (time, value) = value.first_key_value().unwrap();
+            let (_, value) = value.first_key_value().unwrap();
             if let HummockValue::Delete = value {
                 continue;
             }
             assert!(bui.is_valid(), "num_kvs:{}", num_kvs);
-            assert_eq!(&bui.key().user_key, key, "num_kvs:{}", num_kvs);
+            assert_eq!(bui.key().user_key, key.as_ref(), "num_kvs:{}", num_kvs);
             if let HummockValue::Put(bytes) = &value {
                 assert_eq!(bui.value(), bytes, "num_kvs:{}", num_kvs);
             }
@@ -931,14 +989,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_backward_user_chaos_unbounded_unbounded() {
-        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let (_prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
-            let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -958,8 +1011,6 @@ mod tests {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -978,7 +1029,6 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
@@ -999,7 +1049,6 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(

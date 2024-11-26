@@ -14,110 +14,22 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{IntGauge, Registry};
-use risingwave_common::metrics::{
-    LabelGuardedGauge, LabelGuardedGaugeVec, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
-    LabelGuardedIntGauge, LabelGuardedIntGaugeVec, TrAdderGauge,
+use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::{
+    histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
+    Histogram, IntGauge, Registry,
 };
+use risingwave_common::metrics::{LabelGuardedIntCounterVec, TrAdderGauge};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
-use crate::task::TaskId;
-
-#[derive(Clone)]
-pub struct BatchTaskMetrics {
-    pub task_first_poll_delay: LabelGuardedGaugeVec<3>,
-    pub task_fast_poll_duration: LabelGuardedGaugeVec<3>,
-    pub task_idle_duration: LabelGuardedGaugeVec<3>,
-    pub task_poll_duration: LabelGuardedGaugeVec<3>,
-    pub task_scheduled_duration: LabelGuardedGaugeVec<3>,
-    pub task_slow_poll_duration: LabelGuardedGaugeVec<3>,
-    pub task_mem_usage: LabelGuardedIntGaugeVec<3>,
-}
-
-pub static GLOBAL_BATCH_TASK_METRICS: LazyLock<BatchTaskMetrics> =
-    LazyLock::new(|| BatchTaskMetrics::new(&GLOBAL_METRICS_REGISTRY));
-
-impl BatchTaskMetrics {
-    /// The created [`BatchTaskMetrics`] is already registered to the `registry`.
-    fn new(registry: &Registry) -> Self {
-        let task_labels = ["query_id", "stage_id", "task_id"];
-
-        let task_first_poll_delay = register_guarded_gauge_vec_with_registry!(
-            "batch_task_first_poll_delay",
-            "The total duration (s) elapsed between the instant tasks are instrumented, and the instant they are first polled.",
-            &task_labels,
-         registry).unwrap();
-
-        let task_fast_poll_duration = register_guarded_gauge_vec_with_registry!(
-            "batch_task_fast_poll_duration",
-            "The total duration (s) of fast polls.",
-            &task_labels,
-            registry
-        )
-        .unwrap();
-
-        let task_idle_duration = register_guarded_gauge_vec_with_registry!(
-            "batch_task_idle_duration",
-            "The total duration (s) that tasks idled.",
-            &task_labels,
-            registry
-        )
-        .unwrap();
-
-        let task_poll_duration = register_guarded_gauge_vec_with_registry!(
-            "batch_task_poll_duration",
-            "The total duration (s) elapsed during polls.",
-            &task_labels,
-            registry,
-        )
-        .unwrap();
-
-        let task_scheduled_duration = register_guarded_gauge_vec_with_registry!(
-            "batch_task_scheduled_duration",
-            "The total duration (s) that tasks spent waiting to be polled after awakening.",
-            &task_labels,
-            registry,
-        )
-        .unwrap();
-
-        let task_slow_poll_duration = register_guarded_gauge_vec_with_registry!(
-            "batch_task_slow_poll_duration",
-            "The total duration (s) of slow polls.",
-            &task_labels,
-            registry,
-        )
-        .unwrap();
-
-        let task_mem_usage = register_guarded_int_gauge_vec_with_registry!(
-            "batch_task_mem_usage",
-            "Memory usage of batch tasks in bytes.",
-            &task_labels,
-            registry,
-        )
-        .unwrap();
-
-        Self {
-            task_first_poll_delay,
-            task_fast_poll_duration,
-            task_idle_duration,
-            task_poll_duration,
-            task_scheduled_duration,
-            task_slow_poll_duration,
-            task_mem_usage,
-        }
-    }
-
-    /// Create a new `BatchTaskMetrics` instance used in tests or other places.
-    pub fn for_test() -> Self {
-        GLOBAL_BATCH_TASK_METRICS.clone()
-    }
-}
-
+/// Metrics for batch executor.
+/// Currently, it contains:
+/// - `exchange_recv_row_number`: Total number of row that have been received for exchange.
+/// - `row_seq_scan_next_duration`: Time spent iterating next rows.
 #[derive(Clone)]
 pub struct BatchExecutorMetrics {
-    pub exchange_recv_row_number: LabelGuardedIntCounterVec<4>,
-    pub row_seq_scan_next_duration: LabelGuardedHistogramVec<4>,
-    pub mem_usage: LabelGuardedIntGaugeVec<4>,
+    pub exchange_recv_row_number: GenericCounter<AtomicU64>,
+    pub row_seq_scan_next_duration: Histogram,
 }
 
 pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
@@ -125,137 +37,74 @@ pub static GLOBAL_BATCH_EXECUTOR_METRICS: LazyLock<BatchExecutorMetrics> =
 
 impl BatchExecutorMetrics {
     fn new(register: &Registry) -> Self {
-        let executor_labels = ["query_id", "stage_id", "task_id", "executor_id"];
-
-        let exchange_recv_row_number = register_guarded_int_counter_vec_with_registry!(
+        let exchange_recv_row_number = register_int_counter_with_registry!(
             "batch_exchange_recv_row_number",
             "Total number of row that have been received from upstream source",
-            &executor_labels,
             register,
         )
         .unwrap();
 
-        let row_seq_scan_next_duration = register_guarded_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "batch_row_seq_scan_next_duration",
             "Time spent deserializing into a row in cell based table.",
-            &executor_labels,
-            register,
-        )
-        .unwrap();
+        );
 
-        let mem_usage = register_guarded_int_gauge_vec_with_registry!(
-            "batch_executor_mem_usage",
-            "Batch executor memory usage in bytes.",
-            &executor_labels,
-            register,
-        )
-        .unwrap();
+        let row_seq_scan_next_duration = register_histogram_with_registry!(opts, register).unwrap();
 
         Self {
             exchange_recv_row_number,
             row_seq_scan_next_duration,
-            mem_usage,
         }
     }
 
     /// Create a new `BatchTaskMetrics` instance used in tests or other places.
-    pub fn for_test() -> Self {
-        GLOBAL_BATCH_EXECUTOR_METRICS.clone()
+    #[cfg(test)]
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone())
     }
 }
 
-pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
+pub type BatchMetrics = Arc<BatchMetricsInner>;
 
-/// A wrapper of `BatchTaskMetrics` and `BatchExecutorMetrics` that contains the labels derived from
-/// a `TaskId` so that we don't have to pass `task_id` around and repeatedly generate the same
-/// labels.
-pub struct BatchMetricsWithTaskLabelsInner {
+/// A wrapper of `BatchManagerMetrics` and `BatchExecutorMetrics` that contains all metrics for batch.
+pub struct BatchMetricsInner {
     batch_manager_metrics: Arc<BatchManagerMetrics>,
     executor_metrics: Arc<BatchExecutorMetrics>,
-    task_id: TaskId,
-    task_labels: [String; 3],
-
-    // From BatchTaskMetrics
-    pub task_first_poll_delay: LabelGuardedGauge<3>,
-    pub task_fast_poll_duration: LabelGuardedGauge<3>,
-    pub task_idle_duration: LabelGuardedGauge<3>,
-    pub task_poll_duration: LabelGuardedGauge<3>,
-    pub task_scheduled_duration: LabelGuardedGauge<3>,
-    pub task_slow_poll_duration: LabelGuardedGauge<3>,
-    pub task_mem_usage: LabelGuardedIntGauge<3>,
+    iceberg_scan_metrics: Arc<IcebergScanMetrics>,
 }
 
-impl BatchMetricsWithTaskLabelsInner {
+impl BatchMetricsInner {
     pub fn new(
         batch_manager_metrics: Arc<BatchManagerMetrics>,
-        task_metrics: Arc<BatchTaskMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,
-        id: TaskId,
+        iceberg_scan_metrics: Arc<IcebergScanMetrics>,
     ) -> Self {
-        let task_labels = [
-            id.query_id.clone(),
-            id.stage_id.to_string(),
-            id.task_id.to_string(),
-        ];
-        let labels: &[&str; 3] = &task_labels.each_ref().map(|s| s.as_str());
-        let task_first_poll_delay = task_metrics
-            .task_first_poll_delay
-            .with_guarded_label_values(labels);
-        let task_fast_poll_duration = task_metrics
-            .task_fast_poll_duration
-            .with_guarded_label_values(labels);
-        let task_idle_duration = task_metrics
-            .task_idle_duration
-            .with_guarded_label_values(labels);
-        let task_poll_duration = task_metrics
-            .task_poll_duration
-            .with_guarded_label_values(labels);
-        let task_scheduled_duration = task_metrics
-            .task_scheduled_duration
-            .with_guarded_label_values(labels);
-        let task_slow_poll_duration = task_metrics
-            .task_slow_poll_duration
-            .with_guarded_label_values(labels);
-        let task_mem_usage = task_metrics
-            .task_mem_usage
-            .with_guarded_label_values(labels);
         Self {
             batch_manager_metrics,
             executor_metrics,
-            task_id: id.clone(),
-            task_labels,
-            task_first_poll_delay,
-            task_fast_poll_duration,
-            task_idle_duration,
-            task_poll_duration,
-            task_scheduled_duration,
-            task_slow_poll_duration,
-            task_mem_usage,
+            iceberg_scan_metrics,
         }
-    }
-
-    pub fn task_id(&self) -> TaskId {
-        self.task_id.clone()
     }
 
     pub fn executor_metrics(&self) -> &BatchExecutorMetrics {
         &self.executor_metrics
     }
 
-    pub fn executor_labels<'a>(
-        &'a self,
-        executor_id: &'a (impl AsRef<str> + ?Sized),
-    ) -> [&'a str; 4] {
-        [
-            self.task_labels[0].as_str(),
-            self.task_labels[1].as_str(),
-            self.task_labels[2].as_str(),
-            executor_id.as_ref(),
-        ]
-    }
-
     pub fn batch_manager_metrics(&self) -> &BatchManagerMetrics {
         &self.batch_manager_metrics
+    }
+
+    pub fn iceberg_scan_metrics(&self) -> &IcebergScanMetrics {
+        &self.iceberg_scan_metrics
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> BatchMetrics {
+        Arc::new(Self {
+            batch_manager_metrics: BatchManagerMetrics::for_test(),
+            executor_metrics: BatchExecutorMetrics::for_test(),
+            iceberg_scan_metrics: IcebergScanMetrics::for_test(),
+        })
     }
 }
 
@@ -297,8 +146,67 @@ impl BatchManagerMetrics {
         }
     }
 
-    #[cfg(test)]
     pub fn for_test() -> Arc<Self> {
         Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone())
     }
 }
+
+#[derive(Clone)]
+pub struct BatchSpillMetrics {
+    pub batch_spill_read_bytes: GenericCounter<AtomicU64>,
+    pub batch_spill_write_bytes: GenericCounter<AtomicU64>,
+}
+
+pub static GLOBAL_BATCH_SPILL_METRICS: LazyLock<BatchSpillMetrics> =
+    LazyLock::new(|| BatchSpillMetrics::new(&GLOBAL_METRICS_REGISTRY));
+
+impl BatchSpillMetrics {
+    fn new(registry: &Registry) -> Self {
+        let batch_spill_read_bytes = register_int_counter_with_registry!(
+            "batch_spill_read_bytes",
+            "Total bytes of requests read from spill files",
+            registry,
+        )
+        .unwrap();
+        let batch_spill_write_bytes = register_int_counter_with_registry!(
+            "batch_spill_write_bytes",
+            "Total bytes of requests write to spill files",
+            registry,
+        )
+        .unwrap();
+        Self {
+            batch_spill_read_bytes,
+            batch_spill_write_bytes,
+        }
+    }
+
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone())
+    }
+}
+
+#[derive(Clone)]
+pub struct IcebergScanMetrics {
+    pub iceberg_read_bytes: LabelGuardedIntCounterVec<1>,
+}
+
+impl IcebergScanMetrics {
+    fn new(registry: &Registry) -> Self {
+        let iceberg_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_read_bytes",
+            "Total size of iceberg read requests",
+            &["table_name"],
+            registry
+        )
+        .unwrap();
+
+        Self { iceberg_read_bytes }
+    }
+
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone())
+    }
+}
+
+pub static GLOBAL_ICEBERG_SCAN_METRICS: LazyLock<IcebergScanMetrics> =
+    LazyLock::new(|| IcebergScanMetrics::new(&GLOBAL_METRICS_REGISTRY));

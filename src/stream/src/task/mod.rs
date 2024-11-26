@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
@@ -39,6 +39,21 @@ pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
+struct PartialGraphId(u64);
+
+impl PartialGraphId {
+    fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<PartialGraphId> for u64 {
+    fn from(val: PartialGraphId) -> u64 {
+        val.0
+    }
+}
+
 /// Stores the information which may be modified from the data plane.
 ///
 /// The data structure is created in `LocalBarrierWorker` and is shared by actors created
@@ -57,9 +72,9 @@ pub struct SharedContext {
     /// There are three cases when we need local channels to pass around messages:
     /// 1. pass `Message` between two local actors
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    /// `ReceiverExecutor` or `MergerExecutor`.
+    ///    `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.
+    ///    `ExchangeServiceImpl`.
     ///
     /// The channel serves as a buffer because `ExchangeServiceImpl`
     /// is on the server-side and we will also introduce backpressure.
@@ -75,10 +90,10 @@ pub struct SharedContext {
     /// between two actors/actors.
     pub(crate) addr: HostAddr,
 
-    /// The pool of compute clients.
+    /// Compute client pool for streaming gRPC exchange.
     // TODO: currently the client pool won't be cleared. Should remove compute clients when
     // disconnected.
-    pub(crate) compute_client_pool: ComputeClientPool,
+    pub(crate) compute_client_pool: ComputeClientPoolRef,
 
     pub(crate) config: StreamingConfig,
 
@@ -94,30 +109,28 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        config: &StreamingConfig,
-        local_barrier_manager: LocalBarrierManager,
-    ) -> Self {
+    pub fn new(env: &StreamEnvironment, local_barrier_manager: LocalBarrierManager) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
-            addr,
-            compute_client_pool: ComputeClientPool::default(),
-            config: config.clone(),
+            addr: env.server_address().clone(),
+            config: env.config().as_ref().to_owned(),
+            compute_client_pool: env.client_pool(),
             local_barrier_manager,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use std::sync::Arc;
+
         use risingwave_common::config::StreamingDeveloperConfig;
+        use risingwave_rpc_client::ComputeClientPool;
 
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr: LOCAL_TEST_ADDR.clone(),
-            compute_client_pool: ComputeClientPool::default(),
             config: StreamingConfig {
                 developer: StreamingDeveloperConfig {
                     exchange_initial_permits: permit::for_test::INITIAL_PERMITS,
@@ -127,6 +140,7 @@ impl SharedContext {
                 },
                 ..Default::default()
             },
+            compute_client_pool: Arc::new(ComputeClientPool::for_test()),
             local_barrier_manager: LocalBarrierManager::for_test(),
         }
     }
@@ -175,7 +189,7 @@ impl SharedContext {
         &self.config
     }
 
-    pub fn drop_actors(&self, actors: &[ActorId]) {
+    pub(super) fn drop_actors(&self, actors: &HashSet<ActorId>) {
         self.channel_map
             .lock()
             .retain(|(up_id, _), _| !actors.contains(up_id));

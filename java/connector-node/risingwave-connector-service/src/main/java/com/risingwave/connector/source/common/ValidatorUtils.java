@@ -14,12 +14,10 @@
 
 package com.risingwave.connector.source.common;
 
-import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.source.SourceTypeE;
 import io.grpc.Status;
 import java.io.IOException;
 import java.util.Properties;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,20 +66,11 @@ public final class ValidatorUtils {
             case POSTGRES:
             case CITUS:
                 return String.format("jdbc:postgresql://%s:%s/%s", host, port, database);
+            case SQL_SERVER:
+                return String.format(
+                        "jdbc:sqlserver://%s:%s;databaseName=%s", host, port, database);
             default:
                 throw ValidatorUtils.invalidArgument("Unknown source type: " + sourceType);
         }
-    }
-
-    public static boolean isPrimaryKeyMatch(TableSchema sourceSchema, Set<String> pkFields) {
-        if (sourceSchema.getPrimaryKeys().size() != pkFields.size()) {
-            return false;
-        }
-        for (var colName : sourceSchema.getPrimaryKeys()) {
-            if (!pkFields.contains(colName)) {
-                return false;
-            }
-        }
-        return true;
     }
 }

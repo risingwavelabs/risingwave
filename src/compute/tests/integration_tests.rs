@@ -21,14 +21,14 @@ use std::sync::Arc;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{btreemap, convert_args};
 use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
@@ -41,13 +41,14 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_dml::dml_manager::DmlManager;
-use risingwave_hummock_sdk::to_committed_batch_query_epoch;
+use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::panic_store::PanicStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_stream::common::table::state_table::StateTable;
+use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -114,7 +115,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         row_format: PbRowFormatType::Json as i32,
         ..Default::default()
     };
-    let properties = convert_args!(hashmap!(
+    let properties = convert_args!(btreemap!(
         "connector" => "datagen",
         "fields.v1.min" => "1",
         "fields.v1.max" => "1000",
@@ -262,9 +263,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqExecutor2".to_string(),
+        None,
         None,
         None,
     ));
@@ -332,9 +334,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         table.clone(),
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));
@@ -411,9 +414,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         table,
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1024,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));
@@ -445,12 +449,16 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = StateTable::new_without_distribution(
+    let mut state = StateTable::from_table_catalog(
+        &gen_pbtable(
+            TableId::from(0x42),
+            column_descs.clone(),
+            vec![OrderType::ascending()],
+            vec![0],
+            0,
+        ),
         memory_state_store.clone(),
-        TableId::from(0x42),
-        column_descs.clone(),
-        vec![OrderType::ascending()],
-        vec![0_usize],
+        None,
     )
     .await;
     let table = StorageTable::for_test(
@@ -463,7 +471,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     );
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await?;
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -482,9 +490,10 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         table,
         vec![ScanRange::full()],
         true,
-        to_committed_batch_query_epoch(u64::MAX),
+        test_batch_query_epoch(),
         1,
         "RowSeqScanExecutor2".to_string(),
+        None,
         None,
         None,
     ));

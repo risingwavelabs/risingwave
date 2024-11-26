@@ -12,30 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod catalog;
-mod cluster;
 mod error;
-mod migration_plan;
-mod notification;
 mod stream;
-mod user;
 
 use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
-pub use cluster::*;
 pub use error::*;
-pub use migration_plan::*;
-pub use notification::*;
-use prost::Message;
 pub use stream::*;
-
-use crate::hummock::model::ext::Transaction as TransactionV2;
-use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
+use uuid::Uuid;
 
 /// A global, unique identifier of an actor
 pub type ActorId = u32;
@@ -46,196 +34,59 @@ pub type DispatcherId = u64;
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
 
+pub type SubscriptionId = u32;
+
+#[derive(Clone, Debug)]
+pub struct ClusterId(String);
+
+impl Default for ClusterId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ClusterId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+}
+
+impl From<ClusterId> for String {
+    fn from(value: ClusterId) -> Self {
+        value.0
+    }
+}
+
+impl From<String> for ClusterId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for ClusterId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_str()
+    }
+}
+
 #[async_trait]
 pub trait Transactional<TXN> {
     async fn upsert_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
     async fn delete_in_transaction(&self, trx: &mut TXN) -> MetadataModelResult<()>;
 }
 
-mod private {
-    /// A marker trait helps to collect all implementors of `MetadataModel` in
-    /// `for_all_metadata_models`. The trait should only be implemented by adding item in
-    /// `for_all_metadata_models`.
-    pub trait MetadataModelMarker {}
-}
-
-/// `MetadataModel` defines basic model operations in CRUD.
-#[async_trait]
-pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
-    /// Serialized prost message type.
-    type PbType: Message + Default;
-    /// Serialized key type.
-    type KeyType: Message;
-
-    /// Column family for this model.
-    fn cf_name() -> String;
-
-    /// Serialize to protobuf.
-    fn to_protobuf(&self) -> Self::PbType;
-
-    /// Serialize to protobuf encoded byte vector.
-    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
-        self.to_protobuf().encode_to_vec()
-    }
-
-    /// Deserialize from protobuf.
-    fn from_protobuf(prost: Self::PbType) -> Self;
-
-    /// Current record key.
-    fn key(&self) -> MetadataModelResult<Self::KeyType>;
-
-    /// `list` returns all records in this model.
-    async fn list<S>(store: &S) -> MetadataModelResult<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let bytes_vec = store.list_cf(&Self::cf_name()).await?;
-        bytes_vec
-            .iter()
-            .map(|(_k, v)| {
-                Self::PbType::decode(v.as_slice())
-                    .map(Self::from_protobuf)
-                    .map_err(Into::into)
-            })
-            .collect()
-    }
-
-    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
-        bytes_vec
-            .iter()
-            .map(|(_k, v)| {
-                Self::PbType::decode(v.as_slice())
-                    .map(Self::from_protobuf)
-                    .map_err(Into::into)
-            })
-            .collect()
-    }
-
-    /// `insert` insert a new record in meta store, replaced it if the record already exist.
-    async fn insert<S>(&self, store: &S) -> MetadataModelResult<()>
-    where
-        S: MetaStore,
-    {
-        store
-            .put_cf(
-                &Self::cf_name(),
-                self.key()?.encode_to_vec(),
-                self.to_protobuf().encode_to_vec(),
-            )
-            .await
-            .map_err(Into::into)
-    }
-
-    /// `delete` drop records from meta store with associated key.
-    async fn delete<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<()>
-    where
-        S: MetaStore,
-    {
-        store
-            .delete_cf(&Self::cf_name(), &key.encode_to_vec())
-            .await
-            .map_err(Into::into)
-    }
-
-    /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<Option<Self>>
-    where
-        S: MetaStore,
-    {
-        let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
-            Ok(byte_vec) => byte_vec,
-            Err(err) => {
-                if !matches!(err, MetaStoreError::ItemNotFound(_)) {
-                    return Err(err.into());
-                }
-                return Ok(None);
-            }
-        };
-        let model = Self::from_protobuf(Self::PbType::decode(byte_vec.as_slice())?);
-        Ok(Some(model))
-    }
-}
-
-macro_rules! for_all_metadata_models {
-    ($macro:ident) => {
-        $macro! {
-            // These items should be included in a meta snapshot.
-            // So be sure to update meta backup/restore when adding new items.
-            { risingwave_pb::hummock::HummockVersionStats },
-            { crate::hummock::model::CompactionGroup },
-            { risingwave_pb::catalog::Database },
-            { risingwave_pb::catalog::Schema },
-            { risingwave_pb::catalog::Table },
-            { risingwave_pb::catalog::Index },
-            { risingwave_pb::catalog::Sink },
-            { risingwave_pb::catalog::Subscription },
-            { risingwave_pb::catalog::Source },
-            { risingwave_pb::catalog::View },
-            { crate::model::stream::TableFragments },
-            { risingwave_pb::user::UserInfo },
-            { risingwave_pb::catalog::Function },
-            { risingwave_pb::catalog::Connection },
-            // These items need not be included in a meta snapshot.
-            { crate::model::cluster::Worker },
-            { risingwave_pb::hummock::CompactTaskAssignment },
-            { crate::hummock::compaction::CompactStatus },
-            { risingwave_hummock_sdk::version::HummockVersionDelta },
-            { risingwave_pb::hummock::HummockPinnedSnapshot },
-            { risingwave_pb::hummock::HummockPinnedVersion },
-        }
-    };
-}
-
-macro_rules! impl_metadata_model_marker {
-    ($({ $target_type:ty },)*) => {
-        $(
-            impl private::MetadataModelMarker for $target_type {}
-        )*
-    }
-}
-
-for_all_metadata_models!(impl_metadata_model_marker);
-
-/// `Transactional` defines operations supported in a transaction.
-/// Read operations can be supported if necessary.
-#[async_trait]
-impl<T> Transactional<Transaction> for T
-where
-    T: MetadataModel + Sync,
-{
-    async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        trx.put(
-            Self::cf_name(),
-            self.key()?.encode_to_vec(),
-            self.to_protobuf_encoded_vec(),
-        );
-        Ok(())
-    }
-
-    async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-        trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
-        Ok(())
-    }
+pub trait InMemValTransaction: Sized {
+    /// Commit the change to local memory value
+    fn commit(self);
 }
 
 /// Trait that wraps a local memory value and applies the change to the local memory value on
 /// `commit` or leaves the local memory value untouched on `abort`.
-pub trait ValTransaction: Sized {
-    type TXN;
-    /// Commit the change to local memory value
-    fn commit(self);
-
+pub trait ValTransaction<TXN>: InMemValTransaction {
     /// Apply the change (upsert or delete) to `txn`
-    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()>;
-
-    /// Abort the `VarTransaction` and leave the local memory value untouched
-    fn abort(self) {
-        drop(self);
-    }
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()>;
 }
 
 /// Transaction wrapper for a variable.
@@ -244,28 +95,27 @@ pub trait ValTransaction: Sized {
 /// When `commit` is called, the change to `new_value` will be applied to the `orig_value_ref`
 /// When `abort` is called, the `VarTransaction` is dropped and the local memory value is
 /// untouched.
-pub struct VarTransaction<'a, TXN, T: Transactional<TXN>> {
+pub struct VarTransaction<'a, T> {
     orig_value_ref: &'a mut T,
     new_value: Option<T>,
-    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, TXN, T> VarTransaction<'a, TXN, T>
-where
-    T: Transactional<TXN>,
-{
+impl<'a, T> VarTransaction<'a, T> {
     /// Create a `VarTransaction` that wraps a raw variable
-    pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, TXN, T> {
+    pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, T> {
         VarTransaction {
             // lazy initialization
             new_value: None,
             orig_value_ref: val_ref,
-            _phantom: PhantomData,
         }
+    }
+
+    pub fn has_new_value(&self) -> bool {
+        self.new_value.is_some()
     }
 }
 
-impl<'a, TXN, T: Transactional<TXN>> Deref for VarTransaction<'a, TXN, T> {
+impl<T> Deref for VarTransaction<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -276,10 +126,7 @@ impl<'a, TXN, T: Transactional<TXN>> Deref for VarTransaction<'a, TXN, T> {
     }
 }
 
-impl<'a, TXN, T> DerefMut for VarTransaction<'a, TXN, T>
-where
-    T: Clone + Transactional<TXN>,
-{
+impl<T: Clone> DerefMut for VarTransaction<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         if self.new_value.is_none() {
             self.new_value.replace(self.orig_value_ref.clone());
@@ -288,19 +135,22 @@ where
     }
 }
 
-impl<'a, TXN, T> ValTransaction for VarTransaction<'a, TXN, T>
+impl<T> InMemValTransaction for VarTransaction<'_, T>
 where
-    T: Transactional<TXN> + PartialEq,
+    T: PartialEq,
 {
-    type TXN = TXN;
-
     fn commit(self) {
         if let Some(new_value) = self.new_value {
             *self.orig_value_ref = new_value;
         }
     }
+}
 
-    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
+impl<'a, TXN, T> ValTransaction<TXN> for VarTransaction<'a, T>
+where
+    T: Transactional<TXN> + PartialEq,
+{
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if let Some(new_value) = &self.new_value {
             // Apply the change to `txn` only when the value is modified
             if *self.orig_value_ref != *new_value {
@@ -354,7 +204,7 @@ impl<'a, K: Ord, V: Clone> BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -368,7 +218,7 @@ impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let is_occupied = matches!(
             self.staging_entry.as_ref().unwrap(),
@@ -423,28 +273,30 @@ enum BTreeMapOp<V> {
 /// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
 /// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
 /// `tree_ref`.
-pub struct BTreeMapTransaction<'a, K: Ord, V, TXN = Transaction> {
+pub struct BTreeMapTransactionInner<K: Ord, V, P: DerefMut<Target = BTreeMap<K, V>>> {
     /// A reference to the original `BTreeMap`. All access to this field should be immutable,
     /// except when we commit the staging changes to the original map.
-    tree_ref: &'a mut BTreeMap<K, V>,
+    tree_ref: P,
     /// Store all the staging changes that will be applied to the original map on commit
     staging: BTreeMap<K, BTreeMapOp<V>>,
-    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
-    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V, TXN> {
+pub type BTreeMapTransaction<'a, K, V> = BTreeMapTransactionInner<K, V, &'a mut BTreeMap<K, V>>;
+
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>>
+    BTreeMapTransactionInner<K, V, P>
+{
+    pub fn new(tree_ref: P) -> BTreeMapTransactionInner<K, V, P> {
         Self {
             tree_ref,
             staging: BTreeMap::default(),
-            _phantom: PhantomData,
         }
     }
 
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
     #[allow(dead_code)]
-    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V, TXN>> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, None)
+    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<'_, K, V>> {
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, None)
     }
 
     /// Start a `BTreeMapEntryTransaction`. If the `key` does not exist, the the `default_val` will
@@ -454,26 +306,18 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
         &mut self,
         key: K,
         default_val: V,
-    ) -> BTreeMapEntryTransaction<'_, K, V, TXN> {
-        BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
+    ) -> BTreeMapEntryTransaction<'_, K, V> {
+        BTreeMapEntryTransaction::new(&mut self.tree_ref, key, Some(default_val))
             .expect("default value is provided and should return `Some`")
     }
 
     /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
-    pub fn new_entry_insert_txn(
-        &mut self,
-        key: K,
-        val: V,
-    ) -> BTreeMapEntryTransaction<'_, K, V, TXN> {
-        BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
+    pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<'_, K, V> {
+        BTreeMapEntryTransaction::new_insert(&mut self.tree_ref, key, val)
     }
 
     pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        self.tree_ref
-    }
-
-    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
-        self.tree_ref
+        &self.tree_ref
     }
 
     /// Get the value of the provided key by merging the staging value and the original value
@@ -549,7 +393,7 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
         }
     }
 
-    pub fn commit_memory(self) {
+    pub fn commit_memory(mut self) {
         // Apply each op stored in the staging to original tree.
         for (k, op) in self.staging {
             match op {
@@ -564,16 +408,18 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapTransaction<'a, K, V, TXN> {
     }
 }
 
-impl<'a, K: Ord + Debug, V: Transactional<TXN> + Clone, TXN> ValTransaction
-    for BTreeMapTransaction<'a, K, V, TXN>
+impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>> InMemValTransaction
+    for BTreeMapTransactionInner<K, V, P>
 {
-    type TXN = TXN;
-
     fn commit(self) {
         self.commit_memory();
     }
+}
 
-    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
+impl<K: Ord + Debug, V: Transactional<TXN> + Clone, P: DerefMut<Target = BTreeMap<K, V>>, TXN>
+    ValTransaction<TXN> for BTreeMapTransactionInner<K, V, P>
+{
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         // Add the staging operation to txn
         for (k, op) in &self.staging {
             match op {
@@ -590,26 +436,24 @@ impl<'a, K: Ord + Debug, V: Transactional<TXN> + Clone, TXN> ValTransaction
 }
 
 /// Transaction wrapper for a `BTreeMap` entry value of given `key`
-pub struct BTreeMapEntryTransaction<'a, K, V, TXN> {
+pub struct BTreeMapEntryTransaction<'a, K, V> {
     tree_ref: &'a mut BTreeMap<K, V>,
     pub key: K,
     pub new_value: V,
-    _phantom: PhantomData<TXN>,
 }
 
-impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapEntryTransaction<'a, K, V, TXN> {
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
     /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
     /// If the tree does not contain `key`, the `default_val` will be used as the initial value
     pub fn new_insert(
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
         value: V,
-    ) -> BTreeMapEntryTransaction<'a, K, V, TXN> {
+    ) -> BTreeMapEntryTransaction<'a, K, V> {
         BTreeMapEntryTransaction {
             new_value: value,
             tree_ref,
             key,
-            _phantom: PhantomData,
         }
     }
 
@@ -623,7 +467,7 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapEntryTransaction<'a, K, V, TXN> 
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
         default_val: Option<V>,
-    ) -> Option<BTreeMapEntryTransaction<'a, K, V, TXN>> {
+    ) -> Option<BTreeMapEntryTransaction<'a, K, V>> {
         tree_ref
             .get(&key)
             .cloned()
@@ -632,12 +476,11 @@ impl<'a, K: Ord + Debug, V: Clone, TXN> BTreeMapEntryTransaction<'a, K, V, TXN> 
                 new_value: orig_value,
                 tree_ref,
                 key,
-                _phantom: PhantomData,
             })
     }
 }
 
-impl<'a, K, V, TXN> Deref for BTreeMapEntryTransaction<'a, K, V, TXN> {
+impl<K, V> Deref for BTreeMapEntryTransaction<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -645,22 +488,22 @@ impl<'a, K, V, TXN> Deref for BTreeMapEntryTransaction<'a, K, V, TXN> {
     }
 }
 
-impl<'a, K, V, TXN> DerefMut for BTreeMapEntryTransaction<'a, K, V, TXN> {
+impl<K, V> DerefMut for BTreeMapEntryTransaction<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.new_value
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction
-    for BTreeMapEntryTransaction<'a, K, V, TXN>
-{
-    type TXN = TXN;
-
+impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, K, V> {
     fn commit(self) {
         self.tree_ref.insert(self.key, self.new_value);
     }
+}
 
-    async fn apply_to_txn(&self, txn: &mut Self::TXN) -> MetadataModelResult<()> {
+impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
+    for BTreeMapEntryTransaction<'a, K, V>
+{
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)
             || *self.tree_ref.get(&self.key).unwrap() != self.new_value
         {
@@ -670,268 +513,80 @@ impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction
     }
 }
 
-pub enum BTreeMapTransactionWrapper<'a, K: Ord, V> {
-    V1(BTreeMapTransaction<'a, K, V, Transaction>),
-    V2(BTreeMapTransaction<'a, K, V, TransactionV2>),
-}
-
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
-    pub fn tree_ref(&self) -> &BTreeMap<K, V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
-            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
-        }
-    }
-
-    pub fn tree_mut(&mut self) -> &mut BTreeMap<K, V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.tree_ref,
-            BTreeMapTransactionWrapper::V2(v) => v.tree_ref,
-        }
-    }
-
-    /// Get the value of the provided key by merging the staging value and the original value
-    pub fn get(&self, key: &K) -> Option<&V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.get(key),
-            BTreeMapTransactionWrapper::V2(v) => v.get(key),
-        }
-    }
-
-    pub fn contains_key(&self, key: &K) -> bool {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.contains_key(key),
-            BTreeMapTransactionWrapper::V2(v) => v.contains_key(key),
-        }
-    }
-
-    pub fn get_mut(&mut self, key: K) -> Option<BTreeMapTransactionValueGuard<'_, K, V>> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.get_mut(key),
-            BTreeMapTransactionWrapper::V2(v) => v.get_mut(key),
-        }
-    }
-
-    pub fn insert(&mut self, key: K, value: V) {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.insert(key, value),
-            BTreeMapTransactionWrapper::V2(v) => v.insert(key, value),
-        }
-    }
-
-    pub fn remove(&mut self, key: K) -> Option<V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.remove(key),
-            BTreeMapTransactionWrapper::V2(v) => v.remove(key),
-        }
-    }
-
-    pub fn commit_memory(self) {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v.commit_memory(),
-            BTreeMapTransactionWrapper::V2(v) => v.commit_memory(),
-        }
-    }
-
-    pub fn new_entry_txn_or_default(
-        &mut self,
-        key: K,
-        default_val: V,
-    ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
-                BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
-                    .expect("default value is provided and should return `Some`"),
-            ),
-            BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
-                BTreeMapEntryTransaction::new(v.tree_ref, key, Some(default_val))
-                    .expect("default value is provided and should return `Some`"),
-            ),
-        }
-    }
-
-    pub fn new_entry_insert_txn(
-        &mut self,
-        key: K,
-        val: V,
-    ) -> BTreeMapEntryTransactionWrapper<'_, K, V> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => BTreeMapEntryTransactionWrapper::V1(
-                BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
-            ),
-            BTreeMapTransactionWrapper::V2(v) => BTreeMapEntryTransactionWrapper::V2(
-                BTreeMapEntryTransaction::new_insert(v.tree_ref, key, val),
-            ),
+impl<T: InMemValTransaction> InMemValTransaction for Option<T> {
+    fn commit(self) {
+        if let Some(inner) = self {
+            inner.commit();
         }
     }
 }
 
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransactionWrapper<'a, K, V> {
-    pub fn into_v1(self) -> BTreeMapTransaction<'a, K, V, Transaction> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v,
-            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
+impl<T: ValTransaction<TXN>, TXN> ValTransaction<TXN> for Option<T> {
+    async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
+        if let Some(inner) = &self {
+            inner.apply_to_txn(txn).await?;
         }
-    }
-
-    pub fn as_v1_ref(&self) -> &BTreeMapTransaction<'a, K, V, Transaction> {
-        match self {
-            BTreeMapTransactionWrapper::V1(v) => v,
-            BTreeMapTransactionWrapper::V2(_) => panic!("expect V1, found V2"),
-        }
-    }
-
-    pub fn into_v2(self) -> BTreeMapTransaction<'a, K, V, TransactionV2> {
-        match self {
-            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
-            BTreeMapTransactionWrapper::V2(v) => v,
-        }
-    }
-
-    pub fn as_v2_ref(&self) -> &BTreeMapTransaction<'a, K, V, TransactionV2> {
-        match self {
-            BTreeMapTransactionWrapper::V1(_) => panic!("expect V2, found V1"),
-            BTreeMapTransactionWrapper::V2(v) => v,
-        }
+        Ok(())
     }
 }
 
-pub enum BTreeMapEntryTransactionWrapper<'a, K, V> {
-    V1(BTreeMapEntryTransaction<'a, K, V, Transaction>),
-    V2(BTreeMapEntryTransaction<'a, K, V, TransactionV2>),
+pub struct DerefMutForward<
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> {
+    ptr: P,
+    f: F,
+    f_mut: FMut,
 }
 
-impl<'a, K: Ord + Debug, V: Clone> Deref for BTreeMapEntryTransactionWrapper<'a, K, V> {
-    type Target = V;
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMutForward<Inner, Target, P, F, FMut>
+{
+    pub fn new(ptr: P, f: F, f_mut: FMut) -> Self {
+        Self { ptr, f, f_mut }
+    }
+}
+
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > Deref for DerefMutForward<Inner, Target, P, F, FMut>
+{
+    type Target = Target;
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(v) => v.deref(),
-            BTreeMapEntryTransactionWrapper::V2(v) => v.deref(),
-        }
+        (self.f)(&self.ptr)
     }
 }
 
-impl<'a, K: Ord + Debug, V: Clone> DerefMut for BTreeMapEntryTransactionWrapper<'a, K, V> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(v) => v.deref_mut(),
-            BTreeMapEntryTransactionWrapper::V2(v) => v.deref_mut(),
-        }
-    }
-}
-
-impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransactionWrapper<'a, K, V> {
-    pub fn as_v1_ref(&self) -> &BTreeMapEntryTransaction<'a, K, V, Transaction> {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(v) => v,
-            BTreeMapEntryTransactionWrapper::V2(_) => {
-                panic!("expect V1, found V2")
-            }
-        }
-    }
-
-    pub fn into_v1(self) -> BTreeMapEntryTransaction<'a, K, V, Transaction> {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(v) => v,
-            BTreeMapEntryTransactionWrapper::V2(_) => {
-                panic!("expect V1, found V2")
-            }
-        }
-    }
-
-    pub fn as_v2_ref(&self) -> &BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(_) => {
-                panic!("expect V2, found V1")
-            }
-            BTreeMapEntryTransactionWrapper::V2(v) => v,
-        }
-    }
-
-    pub fn into_v2(self) -> BTreeMapEntryTransaction<'a, K, V, TransactionV2> {
-        match self {
-            BTreeMapEntryTransactionWrapper::V1(_) => {
-                panic!("expect V2, found V1")
-            }
-            BTreeMapEntryTransactionWrapper::V2(v) => v,
-        }
-    }
-}
-
-pub enum VarTransactionWrapper<'a, T: Transactional<Transaction> + Transactional<TransactionV2>> {
-    V1(VarTransaction<'a, Transaction, T>),
-    V2(VarTransaction<'a, TransactionV2, T>),
-}
-
-impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>>
-    VarTransactionWrapper<'a, T>
-{
-    pub fn as_v1_ref(&self) -> &VarTransaction<'a, Transaction, T> {
-        match self {
-            VarTransactionWrapper::V1(v) => v,
-            VarTransactionWrapper::V2(_) => {
-                panic!("expect V1, found V2")
-            }
-        }
-    }
-
-    pub fn into_v1(self) -> VarTransaction<'a, Transaction, T> {
-        match self {
-            VarTransactionWrapper::V1(v) => v,
-            VarTransactionWrapper::V2(_) => {
-                panic!("expect V1, found V2")
-            }
-        }
-    }
-
-    pub fn as_v2_ref(&self) -> &VarTransaction<'a, TransactionV2, T> {
-        match self {
-            VarTransactionWrapper::V1(_) => {
-                panic!("expect V2, found V1")
-            }
-            VarTransactionWrapper::V2(v) => v,
-        }
-    }
-
-    pub fn into_v2(self) -> VarTransaction<'a, TransactionV2, T> {
-        match self {
-            VarTransactionWrapper::V1(_) => {
-                panic!("expect V2, found V1")
-            }
-            VarTransactionWrapper::V2(v) => v,
-        }
-    }
-}
-
-impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2>> Deref
-    for VarTransactionWrapper<'a, T>
-{
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            VarTransactionWrapper::V1(v) => v.deref(),
-            VarTransactionWrapper::V2(v) => v.deref(),
-        }
-    }
-}
-
-impl<'a, T: Transactional<Transaction> + Transactional<TransactionV2> + Clone> DerefMut
-    for VarTransactionWrapper<'a, T>
+impl<
+        Inner,
+        Target,
+        P: DerefMut<Target = Inner>,
+        F: Fn(&Inner) -> &Target,
+        FMut: Fn(&mut Inner) -> &mut Target,
+    > DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            VarTransactionWrapper::V1(v) => v.deref_mut(),
-            VarTransactionWrapper::V2(v) => v.deref_mut(),
-        }
+        (self.f_mut)(&mut self.ptr)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::Operation;
+    use crate::storage::{Operation, Transaction};
 
     #[derive(PartialEq, Clone, Debug)]
     struct TestTransactional {
@@ -994,7 +649,6 @@ mod tests {
         };
         let mut num_txn = VarTransaction::new(&mut kv);
         num_txn.value = "modified";
-        num_txn.abort();
         assert_eq!("original", kv.value);
     }
 

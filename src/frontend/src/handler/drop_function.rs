@@ -12,23 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{FunctionDesc, ReferentialAction};
-
 use super::*;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
+/// Drop a function or an aggregate.
 pub async fn handle_drop_function(
     handler_args: HandlerArgs,
     if_exists: bool,
     mut func_desc: Vec<FunctionDesc>,
     _option: Option<ReferentialAction>,
+    aggregate: bool,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {
         bail_not_implemented!("only support dropping 1 function");
     }
+    let stmt_type = if aggregate {
+        StatementType::DROP_AGGREGATE
+    } else {
+        StatementType::DROP_FUNCTION
+    };
     let func_desc = func_desc.remove(0);
 
     let session = handler_args.session;
@@ -73,10 +77,21 @@ pub async fn handle_drop_function(
         match res {
             Ok((function, schema_name)) => {
                 session.check_privilege_for_drop_alter(schema_name, &**function)?;
+                if !aggregate && function.kind.is_aggregate() {
+                    return Err(ErrorCode::CatalogError(
+                        format!("\"{function_name}\" is an aggregate function\nHINT:  Use DROP AGGREGATE to drop aggregate functions.").into(),
+                    )
+                    .into());
+                } else if aggregate && !function.kind.is_aggregate() {
+                    return Err(ErrorCode::CatalogError(
+                        format!("\"{function_name}\" is not an aggregate").into(),
+                    )
+                    .into());
+                }
                 function.id
             }
             Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {
-                return Ok(RwPgResponse::builder(StatementType::DROP_FUNCTION)
+                return Ok(RwPgResponse::builder(stmt_type)
                     .notice(format!(
                         "function \"{}\" does not exist, skipping",
                         function_name
@@ -90,5 +105,5 @@ pub async fn handle_drop_function(
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_function(function_id).await?;
 
-    Ok(PgResponse::empty_result(StatementType::DROP_FUNCTION))
+    Ok(PgResponse::empty_result(stmt_type))
 }

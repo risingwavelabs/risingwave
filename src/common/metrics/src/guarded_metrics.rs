@@ -21,36 +21,27 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
-    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec,
-    GenericGauge, GenericGaugeVec, GenericLocalCounter, MetricVec, MetricVecBuilder,
+    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericLocalCounter,
+    MetricVec, MetricVecBuilder,
 };
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
-use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
+use prometheus::{Gauge, Histogram, IntCounter, IntGauge};
 use thiserror_ext::AsReport;
 use tracing::warn;
-
-pub fn __extract_counter_builder<P: Atomic>(
-    vec: GenericCounterVec<P>,
-) -> MetricVec<VecBuilderOfCounter<P>> {
-    vec
-}
-
-pub fn __extract_gauge_builder<P: Atomic>(
-    vec: GenericGaugeVec<P>,
-) -> MetricVec<VecBuilderOfGauge<P>> {
-    vec
-}
-
-pub fn __extract_histogram_builder(vec: HistogramVec) -> MetricVec<VecBuilderOfHistogram> {
-    vec
-}
 
 #[macro_export]
 macro_rules! register_guarded_histogram_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         $crate::register_guarded_histogram_vec_with_registry! {
             {prometheus::histogram_opts!($NAME, $HELP)},
+            $LABELS_NAMES,
+            $REGISTRY
+        }
+    }};
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $BUCKETS:expr, $REGISTRY:expr $(,)?) => {{
+        $crate::register_guarded_histogram_vec_with_registry! {
+            {prometheus::histogram_opts!($NAME, $HELP, $BUCKETS)},
             $LABELS_NAMES,
             $REGISTRY
         }
@@ -93,6 +84,22 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 }
 
 #[macro_export]
+macro_rules! register_guarded_uint_gauge_vec_with_registry {
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        let inner = prometheus::core::GenericGaugeVec::<AtomicU64>::new(
+            prometheus::opts!($NAME, $HELP),
+            $LABELS_NAMES,
+        );
+        inner.and_then(|inner| {
+            let inner = $crate::__extract_gauge_builder(inner);
+            let label_guarded = $crate::LabelGuardedUintGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
+        })
+    }};
+}
+
+#[macro_export]
 macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
@@ -105,15 +112,43 @@ macro_rules! register_guarded_int_counter_vec_with_registry {
     }};
 }
 
-pub type VecBuilderOfCounter<P: Atomic> = impl MetricVecBuilder<M = GenericCounter<P>>;
-pub type VecBuilderOfGauge<P: Atomic> = impl MetricVecBuilder<M = GenericGauge<P>>;
-pub type VecBuilderOfHistogram = impl MetricVecBuilder<M = Histogram>;
+// put TAITs in a separate module to avoid "non-defining opaque type use in defining scope"
+mod tait {
+    use prometheus::core::{
+        Atomic, GenericCounter, GenericCounterVec, GenericGauge, GenericGaugeVec, MetricVec,
+        MetricVecBuilder,
+    };
+    use prometheus::{Histogram, HistogramVec};
+
+    pub type VecBuilderOfCounter<P: Atomic> = impl MetricVecBuilder<M = GenericCounter<P>>;
+    pub type VecBuilderOfGauge<P: Atomic> = impl MetricVecBuilder<M = GenericGauge<P>>;
+    pub type VecBuilderOfHistogram = impl MetricVecBuilder<M = Histogram>;
+
+    pub fn __extract_counter_builder<P: Atomic>(
+        vec: GenericCounterVec<P>,
+    ) -> MetricVec<VecBuilderOfCounter<P>> {
+        vec
+    }
+
+    pub fn __extract_gauge_builder<P: Atomic>(
+        vec: GenericGaugeVec<P>,
+    ) -> MetricVec<VecBuilderOfGauge<P>> {
+        vec
+    }
+
+    pub fn __extract_histogram_builder(vec: HistogramVec) -> MetricVec<VecBuilderOfHistogram> {
+        vec
+    }
+}
+pub use tait::*;
 
 pub type LabelGuardedHistogramVec<const N: usize> = LabelGuardedMetricVec<VecBuilderOfHistogram, N>;
 pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
 pub type LabelGuardedIntGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedUintGaugeVec<const N: usize> =
+    LabelGuardedMetricVec<VecBuilderOfGauge<AtomicU64>, N>;
 pub type LabelGuardedGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
@@ -156,6 +191,8 @@ impl<const N: usize> LabelGuardedMetricsInfo<N> {
     }
 }
 
+/// An RAII metrics vec with labels.
+///
 /// `LabelGuardedMetricVec` enhances the [`MetricVec`] to ensure the set of labels to be
 /// correctly removed from the Prometheus client once being dropped. This is useful for metrics
 /// that are associated with an object that can be dropped, such as streaming jobs, fragments,
@@ -320,7 +357,7 @@ pub struct LabelGuardedMetric<T, const N: usize> {
     _guard: Arc<LabelGuard<N>>,
 }
 
-impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
+impl<T, const N: usize> Debug for LabelGuardedMetric<T, N> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LabelGuardedMetric").finish()
     }

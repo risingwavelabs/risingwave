@@ -35,8 +35,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Division by zero
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `general_div('1', '0')`
+      2: Division by zero
 - before:
   - create_table_and_mv
   sql: |
@@ -44,8 +45,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Numeric out of range
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `general_add('2147483647', '1')`
+      2: Numeric out of range
 - before:
   - create_table_and_mv
   sql: |
@@ -53,8 +55,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Parse error: bigint invalid digit found in string
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `str_parse('a')`
+      2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -62,8 +65,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Parse error: bigint invalid digit found in string
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `str_parse('a')`
+      2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -147,8 +151,9 @@
   batch_error: |
     Expr error
 
-    Caused by:
-      Parse error: bigint invalid digit found in string
+    Caused by these errors (recent errors listed first):
+      1: error while evaluating expression `str_parse('43.0')`
+      2: Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -496,5 +501,5 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v] }
     └─LogicalFilter { predicate: (t.k = 2147483648:Int64) }
-      └─LogicalScan { table: t, columns: [t.k, t.v] }
+      └─LogicalScan { table: t, columns: [t.k, t.v, t._rw_timestamp] }
   batch_plan: 'BatchValues { rows: [] }'

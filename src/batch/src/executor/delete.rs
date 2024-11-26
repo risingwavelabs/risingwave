@@ -39,6 +39,7 @@ pub struct DeleteExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
+    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -195,8 +196,6 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
-    use itertools::Itertools;
-    use risingwave_common::array::Array;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };

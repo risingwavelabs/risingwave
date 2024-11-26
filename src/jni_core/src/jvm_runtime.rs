@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::option::Option::Some;
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -21,13 +20,12 @@ use anyhow::{bail, Context};
 use fs_err as fs;
 use fs_err::PathExt;
 use jni::objects::{JObject, JString};
-use jni::strings::JNIString;
-use jni::{InitArgsBuilder, JNIEnv, JNIVersion, JavaVM, NativeMethod};
+use jni::{AttachGuard, InitArgsBuilder, JNIEnv, JNIVersion, JavaVM};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use thiserror_ext::AsReport;
 use tracing::error;
 
-use crate::call_method;
+use crate::{call_method, call_static_method};
 
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
@@ -90,6 +88,18 @@ impl JavaVmWrapper {
             }
         }
 
+        // move risingwave-source-cdc to the head of classpath, because we have some patched Debezium classes
+        // in this jar which needs to be loaded first.
+        let mut new_class_vec = Vec::with_capacity(class_vec.len());
+        for path in class_vec {
+            if path.contains("risingwave-source-cdc") {
+                new_class_vec.insert(0, path.clone());
+            } else {
+                new_class_vec.push(path.clone());
+            }
+        }
+        class_vec = new_class_vec;
+
         let jvm_heap_size = if let Ok(heap_size) = std::env::var("JVM_HEAP_SIZE") {
             heap_size
         } else {
@@ -123,19 +133,27 @@ impl JavaVmWrapper {
 
         tracing::info!("initialize JVM successfully");
 
-        register_native_method_for_jvm(&jvm).context("failed to register native method")?;
+        let result: std::result::Result<(), jni::errors::Error> = try {
+            let mut env = jvm_env(&jvm)?;
+            register_java_binding_native_methods(&mut env)?;
+        };
+
+        result.context("failed to register native method")?;
 
         Ok(jvm)
     }
 }
 
-pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
-    let mut env = jvm
-        .attach_current_thread()
-        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))?;
+pub fn jvm_env(jvm: &JavaVM) -> Result<AttachGuard<'_>, jni::errors::Error> {
+    jvm.attach_current_thread()
+        .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm attach thread error"))
+}
 
+pub fn register_java_binding_native_methods(
+    env: &mut JNIEnv<'_>,
+) -> Result<(), jni::errors::Error> {
     let binding_class = env
-        .find_class("com/risingwave/java/binding/Binding")
+        .find_class(gen_class_name!(com.risingwave.java.binding.Binding))
         .inspect_err(|e| tracing::error!(error = ?e.as_report(), "jvm find class error"))?;
     use crate::*;
     macro_rules! gen_native_method_array {
@@ -145,14 +163,8 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {
             [
                 $(
-                    {
-                        let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
-                        let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
-                        NativeMethod {
-                            name: JNIString::from(stringify! {$func_name}),
-                            sig: JNIString::from(sig),
-                            fn_ptr,
-                        }
+                    $crate::gen_native_method_entry! {
+                        Java_com_risingwave_java_binding_Binding_, $func_name, {$($ret)+}, {$($args)*}
                     },
                 )*
             ]
@@ -172,21 +184,21 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     match JVM.get() {
         Some(jvm) => {
-            let result: Result<(usize, usize), jni::errors::Error> = try {
-                let mut env = jvm.attach_current_thread()?;
+            let result: Result<(usize, usize), anyhow::Error> = try {
+                execute_with_jni_env(jvm, |env| {
+                    let runtime_instance = crate::call_static_method!(
+                        env,
+                        {Runtime},
+                        {Runtime getRuntime()}
+                    )?;
 
-                let runtime_instance = crate::call_static_method!(
-                    env,
-                    {Runtime},
-                    {Runtime getRuntime()}
-                )?;
+                    let total_memory =
+                        call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
+                    let free_memory =
+                        call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
 
-                let total_memory =
-                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
-                let free_memory =
-                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
-
-                (total_memory as usize, (total_memory - free_memory) as usize)
+                    Ok((total_memory as usize, (total_memory - free_memory) as usize))
+                })?
             };
             match result {
                 Ok(ret) => ret,
@@ -204,11 +216,32 @@ pub fn execute_with_jni_env<T>(
     jvm: &JavaVM,
     f: impl FnOnce(&mut JNIEnv<'_>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
-    let _guard = jvm
+    let mut env = jvm
         .attach_current_thread()
         .with_context(|| "Failed to attach current rust thread to jvm")?;
 
-    let mut env = jvm.get_env().with_context(|| "Failed to get jni env")?;
+    // set context class loader for the thread
+    // java.lang.Thread.currentThread()
+    //     .setContextClassLoader(java.lang.ClassLoader.getSystemClassLoader());
+
+    let thread = crate::call_static_method!(
+        env,
+        {Thread},
+        {Thread currentThread()}
+    )?;
+
+    let system_class_loader = crate::call_static_method!(
+        env,
+        {ClassLoader},
+        {ClassLoader getSystemClassLoader()}
+    )?;
+
+    crate::call_method!(
+        env,
+        thread,
+        {void setContextClassLoader(ClassLoader)},
+        &system_class_loader
+    )?;
 
     let ret = f(&mut env);
 
@@ -240,4 +273,33 @@ pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<Str
     let jstr = JString::from(obj);
     let java_str = env.get_string(&jstr)?;
     Ok(java_str.to_str()?.to_string())
+}
+
+/// Dumps the JVM stack traces.
+///
+/// # Returns
+///
+/// - `Ok(None)` if JVM is not initialized.
+/// - `Ok(Some(String))` if JVM is initialized and stack traces are dumped.
+/// - `Err` if failed to dump stack traces.
+pub fn dump_jvm_stack_traces() -> anyhow::Result<Option<String>> {
+    match JVM.get() {
+        None => Ok(None),
+        Some(jvm) => execute_with_jni_env(jvm, |env| {
+            let result = call_static_method!(
+                env,
+                {com.risingwave.connector.api.Monitor},
+                {String dumpStackTrace()}
+            )
+            .with_context(|| "Failed to call Java function")?;
+            let result = JString::from(result);
+            let result = env
+                .get_string(&result)
+                .with_context(|| "Failed to convert JString")?;
+            let result = result
+                .to_str()
+                .with_context(|| "Failed to convert JavaStr")?;
+            Ok(Some(result.to_string()))
+        }),
+    }
 }

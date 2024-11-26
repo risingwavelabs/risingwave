@@ -12,26 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
 use icelake::io_v2::{
     BaseFileWriter, BaseFileWriterBuilder, BaseFileWriterMetrics, CurrentFileStatus, FileWriter,
     FileWriterBuilder,
 };
 use icelake::Result;
+use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredBaseFileWriterBuilder<B: FileWriterBuilder> {
     inner: BaseFileWriterBuilder<B>,
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 }
 
 impl<B: FileWriterBuilder> MonitoredBaseFileWriterBuilder<B> {
     pub fn new(
         inner: BaseFileWriterBuilder<B>,
-        unflush_data_file: LabelGuardedIntGauge<2>,
+        unflush_data_file: LabelGuardedIntGauge<3>,
     ) -> Self {
         Self {
             inner,
@@ -59,7 +59,7 @@ pub struct MonitoredBaseFileWriter<B: FileWriterBuilder> {
     inner: BaseFileWriter<B>,
 
     // metrics
-    unflush_data_file: LabelGuardedIntGauge<2>,
+    unflush_data_file: LabelGuardedIntGauge<3>,
 
     cur_metrics: BaseFileWriterMetrics,
 }

@@ -1,0 +1,81 @@
+control substitution on
+
+system ok
+rpk topic delete sr_pb_test || true; \
+(rpk sr subject delete 'sr_pb_test-value' && rpk sr subject delete 'sr_pb_test-value' --permanent) || true;
+
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "sr_pb_test" 20 user
+
+# make sure google/protobuf/source_context.proto is NOT in schema registry
+system ok
+curl --silent "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects" | grep -v 'google/protobuf/source_context.proto'
+
+# Create a table.
+statement ok
+create table sr_pb_test with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_pb_test',
+    scan.startup.mode = 'earliest')
+FORMAT plain ENCODE protobuf(
+        schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+        message = 'test.User'
+    );
+
+# for multiple schema registry nodes
+statement ok
+create table sr_pb_test_bk with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_pb_test',
+    scan.startup.mode = 'earliest')
+FORMAT plain ENCODE protobuf(
+        schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL},${RISEDEV_SCHEMA_REGISTRY_URL}',
+        message = 'test.User'
+    );
+
+
+# for upsert protobuf source
+# NOTE: the key part is in json format and rw only read it as bytes
+statement ok
+create table sr_pb_upsert (primary key (rw_key))
+include
+    key as rw_key
+with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_pb_test',
+    scan.startup.mode = 'earliest')
+FORMAT upsert ENCODE protobuf(
+        schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+        message = 'test.User'
+    );
+
+# Wait for source
+sleep 2s
+
+# Flush into storage
+statement ok
+flush;
+
+query I
+select count(*) from sr_pb_test;
+----
+20
+
+query IT
+select min(id), max(id), max((sc).file_name) from sr_pb_test;
+----
+0 19 source/context_019.proto
+
+query TT
+select convert_from(min(rw_key), 'UTF-8'), convert_from(max(rw_key), 'UTF-8') from sr_pb_upsert;
+----
+{"id": 0} {"id": 9}
+
+statement ok
+drop table sr_pb_test;
+
+statement ok
+drop table sr_pb_test_bk;
+
+statement ok
+drop table sr_pb_upsert;

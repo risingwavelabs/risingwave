@@ -37,11 +37,18 @@ impl DebeziumJsonAccessBuilder {
             json_parse_options: JsonParseOptions::new_for_debezium(timestamptz_handling),
         })
     }
+
+    pub fn new_for_schema_event() -> ConnectorResult<Self> {
+        Ok(Self {
+            value: None,
+            json_parse_options: JsonParseOptions::default(),
+        })
+    }
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -79,7 +86,7 @@ impl DebeziumMongoJsonAccessBuilder {
 
 impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
     #[allow(clippy::unused_async)]
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         self.value = Some(payload);
         let mut event: BorrowedValue<'_> =
             simd_json::to_borrowed_value(self.value.as_mut().unwrap())
@@ -99,8 +106,6 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;
@@ -132,7 +137,6 @@ mod tests {
 
     async fn build_parser(rw_columns: Vec<SourceColumnDesc>) -> DebeziumParser {
         let props = SpecificParserConfig {
-            key_encoding_config: None,
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
@@ -532,7 +536,7 @@ mod tests {
                     // For other overflow, the parsing succeeds but the type conversion fails
                     // The errors are ignored and logged.
                     res.unwrap();
-                    assert!(logs_contain("Expected type"), "{i}");
+                    assert!(logs_contain("expected type"), "{i}");
                 } else {
                     // For f64 overflow, the parsing fails
                     let e = res.unwrap_err();

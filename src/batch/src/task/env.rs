@@ -22,7 +22,9 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
+use crate::monitor::{
+    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, IcebergScanMetrics,
+};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -44,13 +46,10 @@ pub struct BatchEnvironment {
     /// State store for table scanning.
     state_store: StateStoreImpl,
 
-    /// Task level metrics.
-    task_metrics: Arc<BatchTaskMetrics>,
-
     /// Executor level metrics.
     executor_metrics: Arc<BatchExecutorMetrics>,
 
-    /// Compute client pool for grpc exchange.
+    /// Compute client pool for batch gRPC exchange.
     client_pool: ComputeClientPoolRef,
 
     /// Manages dml information.
@@ -58,6 +57,12 @@ pub struct BatchEnvironment {
 
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
+
+    /// Batch spill metrics
+    spill_metrics: Arc<BatchSpillMetrics>,
+
+    /// Metrics for iceberg scan.
+    iceberg_scan_metrics: Arc<IcebergScanMetrics>,
 
     metric_level: MetricLevel,
 }
@@ -70,11 +75,12 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
-        task_metrics: Arc<BatchTaskMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
         source_metrics: Arc<SourceMetrics>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        iceberg_scan_metrics: Arc<IcebergScanMetrics>,
         metric_level: MetricLevel,
     ) -> Self {
         BatchEnvironment {
@@ -83,11 +89,12 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
-            task_metrics,
             executor_metrics,
             client_pool,
             dml_manager,
             source_metrics,
+            spill_metrics,
+            iceberg_scan_metrics,
             metric_level,
         }
     }
@@ -105,17 +112,18 @@ impl BatchEnvironment {
                 BatchManagerMetrics::for_test(),
                 u64::MAX,
             )),
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
+            server_addr: "127.0.0.1:2333".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 MonitoredStorageMetrics::unused(),
             )),
-            task_metrics: Arc::new(BatchTaskMetrics::for_test()),
-            client_pool: Arc::new(ComputeClientPool::default()),
+            client_pool: Arc::new(ComputeClientPool::for_test()),
             dml_manager: Arc::new(DmlManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
-            executor_metrics: Arc::new(BatchExecutorMetrics::for_test()),
+            executor_metrics: BatchExecutorMetrics::for_test(),
+            spill_metrics: BatchSpillMetrics::for_test(),
+            iceberg_scan_metrics: IcebergScanMetrics::for_test(),
             metric_level: MetricLevel::Debug,
         }
     }
@@ -144,10 +152,6 @@ impl BatchEnvironment {
         self.task_manager.metrics()
     }
 
-    pub fn task_metrics(&self) -> Arc<BatchTaskMetrics> {
-        self.task_metrics.clone()
-    }
-
     pub fn executor_metrics(&self) -> Arc<BatchExecutorMetrics> {
         self.executor_metrics.clone()
     }
@@ -164,7 +168,15 @@ impl BatchEnvironment {
         self.source_metrics.clone()
     }
 
+    pub fn spill_metrics(&self) -> Arc<BatchSpillMetrics> {
+        self.spill_metrics.clone()
+    }
+
     pub fn metric_level(&self) -> MetricLevel {
         self.metric_level
+    }
+
+    pub fn iceberg_scan_metrics(&self) -> Arc<IcebergScanMetrics> {
+        self.iceberg_scan_metrics.clone()
     }
 }

@@ -12,31 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
-use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::error::ErrorCode::ProtocolError;
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
-pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
-pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
-pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
-
-pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
-pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
     with_properties
@@ -48,58 +41,19 @@ fn get_connection_property_required(
             )))
         })
 }
-
-fn resolve_private_link_properties(
-    with_properties: &HashMap<String, String>,
-) -> Result<create_connection_request::PrivateLink> {
-    let provider =
-        match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
-        {
-            CLOUD_PROVIDER_MOCK => PrivateLinkProvider::Mock,
-            CLOUD_PROVIDER_AWS => PrivateLinkProvider::Aws,
-            provider => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Unsupported privatelink provider {}",
-                    provider
-                ))));
-            }
-        };
-    match provider {
-        PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
-            provider: provider.into(),
-            service_name: String::new(),
-            tags: None,
-        }),
-        PrivateLinkProvider::Aws => {
-            let service_name =
-                get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
-            Ok(create_connection_request::PrivateLink {
-                provider: provider.into(),
-                service_name,
-                tags: with_properties.get(CONNECTION_TAGS_PROP).cloned(),
-            })
-        }
-        PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
-            "Privatelink provider unspecified".to_string(),
-        ))),
-    }
-}
-
 fn resolve_create_connection_payload(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
 ) -> Result<create_connection_request::Payload> {
     let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
-    let create_connection_payload = match connection_type.as_str() {
-        PRIVATELINK_CONNECTION => create_connection_request::Payload::PrivateLink(
-            resolve_private_link_properties(with_properties)?,
-        ),
-        _ => {
-            return Err(RwError::from(ProtocolError(format!(
-                "Connection type \"{connection_type}\" is not supported"
-            ))));
-        }
-    };
-    Ok(create_connection_payload)
+    match connection_type.as_str() {
+        PRIVATELINK_CONNECTION => Err(RwError::from(ErrorCode::Deprecated(
+            "CREATE CONNECTION to Private Link".to_string(),
+            "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
+        ))),
+        _ => Err(RwError::from(ProtocolError(format!(
+            "Connection type \"{connection_type}\" is not supported"
+        )))),
+    }
 }
 
 pub async fn handle_create_connection(

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# FIXME: this script has not been maintained for a long time.
+
 set -e
 
 export DOCKER_BUILDKIT=1

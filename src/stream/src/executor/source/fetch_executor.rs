@@ -16,12 +16,15 @@ use std::marker::PhantomData;
 use std::ops::Bound;
 
 use either::Either;
-use futures::{stream, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::ScalarRef;
+use risingwave_connector::parser::parquet_parser::get_total_row_nums_for_parquet_file;
+use risingwave_connector::parser::EncodingProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
+    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
 };
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
@@ -110,6 +113,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
                             SplitImpl::from(split)
                         }
+                        risingwave_connector::source::ConnectorProperties::Azblob(_) => {
+                            let split: OpendalFsSplit<OpendalAzblob> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
                         risingwave_connector::source::ConnectorProperties::PosixFs(_) => {
                             let split: OpendalFsSplit<OpendalPosixFs> =
                                 OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
@@ -152,9 +160,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         batch: SplitBatch,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        let stream = source_desc
+        let (stream, _) = source_desc
             .source
-            .to_stream(batch, column_ids, Arc::new(source_ctx))
+            .build_stream(batch, column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok(apply_rate_limit(stream, rate_limit_rps).boxed())
@@ -177,6 +185,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
+            None,
         )
     }
 
@@ -184,6 +193,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     async fn into_stream(mut self) {
         let mut upstream = self.upstream.take().unwrap().execute();
         let barrier = expect_first_barrier(&mut upstream).await?;
+        let first_epoch = barrier.epoch;
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.take().unwrap();
         let mut state_store_handler = core.split_state_store;
@@ -199,15 +211,14 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         else {
             unreachable!("Partition and offset columns must be set.");
         };
-
         // Initialize state table.
-        state_store_handler.init_epoch(barrier.epoch);
+        state_store_handler.init_epoch(first_epoch).await?;
 
         let mut splits_on_fetch: usize = 0;
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(upstream, stream::pending().boxed());
 
-        if barrier.is_pause_on_startup() {
+        if is_pause_on_startup {
             stream.pause_stream();
         }
 
@@ -224,8 +235,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.rate_limit_rps,
         )
         .await?;
-
-        yield Message::Barrier(barrier);
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -250,6 +259,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                                     actor_to_apply.get(&self.actor_ctx.id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
+                                                    tracing::debug!(
+                                                        "updating rate limit from {:?} to {:?}",
+                                                        self.rate_limit_rps,
+                                                        *new_rate_limit
+                                                    );
                                                     self.rate_limit_rps = *new_rate_limit;
                                                     need_rebuild_reader = true;
                                                 }
@@ -300,19 +314,53 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table.
                                 Message::Chunk(chunk) => {
-                                    let file_assignment = chunk
-                                        .data_chunk()
-                                        .rows()
-                                        .map(|row| {
-                                            let filename = row.datum_at(0).unwrap().into_utf8();
-                                            let size = row.datum_at(2).unwrap().into_int64();
-                                            OpendalFsSplit::<Src>::new(
-                                                filename.to_owned(),
-                                                0,
-                                                size as usize,
+                                    // For Parquet encoding, the offset indicates the current row being read.
+                                    // Therefore, to determine if the end of a Parquet file has been reached, we need to compare its offset with the total number of rows.
+                                    // We directly obtain the total row count and set the size in `OpendalFsSplit` to this value.
+                                    let file_assignment = if let EncodingProperties::Parquet =
+                                        source_desc.source.parser_config.encoding_config
+                                    {
+                                        let filename_list: Vec<_> = chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                                filename.to_string()
+                                            })
+                                            .collect();
+                                        let mut parquet_file_assignment = vec![];
+                                        for filename in &filename_list {
+                                            let total_row_num =
+                                                get_total_row_nums_for_parquet_file(
+                                                    filename,
+                                                    source_desc.clone(),
+                                                )
+                                                .await?;
+                                            parquet_file_assignment.push(
+                                                OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    total_row_num - 1, // -1 because offset start from 0.
+                                                ),
                                             )
-                                        })
-                                        .collect();
+                                        }
+                                        parquet_file_assignment
+                                    } else {
+                                        chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+
+                                                let size = row.datum_at(2).unwrap().into_int64();
+                                                OpendalFsSplit::<Src>::new(
+                                                    filename.to_owned(),
+                                                    0,
+                                                    size as usize,
+                                                )
+                                            })
+                                            .collect()
+                                    };
                                     state_store_handler.set_states(file_assignment).await?;
                                     state_store_handler.state_table.try_flush().await?;
                                 }
@@ -338,7 +386,6 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
                                     _ => unreachable!(),
                                 };
-
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;

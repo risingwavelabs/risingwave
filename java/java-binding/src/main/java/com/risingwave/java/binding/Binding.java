@@ -26,16 +26,18 @@ public class Binding {
         }
     }
 
+    static void ensureInitialized() {}
+
     public static native void tracingSlf4jEvent(
             String threadName, String name, int level, String message);
 
     public static native boolean tracingSlf4jEventEnabled(int level);
 
-    public static native int vnodeCount();
-
-    // hummock iterator method
-    // Return a pointer to the iterator
-    static native long iteratorNewHummock(byte[] readPlan);
+    /**
+     * Used to get the default number of vnodes for a table, if its `maybeVnodeCount` field is not
+     * set.
+     */
+    public static native int defaultVnodeCount();
 
     static native long iteratorNewStreamChunk(long pointer);
 

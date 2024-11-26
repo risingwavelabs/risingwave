@@ -19,9 +19,8 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::ConnectorParams;
 use risingwave_dml::dml_manager::DmlManagerRef;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;
@@ -32,9 +31,6 @@ pub(crate) type WorkerNodeId = u32;
 pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
     server_addr: HostAddr,
-
-    /// Parameters used by connector nodes.
-    connector_params: ConnectorParams,
 
     /// Streaming related configurations.
     config: Arc<StreamingConfig>,
@@ -59,13 +55,15 @@ pub struct StreamEnvironment {
 
     /// Meta client. Use `None` for test only
     meta_client: Option<MetaClient>,
+
+    /// Compute client pool for streaming gRPC exchange.
+    client_pool: ComputeClientPoolRef,
 }
 
 impl StreamEnvironment {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_addr: HostAddr,
-        connector_params: ConnectorParams,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
@@ -73,10 +71,10 @@ impl StreamEnvironment {
         system_params_manager: LocalSystemParamsManagerRef,
         source_metrics: Arc<SourceMetrics>,
         meta_client: MetaClient,
+        client_pool: ComputeClientPoolRef,
     ) -> Self {
         StreamEnvironment {
             server_addr,
-            connector_params,
             config,
             worker_id,
             state_store,
@@ -85,6 +83,7 @@ impl StreamEnvironment {
             source_metrics,
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: Some(meta_client),
+            client_pool,
         }
     }
 
@@ -93,11 +92,10 @@ impl StreamEnvironment {
     pub fn for_test() -> Self {
         use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
         use risingwave_dml::dml_manager::DmlManager;
-        use risingwave_pb::connector_service::SinkPayloadFormat;
+        use risingwave_rpc_client::ComputeClientPool;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
-            server_addr: "127.0.0.1:5688".parse().unwrap(),
-            connector_params: ConnectorParams::new(SinkPayloadFormat::Json),
+            server_addr: "127.0.0.1:2333".parse().unwrap(),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
@@ -108,6 +106,7 @@ impl StreamEnvironment {
             source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: None,
+            client_pool: Arc::new(ComputeClientPool::for_test()),
         }
     }
 
@@ -125,10 +124,6 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
-    }
-
-    pub fn connector_params(&self) -> ConnectorParams {
-        self.connector_params.clone()
     }
 
     pub fn dml_manager_ref(&self) -> DmlManagerRef {
@@ -149,5 +144,9 @@ impl StreamEnvironment {
 
     pub fn meta_client(&self) -> Option<MetaClient> {
         self.meta_client.clone()
+    }
+
+    pub fn client_pool(&self) -> ComputeClientPoolRef {
+        self.client_pool.clone()
     }
 }

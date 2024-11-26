@@ -18,30 +18,24 @@ use std::sync::Arc;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
-use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
+use risingwave_connector_codec::decoder::avro::{
+    avro_extract_field_schema, avro_schema_skip_nullable_union, avro_schema_to_column_descs,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
-use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
-use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::unified::avro::{
-    avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
-};
+use crate::parser::avro::ConfluentSchemaCache;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::parser::{AccessBuilder, EncodingProperties, EncodingType, SchemaLocation};
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
 
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-const PAYLOAD: &str = "payload";
-
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: Schema,
-    schema_resolver: Arc<ConfluentSchemaResolver>,
+    schema: ResolvedAvroSchema,
+    schema_resolver: Arc<ConfluentSchemaCache>,
     key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
     encoding_type: EncodingType,
@@ -49,9 +43,9 @@ pub struct DebeziumAvroAccessBuilder {
 
 // TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_, '_>> {
+    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let schema = self.schema_resolver.get(schema_id).await?;
+        let schema = self.schema_resolver.get_by_id(schema_id).await?;
         self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
         self.key_schema = match self.encoding_type {
             EncodingType::Key => Some(schema),
@@ -59,9 +53,10 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         };
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_mut().unwrap(),
-            AvroParseOptions::default().with_schema(match self.encoding_type {
+            // Assumption: Key will not contain reference, so unresolved schema can work here.
+            AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema,
+                EncodingType::Value => &self.schema.resolved_schema,
             }),
         )))
     }
@@ -78,11 +73,8 @@ impl DebeziumAvroAccessBuilder {
             ..
         } = config;
 
-        let resolver = apache_avro::schema::ResolvedSchema::try_from(&*outer_schema)?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let schema = resolver.to_resolved(&outer_schema)?;
         Ok(Self {
-            schema,
+            schema: ResolvedAvroSchema::create(outer_schema)?,
             schema_resolver,
             key_schema: None,
             value: None,
@@ -96,24 +88,29 @@ impl DebeziumAvroAccessBuilder {
 pub struct DebeziumAvroParserConfig {
     pub key_schema: Arc<Schema>,
     pub outer_schema: Arc<Schema>,
-    pub schema_resolver: Arc<ConfluentSchemaResolver>,
+    pub schema_resolver: Arc<ConfluentSchemaCache>,
 }
 
 impl DebeziumAvroParserConfig {
     pub async fn new(encoding_config: EncodingProperties) -> ConnectorResult<Self> {
         let avro_config = try_match_expand!(encoding_config, EncodingProperties::Avro)?;
-        let schema_location = &avro_config.row_schema_location;
-        let client_config = &avro_config.client_config;
-        let kafka_topic = &avro_config.topic;
+        let SchemaLocation::Confluent {
+            urls: schema_location,
+            client_config,
+            name_strategy,
+            topic: kafka_topic,
+        } = &avro_config.schema_location
+        else {
+            unreachable!()
+        };
         let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
-        let resolver = ConfluentSchemaResolver::new(client);
+        let resolver = ConfluentSchemaCache::new(client);
 
-        let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
         let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
-        let key_schema = resolver.get_by_subject_name(&key_subject).await?;
-        let outer_schema = resolver.get_by_subject_name(&val_subject).await?;
+        let key_schema = resolver.get_by_subject(&key_subject).await?;
+        let outer_schema = resolver.get_by_subject(&val_subject).await?;
 
         Ok(Self {
             key_schema,
@@ -123,14 +120,59 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.key_schema)
+        avro_schema_to_column_descs(
+            &self.key_schema,
+            // TODO: do we need to support map type here?
+            None,
+        )
+        .map_err(Into::into)
     }
 
     pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(avro_schema_skip_union(avro_extract_field_schema(
-            &self.outer_schema,
-            Some("before"),
-        )?)?)
+        // Refer to debezium_avro_msg_schema.avsc for how the schema looks like:
+
+        // "fields": [
+        // {
+        //     "name": "before",
+        //     "type": [
+        //         "null",
+        //         {
+        //             "type": "record",
+        //             "name": "Value",
+        //             "fields": [...],
+        //         }
+        //     ],
+        //     "default": null
+        // },
+        // {
+        //     "name": "after",
+        //     "type": [
+        //         "null",
+        //         "Value"
+        //     ],
+        //     "default": null
+        // },
+        // ...]
+
+        // Other fields are:
+        // - source: describes the source metadata for the event
+        // - op
+        // - ts_ms
+        // - transaction
+        // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
+
+        avro_schema_to_column_descs(
+            avro_schema_skip_nullable_union(avro_extract_field_schema(
+                // FIXME: use resolved schema here.
+                // Currently it works because "after" refers to a subtree in "before",
+                // but in theory, inside "before" there could also be a reference.
+                &self.outer_schema,
+                Some("before"),
+            )?)?,
+            // TODO: do we need to support map type here?
+            None,
+        )
+        .map_err(Into::into)
     }
 }
 
@@ -139,9 +181,8 @@ mod tests {
     use std::io::Read;
     use std::path::PathBuf;
 
-    use apache_avro::Schema;
     use itertools::Itertools;
-    use maplit::{convert_args, hashmap};
+    use maplit::{btreemap, convert_args};
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
     use risingwave_common::row::{OwnedRow, Row};
@@ -151,10 +192,9 @@ mod tests {
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
-    use crate::parser::{
-        DebeziumAvroParserConfig, DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig,
-    };
+    use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
     use crate::source::{SourceColumnDesc, SourceContext};
+    use crate::WithOptionsSecResolved;
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
 
@@ -224,7 +264,7 @@ mod tests {
 
         let outer_schema = get_outer_schema();
         let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema = avro_schema_skip_union(
+        let extracted_inner_schema = avro_schema_skip_nullable_union(
             avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
         )
         .unwrap();
@@ -245,7 +285,7 @@ mod tests {
 }
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
-        let names: Vec<String> = avro_schema_to_column_descs(&key_schema)
+        let names: Vec<String> = avro_schema_to_column_descs(&key_schema, None)
             .unwrap()
             .drain(..)
             .map(|d| d.name)
@@ -301,7 +341,7 @@ mod tests {
 }
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
-        let columns = avro_schema_to_column_descs(&schema).unwrap();
+        let columns = avro_schema_to_column_descs(&schema, None).unwrap();
         for col in &columns {
             let dtype = col.column_type.as_ref().unwrap();
             println!("name = {}, type = {:?}", col.name, dtype.type_name);
@@ -315,10 +355,11 @@ mod tests {
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
-            avro_schema_skip_union(
+            avro_schema_skip_nullable_union(
                 avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
             )
             .unwrap(),
+            None,
         )
         .unwrap()
         .into_iter()
@@ -350,7 +391,7 @@ mod tests {
     #[ignore]
     #[tokio::test]
     async fn test_debezium_avro_parser() -> crate::error::ConnectorResult<()> {
-        let props = convert_args!(hashmap!(
+        let props = convert_args!(btreemap!(
             "kafka.topic" => "dbserver1.inventory.customers"
         ));
         let info = StreamSourceInfo {
@@ -359,7 +400,8 @@ mod tests {
             row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(&info, &props)?;
+        let parser_config =
+            SpecificParserConfig::new(&info, &WithOptionsSecResolved::without_secrets(props))?;
         let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?

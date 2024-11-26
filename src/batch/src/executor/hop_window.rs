@@ -32,7 +32,6 @@ pub struct HopWindowExecutor {
     child: BoxedExecutor,
     identity: String,
     schema: Schema,
-    time_col_idx: usize,
     window_slide: Interval,
     window_size: Interval,
     window_start_exprs: Vec<BoxedExpression>,
@@ -52,7 +51,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::HopWindow
         )?;
-        let time_col = hop_window_node.get_time_col() as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
         let output_indices = hop_window_node
@@ -74,6 +72,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             .try_collect()?;
         assert_eq!(window_start_exprs.len(), window_end_exprs.len());
 
+        let time_col = hop_window_node.get_time_col() as usize;
         let time_col_data_type = child.schema().fields()[time_col].data_type();
         let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = child
@@ -93,7 +92,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         Ok(Box::new(HopWindowExecutor::new(
             child,
             output_indices_schema,
-            time_col,
             window_slide,
             window_size,
             source.plan_node().get_identity().clone(),
@@ -109,7 +107,6 @@ impl HopWindowExecutor {
     fn new(
         child: BoxedExecutor,
         schema: Schema,
-        time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
         identity: String,
@@ -121,7 +118,6 @@ impl HopWindowExecutor {
             child,
             identity,
             schema,
-            time_col_idx,
             window_slide,
             window_size,
             window_start_exprs,
@@ -209,10 +205,8 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::DataType;
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
     use super::*;
@@ -256,7 +250,6 @@ mod tests {
         Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
             schema,
-            2,
             window_slide,
             window_size,
             "test".to_string(),

@@ -1,16 +1,18 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2024 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector;
 
@@ -25,25 +27,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.apache.http.HttpHost;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.elasticsearch.action.bulk.BackoffPolicy;
-import org.elasticsearch.action.bulk.BulkProcessor;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.delete.DeleteRequest;
-import org.elasticsearch.action.update.UpdateRequest;
-import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.client.RestHighLevelClientBuilder;
-import org.elasticsearch.common.unit.ByteSizeUnit;
-import org.elasticsearch.common.unit.ByteSizeValue;
-import org.elasticsearch.core.TimeValue;
-import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,10 +46,13 @@ import org.slf4j.LoggerFactory;
 public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error message %s";
+    private static final int INDEX_INDEX = 0;
+    private static final int KEY_INDEX = 1;
+    private static final int DOC_INDEX = 2;
+    private static final int ROUTING_INDEX = 3;
 
     private final EsSinkConfig config;
-    private BulkProcessor bulkProcessor;
-    private final RestHighLevelClient client;
+    private BulkProcessorAdapter bulkProcessor;
 
     // Used to handle the return message of ES and throw errors
     private final RequestTracker requestTracker;
@@ -165,158 +151,44 @@ public class EsSink extends SinkWriterBase {
 
         this.config = config;
         this.requestTracker = new RequestTracker();
-
         // ApiCompatibilityMode is enabled to ensure the client can talk to newer version es sever.
-        this.client =
-                new RestHighLevelClientBuilder(
-                                configureRestClientBuilder(RestClient.builder(host), config)
-                                        .build())
-                        .setApiCompatibilityMode(true)
-                        .build();
-        // Test connection
-        try {
-            boolean isConnected = this.client.ping(RequestOptions.DEFAULT);
-            if (!isConnected) {
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("Cannot connect to " + config.getUrl())
-                        .asRuntimeException();
-            }
-        } catch (Exception e) {
-            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
-        }
-        this.bulkProcessor = createBulkProcessor(this.requestTracker);
-    }
-
-    private static RestClientBuilder configureRestClientBuilder(
-            RestClientBuilder builder, EsSinkConfig config) {
-        // Possible config:
-        // 1. Connection path prefix
-        // 2. Username and password
-        if (config.getPassword() != null && config.getUsername() != null) {
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(
-                    AuthScope.ANY,
-                    new UsernamePasswordCredentials(config.getUsername(), config.getPassword()));
-            builder.setHttpClientConfigCallback(
-                    httpClientBuilder ->
-                            httpClientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        // 3. Timeout
-        return builder;
-    }
-
-    private BulkProcessor.Builder applyBulkConfig(
-            RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
-        BulkProcessor.Builder builder =
-                BulkProcessor.builder(
-                        (BulkRequestConsumerFactory)
-                                (bulkRequest, bulkResponseActionListener) ->
-                                        client.bulkAsync(
-                                                bulkRequest,
-                                                RequestOptions.DEFAULT,
-                                                bulkResponseActionListener),
-                        listener);
-        // Possible feature: move these to config
-        // execute the bulk every 10 000 requests
-        builder.setBulkActions(1000);
-        // flush the bulk every 5mb
-        builder.setBulkSize(new ByteSizeValue(5, ByteSizeUnit.MB));
-        // flush the bulk every 5 seconds whatever the number of requests
-        builder.setFlushInterval(TimeValue.timeValueSeconds(5));
-        // Set the number of concurrent requests
-        builder.setConcurrentRequests(1);
-        // Set a custom backoff policy which will initially wait for 100ms, increase exponentially
-        // and retries up to three times.
-        builder.setBackoffPolicy(
-                BackoffPolicy.exponentialBackoff(TimeValue.timeValueMillis(100), 3));
-        return builder;
-    }
-
-    private BulkProcessor createBulkProcessor(RequestTracker requestTracker) {
-        BulkProcessor.Builder builder =
-                applyBulkConfig(this.client, this.config, new BulkListener(requestTracker));
-        return builder.build();
-    }
-
-    private class BulkListener implements BulkProcessor.Listener {
-        private final RequestTracker requestTracker;
-
-        public BulkListener(RequestTracker requestTracker) {
-            this.requestTracker = requestTracker;
-        }
-
-        /** This method is called just before bulk is executed. */
-        @Override
-        public void beforeBulk(long executionId, BulkRequest request) {
-            LOG.debug("Sending bulk of {} actions to Elasticsearch.", request.numberOfActions());
-        }
-
-        /** This method is called after bulk execution. */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            if (response.hasFailures()) {
-                String errMessage =
-                        String.format(
-                                "Bulk of %d actions failed. Failure: %s",
-                                request.numberOfActions(), response.buildFailureMessage());
-                this.requestTracker.addErrResult(errMessage);
-            } else {
-                this.requestTracker.addOkResult(request.numberOfActions());
-                LOG.debug("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
-            }
-        }
-
-        /** This method is called when the bulk failed and raised a Throwable */
-        @Override
-        public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            String errMessage =
-                    String.format(
-                            "Bulk of %d actions failed. Failure: %s",
-                            request.numberOfActions(), failure.getMessage());
-            this.requestTracker.addErrResult(errMessage);
-        }
-    }
-
-    private void processUpsert(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-        String doc = (String) row.get(2);
-
-        UpdateRequest updateRequest;
-        if (config.getIndex() != null) {
-            updateRequest =
-                    new UpdateRequest(config.getIndex(), "_doc", key).doc(doc, XContentType.JSON);
+        if (config.getConnector().equals("elasticsearch_v1")) {
+            ElasticRestHighLevelClientAdapter client =
+                    new ElasticRestHighLevelClientAdapter(host, config);
+            this.bulkProcessor =
+                    new ElasticBulkProcessorAdapter(this.requestTracker, client, config);
+        } else if (config.getConnector().equals("opensearch_v1")) {
+            OpensearchRestHighLevelClientAdapter client =
+                    new OpensearchRestHighLevelClientAdapter(host, config);
+            this.bulkProcessor =
+                    new OpensearchBulkProcessorAdapter(this.requestTracker, client, config);
         } else {
-            updateRequest = new UpdateRequest(index, "_doc", key).doc(doc, XContentType.JSON);
+            throw new RuntimeException("Sink type must be elasticsearch or opensearch");
         }
-        updateRequest.docAsUpsert(true);
-        this.requestTracker.addWriteTask();
-        bulkProcessor.add(updateRequest);
     }
 
-    private void processDelete(SinkRow row) throws JsonMappingException, JsonProcessingException {
-        final String index = (String) row.get(0);
-        final String key = (String) row.get(1);
-
-        DeleteRequest deleteRequest;
-        if (config.getIndex() != null) {
-            deleteRequest = new DeleteRequest(config.getIndex(), "_doc", key);
+    private void writeRow(SinkRow row)
+            throws JsonMappingException, JsonProcessingException, InterruptedException {
+        final String key = (String) row.get(KEY_INDEX);
+        String doc = (String) row.get(DOC_INDEX);
+        final String index;
+        if (config.getIndex() == null) {
+            index = (String) row.get(INDEX_INDEX);
         } else {
-            deleteRequest = new DeleteRequest(index, "_doc", key);
+            index = config.getIndex();
         }
-        this.requestTracker.addWriteTask();
-        bulkProcessor.add(deleteRequest);
-    }
-
-    private void writeRow(SinkRow row) throws JsonMappingException, JsonProcessingException {
+        String routing = null;
+        if (config.getRoutingColumn() != null) {
+            routing = (String) row.get(ROUTING_INDEX);
+        }
         switch (row.getOp()) {
             case INSERT:
             case UPDATE_INSERT:
-                processUpsert(row);
+                this.bulkProcessor.addRow(index, key, doc, routing);
                 break;
             case DELETE:
             case UPDATE_DELETE:
-                processDelete(row);
+                this.bulkProcessor.deleteRow(index, key, routing);
                 break;
             default:
                 throw Status.INVALID_ARGUMENT
@@ -353,15 +225,10 @@ public class EsSink extends SinkWriterBase {
     public void drop() {
         try {
             bulkProcessor.awaitClose(100, TimeUnit.SECONDS);
-            client.close();
         } catch (Exception e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();
         }
-    }
-
-    public RestHighLevelClient getClient() {
-        return client;
     }
 }

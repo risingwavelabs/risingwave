@@ -17,7 +17,7 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{is_system_schema, Field};
+use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
@@ -25,6 +25,7 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::BoundShare;
+use crate::binder::relation::BoundShareInput;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -119,9 +120,14 @@ impl Binder {
                                 table_name
                             );
                         }
-                    } else if let Ok((table_catalog, schema_name)) =
-                        self.catalog
-                            .get_table_by_name(&self.db_name, schema_path, table_name)
+                    } else if let Some(source_catalog) =
+                        self.temporary_source_manager.get_source(table_name)
+                    // don't care about the database and schema
+                    {
+                        self.resolve_source_relation(&source_catalog.clone(), as_of)
+                    } else if let Ok((table_catalog, schema_name)) = self
+                        .catalog
+                        .get_created_table_by_name(&self.db_name, schema_path, table_name)
                     {
                         self.resolve_table_relation(table_catalog.clone(), schema_name, as_of)?
                     } else if let Ok((source_catalog, _)) =
@@ -162,7 +168,15 @@ impl Binder {
                             if let Ok(schema) =
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
-                                if let Some(table_catalog) = schema.get_table_by_name(table_name) {
+                                if let Some(source_catalog) =
+                                    self.temporary_source_manager.get_source(table_name)
+                                // don't care about the database and schema
+                                {
+                                    return Ok(self
+                                        .resolve_source_relation(&source_catalog.clone(), as_of));
+                                } else if let Some(table_catalog) =
+                                    schema.get_created_table_by_name(table_name)
+                                {
                                     return self.resolve_table_relation(
                                         table_catalog.clone(),
                                         &schema_name.clone(),
@@ -221,6 +235,7 @@ impl Binder {
         source_catalog: &SourceCatalog,
         as_of: Option<AsOf>,
     ) -> (Relation, Vec<(bool, Field)>) {
+        debug_assert_column_ids_distinct(&source_catalog.columns);
         self.included_relations.insert(source_catalog.id.into());
         (
             Relation::Source(Box::new(BoundSource {
@@ -280,7 +295,10 @@ impl Binder {
         };
         let input = Either::Left(query);
         Ok((
-            Relation::Share(Box::new(BoundShare { share_id, input })),
+            Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: BoundShareInput::Query(input),
+            })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }
@@ -309,7 +327,7 @@ impl Binder {
         };
         let (table_catalog, schema_name) =
             self.catalog
-                .get_table_by_name(db_name, schema_path, table_name)?;
+                .get_created_table_by_name(db_name, schema_path, table_name)?;
         let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();
@@ -347,7 +365,7 @@ impl Binder {
 
         let (table, _schema_name) =
             self.catalog
-                .get_table_by_name(db_name, schema_path, table_name)?;
+                .get_created_table_by_name(db_name, schema_path, table_name)?;
 
         match table.table_type() {
             TableType::Table => {}

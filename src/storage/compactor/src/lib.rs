@@ -22,6 +22,8 @@ use risingwave_common::config::{
     AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
 };
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 
@@ -91,6 +93,10 @@ pub struct CompactorOpts {
 
     #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+
+    /// Total available memory for the frontend node in bytes. Used by compactor.
+    #[clap(long, env = "RW_COMPACTOR_TOTAL_MEMORY_BYTES", default_value_t = default_compactor_total_memory_bytes())]
+    pub compactor_total_memory_bytes: usize,
 }
 
 impl risingwave_common::opts::Opts for CompactorOpts {
@@ -106,7 +112,10 @@ impl risingwave_common::opts::Opts for CompactorOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: CompactorOpts,
+    shutdown: CancellationToken,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     match opts.compactor_mode {
@@ -116,11 +125,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
             let listen_addr = opts.listen_addr.parse().unwrap();
 
-            let (join_handle, _shutdown_sender) = shared_compactor_serve(listen_addr, opts).await;
-
-            tracing::info!("Server listening at {}", listen_addr);
-
-            join_handle.await.unwrap();
+            shared_compactor_serve(listen_addr, opts, shutdown).await;
         }),
         None | Some(CompactorMode::Dedicated) => Box::pin(async move {
             tracing::info!("Compactor node options: {:?}", opts);
@@ -138,13 +143,12 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 .parse()
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
-            let (join_handle, observer_join_handle, _shutdown_sender) =
-                compactor_serve(listen_addr, advertise_addr, opts).await;
 
-            tracing::info!("Server listening at {}", listen_addr);
-
-            join_handle.await.unwrap();
-            observer_join_handle.abort();
+            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
         }),
     }
+}
+
+pub fn default_compactor_total_memory_bytes() -> usize {
+    system_memory_available_bytes()
 }

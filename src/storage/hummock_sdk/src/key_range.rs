@@ -52,6 +52,11 @@ impl KeyRange {
     fn end_bound_inf(&self) -> bool {
         self.right.is_empty()
     }
+
+    #[inline]
+    pub fn inf_key_range(&self) -> bool {
+        self.start_bound_inf() && self.end_bound_inf()
+    }
 }
 
 pub trait KeyRangeCommon {

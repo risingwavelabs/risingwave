@@ -140,10 +140,11 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
             <NavButton href="/views/">Views</NavButton>
+            <NavButton href="/subscriptions/">Subscriptions</NavButton>
           </Section>
           <Section>
             <NavTitle>Streaming</NavTitle>
-            <NavButton href="/dependency_graph/">Dependency Graph</NavButton>
+            <NavButton href="/relation_graph/">Relation Graph</NavButton>
             <NavButton href="/fragment_graph/">Fragment Graph</NavButton>
           </Section>
           <Section>

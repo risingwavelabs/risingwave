@@ -19,9 +19,15 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, CreateType, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
+use crate::sink::file_sink::azblob::AZBLOB_SINK;
+use crate::sink::file_sink::fs::FS_SINK;
+use crate::sink::file_sink::s3::S3_SINK;
+use crate::sink::file_sink::webhdfs::WEBHDFS_SINK;
+use crate::sink::CONNECTOR_TYPE_KEY;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {
@@ -37,7 +43,7 @@ pub struct SinkDesc {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink. Derived by the frontend.
+    /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
@@ -49,6 +55,9 @@ pub struct SinkDesc {
 
     /// The properties of the sink.
     pub properties: BTreeMap<String, String>,
+
+    /// Secret ref
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -82,7 +91,6 @@ impl SinkDesc {
         database_id: DatabaseId,
         owner: UserId,
         connection_id: Option<ConnectionId>,
-        dependent_relations: Vec<TableId>,
     ) -> SinkCatalog {
         SinkCatalog {
             id: self.id,
@@ -95,8 +103,8 @@ impl SinkDesc {
             downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
-            dependent_relations,
-            properties: self.properties.into_iter().collect(),
+            properties: self.properties,
+            secret_refs: self.secret_refs,
             sink_type: self.sink_type,
             format_desc: self.format_desc,
             connection_id,
@@ -108,6 +116,7 @@ impl SinkDesc {
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
             create_type: self.create_type,
+            original_target_columns: vec![],
         }
     }
 
@@ -131,6 +140,19 @@ impl SinkDesc {
             sink_from_name: self.sink_from_name.clone(),
             target_table: self.target_table.map(|table_id| table_id.table_id()),
             extra_partition_col_idx: self.extra_partition_col_idx.map(|idx| idx as u64),
+            secret_refs: self.secret_refs.clone(),
         }
+    }
+
+    pub fn is_file_sink(&self) -> bool {
+        self.properties
+            .get(CONNECTOR_TYPE_KEY)
+            .map(|s| {
+                s.eq_ignore_ascii_case(FS_SINK)
+                    || s.eq_ignore_ascii_case(AZBLOB_SINK)
+                    || s.eq_ignore_ascii_case(S3_SINK)
+                    || s.eq_ignore_ascii_case(WEBHDFS_SINK)
+            })
+            .unwrap_or(false)
     }
 }
