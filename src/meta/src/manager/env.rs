@@ -16,12 +16,12 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
-use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
@@ -329,25 +329,6 @@ impl MetaOpts {
     }
 }
 
-/// This function `is_first_launch_for_sql_backend_cluster` is used to check whether the cluster, which uses SQL as the backend, is a new cluster.
-/// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
-/// then it is considered an old cluster.
-///
-/// Note: this check should be performed before `Migrator::up()`.
-pub async fn is_first_launch_for_sql_backend_cluster(
-    sql_meta_store: &SqlMetaStore,
-) -> MetaResult<bool> {
-    let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
-    for migration in migrations {
-        if migration.name() == "m20230908_072257_init"
-            && migration.status() == MigrationStatus::Applied
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
@@ -376,12 +357,13 @@ impl MetaSrvEnv {
             );
         }
 
-        let cluster_first_launch =
-            is_first_launch_for_sql_backend_cluster(&meta_store_impl).await?;
-        // Try to upgrade if any new model changes are added.
-        Migrator::up(&meta_store_impl.conn, None)
-            .await
-            .expect("Failed to upgrade models in meta store");
+        let cluster_first_launch = meta_store_impl.up().await.context(
+            "Failed to initialize the meta store, \
+            this may happen if there's existing metadata incompatible with the current version of RisingWave, \
+            e.g., downgrading from a newer release or a nightly build to an older one. \
+            For a single-node deployment, you may want to reset all data by deleting the data directory, \
+            typically located at `~/.risingwave`.",
+        )?;
 
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);
