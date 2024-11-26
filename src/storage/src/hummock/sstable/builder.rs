@@ -785,12 +785,14 @@ pub(super) mod tests {
 
         // build remote table
         let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
             sstable_store.clone(),
             CachePolicy::NotFill,
+            table_id_to_vnode,
         )
         .await;
         let table = sstable_store

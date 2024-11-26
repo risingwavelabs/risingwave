@@ -25,6 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -229,6 +230,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
+    table_id_to_vnode: HashMap<u32, usize>,
 ) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
@@ -239,10 +241,6 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         .clone()
         .create_sst_writer(object_id, writer_opts);
 
-    let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
-        VirtualNode::COUNT_FOR_TEST,
-    )]);
     let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
         FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         table_id_to_vnode,
@@ -279,12 +277,48 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> (TableHolder, SstableInfo) {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store.clone(),
         CachePolicy::NotFill,
+        table_id_to_vnode,
+    )
+    .await;
+
+    (
+        sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap(),
+        sst_info,
+    )
+}
+
+pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + Eq>(
+    opts: SstableBuilderOptions,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    sstable_store: SstableStoreRef,
+    table_ids: Vec<StateTableId>,
+) -> (TableHolder, SstableInfo) {
+    let table_id_to_vnode = table_ids
+        .into_iter()
+        .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+        .collect();
+
+    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+        opts,
+        object_id,
+        kv_iter,
+        sstable_store.clone(),
+        CachePolicy::NotFill,
+        table_id_to_vnode,
     )
     .await;
 
@@ -304,12 +338,17 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store,
         CachePolicy::NotFill,
+        table_id_to_vnode,
     )
     .await
 }
@@ -321,12 +360,17 @@ pub async fn gen_test_sstable_with_range_tombstone(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store.clone(),
         CachePolicy::Fill(CacheHint::Normal),
+        table_id_to_vnode,
     )
     .await
 }

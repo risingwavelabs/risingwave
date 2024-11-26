@@ -359,13 +359,14 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_info, test_key_of,
-        test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_info,
+        gen_test_sstable_with_table_ids, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::CachePolicy;
 
@@ -569,5 +570,149 @@ mod tests {
             sstable_iter.next().await.unwrap();
         }
         assert_eq!(cnt, TEST_KEYS_COUNT);
+    }
+
+    #[tokio::test]
+    async fn test_key_range() {
+        {
+            let sstable_store = mock_sstable_store().await;
+            let (sstable, sstable_info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                    .await;
+            let mut sstable_iter = SstableIterator::create(
+                sstable,
+                sstable_store.clone(),
+                Arc::new(SstableIteratorReadOptions::default()),
+                sstable_info.key_range,
+            );
+            sstable_iter.rewind().await.unwrap();
+            assert!(sstable_iter.is_valid());
+            assert_eq!(sstable_iter.key(), test_key_of(0).to_ref());
+        }
+
+        {
+            let sstable_store = mock_sstable_store().await;
+            let (sstable, _sstable_info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                    .await;
+            // test skip key_range left
+            let key_range = KeyRange {
+                left: test_key_of(5000).encode().into(),
+                right: test_key_of(100000).encode().into(),
+                right_exclusive: false,
+            };
+            let mut sstable_iter = SstableIterator::create(
+                sstable,
+                sstable_store.clone(),
+                Arc::new(SstableIteratorReadOptions::default()),
+                key_range.clone(),
+            );
+            sstable_iter.rewind().await.unwrap();
+            assert!(sstable_iter.is_valid());
+            assert!(sstable_iter.key().le(&FullKey::decode(&key_range.left)));
+        }
+
+        {
+            let sstable_store = mock_sstable_store().await;
+            let (sstable, _sstable_info) =
+                gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                    .await;
+            // test skip key_range left
+            let start_idx = 5000;
+            let end_idx = 6000;
+            let key_range = KeyRange {
+                left: test_key_of(start_idx).encode().into(),
+                right: test_key_of(end_idx).encode().into(),
+                right_exclusive: false,
+            };
+            let mut sstable_iter = SstableIterator::create(
+                sstable,
+                sstable_store.clone(),
+                Arc::new(SstableIteratorReadOptions::default()),
+                key_range.clone(),
+            );
+            sstable_iter.rewind().await.unwrap();
+            assert!(sstable_iter.is_valid());
+            assert!(sstable_iter.key().le(&FullKey::decode(&key_range.left)));
+
+            let mut cnt = 0;
+            let mut last_key = FullKey::decode(&key_range.left).to_vec();
+            while sstable_iter.is_valid() {
+                last_key = sstable_iter.key().to_vec();
+                cnt += 1;
+                sstable_iter.next().await.unwrap();
+            }
+
+            // table_id not change, key_range check can not be done
+            assert!(cnt > (end_idx - start_idx + 1));
+            assert_ne!(last_key, test_key_of(end_idx));
+        }
+
+        {
+            let sstable_store = mock_sstable_store().await;
+            // test key_range right
+            let k1 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 1).as_bytes());
+                let uk = UserKey::for_test(TableId::from(1), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
+
+            let k2 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 2).as_bytes());
+                let uk = UserKey::for_test(TableId::from(2), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
+
+            let kv_pairs = vec![
+                (k1.clone(), HummockValue::put(test_value_of(1))),
+                (k2.clone(), HummockValue::put(test_value_of(2))),
+            ];
+
+            let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                default_builder_opt_for_test(),
+                10,
+                kv_pairs.into_iter(),
+                sstable_store.clone(),
+                vec![1, 2],
+            )
+            .await;
+
+            {
+                let key_range = KeyRange {
+                    left: k1.encode().into(),
+                    right: k2.encode().into(),
+                    right_exclusive: false,
+                };
+                let mut sstable_iter = SstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    key_range.clone(),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+
+                let mut cnt = 0;
+                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                // table_id not change, key_range check can not be done
+                assert_eq!(2, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+        }
     }
 }
