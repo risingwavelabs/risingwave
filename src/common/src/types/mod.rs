@@ -409,10 +409,6 @@ impl DataType {
         Self::Struct(StructType::from_parts(field_names, fields))
     }
 
-    pub fn new_unnamed_struct(fields: Vec<DataType>) -> Self {
-        Self::Struct(StructType::unnamed(fields))
-    }
-
     pub fn as_struct(&self) -> &StructType {
         match self {
             DataType::Struct(t) => t,
