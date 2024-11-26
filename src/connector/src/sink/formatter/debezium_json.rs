@@ -336,7 +336,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use super::*;
     use crate::sink::utils::chunk_to_json;
@@ -373,10 +373,11 @@ mod tests {
                 type_name: "".into(),
             },
             Field {
-                data_type: DataType::new_struct(
-                    vec![DataType::Int32, DataType::Float32],
-                    vec!["v4".to_string(), "v5".to_string()],
-                ),
+                data_type: StructType::new(vec![
+                    ("v4", DataType::Int32),
+                    ("v5", DataType::Float32),
+                ])
+                .into(),
                 name: "v3".into(),
                 sub_fields: vec![
                     Field {

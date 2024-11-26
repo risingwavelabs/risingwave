@@ -21,8 +21,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry,
+    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -67,7 +66,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -84,14 +83,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheContext),
+    Fill(CacheHint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheContext::Default)
+        CachePolicy::Fill(CacheHint::Normal)
     }
 }
 
@@ -354,9 +353,9 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CacheContext::LowPriority
+                    CacheHint::Low
                 };
-                let entry = self.block_cache.insert_with_context(
+                let entry = self.block_cache.insert_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
@@ -440,7 +439,7 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_context(
+                let entry = self.block_cache.fetch_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,

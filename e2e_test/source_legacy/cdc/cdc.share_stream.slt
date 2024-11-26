@@ -134,6 +134,33 @@ create table orders_test (
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
 
+statement error
+CREATE TABLE test_my_default_value (
+    id int,
+    name varchar,
+    city varchar DEFAULT 'Beijing',
+    PRIMARY KEY (id)
+) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
+
+statement ok
+CREATE TABLE test_my_default_value (
+    id int,
+    name varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+INSERT INTO test_my_default_value VALUES (2, 'jack');
+
+query II
+select * from test_my_default_value;
+----
+2 jack Shanghai
+
 
 statement ok
 create table kt1 (*) from mysql_source table 'kdb.kt1';
@@ -575,3 +602,22 @@ query II
 select * from upper_orders_shared order by id;
 ----
 1 happy
+
+statement ok
+CREATE TABLE test_pg_default_value (
+    id int,
+    name varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.test_default_value';
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+INSERT INTO test_pg_default_value VALUES (1, 'noris');
+
+query II
+select * from test_pg_default_value;
+----
+1 noris Shanghai
