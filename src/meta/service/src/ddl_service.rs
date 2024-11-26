@@ -41,7 +41,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
-    DdlCommand, DdlController, DropMode, ReplaceTableInfo, StreamingJobId,
+    DdlCommand, DdlController, DropMode, ReplaceStreamJobInfo, StreamingJobId,
 };
 use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::MetaError;
@@ -92,13 +92,13 @@ impl DdlServiceImpl {
             source,
             job_type,
         }: ReplaceTablePlan,
-    ) -> ReplaceTableInfo {
+    ) -> ReplaceStreamJobInfo {
         let table = table.unwrap();
         let col_index_mapping = table_col_index_mapping
             .as_ref()
             .map(ColIndexMapping::from_protobuf);
 
-        ReplaceTableInfo {
+        ReplaceStreamJobInfo {
             streaming_job: StreamingJob::Table(
                 source,
                 table,

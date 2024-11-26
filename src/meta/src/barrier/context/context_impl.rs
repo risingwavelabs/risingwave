@@ -27,7 +27,7 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, RecoveryReason, ReplaceTablePlan, Scheduled,
+    CreateStreamingJobType, RecoveryReason, ReplaceStreamJobPlan, Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::{MetaError, MetaResult};
@@ -180,7 +180,7 @@ impl CommandContext {
                     )
                     .await?;
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
+                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
                     new_fragments,
                     dispatchers,
                     init_split_assignment,
@@ -223,7 +223,7 @@ impl CommandContext {
                     .await?;
             }
 
-            Command::ReplaceTable(ReplaceTablePlan {
+            Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                 old_fragments,
                 new_fragments,
                 dispatchers,
