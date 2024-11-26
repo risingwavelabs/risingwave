@@ -60,6 +60,14 @@ updates:
     - dependency-name: "io.debezium:*"
       update-types:
         ["version-update:semver-minor", "version-update:semver-major"]
+    # Don't upgrade protobuf to 4.x now. See https://github.com/grpc/grpc-java/issues/11015
+    - dependency-name: "com.google.protobuf:*"
+      update-types:
+        ["version-update:semver-major"]
+    # Don't upgrade Flink to 2.0-preview
+    - dependency-name: "org.apache.flink:*"
+      update-types:
+        ["version-update:semver-major"]
   groups:
     # Group all dependenies together because Java libraries are quite stable
     all:
