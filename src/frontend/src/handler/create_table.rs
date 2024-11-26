@@ -73,7 +73,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot}
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::{IcebergEngineOpts, OverwriteOptions};
-use crate::{Binder, FrontendOpts, TableCatalog, WithOptions};
+use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
