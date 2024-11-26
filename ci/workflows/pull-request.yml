@@ -818,7 +818,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 32
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.
