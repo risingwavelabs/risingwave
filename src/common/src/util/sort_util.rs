@@ -579,7 +579,7 @@ mod tests {
     use super::*;
     use crate::array::{ListValue, StructValue};
     use crate::row::OwnedRow;
-    use crate::types::{DataType, Datum, ScalarImpl};
+    use crate::types::{DataType, Datum, ScalarImpl, StructType};
 
     #[test]
     fn test_order_type() {
@@ -720,7 +720,7 @@ mod tests {
                 DataType::Date,
                 DataType::Timestamp,
                 DataType::Time,
-                DataType::new_struct(vec![DataType::Int32, DataType::Float32], vec![]),
+                StructType::unnamed(vec![DataType::Int32, DataType::Float32]).into(),
                 DataType::List(Box::new(DataType::Int32)),
             ],
         );
