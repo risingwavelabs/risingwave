@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::catalog::connection::Info;
-use risingwave_pb::catalog::{connection, ConnectionParams, PbConnection};
+use risingwave_pb::catalog::{connection, PbConnection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
 use crate::user::UserId;
@@ -23,25 +23,21 @@ pub struct ConnectionCatalog {
     pub id: ConnectionId,
     pub name: String,
     pub info: connection::Info,
-    pub connection_params: Option<ConnectionParams>,
     pub owner: UserId,
 }
 
 impl ConnectionCatalog {
     pub fn connection_type(&self) -> &str {
-        if let Some(ref cp) = self.connection_params {
-            cp.get_connection_type().unwrap().as_str_name()
-        } else {
-            let Info::PrivateLinkService(ref srv) = self.info;
-            srv.get_provider().unwrap().as_str_name()
+        match &self.info {
+            Info::PrivateLinkService(srv) => srv.get_provider().unwrap().as_str_name(),
+            Info::ConnectionParams(params) => params.get_connection_type().unwrap().as_str_name(),
         }
     }
 
     pub fn provider(&self) -> &str {
-        if matches!(self.info, connection::Info::PrivateLinkService(_)) {
-            "PRIVATELINK"
-        } else {
-            unreachable!()
+        match &self.info {
+            Info::PrivateLinkService(_) => "PRIVATELINK",
+            Info::ConnectionParams(_) => panic!("ConnectionParams is not supported as provider."),
         }
     }
 }
@@ -52,7 +48,6 @@ impl From<&PbConnection> for ConnectionCatalog {
             id: prost.id,
             name: prost.name.clone(),
             info: prost.info.clone().unwrap(),
-            connection_params: prost.connection_params.clone(),
             owner: prost.owner,
         }
     }

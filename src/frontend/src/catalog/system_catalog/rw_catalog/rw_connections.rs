@@ -14,7 +14,6 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::catalog::connection::Info;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -52,12 +51,14 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     acl: vec![],
                     connection_params: "".to_string(),
                 };
-                if let Some(ref params) = conn.connection_params {
-                    rw_connection.connection_params = print_connection_params(params, schema);
-                } else if matches!(conn.info, Info::PrivateLinkService(_)) {
-                    // make sure the connection is private link service or it can lead to panic
-                    rw_connection.provider = conn.provider().into();
-                }
+                match &conn.info {
+                    risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => {
+                        rw_connection.provider = conn.provider().into();
+                    }
+                    risingwave_pb::catalog::connection::Info::ConnectionParams(params) => {
+                        rw_connection.connection_params = print_connection_params(params, schema);
+                    }
+                };
 
                 rw_connection
             })

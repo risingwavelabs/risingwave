@@ -269,9 +269,9 @@ message Connection {
   string name = 4;
   oneof info {
     PrivateLinkService private_link_service = 5 [deprecated = true];
+    ConnectionParams connection_params = 7;
   }
   uint32 owner = 6;
-  ConnectionParams connection_params = 7;
 }
 
 message Index {

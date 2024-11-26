@@ -24,6 +24,7 @@ use risingwave_connector::source::kafka::private_link::{
 };
 pub use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
@@ -205,7 +206,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             )?;
             let connection_catalog =
                 session.get_connection_by_name(schema_name, &connection_name)?;
-            if let Some(ref params) = connection_catalog.connection_params {
+            if let ConnectionInfo::ConnectionParams(params) = &connection_catalog.info {
                 connection_id = Some(connection_catalog.id);
                 Some(params.clone())
             } else {
