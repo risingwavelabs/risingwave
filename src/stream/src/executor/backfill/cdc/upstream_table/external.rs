@@ -37,7 +37,6 @@ pub struct ExternalStorageTable {
 
     table_type: CdcTableType,
 
-    // table_reader: ExternalTableReaderImpl,
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// `RowSeqScanExecutor`.
     /// todo: the schema of the external table defined in the CREATE TABLE DDL
@@ -123,8 +122,7 @@ impl ExternalStorageTable {
         &self,
         table_reader: &ExternalTableReaderImpl,
     ) -> ConnectorResult<Option<CdcOffset>> {
-        let binlog = table_reader.current_cdc_offset();
-        let binlog = binlog.await?;
+        let binlog = table_reader.current_cdc_offset().await?;
         Ok(Some(binlog))
     }
 }
