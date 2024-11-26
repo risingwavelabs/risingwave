@@ -5045,6 +5045,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5070,12 +5076,12 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ffa01d910407917a7c268fddf2be41163028693556b833a55f59351deffa011"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
+ "equivalent",
  "fastrace",
  "foyer-common",
  "foyer-memory",
@@ -5088,13 +5094,11 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "797addbeabe5c42db9615e4d350a9b9d1597bebc07eefbd032d0e173430c8868"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "bytes",
  "cfg-if",
- "crossbeam",
  "fastrace",
  "futures",
  "hashbrown 0.14.5",
@@ -5107,32 +5111,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "foyer-intrusive"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ee0c1f19c7736f34e37e7cd4c1d5ceef3a32e24dbb14fcf2fcc836ce1cbfc4"
-dependencies = [
- "foyer-common",
- "itertools 0.13.0",
-]
-
-[[package]]
 name = "foyer-memory"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b46b30275039721c05b390d4df00eff88814b1877ee06d56b61a859a5cf9577"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
  "cmsketch",
+ "equivalent",
  "fastrace",
  "foyer-common",
- "foyer-intrusive",
  "futures",
  "hashbrown 0.14.5",
+ "intrusive-collections",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "serde",
  "tracing",
@@ -5140,9 +5135,8 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038ecf3211a5f984d534a5654a41613be7334fe8f5aab529708866da2de62d82"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5155,6 +5149,7 @@ dependencies = [
  "bytes",
  "clap",
  "either",
+ "equivalent",
  "fastrace",
  "flume",
  "foyer-common",
@@ -5873,6 +5868,9 @@ name = "hashbrown"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+dependencies = [
+ "foldhash",
+]
 
 [[package]]
 name = "hashlink"
@@ -6556,6 +6554,14 @@ name = "integer-encoding"
 version = "3.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
+
+[[package]]
+name = "intrusive-collections"
+version = "0.9.7"
+source = "git+https://github.com/foyer-rs/intrusive-rs?rev=94cfac4701dbc0033b7bc27e31c46bf3a12d96d7#94cfac4701dbc0033b7bc27e31c46bf3a12d96d7"
+dependencies = [
+ "memoffset",
+]
 
 [[package]]
 name = "io-extras"
@@ -7483,9 +7489,9 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
+checksum = "8ae428771d17306715c5091d446327d1cfdedc82185c65ba8423ab404e45bf10"
 dependencies = [
  "ahash 0.8.11",
  "portable-atomic",
@@ -7493,31 +7499,29 @@ dependencies = [
 
 [[package]]
 name = "metrics-prometheus"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51557a875fdbd5b953b698ecd6cd06efef47618e02d95ad912e2392e5b5617ff"
+checksum = "ba3115d0e859470455e1587af70aed7935163339f959f01d6cbd245605fe7e67"
 dependencies = [
  "arc-swap",
  "metrics",
  "metrics-util",
- "once_cell",
  "prometheus",
- "sealed 0.5.0",
+ "sealed 0.6.0",
  "smallvec",
  "thiserror 1.0.63",
 ]
 
 [[package]]
 name = "metrics-util"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
+checksum = "15b482df36c13dd1869d73d14d28cd4855fbd6cfc32294bee109908a9f4a4ed7"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.0",
  "metrics",
- "num_cpus",
 ]
 
 [[package]]
@@ -12967,11 +12971,10 @@ dependencies = [
 
 [[package]]
 name = "sealed"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4a8caec23b7800fb97971a1c6ae365b6239aaeddfb934d6265f8505e795699d"
+checksum = "22f968c5ea23d555e670b449c1c5e7b2fc399fdaec1d304a17cd48e288abc107"
 dependencies = [
- "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.87",
