@@ -73,3 +73,11 @@ updates:
     all:
       patterns:
         - "*"
+
+# Don't touch risingwave-sink-deltalake-test. It's too complicated and it's only for testing
+- package-ecosystem: maven
+  directory: /java/connector-node/risingwave-sink-deltalake-test/
+  schedule:
+    interval: "weekly"
+  ignore:
+    - dependency-name: "*"
