@@ -202,6 +202,7 @@ define_keywords!(
     DISTRIBUTED,
     DISTSQL,
     DO,
+    DOT,
     DOUBLE,
     DROP,
     DYNAMIC,

@@ -21,6 +21,7 @@ use crate::optimizer::plan_node::{BatchSource, LogicalScan, StreamSource, Stream
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
+/// TODO(rc): maybe we should rename this to `DependencyCollectorVisitor`.
 #[derive(Debug, Clone, Default)]
 pub struct RelationCollectorVisitor {
     relations: HashSet<TableId>,

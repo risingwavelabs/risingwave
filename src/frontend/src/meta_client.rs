@@ -33,6 +33,7 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{EventLog, PbThrottleTarget, RecoveryStatus};
@@ -125,6 +126,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_cluster_recovery_status(&self) -> Result<RecoveryStatus>;
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
+
+    async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -299,5 +302,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>> {
         self.0.get_cluster_limits().await
+    }
+
+    async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
+        self.0.list_rate_limits().await
     }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Display;
 use std::future::pending;
 use std::iter::once;
@@ -20,10 +20,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::StreamExt;
+use await_tree::InstrumentAwait;
+use futures::future::BoxFuture;
+use futures::stream::{BoxStream, FuturesOrdered};
+use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::error::tonic::extra::Score;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
 };
@@ -51,7 +54,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
-use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     InitRequest, InitialPartialGraph, Request,
 };
@@ -265,6 +267,9 @@ pub(super) struct LocalBarrierWorker {
     /// Current barrier collection state.
     pub(super) state: ManagedBarrierState,
 
+    /// Futures will be finished in the order of epoch in ascending order.
+    await_epoch_completed_futures: FuturesOrdered<AwaitEpochCompletedFuture>,
+
     control_stream_handle: ControlStreamHandle,
 
     pub(super) actor_manager: Arc<StreamActorManager>,
@@ -296,6 +301,7 @@ impl LocalBarrierWorker {
                 shared_context.clone(),
                 initial_partial_graphs,
             ),
+            await_epoch_completed_futures: Default::default(),
             control_stream_handle: ControlStreamHandle::empty(),
             actor_manager,
             current_shared_context: shared_context,
@@ -316,10 +322,17 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, completed_epoch) = self.state.next_completed_epoch() => {
-                    let result = self.on_epoch_completed(partial_graph_id, completed_epoch);
-                    if let Err(err) = result {
-                        self.notify_other_failure(err, "failed to complete epoch").await;
+                (partial_graph_id, barrier) = self.state.next_collected_epoch() => {
+                    self.complete_barrier(partial_graph_id, barrier.epoch.prev);
+                }
+                (partial_graph_id, barrier, result) = rw_futures_util::pending_on_none(self.await_epoch_completed_futures.next()) => {
+                    match result {
+                        Ok(result) => {
+                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
+                        }
+                        Err(err) => {
+                            self.notify_other_failure(err, "failed to complete epoch").await;
+                        }
                     }
                 },
                 event = self.barrier_event_rx.recv() => {
@@ -454,23 +467,139 @@ impl LocalBarrierWorker {
     }
 }
 
-// event handler
+mod await_epoch_completed_future {
+    use std::future::Future;
+
+    use futures::future::BoxFuture;
+    use futures::FutureExt;
+    use risingwave_hummock_sdk::SyncResult;
+    use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
+
+    use crate::error::StreamResult;
+    use crate::executor::Barrier;
+    use crate::task::{await_tree_key, BarrierCompleteResult, PartialGraphId};
+
+    pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
+        + 'static;
+
+    pub(super) fn instrument_complete_barrier_future(
+        partial_graph_id: PartialGraphId,
+        complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
+        barrier: Barrier,
+        barrier_await_tree_reg: Option<&await_tree::Registry>,
+        create_mview_progress: Vec<PbCreateMviewProgress>,
+    ) -> AwaitEpochCompletedFuture {
+        let prev_epoch = barrier.epoch.prev;
+        let future = async move {
+            if let Some(future) = complete_barrier_future {
+                let result = future.await;
+                result.map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        .map(move |result| {
+            (
+                partial_graph_id,
+                barrier,
+                result.map(|sync_result| BarrierCompleteResult {
+                    sync_result,
+                    create_mview_progress,
+                }),
+            )
+        });
+        if let Some(reg) = barrier_await_tree_reg {
+            reg.register(
+                await_tree_key::BarrierAwait { prev_epoch },
+                format!("SyncEpoch({})", prev_epoch),
+            )
+            .instrument(future)
+            .left_future()
+        } else {
+            future.right_future()
+        }
+    }
+}
+
+use await_epoch_completed_future::*;
+use risingwave_common::catalog::TableId;
+use risingwave_storage::StateStoreImpl;
+
+fn sync_epoch(
+    state_store: &StateStoreImpl,
+    streaming_metrics: &StreamingMetrics,
+    prev_epoch: u64,
+    table_ids: HashSet<TableId>,
+) -> BoxFuture<'static, StreamResult<SyncResult>> {
+    let timer = streaming_metrics.barrier_sync_latency.start_timer();
+    let hummock = state_store.as_hummock().cloned();
+    let future = async move {
+        if let Some(hummock) = hummock {
+            hummock.sync(vec![(prev_epoch, table_ids)]).await
+        } else {
+            Ok(SyncResult::default())
+        }
+    };
+    future
+        .instrument_await(format!("sync_epoch (epoch {})", prev_epoch))
+        .inspect_ok(move |_| {
+            timer.observe_duration();
+        })
+        .map_err(move |e| {
+            tracing::error!(
+                prev_epoch,
+                error = %e.as_report(),
+                "Failed to sync state store",
+            );
+            e.into()
+        })
+        .boxed()
+}
+
 impl LocalBarrierWorker {
+    fn complete_barrier(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
+        {
+            let (barrier, table_ids, create_mview_progress) = self
+                .state
+                .pop_barrier_to_complete(partial_graph_id, prev_epoch);
+
+            let complete_barrier_future = match &barrier.kind {
+                BarrierKind::Unspecified => unreachable!(),
+                BarrierKind::Initial => {
+                    tracing::info!(
+                        epoch = prev_epoch,
+                        "ignore sealing data for the first barrier"
+                    );
+                    tracing::info!(?prev_epoch, "ignored syncing data for the first barrier");
+                    None
+                }
+                BarrierKind::Barrier => None,
+                BarrierKind::Checkpoint => Some(sync_epoch(
+                    &self.actor_manager.env.state_store(),
+                    &self.actor_manager.streaming_metrics,
+                    prev_epoch,
+                    table_ids.expect("should be Some on BarrierKind::Checkpoint"),
+                )),
+            };
+
+            self.await_epoch_completed_futures.push_back({
+                instrument_complete_barrier_future(
+                    partial_graph_id,
+                    complete_barrier_future,
+                    barrier,
+                    self.actor_manager.await_tree_reg.as_ref(),
+                    create_mview_progress,
+                )
+            });
+        }
+    }
+
     fn on_epoch_completed(
         &mut self,
         partial_graph_id: PartialGraphId,
         epoch: u64,
-    ) -> StreamResult<()> {
-        let state = self
-            .state
-            .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
-        let result = state
-            .pop_completed_epoch(epoch)
-            .expect("should exist")
-            .expect("should have completed")?;
-
+        result: BarrierCompleteResult,
+    ) {
         let BarrierCompleteResult {
             create_mview_progress,
             sync_result,
@@ -524,7 +653,6 @@ impl LocalBarrierWorker {
         };
 
         self.control_stream_handle.send_response(result);
-        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
@@ -538,11 +666,6 @@ impl LocalBarrierWorker {
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        if barrier.kind == BarrierKind::Initial {
-            self.actor_manager
-                .watermark_epoch
-                .store(barrier.epoch.curr, std::sync::atomic::Ordering::SeqCst);
-        }
         debug!(
             target: "events::stream::barrier::manager::send",
             "send barrier {:?}, actor_ids_to_collect = {:?}",

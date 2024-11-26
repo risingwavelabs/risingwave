@@ -222,7 +222,6 @@ macro_rules! dispatch_state_store {
 
 #[cfg(any(debug_assertions, test, feature = "test"))]
 pub mod verify {
-    use std::collections::HashSet;
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
@@ -231,7 +230,6 @@ pub mod verify {
 
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -575,20 +573,6 @@ pub mod verify {
             self.actual.try_wait_epoch(epoch, options)
         }
 
-        fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-            let expected_future = self
-                .expected
-                .as_ref()
-                .map(|expected| expected.sync(epoch, table_ids.clone()));
-            let actual_future = self.actual.sync(epoch, table_ids);
-            async move {
-                if let Some(expected_future) = expected_future {
-                    expected_future.await?;
-                }
-                actual_future.await
-            }
-        }
-
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
             let expected = if let Some(expected) = &self.expected {
                 Some(expected.new_local(option.clone()).await)
@@ -826,20 +810,16 @@ impl AsHummock for SledStateStore {
 
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
-    use std::collections::HashSet;
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
     use std::sync::Arc;
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
-    use futures::future::BoxFuture;
-    use futures::FutureExt;
     use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -1161,12 +1141,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> StorageResult<()>;
 
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> BoxFuture<'static, StorageResult<SyncResult>>;
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
     }
 
@@ -1178,14 +1152,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> StorageResult<()> {
             self.try_wait_epoch(epoch, options).await
-        }
-
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> BoxFuture<'static, StorageResult<SyncResult>> {
-            self.sync(epoch, table_ids).boxed()
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
@@ -1265,14 +1231,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.deref().try_wait_epoch(epoch, options)
-        }
-
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
-            self.deref().sync(epoch, table_ids)
         }
 
         fn new_local(
