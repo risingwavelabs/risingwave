@@ -46,19 +46,22 @@ pub struct KafkaConnection {
 }
 
 pub async fn validate_connection(connection: &PbConnection) -> ConnectorResult<()> {
-    if let Some(ref info) = connection.info {
-        match info {
-            risingwave_pb::catalog::connection::Info::ConnectionParams(cp) => {
-                let options = cp.properties.clone().into_iter().collect();
-                let secret_refs = cp.secret_refs.clone().into_iter().collect();
-                let props_secret_resolved =
-                    LocalSecretManager::global().fill_secrets(options, secret_refs)?;
-                let connection_impl =
-                    ConnectionImpl::from_proto(cp.connection_type(), props_secret_resolved)?;
-                dispatch_connection_impl!(connection_impl, inner, inner.test_connection().await?)
-            }
-            risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => unreachable!(),
+    #[cfg(debug_assertions)]
+    {
+        if let Some(risingwave_pb::catalog::connection::Info::PrivateLinkService(_)) =
+            connection.info
+        {
+            unreachable!("private link has been deprecated.")
         }
+    }
+    if let Some(ref cp) = connection.connection_params {
+        let options = cp.properties.clone().into_iter().collect();
+        let secret_refs = cp.secret_refs.clone().into_iter().collect();
+        let props_secret_resolved =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let connection_impl =
+            ConnectionImpl::from_proto(cp.connection_type(), props_secret_resolved)?;
+        dispatch_connection_impl!(connection_impl, inner, inner.test_connection().await?)
     }
     Ok(())
 }

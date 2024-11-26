@@ -410,13 +410,12 @@ pub async fn handle_show_object(
                 .iter_connections()
                 .map(|c| {
                     let name = c.name.clone();
-                    let r#type = match &c.info {
-                        connection::Info::PrivateLinkService(_) => {
-                            PRIVATELINK_CONNECTION.to_string()
-                        },
-                        connection::Info::ConnectionParams(params) => {
-                            params.get_connection_type().unwrap().as_str_name().to_string()
-                        }
+                    let r#type = if let Some(ref cp) = c.connection_params {
+                        cp.get_connection_type().unwrap().as_str_name().to_string()
+                    } else if matches!(c.info, connection::Info::PrivateLinkService(_)) {
+                        PRIVATELINK_CONNECTION.to_string()
+                    } else {
+                        unreachable!()
                     };
                     let source_names = schema
                         .get_source_ids_by_connection(c.id)
@@ -430,22 +429,19 @@ pub async fn handle_show_object(
                         .into_iter()
                         .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
-                    let properties = match &c.info {
-                        connection::Info::PrivateLinkService(i) => {
-                            format!(
-                                "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
-                                i.get_provider().unwrap().as_str_name(),
-                                i.service_name,
-                                i.endpoint_id,
-                                serde_json::to_string(&i.dns_entries.keys().collect_vec()).unwrap(),
-                                serde_json::to_string(&source_names).unwrap(),
-                                serde_json::to_string(&sink_names).unwrap(),
-                            )
-                        }
-                        connection::Info::ConnectionParams(params) => {
-                            // todo: show dep relations
-                            print_connection_params(params, schema)
-                        }
+                    let properties = if let Some(ref params) = c.connection_params {
+                        print_connection_params(params, schema)
+                    } else {
+                        let connection::Info::PrivateLinkService(ref srv) = c.info;
+                        format!(
+                            "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
+                            srv.get_provider().unwrap().as_str_name(),
+                            srv.service_name,
+                            srv.endpoint_id,
+                            serde_json::to_string(&srv.dns_entries.keys().collect_vec()).unwrap(),
+                            serde_json::to_string(&source_names).unwrap(),
+                            serde_json::to_string(&sink_names).unwrap(),
+                        )
                     };
                     ShowConnectionRow {
                         name,

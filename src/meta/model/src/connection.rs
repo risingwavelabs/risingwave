@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::connection::PbInfo;
 use risingwave_pb::catalog::PbConnection;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -70,9 +69,7 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbConnection> for ActiveModel {
     fn from(conn: PbConnection) -> Self {
-        let Some(PbInfo::ConnectionParams(connection_params)) = conn.info else {
-            unreachable!("private link has been deprecated.")
-        };
+        let connection_params = conn.connection_params.unwrap();
 
         Self {
             connection_id: Set(conn.id as _),

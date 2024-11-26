@@ -36,7 +36,6 @@ use risingwave_meta_model::{
     SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
     ViewId,
 };
-use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -1468,7 +1467,7 @@ impl CatalogController {
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
         let mut dep_secrets = HashSet::new();
-        if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
+        if let Some(ref params) = &pb_connection.connection_params {
             dep_secrets.extend(
                 params
                     .secret_refs

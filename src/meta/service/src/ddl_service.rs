@@ -25,7 +25,6 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta_model::ObjectId;
-use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
@@ -753,7 +752,8 @@ impl DdlService for DdlServiceImpl {
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
-                    info: Some(ConnectionInfo::ConnectionParams(params)),
+                    info: None,
+                    connection_params: Some(params),
                     owner: req.owner_id,
                 };
                 let version = self

@@ -19,7 +19,7 @@ use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
-    table, view, PrivateLinkService,
+    table, view,
 };
 use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
@@ -360,18 +360,16 @@ impl From<ObjectModel<view::Model>> for PbView {
 
 impl From<ObjectModel<connection::Model>> for PbConnection {
     fn from(value: ObjectModel<connection::Model>) -> Self {
-        let info: PbConnectionInfo = if value.0.info == PrivateLinkService::default() {
-            PbConnectionInfo::ConnectionParams(value.0.params.to_protobuf())
-        } else {
-            PbConnectionInfo::PrivateLinkService(value.0.info.to_protobuf())
-        };
         Self {
             id: value.1.oid as _,
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
-            info: Some(info),
+            info: Some(PbConnectionInfo::PrivateLinkService(
+                value.0.info.to_protobuf(),
+            )),
+            connection_params: Some(value.0.params.to_protobuf()),
         }
     }
 }
