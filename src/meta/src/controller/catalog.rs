@@ -1410,8 +1410,15 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
 
         // Check if the secret exists.
-        if Secret::find_by_id(pb_secret.get_id() as i32).one(&txn).await?.is_none() {
-            return Err(MetaError::catalog_id_not_found("secret", pb_secret.get_id()));
+        if Secret::find_by_id(pb_secret.get_id() as i32)
+            .one(&txn)
+            .await?
+            .is_none()
+        {
+            return Err(MetaError::catalog_id_not_found(
+                "secret",
+                pb_secret.get_id(),
+            ));
         }
 
         let secret: secret::ActiveModel = pb_secret.clone().into();
