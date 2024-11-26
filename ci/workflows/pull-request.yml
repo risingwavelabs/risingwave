@@ -29,6 +29,10 @@ sql-backend: &sql-backend
         endpoint: ""
       skip: true # hack
     - with:
+        label: "sqlite"
+        # sqlite3 /tmp/rwmeta.db
+        endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
+    - with:
         label: "postgres"
         # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
         endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
