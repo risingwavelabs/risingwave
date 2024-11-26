@@ -62,22 +62,26 @@ BigQueryConfig:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
@@ -198,22 +202,26 @@ DynamoDbConfig:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
@@ -668,22 +676,26 @@ KafkaConfig:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
@@ -945,22 +957,26 @@ PulsarConfig:
     required: false
     alias:
     - region
+    - s3.region
   - name: aws.endpoint_url
     field_type: String
     required: false
     alias:
     - endpoint_url
     - endpoint
+    - s3.endpoint
   - name: aws.credentials.access_key_id
     field_type: String
     required: false
     alias:
     - access_key
+    - s3.access.key
   - name: aws.credentials.secret_access_key
     field_type: String
     required: false
     alias:
     - secret_key
+    - s3.secret.key
   - name: aws.credentials.session_token
     field_type: String
     required: false
