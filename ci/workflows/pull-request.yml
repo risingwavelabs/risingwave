@@ -40,9 +40,6 @@ sql-backend: &sql-backend
 sql-backend-env: &sql-backend-env
   - "RISEDEV_SQL_ENDPOINT={{matrix.endpoint}}"
 
-test-env: &test-env
-  - "FOO=bar"
-
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -64,7 +61,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          env: *test-env
     timeout_in_minutes: 15
     retry: *auto-retry
 
