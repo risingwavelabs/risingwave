@@ -14,13 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view, PrivateLinkService,
 };
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -32,7 +33,7 @@ use risingwave_pb::catalog::{
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
-use crate::MetaError;
+use crate::{MetaError, MetaResult};
 
 pub mod catalog;
 pub mod cluster;
@@ -70,10 +71,41 @@ impl SqlMetaStore {
 
     #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
-        use risingwave_meta_model_migration::{Migrator, MigratorTrait};
         let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
+    }
+
+    /// Check whether the cluster, which uses SQL as the backend, is a new cluster.
+    /// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+    /// then it is considered an old cluster.
+    ///
+    /// Note: this check should be performed before [`Self::up()`].
+    async fn is_first_launch(&self) -> MetaResult<bool> {
+        let migrations = Migrator::get_applied_migrations(&self.conn)
+            .await
+            .context("failed to get applied migrations")?;
+        for migration in migrations {
+            if migration.name() == "m20230908_072257_init"
+                && migration.status() == MigrationStatus::Applied
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Apply all the migrations to the meta store before starting the service.
+    ///
+    /// Returns whether the cluster is the first launch.
+    pub async fn up(&self) -> MetaResult<bool> {
+        let cluster_first_launch = self.is_first_launch().await?;
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&self.conn, None)
+            .await
+            .context("failed to upgrade models in meta store")?;
+
+        Ok(cluster_first_launch)
     }
 }
 

@@ -164,6 +164,7 @@ impl HummockManager {
             .cloned()
             .filter(|table_id| !valid_ids.contains(table_id))
             .collect_vec();
+
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
         self.unregister_table_ids(to_unregister).await
@@ -276,10 +277,22 @@ impl HummockManager {
         &self,
         table_ids: impl IntoIterator<Item = TableId> + Send,
     ) -> Result<()> {
-        let mut table_ids = table_ids.into_iter().peekable();
-        if table_ids.peek().is_none() {
+        let table_ids = table_ids.into_iter().collect_vec();
+        if table_ids.is_empty() {
             return Ok(());
         }
+
+        {
+            // Remove table write throughput statistics
+            // The Caller acquires `Send`, so we should safely use `write` lock before the await point.
+            // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
+            let mut table_write_throughput_statistic_manager =
+                self.table_write_throughput_statistic_manager.write();
+            for table_id in table_ids.iter().unique() {
+                table_write_throughput_statistic_manager.remove_table(table_id.table_id);
+            }
+        }
+
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let mut version = HummockVersionTransaction::new(
@@ -292,7 +305,7 @@ impl HummockManager {
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
-        for table_id in table_ids.unique() {
+        for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
@@ -356,6 +369,7 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+
         // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())
     }

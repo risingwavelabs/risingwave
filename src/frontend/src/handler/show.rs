@@ -483,7 +483,7 @@ pub async fn handle_show_object(
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_string(),
-                    parallelism: worker.get_parallelism() as _,
+                    parallelism: worker.parallelism() as _,
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
                     is_unschedulable: property.map(|p| p.is_unschedulable),
