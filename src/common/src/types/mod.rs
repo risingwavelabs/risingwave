@@ -484,6 +484,12 @@ impl DataType {
     }
 }
 
+impl From<StructType> for DataType {
+    fn from(value: StructType) -> Self {
+        Self::Struct(value)
+    }
+}
+
 impl From<DataType> for PbDataType {
     fn from(data_type: DataType) -> Self {
         data_type.to_protobuf()
