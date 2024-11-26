@@ -2941,7 +2941,15 @@ impl Parser<'_> {
     pub fn parse_sql_option(&mut self) -> PResult<SqlOption> {
         let name = self.parse_object_name()?;
         self.expect_token(&Token::Eq)?;
-        let value = self.parse_value_and_obj_ref::<false>()?;
+        let value = {
+            const CONNECTION_REF_KEY: &str = "connection";
+            if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
+                let connection_name = self.parse_object_name()?;
+                SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
+            } else {
+                self.parse_value_and_obj_ref::<false>()?
+            }
+        };
         Ok(SqlOption { name, value })
     }
 
@@ -3631,18 +3639,6 @@ impl Parser<'_> {
                     Ok(SqlOptionValue::SecretRef(SecretRefValue {
                         secret_name,
                         ref_as,
-                    }))
-                }
-                Keyword::CONNECTION => {
-                    if FORBID_OBJ_REF {
-                        return self.expected_at(
-                            checkpoint,
-                            "a concrete value rather than a connection reference",
-                        );
-                    }
-                    let connection_name = self.parse_object_name()?;
-                    Ok(SqlOptionValue::ConnectionRef(ConnectionRefValue {
-                        connection_name,
                     }))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),

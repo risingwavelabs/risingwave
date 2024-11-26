@@ -44,8 +44,6 @@ mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
-const CONNECTION_REF_KEY: &str = "profile";
-
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
@@ -359,12 +357,6 @@ impl TryFrom<&[SqlOption]> for WithOptions {
                     continue;
                 }
                 SqlOptionValue::ConnectionRef(r) => {
-                    if key != CONNECTION_REF_KEY {
-                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "expect 'profile' as the key for connection ref, but got: {}",
-                            key
-                        ))));
-                    }
                     if connection_ref.insert(key.clone(), r.clone()).is_some()
                         || inner.contains_key(&key)
                     {
