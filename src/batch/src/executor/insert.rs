@@ -267,7 +267,7 @@ mod tests {
     use std::ops::Bound;
 
     use assert_matches::assert_matches;
-    use foyer::CacheContext;
+    use foyer::CacheHint;
     use futures::StreamExt;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
     use risingwave_common::catalog::{
@@ -290,10 +290,9 @@ mod tests {
         let store = MemoryStateStore::new();
 
         // Make struct field
-        let struct_field = Field::unnamed(DataType::new_struct(
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            vec![],
-        ));
+        let struct_field = Field::unnamed(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
+        );
 
         // Schema for mock executor.
         let mut schema = schema_test_utils::ii();
@@ -399,7 +398,7 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )

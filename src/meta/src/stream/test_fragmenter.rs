@@ -20,7 +20,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
+use risingwave_pb::common::worker_node::Property;
+use risingwave_pb::common::{
+    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
@@ -39,7 +42,7 @@ use risingwave_pb::stream_plan::{
 
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::TableFragments;
+use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -426,7 +429,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
         0,
         WorkerNode {
             id: 0,
-            parallelism: 8,
+            property: Some(Property {
+                parallelism: 8,
+                ..Default::default()
+            }),
+            r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
         },
     ))
@@ -459,15 +466,15 @@ async fn test_graph_builder() -> MetaResult<()> {
     let ActorGraphBuildResult { graph, .. } =
         actor_graph_builder.generate_graph(&env, &job, expr_context)?;
 
-    let table_fragments = TableFragments::for_test(TableId::default(), graph);
-    let actors = table_fragments.actors();
-    let mview_actor_ids = table_fragments.mview_actor_ids();
+    let stream_job_fragments = StreamJobFragments::for_test(TableId::default(), graph);
+    let actors = stream_job_fragments.actors();
+    let mview_actor_ids = stream_job_fragments.mview_actor_ids();
 
     assert_eq!(actors.len(), 9);
     assert_eq!(mview_actor_ids, vec![1]);
     assert_eq!(internal_tables.len(), 3);
 
-    let fragment_upstreams: HashMap<_, _> = table_fragments
+    let fragment_upstreams: HashMap<_, _> = stream_job_fragments
         .fragments
         .iter()
         .map(|(fragment_id, fragment)| (*fragment_id, fragment.upstream_fragment_ids.clone()))

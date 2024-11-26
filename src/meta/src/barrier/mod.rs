@@ -26,7 +26,7 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 mod checkpoint;
@@ -44,8 +44,8 @@ mod utils;
 mod worker;
 
 pub use self::command::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
-    Reschedule, SnapshotBackfillInfo,
+    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
@@ -105,7 +105,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
     stream_actors: HashMap<ActorId, StreamActor>,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, TableFragments)>,
+    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
 }
 

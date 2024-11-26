@@ -35,14 +35,12 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 
-/// Includes full information about a table.
+/// `TableCatalog` Includes full information about a table.
 ///
-/// Currently, it can be either:
-/// - a table or a source
-/// - a materialized view
-/// - an index
+/// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+/// It is not the same as a user-side table created by `CREATE TABLE`.
 ///
-/// Use `self.table_type()` to determine the type of the table.
+/// Use [`Self::table_type()`] to determine the [`TableType`] of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -191,6 +189,7 @@ pub enum TableType {
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
+    /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
     /// Internal tables for executors.
     Internal,
@@ -762,10 +761,11 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::new_struct(
-                                vec![DataType::Varchar, DataType::Varchar],
-                                vec!["address".to_string(), "zipcode".to_string()]
-                            ),
+                            data_type: StructType::new(vec![
+                                ("address", DataType::Varchar),
+                                ("zipcode", DataType::Varchar)
+                            ],)
+                            .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![

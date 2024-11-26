@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::CacheContext;
+use foyer::CacheHint;
 use futures::pin_mut;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::TableKey;
@@ -109,7 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     epoch,
                     ReadOptions {
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 ))

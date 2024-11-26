@@ -62,6 +62,22 @@ pub struct IcebergCommon {
     /// Full name of table, must include schema name.
     #[serde(rename = "table.name")]
     pub table_name: String,
+    /// Credential for accessing iceberg catalog, only applicable in rest catalog.
+    /// A credential to exchange for a token in the OAuth2 client credentials flow.
+    #[serde(rename = "catalog.credential")]
+    pub credential: Option<String>,
+    /// token for accessing iceberg catalog, only applicable in rest catalog.
+    /// A Bearer token which will be used for interaction with the server.
+    #[serde(rename = "catalog.token")]
+    pub token: Option<String>,
+    /// `oauth2-server-uri` for accessing iceberg catalog, only applicable in rest catalog.
+    /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
+    #[serde(rename = "catalog.oauth2-server-uri")]
+    pub oauth2_server_uri: Option<String>,
+    /// scope for accessing iceberg catalog, only applicable in rest catalog.
+    /// Additional scope for OAuth2.
+    #[serde(rename = "catalog.scope")]
+    pub scope: Option<String>,
 
     #[serde(
         rename = "s3.path.style.access",
@@ -145,20 +161,32 @@ impl IcebergCommon {
             match &self.warehouse_path {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
-                        let url = Url::parse(warehouse_path).with_context(|| {
-                            format!("Invalid warehouse path: {}", warehouse_path)
-                        })?;
-                        let bucket = url
-                            .host_str()
-                            .with_context(|| {
-                                format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
-                            })?
-                            .to_string();
-                        let root = url.path().trim_start_matches('/').to_string();
-                        (bucket, root)
+                        let url = Url::parse(warehouse_path);
+                        if url.is_err() && catalog_type == "rest" {
+                            // If the warehouse path is not a valid URL, it could be a warehouse name in rest catalog
+                            // so we allow it to pass here.
+                            (None, None)
+                        } else {
+                            let url = url.with_context(|| {
+                                format!("Invalid warehouse path: {}", warehouse_path)
+                            })?;
+                            let bucket = url
+                                .host_str()
+                                .with_context(|| {
+                                    format!(
+                                        "Invalid s3 path: {}, bucket is missing",
+                                        warehouse_path
+                                    )
+                                })?
+                                .to_string();
+                            let root = url.path().trim_start_matches('/').to_string();
+                            (Some(bucket), Some(root))
+                        }
                     };
 
-                    iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                    if let Some(bucket) = bucket {
+                        iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                    }
                 }
                 None => {
                     if catalog_type != "rest" {
@@ -219,29 +247,48 @@ impl IcebergCommon {
                     path_style_access.to_string(),
                 );
             }
-            if matches!(self.catalog_type.as_deref(), Some("glue")) {
-                java_catalog_configs.insert(
-                    "client.credentials-provider".to_string(),
-                    "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
-                );
-                // Use S3 ak/sk and region as glue ak/sk and region by default.
-                // TODO: use different ak/sk and region for s3 and glue.
-                java_catalog_configs.insert(
-                    "client.credentials-provider.glue.access-key-id".to_string(),
-                    self.access_key.clone().to_string(),
-                );
-                java_catalog_configs.insert(
-                    "client.credentials-provider.glue.secret-access-key".to_string(),
-                    self.secret_key.clone().to_string(),
-                );
-                if let Some(region) = &self.region {
-                    java_catalog_configs
-                        .insert("client.region".to_string(), region.clone().to_string());
-                    java_catalog_configs.insert(
-                        "glue.endpoint".to_string(),
-                        format!("https://glue.{}.amazonaws.com", region),
-                    );
+
+            match self.catalog_type.as_deref() {
+                Some("rest") => {
+                    if let Some(credential) = &self.credential {
+                        java_catalog_configs.insert("credential".to_string(), credential.clone());
+                    }
+                    if let Some(token) = &self.token {
+                        java_catalog_configs.insert("token".to_string(), token.clone());
+                    }
+                    if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
+                        java_catalog_configs
+                            .insert("oauth2-server-uri".to_string(), oauth2_server_uri.clone());
+                    }
+                    if let Some(scope) = &self.scope {
+                        java_catalog_configs.insert("scope".to_string(), scope.clone());
+                    }
                 }
+                Some("glue") => {
+                    java_catalog_configs.insert(
+                        "client.credentials-provider".to_string(),
+                        "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
+                    );
+                    // Use S3 ak/sk and region as glue ak/sk and region by default.
+                    // TODO: use different ak/sk and region for s3 and glue.
+                    java_catalog_configs.insert(
+                        "client.credentials-provider.glue.access-key-id".to_string(),
+                        self.access_key.clone().to_string(),
+                    );
+                    java_catalog_configs.insert(
+                        "client.credentials-provider.glue.secret-access-key".to_string(),
+                        self.secret_key.clone().to_string(),
+                    );
+                    if let Some(region) = &self.region {
+                        java_catalog_configs
+                            .insert("client.region".to_string(), region.clone().to_string());
+                        java_catalog_configs.insert(
+                            "glue.endpoint".to_string(),
+                            format!("https://glue.{}.amazonaws.com", region),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -492,6 +539,20 @@ mod v2 {
                         S3_SECRET_ACCESS_KEY.to_string(),
                         self.secret_key.clone().to_string(),
                     );
+                    if let Some(credential) = &self.credential {
+                        iceberg_configs.insert("credential".to_string(), credential.clone());
+                    }
+                    if let Some(token) = &self.token {
+                        iceberg_configs.insert("token".to_string(), token.clone());
+                    }
+                    if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
+                        iceberg_configs
+                            .insert("oauth2-server-uri".to_string(), oauth2_server_uri.clone());
+                    }
+                    if let Some(scope) = &self.scope {
+                        iceberg_configs.insert("scope".to_string(), scope.clone());
+                    }
+
                     let config_builder = iceberg_catalog_rest::RestCatalogConfig::builder()
                         .uri(self.catalog_uri.clone().with_context(|| {
                             "`catalog.uri` must be set in rest catalog".to_string()

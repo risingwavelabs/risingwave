@@ -2300,7 +2300,6 @@ impl CatalogController {
             .filter(|obj| {
                 obj.obj_type == ObjectType::Table
                     || obj.obj_type == ObjectType::Sink
-                    || obj.obj_type == ObjectType::Subscription
                     || obj.obj_type == ObjectType::Index
             })
             .map(|obj| obj.oid)
