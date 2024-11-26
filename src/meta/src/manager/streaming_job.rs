@@ -15,19 +15,25 @@
 use std::collections::HashSet;
 
 use risingwave_common::catalog::TableVersionId;
-use risingwave_common::current_cluster_version;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::{bail_not_implemented, current_cluster_version};
+use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::prelude::Table as TableModel;
+use risingwave_meta_model::{table, TableId, TableVersion};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use sea_orm::entity::prelude::*;
+use sea_orm::{DatabaseTransaction, QuerySelect};
 use strum::{EnumDiscriminants, EnumIs};
 
 use super::{get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source};
 use crate::model::FragmentId;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
+#[strum_discriminants(name(StreamingJobType))]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -255,6 +261,10 @@ impl StreamingJob {
         }
     }
 
+    pub fn job_type(&self) -> StreamingJobType {
+        self.into()
+    }
+
     pub fn job_type_str(&self) -> &'static str {
         match self {
             StreamingJob::MaterializedView(_) => "materialized view",
@@ -272,6 +282,16 @@ impl StreamingJob {
             Self::Index(_, table) => table.definition.clone(),
             Self::Sink(sink, _) => sink.definition.clone(),
             Self::Source(source) => source.definition.clone(),
+        }
+    }
+
+    pub fn object_type(&self) -> ObjectType {
+        match self {
+            Self::MaterializedView(_) => ObjectType::Table, // Note MV is special.
+            Self::Sink(_, _) => ObjectType::Sink,
+            Self::Table(_, _, _) => ObjectType::Table,
+            Self::Index(_, _) => ObjectType::Index,
+            Self::Source(_) => ObjectType::Source,
         }
     }
 
@@ -299,13 +319,14 @@ impl StreamingJob {
         }
     }
 
-    // TODO: record all objects instead.
+    // TODO: to be removed, pass all objects uniformly through `dependencies` field instead.
     pub fn dependent_relations(&self) -> Vec<u32> {
         match self {
             StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(sink, _) => sink.dependent_relations.clone(),
-            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(),
+            StreamingJob::Sink(_sink, _) => vec![], /* sink dependencies are now passed via `dependencies` field in `CreateSinkRequest` */
+            StreamingJob::Table(_, table, _) => table.dependent_relations.clone(), /* TODO(rc): record table dependencies via `dependencies` field */
             StreamingJob::Index(index, index_table) => {
+                // TODO(rc): record index dependencies via `dependencies` field
                 assert_eq!(index.primary_table_id, index_table.dependent_relations[0]);
                 vec![]
             }
@@ -327,5 +348,36 @@ impl StreamingJob {
             StreamingJob::Source(source) => get_referred_secret_ids_from_source(source),
             StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
+    }
+
+    /// Verify the new version is the next version of the original version.
+    pub async fn verify_version_for_replace(&self, txn: &DatabaseTransaction) -> MetaResult<()> {
+        let id = self.id();
+
+        match self {
+            StreamingJob::Table(_source, table, _table_job_type) => {
+                let new_version = table.get_version()?.get_version();
+                let original_version: Option<TableVersion> = TableModel::find_by_id(id as TableId)
+                    .select_only()
+                    .column(table::Column::Version)
+                    .into_tuple()
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
+                let original_version = original_version
+                    .expect("version for table should exist")
+                    .to_protobuf();
+                if new_version != original_version.version + 1 {
+                    return Err(MetaError::permission_denied("table version is stale"));
+                }
+            }
+            StreamingJob::MaterializedView(_)
+            | StreamingJob::Sink(_, _)
+            | StreamingJob::Index(_, _)
+            | StreamingJob::Source(_) => {
+                bail_not_implemented!("schema change for {}", self.job_type_str())
+            }
+        }
+        Ok(())
     }
 }

@@ -1438,10 +1438,10 @@ script = '''
 UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
-#[tasks.backwards-compat-test]
-#category = "RiseDev - Test - Backwards Compatibility Test"
-#description = "Run backwards compatibility test"
-#script = "./e2e_test/backwards-compat-tests/scripts/run_local.sh"
+[tasks.backwards-compat-test]
+category = "RiseDev - Test - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./e2e_test/backwards-compat-tests/scripts/run_local.sh"
 
 # For debugging.
 # To show the env for a specific task, use `run_task = "show-env"` for that task.

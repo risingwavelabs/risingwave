@@ -24,7 +24,7 @@ struct RwSecret {
     id: i32,
     name: String,
     owner: i32,
-    acl: String,
+    acl: Vec<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_secrets")]
@@ -38,7 +38,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
                 id: secret.id.secret_id() as i32,
                 name: secret.name.clone(),
                 owner: secret.owner as i32,
-                acl: "".into(),
+                acl: vec![],
             })
         })
         .collect())

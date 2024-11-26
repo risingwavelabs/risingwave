@@ -64,8 +64,8 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
 use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, rename_relation,
-    rename_relation_refer,
+    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
+    rename_relation, rename_relation_refer,
 };
 use crate::controller::utils::{
     build_relation_group_for_delete, check_connection_name_duplicate,
@@ -77,7 +77,10 @@ use crate::controller::utils::{
     resolve_source_register_info_for_jobs, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion, IGNORED_NOTIFICATION_VERSION};
+use crate::manager::{
+    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
+    IGNORED_NOTIFICATION_VERSION,
+};
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -1232,6 +1235,9 @@ impl CatalogController {
         )
         .await?;
 
+        // handle secret ref
+        let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+
         let source_obj = Self::create_object(
             &txn,
             ObjectType::Source,
@@ -1244,6 +1250,19 @@ impl CatalogController {
         pb_source.id = source_id as _;
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
+
+        // add secret dependency
+        if !secret_ids.is_empty() {
+            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+                object_dependency::ActiveModel {
+                    oid: Set(*id as _),
+                    used_by: Set(source_id as _),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
@@ -1378,6 +1397,43 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn alter_secret(
+        &self,
+        pb_secret: PbSecret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+
+        ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::update(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = pb_secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Secret(secret_plain),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)
@@ -1398,7 +1454,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
         ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
 
-        // Find affect users with privileges on the connection.
+        // Find affect users with privileges on the secret.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
@@ -2240,7 +2296,6 @@ impl CatalogController {
             .filter(|obj| {
                 obj.obj_type == ObjectType::Table
                     || obj.obj_type == ObjectType::Sink
-                    || obj.obj_type == ObjectType::Subscription
                     || obj.obj_type == ObjectType::Index
             })
             .map(|obj| obj.oid)
@@ -2872,24 +2927,29 @@ impl CatalogController {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<risingwave_common::catalog::TableId, HashMap<u32, u64>>> {
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
         let inner = self.inner.read().await;
-        let subscription_objs = Subscription::find()
-            .find_also_related(Object)
-            .all(&inner.db)
-            .await?;
-        let mut map = HashMap::new();
+        let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
+            Subscription::find()
+                .select_only()
+                .select_column(subscription::Column::SubscriptionId)
+                .select_column(subscription::Column::DependentTableId)
+                .select_column(subscription::Column::RetentionSeconds)
+                .select_column(object::Column::DatabaseId)
+                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
+        let mut map: HashMap<_, HashMap<_, HashMap<_, _>>> = HashMap::new();
         // Write object at the same time we write subscription, so we must be able to get obj
-        for subscription in subscription_objs
-            .into_iter()
-            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+        for (subscription_id, dependent_table_id, retention_seconds, database_id) in
+            subscription_objs
         {
-            let subscription: PbSubscription = subscription;
-            map.entry(risingwave_common::catalog::TableId::from(
-                subscription.dependent_table_id,
-            ))
-            .or_insert(HashMap::new())
-            .insert(subscription.id, subscription.retention_seconds);
+            map.entry(database_id)
+                .or_default()
+                .entry(dependent_table_id)
+                .or_default()
+                .insert(subscription_id, retention_seconds as _);
         }
         Ok(map)
     }
@@ -3474,13 +3534,7 @@ async fn update_internal_tables(
     new_value: Value,
     relations_to_notify: &mut Vec<PbRelationInfo>,
 ) -> MetaResult<()> {
-    let internal_tables: Vec<TableId> = Table::find()
-        .select_only()
-        .column(table::Column::TableId)
-        .filter(table::Column::BelongsToJobId.eq(object_id))
-        .into_tuple()
-        .all(txn)
-        .await?;
+    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -3505,6 +3559,8 @@ async fn update_internal_tables(
 
 #[cfg(test)]
 mod tests {
+
+    use risingwave_pb::catalog::StreamSourceInfo;
 
     use super::*;
 
@@ -3665,6 +3721,9 @@ mod tests {
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
                 .to_string(),
+            info: Some(StreamSourceInfo {
+                ..Default::default()
+            }),
             ..Default::default()
         };
         mgr.create_source(pb_source).await?;

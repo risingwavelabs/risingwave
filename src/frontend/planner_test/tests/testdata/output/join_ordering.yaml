@@ -13,10 +13,10 @@
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
+        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
+        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id, t4._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
@@ -61,10 +61,10 @@
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
-        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+        │ │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
+        │ │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
+        │ └─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id, t4._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t3.v5 = t4.v7, output: all }
@@ -108,11 +108,11 @@
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
     └─LogicalJoin { type: Inner, on: (t1.v2 = t3.v6), output: all }
       ├─LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
-      │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
-      │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+      │ ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
+      │ └─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
       └─LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
-        ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+        ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
+        └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id, t4._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v6, output: all }
@@ -155,12 +155,12 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4, t3.v5, t3.v6, t4.v7, t4.v8] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v3), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
       └─LogicalJoin { type: Inner, on: (t2.v4 = t3.v6), output: all }
-        ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+        ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
         └─LogicalJoin { type: Inner, on: (t3.v5 = t4.v7), output: all }
-          ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id] }
-          └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id] }
+          ├─LogicalScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id, t3._rw_timestamp] }
+          └─LogicalScan { table: t4, columns: [t4.v7, t4.v8, t4._row_id, t4._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: t1.v1 = t2.v3, output: all }

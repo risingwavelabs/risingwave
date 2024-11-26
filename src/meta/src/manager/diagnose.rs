@@ -70,8 +70,9 @@ impl DiagnoseCommand {
         let mut report = String::new();
         let _ = writeln!(
             report,
-            "report created at: {}",
-            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now())
+            "report created at: {}\nversion: {}",
+            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now()),
+            risingwave_common::current_cluster_version(),
         );
         let _ = writeln!(report);
         self.write_catalog(&mut report).await;

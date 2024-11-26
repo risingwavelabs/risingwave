@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -22,7 +22,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::mem_table::MemtableLocalStateStore;
@@ -608,19 +608,22 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
     type RevIter = RangeKvStateStoreRevIter<R>;
 
     #[allow(clippy::unused_async)]
-    async fn get(
+    async fn get_keyed_row(
         &self,
         key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
         // We do not really care about vnodes here, so we just use the default value.
         let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
         Ok(match res.as_slice() {
             [] => None,
-            [(_, value)] => Some(value.clone()),
+            [(key, value)] => Some((
+                FullKey::decode(key.as_ref()).to_vec().into_bytes(),
+                value.clone(),
+            )),
             _ => unreachable!(),
         })
     }
@@ -744,16 +747,6 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         Ok(())
     }
 
-    #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let result = self.inner.flush();
-        // memory backend doesn't need to push to S3, so this is a no-op
-        async move {
-            result?;
-            Ok(SyncResult::default())
-        }
-    }
-
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
         MemtableLocalStateStore::new(self.clone(), option)
     }
@@ -767,7 +760,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     last_key: Option<UserKey<Bytes>>,
 
-    item_buffer: Option<StateStoreIterItem>,
+    item_buffer: Option<StateStoreKeyedRow>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
@@ -788,7 +781,7 @@ impl<R: RangeKv> RangeKvStateStoreIter<R> {
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
     #[allow(clippy::unused_async)]
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
             .item_buffer
@@ -826,7 +819,7 @@ pub struct RangeKvStateStoreRevIter<R: RangeKv> {
     epoch: HummockEpoch,
     is_inclusive_epoch: bool,
 
-    item_buffer: VecDeque<StateStoreIterItem>,
+    item_buffer: VecDeque<StateStoreKeyedRow>,
 }
 
 impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
@@ -846,7 +839,7 @@ impl<R: RangeKv> RangeKvStateStoreRevIter<R> {
 
 impl<R: RangeKv> StateStoreIter for RangeKvStateStoreRevIter<R> {
     #[allow(clippy::unused_async)]
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         self.next_inner()?;
         Ok(self
             .item_buffer

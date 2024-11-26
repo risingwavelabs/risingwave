@@ -422,6 +422,7 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
@@ -871,6 +872,12 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_max_overlap_sst_count")]
     pub compactor_max_overlap_sst_count: usize,
 
+    /// The maximum number of meta files that can be preloaded.
+    /// If the number of meta files exceeds this value, the compactor will try to compute parallelism only through `SstableInfo`, no longer preloading `SstableMeta`.
+    /// This is to prevent the compactor from consuming too much memory, but it may cause the compactor to be less efficient.
+    #[serde(default = "default::storage::compactor_max_preload_meta_file_count")]
+    pub compactor_max_preload_meta_file_count: usize,
+
     /// Object storage configuration
     /// 1. General configuration
     /// 2. Some special configuration of Backend
@@ -1094,6 +1101,9 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::memory_controller_eviction_factor_stable")]
     pub memory_controller_eviction_factor_stable: f64,
 
+    #[serde(default = "default::developer::memory_controller_update_interval_ms")]
+    pub memory_controller_update_interval_ms: usize,
+
     #[serde(default = "default::developer::memory_controller_sequence_tls_step")]
     pub memory_controller_sequence_tls_step: u64,
 
@@ -1197,11 +1207,11 @@ pub struct ObjectStoreConfig {
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
 
-    // TODO: the following field will be deprecated after opendal is stablized
+    // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default)]
     pub opendal_writer_abort_on_err: bool,
 
@@ -1795,6 +1805,10 @@ pub mod default {
             64
         }
 
+        pub fn compactor_max_preload_meta_file_count() -> usize {
+            32
+        }
+
         // deprecated
         pub fn table_info_statistic_history_times() -> usize {
             240
@@ -1809,7 +1823,7 @@ pub mod default {
         }
 
         pub fn time_travel_version_cache_capacity() -> u64 {
-            32
+            2
         }
     }
 
@@ -2046,6 +2060,10 @@ pub mod default {
             1.0
         }
 
+        pub fn memory_controller_update_interval_ms() -> usize {
+            100
+        }
+
         pub fn memory_controller_sequence_tls_step() -> u64 {
             128
         }
@@ -2219,6 +2237,10 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
         }
     }
 

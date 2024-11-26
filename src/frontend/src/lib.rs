@@ -33,6 +33,7 @@
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
+#![feature(try_trait_v2)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
@@ -61,6 +62,7 @@ pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
@@ -164,6 +166,10 @@ pub struct FrontendOpts {
         default_value = "./secrets"
     )]
     pub temp_secret_file_dir: String,
+
+    /// Total available memory for the frontend node in bytes. Used for batch computing.
+    #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
+    pub frontend_total_memory_bytes: usize,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -224,4 +230,8 @@ pub fn start(
         .await
         .unwrap()
     })
+}
+
+pub fn default_frontend_total_memory_bytes() -> usize {
+    system_memory_available_bytes()
 }

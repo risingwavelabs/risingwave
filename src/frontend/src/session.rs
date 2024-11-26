@@ -59,18 +59,19 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::cluster_limit;
 use risingwave_common::util::cluster_limit::ActorCountPerParallelism;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_common::util::{cluster_limit, resource_util};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS};
+use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::meta::add_worker_node_request::Property as AddWorkerNodeProperty;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -444,15 +445,22 @@ impl FrontendEnv {
                 .map_err(|err| anyhow!(err))?;
         }
 
-        let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
+        let total_memory_bytes = opts.frontend_total_memory_bytes;
         let heap_profiler =
             HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
         heap_profiler.start();
 
-        let mem_context = risingwave_common::memory::MemoryContext::root(
+        let batch_memory_limit = total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION;
+        let mem_context = MemoryContext::root(
             frontend_metrics.batch_total_mem.clone(),
-            (total_memory_bytes as f64 * FRONTEND_BATCH_MEMORY_PROPORTION) as u64,
+            batch_memory_limit as u64,
+        );
+
+        info!(
+            "Frontend  total_memory: {} batch_memory: {}",
+            convert(total_memory_bytes as _),
+            convert(batch_memory_limit as _),
         );
 
         Ok((

@@ -60,8 +60,8 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
     pub async fn init(&mut self, init_epoch: EpochPair) -> StreamExecutorResult<()> {
         // Init state tables.
-        self.count_state_table.init_epoch(init_epoch);
-        self.bucket_state_table.init_epoch(init_epoch);
+        self.count_state_table.init_epoch(init_epoch).await?;
+        self.bucket_state_table.init_epoch(init_epoch).await?;
 
         // Refill row_count
         let row_count_state = self.get_row_count_state().await?;

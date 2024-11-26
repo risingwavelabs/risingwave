@@ -51,7 +51,7 @@ futures = { version = "0.3", default-features = false, features = [
 futures-async-stream = "0.2.9"
 risingwave_hummock_sdk = { workspace = true }
 risingwave_test_runner = { workspace = true }
-serial_test = "3.1"
+serial_test = "3.2"
 sync-point = { path = "../../utils/sync-point" }
 
 [features]

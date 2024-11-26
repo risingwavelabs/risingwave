@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::CacheHint;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{FutureExt, TryFutureExt};
 use risingwave_common::array::StreamChunk;
@@ -38,7 +38,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
-    PrefetchOptions, ReadOptions, StateStoreIterItemRef, StateStoreRead,
+    PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
 use risingwave_storage::{StateStore, StateStoreIter};
 use tokio::sync::watch;
@@ -110,7 +110,9 @@ impl RewindDelay {
         self.rewind_count.inc();
         if let Some(delay) = self.backoff_policy.next() {
             self.rewind_delay.observe(delay.as_secs_f64());
-            sleep(delay).await;
+            if !cfg!(test) {
+                sleep(delay).await;
+            }
         }
     }
 }
@@ -296,7 +298,7 @@ use timeout_auto_rebuild::*;
 impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
     for AutoRebuildStateStoreReadIter<S, F>
 {
-    async fn try_next(&mut self) -> StorageResult<Option<StateStoreIterItemRef<'_>>> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreKeyedRowRef<'_>>> {
         let should_rebuild = (self.should_rebuild)();
         if should_rebuild {
             let Some((key, _value)) = self.iter.try_next().await? else {
@@ -316,7 +318,7 @@ impl<S: StateStoreRead, F: FnMut() -> bool + Send> StateStoreIter
                 )
                 .await?;
             self.iter = new_iter;
-            let item: Option<StateStoreIterItemRef<'_>> = self.iter.try_next().await?;
+            let item: Option<StateStoreKeyedRowRef<'_>> = self.iter.try_next().await?;
             if let Some((key, value)) = item {
                 assert_eq!(
                     key.user_key.table_key.0,
@@ -375,7 +377,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
                     ReadOptions {
                         // This stream lives too long, the connection of prefetch object may break. So use a short connection prefetch.
                         prefetch_options: PrefetchOptions::prefetch_for_small_range_scan(),
-                        cache_policy: CachePolicy::Fill(CacheContext::LowPriority),
+                        cache_policy: CachePolicy::Fill(CacheHint::Low),
                         table_id,
                         ..Default::default()
                     },
@@ -527,7 +529,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::prefetch_for_large_range_scan(),
-                                                cache_policy: CachePolicy::Fill(CacheContext::LowPriority),
+                                                cache_policy: CachePolicy::Fill(CacheHint::Low),
                                                 table_id,
                                                 ..Default::default()
                                             },

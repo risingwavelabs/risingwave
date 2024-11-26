@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
-use parquet::arrow::ProjectionMask;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_connector::source::iceberg::parquet_file_reader::create_parquet_stream_builder;
+use risingwave_connector::source::iceberg::{new_s3_operator, read_parquet_file};
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -85,34 +82,18 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
-            let mut batch_stream_builder = create_parquet_stream_builder(
+            let op = new_s3_operator(
                 self.s3_region.clone(),
                 self.s3_access_key.clone(),
                 self.s3_secret_key.clone(),
-                file,
-            )
-            .await?;
-
-            let arrow_schema = batch_stream_builder.schema();
-            assert_eq!(arrow_schema.fields.len(), self.schema.fields.len());
-            for (field, arrow_field) in self.schema.fields.iter().zip(arrow_schema.fields.iter()) {
-                assert_eq!(*field.name, *arrow_field.name());
-            }
-
-            batch_stream_builder = batch_stream_builder.with_projection(ProjectionMask::all());
-
-            batch_stream_builder = batch_stream_builder.with_batch_size(self.batch_size);
-
-            let record_batch_stream = batch_stream_builder
-                .build()
-                .map_err(|e| anyhow!(e).context("fail to build arrow stream builder"))?;
-
+                file.clone(),
+            )?;
+            let chunk_stream = read_parquet_file(op, file, None, None, self.batch_size, 0).await?;
             #[for_await]
-            for record_batch in record_batch_stream {
-                let record_batch = record_batch?;
-                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                debug_assert_eq!(chunk.data_types(), self.schema.data_types());
-                yield chunk;
+            for stream_chunk in chunk_stream {
+                let stream_chunk = stream_chunk?;
+                let (data_chunk, _) = stream_chunk.into_parts();
+                yield data_chunk;
             }
         }
     }

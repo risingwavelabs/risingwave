@@ -17,6 +17,8 @@ use std::mem::size_of;
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
 use crate::key_range::KeyRange;
+use crate::version::{ObjectIdReader, SstableIdReader};
+use crate::{HummockSstableId, HummockSstableObjectId};
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct SstableInfo {
@@ -214,5 +216,17 @@ impl From<&SstableInfo> for PbSstableInfo {
 impl SstableInfo {
     pub fn remove_key_range(&mut self) {
         self.key_range = KeyRange::default();
+    }
+}
+
+impl SstableIdReader for SstableInfo {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableInfo {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
     }
 }

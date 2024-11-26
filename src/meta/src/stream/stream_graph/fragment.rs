@@ -156,6 +156,15 @@ impl BuildingFragment {
                 dml_node.table_id = job_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
+            NodeBody::StreamFsFetch(fs_fetch_node) => {
+                if let StreamingJob::Table(table_source, _, _) = job {
+                    if let Some(node_inner) = fs_fetch_node.node_inner.as_mut()
+                        && let Some(source) = table_source
+                    {
+                        node_inner.source_id = source.id;
+                    }
+                }
+            }
             NodeBody::Source(source_node) => {
                 match job {
                     // Note: For table without connector, it has a dummy Source node.
@@ -449,7 +458,7 @@ impl StreamFragmentGraph {
     /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
     /// Be careful when using the returned values.
     ///
-    /// See also [`crate::model::TableFragments::internal_tables`].
+    /// See also [`crate::model::StreamJobFragments::internal_tables`].
     pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {

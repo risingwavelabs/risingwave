@@ -22,7 +22,31 @@ mysql --protocol=tcp -u root mytest < e2e_test/source_legacy/cdc/mysql_init_data
 statement ok
 create secret mysql_pwd with (
   backend = 'meta'
-) as '${MYSQL_PWD:}';
+) as 'incorrect_password';
+
+# create a cdc source job, with incorrct password
+statement error
+create source mysql_mytest with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'rwcdc',
+ password = secret mysql_pwd,
+ database.name = 'mytest',
+ server.id = '5601'
+);
+# The detailed error message is commented out because the user IP in error message may vary in different environments.
+# ----
+# db error: ERROR: Failed to run the query
+# Caused by these errors (recent errors listed first):
+#   1: gRPC request to meta service failed: Internal error
+#   2: failed to create source worker
+#   3: failed to create SplitEnumerator
+#   4: source cannot pass validation
+#   5: Internal error: Access denied for user 'rwcdc'@'172.17.0.1' (using password: YES)
+
+statement ok
+alter secret mysql_pwd as '${MYSQL_PWD:}';
 
 # create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
 statement ok
@@ -35,7 +59,6 @@ create source mysql_mytest with (
  database.name = 'mytest',
  server.id = '5601'
 );
-
 
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mysql_mytest;
@@ -61,6 +84,22 @@ from mysql_mytest table 'mytest.products';
 
 # sleep to ensure (default,'Milk','Milk is a white liquid food') is consumed from Debezium message instead of backfill.
 sleep 10s
+
+### BEGIN test change secret in MySQL and ALTER SECRET in Risingwave
+onlyif can-use-recover
+statement ok
+alter secret mysql_pwd with (
+  backend = 'meta'
+) as 'new_password';
+
+onlyif can-use-recover
+system ok
+mysql --protocol=tcp -u root -e "ALTER USER 'rwcdc'@'%' IDENTIFIED BY 'new_password';"
+
+onlyif can-use-recover
+statement ok
+recover;
+### END
 
 statement error Permission denied
 drop secret mysql_pwd;
@@ -133,6 +172,33 @@ create table orders_test (
    order_status smallint,
    PRIMARY KEY (order_id)
 ) from mysql_mytest table 'mytest.orders';
+
+statement error
+CREATE TABLE test_my_default_value (
+    id int,
+    name varchar,
+    city varchar DEFAULT 'Beijing',
+    PRIMARY KEY (id)
+) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
+
+statement ok
+CREATE TABLE test_my_default_value (
+    id int,
+    name varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+INSERT INTO test_my_default_value VALUES (2, 'jack');
+
+query II
+select * from test_my_default_value;
+----
+2 jack Shanghai
 
 
 statement ok
@@ -575,3 +641,36 @@ query II
 select * from upper_orders_shared order by id;
 ----
 1 happy
+
+statement ok
+CREATE TABLE test_pg_default_value (
+    id int,
+    name varchar,
+    city varchar,
+    PRIMARY KEY (id)
+) FROM pg_source TABLE 'public.test_default_value';
+
+statement ok
+SET RW_IMPLICIT_FLUSH=true;
+
+statement ok
+INSERT INTO test_pg_default_value VALUES (1, 'noris');
+
+query II
+select * from test_pg_default_value;
+----
+1 noris Shanghai
+
+### BEGIN reset the password to the original one
+onlyif can-use-recover
+statement ok
+alter secret mysql_pwd as '${MYSQL_PWD:}';
+
+onlyif can-use-recover
+system ok
+mysql --protocol=tcp -u root -e "ALTER USER 'rwcdc'@'%' IDENTIFIED BY '${MYSQL_PWD:}';"
+
+onlyif can-use-recover
+statement ok
+recover;
+### END

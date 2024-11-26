@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -28,6 +29,7 @@ mod bind_context;
 mod bind_param;
 mod create;
 mod create_view;
+mod declare_cursor;
 mod delete;
 mod expr;
 pub mod fetch_cursor;
@@ -57,7 +59,7 @@ pub use relation::{
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
-pub use update::BoundUpdate;
+pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -119,6 +121,9 @@ pub struct Binder {
 
     /// The included relations while binding a query.
     included_relations: HashSet<TableId>,
+
+    /// The included user-defined functions while binding a query.
+    included_udfs: HashSet<FunctionId>,
 
     param_types: ParameterTypes,
 
@@ -323,6 +328,7 @@ impl Binder {
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
+            included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
@@ -381,13 +387,18 @@ impl Binder {
         self.param_types.export()
     }
 
-    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// Get included relations in the query after binding. This is used for resolving relation
     /// dependencies. Note that it only contains referenced relations discovered during binding.
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> HashSet<TableId> {
-        self.included_relations.clone()
+    pub fn included_relations(&self) -> &HashSet<TableId> {
+        &self.included_relations
+    }
+
+    /// Get included user-defined functions in the query after binding.
+    pub fn included_udfs(&self) -> &HashSet<FunctionId> {
+        &self.included_udfs
     }
 
     fn push_context(&mut self) {

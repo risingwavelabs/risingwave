@@ -176,6 +176,7 @@ impl std::fmt::Debug for ColumnDescTestDisplay<'_> {
             description,
             additional_column: AdditionalColumn { column_type },
             version: _,
+            system_column: _,
         } = &self.0;
 
         write!(

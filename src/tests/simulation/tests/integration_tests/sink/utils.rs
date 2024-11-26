@@ -39,6 +39,7 @@ use risingwave_connector::source::test_source::{
     registry_test_source, BoxSource, TestSourceRegistryGuard, TestSourceSplit,
 };
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
+use tokio::task::yield_now;
 use tokio::time::sleep;
 
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
@@ -243,6 +244,14 @@ impl SimulationTestSink {
     pub fn set_err_rate(&self, err_rate: f64) {
         let err_rate = u32::MAX as f64 * err_rate;
         self.err_rate.store(err_rate as _, Relaxed);
+    }
+
+    pub async fn wait_initial_parallelism(&self, parallelism: usize) -> Result<()> {
+        while self.parallelism_counter.load(Relaxed) < parallelism {
+            yield_now().await;
+        }
+        assert_eq!(self.parallelism_counter.load(Relaxed), parallelism);
+        Ok(())
     }
 }
 

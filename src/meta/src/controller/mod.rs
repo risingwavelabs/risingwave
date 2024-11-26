@@ -14,13 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
     table, view,
 };
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -32,7 +33,7 @@ use risingwave_pb::catalog::{
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
-use crate::MetaError;
+use crate::{MetaError, MetaResult};
 
 pub mod catalog;
 pub mod cluster;
@@ -70,10 +71,41 @@ impl SqlMetaStore {
 
     #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
-        use risingwave_meta_model_migration::{Migrator, MigratorTrait};
         let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
+    }
+
+    /// Check whether the cluster, which uses SQL as the backend, is a new cluster.
+    /// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+    /// then it is considered an old cluster.
+    ///
+    /// Note: this check should be performed before [`Self::up()`].
+    async fn is_first_launch(&self) -> MetaResult<bool> {
+        let migrations = Migrator::get_applied_migrations(&self.conn)
+            .await
+            .context("failed to get applied migrations")?;
+        for migration in migrations {
+            if migration.name() == "m20230908_072257_init"
+                && migration.status() == MigrationStatus::Applied
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Apply all the migrations to the meta store before starting the service.
+    ///
+    /// Returns whether the cluster is the first launch.
+    pub async fn up(&self) -> MetaResult<bool> {
+        let cluster_first_launch = self.is_first_launch().await?;
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&self.conn, None)
+            .await
+            .context("failed to upgrade models in meta store")?;
+
+        Ok(cluster_first_launch)
     }
 }
 
@@ -216,6 +248,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
         }
+        #[allow(deprecated)] // for `dependent_relations`
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -223,7 +256,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
+            dependent_relations: vec![],
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
@@ -357,14 +390,13 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             arg_types: value.0.arg_types.to_protobuf(),
             return_type: Some(value.0.return_type.to_protobuf()),
             language: value.0.language,
+            runtime: value.0.runtime,
             link: value.0.link,
             identifier: value.0.identifier,
             body: value.0.body,
             compressed_binary: value.0.compressed_binary,
             kind: Some(value.0.kind.into()),
             always_retry_on_network_error: value.0.always_retry_on_network_error,
-            runtime: value.0.runtime,
-            function_type: value.0.function_type,
         }
     }
 }

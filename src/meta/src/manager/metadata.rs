@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::pin::pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{select, Either};
-use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_meta_model::{DatabaseId, ObjectId, SourceId, WorkerId};
+use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
+use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
-use risingwave_pb::common::worker_node::{PbResource, State};
+use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
-use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -37,7 +37,9 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{ActorId, ClusterId, FragmentId, TableFragments, TableParallelism};
+use crate::model::{
+    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
+};
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
@@ -61,6 +63,14 @@ pub struct ActiveStreamingWorkerNodes {
     rx: UnboundedReceiver<LocalNotification>,
     #[cfg_attr(not(debug_assertions), expect(dead_code))]
     meta_manager: MetadataManager,
+}
+
+impl Debug for ActiveStreamingWorkerNodes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActiveStreamingWorkerNodes")
+            .field("worker_nodes", &self.worker_nodes)
+            .finish()
+    }
 }
 
 impl ActiveStreamingWorkerNodes {
@@ -214,7 +224,6 @@ impl ActiveStreamingWorkerNodes {
                             id: node.id,
                             r#type: node.r#type,
                             host: node.host.clone(),
-                            parallelism: node.parallelism,
                             property: node.property.clone(),
                             resource: node.resource.clone(),
                             ..Default::default()
@@ -319,7 +328,7 @@ impl MetadataManager {
             .list_fragment_database_ids(None)
             .await?
             .into_iter()
-            .map(|(_, database_id)| database_id)
+            .map(|(_, database_id)| DatabaseId::new(database_id as _))
             .collect())
     }
 
@@ -338,7 +347,7 @@ impl MetadataManager {
             .await?
             .into_iter()
             .map(|(fragment_id, database_id)| {
-                (fragment_id as FragmentId, database_id as DatabaseId)
+                (fragment_id as FragmentId, DatabaseId::new(database_id as _))
             })
             .collect();
         let mut ret: HashMap<_, HashMap<_, _>> = HashMap::new();
@@ -540,12 +549,15 @@ impl MetadataManager {
         })
     }
 
-    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<TableFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<StreamJobFragments> {
         let pb_table_fragments = self
             .catalog_controller
-            .get_job_fragments_by_id(id.table_id as _)
+            .get_job_fragments_by_id(job_id.table_id as _)
             .await?;
-        Ok(TableFragments::from_protobuf(pb_table_fragments))
+        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -585,29 +597,27 @@ impl MetadataManager {
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
-    ) -> MetaResult<Vec<TableFragments>> {
+    ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
             let pb_table_fragments = self
                 .catalog_controller
                 .get_job_fragments_by_id(id.table_id as _)
                 .await?;
-            table_fragments.push(TableFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
         }
         Ok(table_fragments)
     }
 
-    pub async fn all_node_actors(
-        &self,
-        include_inactive: bool,
-    ) -> MetaResult<HashMap<WorkerId, Vec<StreamActor>>> {
+    pub async fn all_active_actors(&self) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
-            let tf = TableFragments::from_protobuf(fragments);
-            for (node_id, actors) in tf.worker_actors(include_inactive) {
-                let node_actors = actor_maps.entry(node_id).or_insert_with(Vec::new);
-                node_actors.extend(actors)
+            let tf = StreamJobFragments::from_protobuf(fragments);
+            for actor in tf.active_actors() {
+                actor_maps
+                    .try_insert(actor.actor_id, actor)
+                    .expect("non duplicate");
             }
         }
         Ok(actor_maps)
@@ -649,14 +659,14 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_mv_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -675,10 +685,32 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
-    ) -> MetaResult<HashMap<TableId, HashMap<u32, u64>>> {
-        self.catalog_controller
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        Ok(self
+            .catalog_controller
             .get_mv_depended_subscriptions()
-            .await
+            .await?
+            .into_iter()
+            .map(|(database_id, mv_depended_subscriptions)| {
+                (
+                    DatabaseId::new(database_id as _),
+                    mv_depended_subscriptions
+                        .into_iter()
+                        .map(|(table_id, subscriptions)| {
+                            (
+                                TableId::new(table_id as _),
+                                subscriptions
+                                    .into_iter()
+                                    .map(|(subscription_id, retention_time)| {
+                                        (subscription_id as SubscriptionId, retention_time)
+                                    })
+                                    .collect(),
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect())
     }
 
     pub async fn get_job_max_parallelism(&self, table_id: TableId) -> MetaResult<usize> {
@@ -690,10 +722,15 @@ impl MetadataManager {
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
     }
+
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let rate_limits = self.catalog_controller.list_rate_limits().await?;
+        Ok(rate_limits)
+    }
 }
 
 impl MetadataManager {
-    /// Wait for job finishing notification in `TrackingJob::pre_finish`.
+    /// Wait for job finishing notification in `TrackingJob::finish`.
     /// The progress is updated per barrier.
     pub(crate) async fn wait_streaming_job_finished(
         &self,

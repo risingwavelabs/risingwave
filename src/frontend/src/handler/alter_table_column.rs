@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ProjectNode, StreamFragmentGraph};
 use risingwave_sqlparser::ast::{
     AlterTableOperation, ColumnDef, ColumnOption, DataType as AstDataType, Encode,
-    FormatEncodeOptions, ObjectName, Statement, StructField,
+    FormatEncodeOptions, Ident, ObjectName, Statement, StructField, TableConstraint,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -43,33 +43,9 @@ use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, InputRef, Literal};
 use crate::handler::create_sink::{fetch_incoming_sinks, insert_merger_to_union_with_project};
+use crate::handler::create_table::bind_table_constraints;
 use crate::session::SessionImpl;
 use crate::{Binder, TableCatalog, WithOptions};
-
-pub async fn replace_table_with_definition(
-    session: &Arc<SessionImpl>,
-    table_name: ObjectName,
-    definition: Statement,
-    original_catalog: &Arc<TableCatalog>,
-    format_encode: Option<FormatEncodeOptions>,
-) -> Result<()> {
-    let (source, table, graph, col_index_mapping, job_type) = get_replace_table_plan(
-        session,
-        table_name,
-        definition,
-        original_catalog,
-        format_encode,
-        None,
-    )
-    .await?;
-
-    let catalog_writer = session.catalog_writer()?;
-
-    catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
-        .await?;
-    Ok(())
-}
 
 /// Used in auto schema change process
 pub async fn get_new_table_definition_for_cdc_table(
@@ -84,9 +60,11 @@ pub async fn get_new_table_definition_for_cdc_table(
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
+
     let Statement::CreateTable {
         columns: original_columns,
         format_encode,
+        constraints,
         ..
     } = &mut definition
     else {
@@ -97,6 +75,22 @@ pub async fn get_new_table_definition_for_cdc_table(
         format_encode.is_none(),
         "source schema should be None for CDC table"
     );
+
+    if bind_table_constraints(constraints)?.is_empty() {
+        // For table created by `create table t (*)` the constraint is empty, we need to
+        // retrieve primary key names from original table catalog if available
+        let pk_names: Vec<_> = original_catalog
+            .pk
+            .iter()
+            .map(|x| original_catalog.columns[x.column_index].name().to_string())
+            .collect();
+
+        constraints.push(TableConstraint::Unique {
+            name: None,
+            columns: pk_names.iter().map(Ident::new_unchecked).collect(),
+            is_primary: true,
+        });
+    }
 
     let orig_column_catalog: HashMap<String, ColumnCatalog> = HashMap::from_iter(
         original_catalog
@@ -163,9 +157,8 @@ fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
 pub async fn get_replace_table_plan(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,
-    definition: Statement,
-    original_catalog: &Arc<TableCatalog>,
-    format_encode: Option<FormatEncodeOptions>,
+    new_definition: Statement,
+    old_catalog: &Arc<TableCatalog>,
     new_version_columns: Option<Vec<ColumnCatalog>>, // only provided in auto schema change
 ) -> Result<(
     Option<Source>,
@@ -175,8 +168,8 @@ pub async fn get_replace_table_plan(
     TableJobType,
 )> {
     // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
-    let col_id_gen = ColumnIdGenerator::new_alter(original_catalog);
+    let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
+    let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
     let Statement::CreateTable {
         columns,
         constraints,
@@ -186,16 +179,22 @@ pub async fn get_replace_table_plan(
         with_version_column,
         wildcard_idx,
         cdc_table_info,
+        format_encode,
+        include_column_options,
         ..
-    } = definition
+    } = new_definition
     else {
-        panic!("unexpected statement type: {:?}", definition);
+        panic!("unexpected statement type: {:?}", new_definition);
     };
+
+    let format_encode = format_encode
+        .clone()
+        .map(|format_encode| format_encode.into_v2_with_warning());
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
         table_name,
-        original_catalog,
+        old_catalog,
         format_encode,
         handler_args.clone(),
         col_id_gen,
@@ -208,12 +207,13 @@ pub async fn get_replace_table_plan(
         with_version_column,
         cdc_table_info,
         new_version_columns,
+        include_column_options,
     )
     .await?;
 
     // Calculate the mapping from the original columns to the new columns.
     let col_index_mapping = ColIndexMapping::new(
-        original_catalog
+        old_catalog
             .columns()
             .iter()
             .map(|old_c| {
@@ -225,12 +225,13 @@ pub async fn get_replace_table_plan(
         table.columns.len(),
     );
 
-    let incoming_sink_ids: HashSet<_> = original_catalog.incoming_sinks.iter().copied().collect();
+    let incoming_sink_ids: HashSet<_> = old_catalog.incoming_sinks.iter().copied().collect();
 
     let target_columns = table
         .columns
         .iter()
         .map(|col| ColumnCatalog::from(col.clone()))
+        .filter(|col| !col.is_rw_timestamp_column())
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {
@@ -245,7 +246,7 @@ pub async fn get_replace_table_plan(
     // Set some fields ourselves so that the meta service does not need to maintain them.
     let mut table = table;
     table.incoming_sinks = incoming_sink_ids.iter().copied().collect();
-    table.maybe_vnode_count = VnodeCount::set(original_catalog.vnode_count()).to_protobuf();
+    table.maybe_vnode_count = VnodeCount::set(old_catalog.vnode_count()).to_protobuf();
 
     Ok((source, table, graph, col_index_mapping, job_type))
 }
@@ -332,6 +333,7 @@ pub async fn handle_alter_table_column(
     else {
         panic!("unexpected statement: {:?}", definition);
     };
+
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
@@ -455,15 +457,14 @@ pub async fn handle_alter_table_column(
         _ => unreachable!(),
     };
 
-    replace_table_with_definition(
-        &session,
-        table_name,
-        definition,
-        &original_catalog,
-        format_encode,
-    )
-    .await?;
+    let (source, table, graph, col_index_mapping, job_type) =
+        get_replace_table_plan(&session, table_name, definition, &original_catalog, None).await?;
 
+    let catalog_writer = session.catalog_writer()?;
+
+    catalog_writer
+        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .await?;
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 

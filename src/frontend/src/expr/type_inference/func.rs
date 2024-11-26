@@ -841,7 +841,7 @@ fn implicit_ok(source: &DataType, target: &SigDataType, eq_ok: bool) -> bool {
 /// Find the top `candidates` that match `inputs` on most non-null positions. This covers Rule 2,
 /// 4a, 4c and 4d in [`PostgreSQL`](https://www.postgresql.org/docs/current/typeconv-func.html).
 ///
-/// * Rule 2 & 4c: Keep candidates that have most exact type matches. Exact match on all posistions
+/// * Rule 2 & 4c: Keep candidates that have most exact type matches. Exact match on all positions
 ///   is just a special case.
 /// * Rule 4d: Break ties by selecting those that accept preferred types at most positions.
 /// * Rule 4a: If the input cannot implicit cast to expected type at any position, this candidate is

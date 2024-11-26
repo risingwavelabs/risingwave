@@ -318,11 +318,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.state.table.init_epoch(epoch);
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state.table.init_epoch(epoch).await?;
         if let Some(degree_state) = &mut self.degree_state {
-            degree_state.table.init_epoch(epoch);
+            degree_state.table.init_epoch(epoch).await?;
         }
+        Ok(())
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.

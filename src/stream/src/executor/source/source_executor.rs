@@ -71,7 +71,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Rate limit in rows/s.
     rate_limit_rps: Option<u32>,
 
-    is_shared: bool,
+    is_shared_non_cdc: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -82,7 +82,7 @@ impl<S: StateStore> SourceExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
         rate_limit_rps: Option<u32>,
-        is_shared: bool,
+        is_shared_non_cdc: bool,
     ) -> Self {
         Self {
             actor_ctx,
@@ -91,7 +91,7 @@ impl<S: StateStore> SourceExecutor<S> {
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
-            is_shared,
+            is_shared_non_cdc,
         }
     }
 
@@ -116,11 +116,13 @@ impl<S: StateStore> SourceExecutor<S> {
         }))
     }
 
+    /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxChunkSourceStream> {
+        seek_to_latest: bool,
+    ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -183,13 +185,16 @@ impl<S: StateStore> SourceExecutor<S> {
             source_desc.source.config.clone(),
             schema_change_tx,
         );
-        let stream = source_desc
+        let (stream, latest_splits) = source_desc
             .source
-            .build_stream(state, column_ids, Arc::new(source_ctx))
+            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
             .await
-            .map_err(StreamExecutorError::connector_error);
+            .map_err(StreamExecutorError::connector_error)?;
 
-        Ok(apply_rate_limit(stream?, self.rate_limit_rps).boxed())
+        Ok((
+            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            latest_splits,
+        ))
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -367,10 +372,10 @@ impl<S: StateStore> SourceExecutor<S> {
         );
 
         // Replace the source reader with a new one of the new state.
-        let reader = self
-            .build_stream_source_reader(source_desc, Some(target_state.clone()))
-            .await?
-            .map_err(StreamExecutorError::connector_error);
+        let (reader, _) = self
+            .build_stream_source_reader(source_desc, Some(target_state.clone()), false)
+            .await?;
+        let reader = reader.map_err(StreamExecutorError::connector_error);
 
         stream.replace_data_stream(reader);
 
@@ -430,6 +435,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
+        let first_epoch = barrier.epoch;
+        let mut boot_state =
+            if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+                tracing::debug!(?splits, "boot with splits");
+                splits.to_vec()
+            } else {
+                Vec::default()
+            };
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -447,14 +463,8 @@ impl<S: StateStore> SourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut boot_state = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            tracing::debug!(?splits, "boot with splits");
-            boot_state = splits.to_vec();
-        }
-
-        core.split_state_store.init_epoch(barrier.epoch);
-
+        core.split_state_store.init_epoch(first_epoch).await?;
+        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -462,42 +472,47 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await?
             {
                 *ele = recover_state;
+                // if state store is non-empty, we consider it's initialized.
+                is_uninitialized = false;
             } else {
                 // This is a new split, not in state table.
-                if self.is_shared {
-                    // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
-                    // It's highly probable that the work of scanning historical data cannot be shared,
-                    // so don't waste work on it.
-                    // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
-                    if ele.is_cdc_split() {
-                        // shared CDC source already starts from latest.
-                        continue;
-                    }
-                    match ele {
-                        SplitImpl::Kafka(split) => {
-                            split.seek_to_latest_offset();
-                        }
-                        _ => unreachable!("only kafka source can be shared, got {:?}", ele),
-                    }
-                }
+                // make sure it is written to state table later.
+                // Then even it receives no messages, we can observe it in state table.
+                core.updated_splits_in_epoch.insert(ele.id(), ele.clone());
             }
         }
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
-        let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
-        let source_chunk_reader = self
-            .build_stream_source_reader(&source_desc, recover_state)
+        let (source_chunk_reader, latest_splits) = self
+            .build_stream_source_reader(
+                &source_desc,
+                recover_state,
+                // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
+                // It's highly probable that the work of scanning historical data cannot be shared,
+                // so don't waste work on it.
+                // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
+                // Note that shared CDC source is special. It already starts from latest.
+                self.is_shared_non_cdc && is_uninitialized,
+            )
             .instrument_await("source_build_reader")
-            .await?
-            .map_err(StreamExecutorError::connector_error);
-
+            .await?;
+        let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
+        if let Some(latest_splits) = latest_splits {
+            // make sure it is written to state table later.
+            // Then even it receives no messages, we can observe it in state table.
+            self.stream_source_core
+                .as_mut()
+                .unwrap()
+                .updated_splits_in_epoch
+                .extend(latest_splits.into_iter().map(|s| (s.id(), s)));
+        }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
@@ -505,19 +520,12 @@ impl<S: StateStore> SourceExecutor<S> {
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
         let mut command_paused = false;
 
-        // - For shared source, pause until there's a MV.
         // - If the first barrier requires us to pause on startup, pause the stream.
-        if (self.is_shared && is_uninitialized) || barrier.is_pause_on_startup() {
-            tracing::info!(
-                is_shared = self.is_shared,
-                is_uninitialized = is_uninitialized,
-                "source paused on startup"
-            );
+        if is_pause_on_startup {
+            tracing::info!("source paused on startup");
             stream.pause_stream();
             command_paused = true;
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
         // milliseconds, considering some other latencies like network and cost in Meta.
@@ -558,14 +566,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
 
                     let epoch = barrier.epoch;
-
-                    if self.is_shared
-                        && is_uninitialized
-                        && barrier.has_more_downstream_fragments(self.actor_ctx.id)
-                    {
-                        stream.resume_stream();
-                        is_uninitialized = false;
-                    }
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
@@ -608,6 +608,11 @@ impl<S: StateStore> SourceExecutor<S> {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
+                                    tracing::info!(
+                                        "updating rate limit from {:?} to {:?}",
+                                        self.rate_limit_rps,
+                                        *new_rate_limit
+                                    );
                                     self.rate_limit_rps = *new_rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)
@@ -1108,7 +1113,10 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
+            .await
+            .unwrap();
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -1147,7 +1155,10 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+            .await
+            .unwrap();
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])

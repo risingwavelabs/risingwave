@@ -36,10 +36,10 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     LocalSstableInfo, SyncResult, FIRST_VERSION_ID,
 };
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::HummockPinnedVersion;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -381,11 +381,11 @@ async fn test_release_context_resource() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )
@@ -464,11 +464,11 @@ async fn test_hummock_manager_basic() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )
@@ -567,8 +567,6 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    // objects_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -580,7 +578,6 @@ async fn test_hummock_manager_basic() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -953,7 +950,8 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
+    let (join_handle, shutdown_tx) =
+        HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1082,7 +1080,8 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
+    let (join_handle, shutdown_tx) =
+        HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1181,24 +1180,20 @@ async fn test_extend_objects_to_delete() {
         })
         .max()
         .unwrap();
-    let orphan_sst_num = 10;
+    let orphan_sst_num: usize = 10;
     let all_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.object_id)
-        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
+        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
         .collect_vec();
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
-    );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
 
     // Checkpoint
@@ -1206,50 +1201,30 @@ async fn test_extend_objects_to_delete() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
-    );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     // version1 is unpin, but version2 is pinned, and version2 is the checkpoint version.
     // stale objects are combined in the checkpoint of version2, so no sst to reclaim
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = version_max_committed_epoch(&pinned_version2).next_epoch();
     hummock_meta_client
         .commit_epoch(
@@ -1272,13 +1247,12 @@ async fn test_extend_objects_to_delete() {
     // in the stale objects of version2 checkpoint
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize + 3
+            .unwrap()
+            .len(),
+        orphan_sst_num + 3
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
 #[tokio::test]
@@ -2572,4 +2546,44 @@ async fn test_merge_compaction_group_task_expired() {
         .collect::<HashSet<_>>();
     // task 2 report failed due to the compaction group is merged
     assert!(!sst_ids.contains(&report_sst_id));
+}
+
+#[tokio::test]
+async fn test_vacuum() {
+    let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+    let context_id = worker_id as _;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        context_id,
+    ));
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    hummock_manager.pin_version(context_id).await.unwrap();
+    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+    let sst_infos = add_test_tables(
+        hummock_manager.as_ref(),
+        hummock_meta_client.clone(),
+        compaction_group_id,
+    )
+    .await;
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    hummock_manager.create_version_checkpoint(1).await.unwrap();
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 6);
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+
+    hummock_manager
+        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .await
+        .unwrap();
+    hummock_manager.create_version_checkpoint(0).await.unwrap();
+    let deleted = hummock_manager
+        .complete_gc_batch(
+            sst_infos
+                .iter()
+                .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
+                .collect(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted, 3);
 }
