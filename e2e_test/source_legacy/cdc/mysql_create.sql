@@ -51,8 +51,8 @@ INSERT INTO mysql_all_types VALUES ( False, 0, null, null, -8388608, -2147483647
 INSERT INTO mysql_all_types VALUES ( True, 1, -128, -32767, -8388608, -2147483647, -9223372036854775807, -10.0, -9999.999999, -10000.0, 'a', 'b', '', '', '1001-01-01', '00:00:00', '1998-01-01 00:00:00.000000', '1970-01-01 00:00:01');
 
 CREATE TABLE test_my_default_value (
-    "id" int,
-    "name" varchar(64),
-    "city" varchar(200) default 'Shanghai',
-    PRIMARY KEY ("id")
+    id int,
+    name varchar(64),
+    city varchar(200) default 'Shanghai',
+    PRIMARY KEY (id)
 );
