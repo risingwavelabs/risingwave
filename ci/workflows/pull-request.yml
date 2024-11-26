@@ -792,9 +792,13 @@ steps:
   - label: "end-to-end test ({{matrix.label}} backend)"
     matrix:
       setup:
-        label: []
-        endpoint: []
+        label: [""]
+        endpoint: [""]
       adjustments:
+        - with:
+            label: ""
+            endpoint: ""
+          skip: true
         - with:
             label: "postgres"
             # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
