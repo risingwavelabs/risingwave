@@ -148,7 +148,7 @@ fn value_encoding_to_literal(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{ListValue, StructValue};
-    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType};
     use risingwave_common::util::value_encoding::DatumFromProtoExt;
     use risingwave_pb::expr::expr_node::RexNode;
 
@@ -166,10 +166,8 @@ mod tests {
         if let RexNode::Constant(prost) = node {
             let data2 = Datum::from_protobuf(
                 &prost,
-                &DataType::new_struct(
-                    vec![DataType::Varchar, DataType::Int32, DataType::Int32],
-                    vec![],
-                ),
+                &StructType::unnamed(vec![DataType::Varchar, DataType::Int32, DataType::Int32])
+                    .into(),
             )
             .unwrap()
             .unwrap();
