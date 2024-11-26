@@ -28,6 +28,14 @@ use crate::{
     MetaNodeConfig,
 };
 
+/// URL for connecting to the SQL meta store.
+///
+/// # Examples
+///
+/// - `mysql://root:my-secret-pw@127.0.0.1:3306/metastore`
+/// - `postgresql://localhost:5432/metastore`
+/// - `sqlite:///path/to/file.db`
+/// - `sqlite::memory:`
 fn sql_endpoint_from_env() -> Result<String> {
     env::var("RISEDEV_SQL_ENDPOINT").context("env RISEDEV_SQL_ENDPOINT not set")
 }
@@ -332,10 +340,21 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
         let init_url = init_options.to_url_lossy();
 
         (db, init_url)
-    } else {
-        // SQLite file itself is the database.
-        // TODO: shall we empty the file?
+    } else if sqlx::Sqlite::URL_SCHEMES.contains(&scheme) {
+        // For SQLite, simply empty the file.
+        let options = sqlx::sqlite::SqliteConnectOptions::from_url(&endpoint)
+            .context("invalid database url for SQLite meta backend")?;
+
+        if endpoint.as_str().contains(":memory:") || endpoint.as_str().contains("mode=memory") {
+            // SQLite in-memory database does not need initialization.
+        } else {
+            let filename = options.get_filename();
+            fs_err::write(filename, b"").context("failed to empty SQLite file")?;
+        }
+
         return Ok(());
+    } else {
+        bail!("unsupported SQL scheme for meta backend: {}", scheme);
     };
 
     rt.block_on(async move {
