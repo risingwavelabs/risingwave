@@ -97,9 +97,7 @@ impl Expr for Subquery {
                     StructType::unnamed(self.query.data_types())
                 } else {
                     StructType::new(
-                        (schema.fields().iter().cloned())
-                            .map(|f| (f.name, f.data_type))
-                            .collect(),
+                        (schema.fields().iter().cloned()).map(|f| (f.name, f.data_type)),
                     )
                 };
                 DataType::Struct(struct_type)

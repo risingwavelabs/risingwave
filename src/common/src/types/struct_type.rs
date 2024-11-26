@@ -48,10 +48,11 @@ struct StructTypeInner {
 
 impl StructType {
     /// Creates a struct type with named fields.
-    pub fn new(named_fields: Vec<(impl Into<String>, DataType)>) -> Self {
-        let mut field_types = Vec::with_capacity(named_fields.len());
-        let mut field_names = Vec::with_capacity(named_fields.len());
-        for (name, ty) in named_fields {
+    pub fn new(named_fields: impl IntoIterator<Item = (impl Into<String>, DataType)>) -> Self {
+        let iter = named_fields.into_iter();
+        let mut field_types = Vec::with_capacity(iter.size_hint().0);
+        let mut field_names = Vec::with_capacity(iter.size_hint().0);
+        for (name, ty) in iter {
             field_names.push(name.into());
             field_types.push(ty);
         }
