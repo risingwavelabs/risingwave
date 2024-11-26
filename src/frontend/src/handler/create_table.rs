@@ -1337,7 +1337,8 @@ pub fn check_create_table_with_source(
     if cdc_table_info.is_some() {
         return Ok(format_encode);
     }
-    let defined_source = with_options.contains_key(UPSTREAM_SOURCE_KEY);
+    let defined_source = with_options.is_source_connector();
+
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),

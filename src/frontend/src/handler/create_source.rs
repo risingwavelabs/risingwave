@@ -52,12 +52,12 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
-pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
     ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
-    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR, WEBHOOK_CONNECTOR,
+    POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
+pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
@@ -1136,9 +1136,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
-                ),
-                WEBHOOK_CONNECTOR => hashmap!(
-                    Format::Native => vec![Encode::Native],
                 ),
         ))
     });

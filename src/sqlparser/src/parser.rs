@@ -38,6 +38,7 @@ use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -2551,21 +2552,16 @@ impl Parser<'_> {
         let include_options = self.parse_include_options()?;
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
-        let mut with_options = self.parse_with_properties()?;
+        let with_options = self.parse_with_properties()?;
 
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
-        let contain_webhook = if let Some(connector) = &connector
-            && connector.contains("webhook")
-        {
-            // for webhook source, we clear all the options and use `webhook_info` to store the webhook info
-            with_options.clear();
-            true
-        } else {
-            false
-        };
+        let contain_webhook =
+            connector.is_some() && connector.as_ref().unwrap().contains(WEBHOOK_CONNECTOR);
+
+        // webhook connector does not require row format
         let format_encode = if let Some(connector) = connector
             && !contain_webhook
         {

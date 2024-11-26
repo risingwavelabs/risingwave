@@ -58,6 +58,8 @@ const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
+pub const WEBHOOK_CONNECTOR: &str = "webhook";
+
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(

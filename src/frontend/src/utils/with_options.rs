@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{
 use super::OverwriteOptions;
 use crate::catalog::ConnectionId;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
+use crate::handler::create_source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use crate::session::SessionImpl;
 use crate::Binder;
 
@@ -155,6 +156,11 @@ impl WithOptions {
                 "Secret reference is not allowed in OAuth options".to_string(),
             )))
         }
+    }
+
+    pub fn is_source_connector(&self) -> bool {
+        self.inner.contains_key(UPSTREAM_SOURCE_KEY)
+            && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
 }
 

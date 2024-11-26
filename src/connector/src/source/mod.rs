@@ -28,7 +28,7 @@ pub mod pulsar;
 
 use std::future::IntoFuture;
 
-pub use base::{UPSTREAM_SOURCE_KEY, *};
+pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub(crate) use common::*;
 use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
@@ -54,8 +54,6 @@ pub use crate::source::filesystem::opendal_source::{
 pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
-
-pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
