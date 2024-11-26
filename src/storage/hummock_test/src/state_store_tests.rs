@@ -1774,7 +1774,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1788,7 +1788,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1807,7 +1807,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "ab"),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1837,7 +1837,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1867,7 +1867,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch3,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1881,7 +1881,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch1,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1897,7 +1897,7 @@ async fn test_get_keyed_row() {
             anchor.clone(),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1928,7 +1928,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "bb"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -1945,7 +1945,7 @@ async fn test_get_keyed_row() {
             gen_key_from_str(VirtualNode::ZERO, "dd"),
             epoch2,
             ReadOptions {
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
