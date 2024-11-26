@@ -19,20 +19,6 @@ cargo-cache: &cargo-cache
     - ".cargo/registry/cache"
     - ".cargo/git"
 
-sql-backend: &sql-backend
-  setup:
-    label: []
-    endpoint: []
-  adjustments:
-    - with:
-        label: "postgres"
-        # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
-        endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
-    - with:
-        label: "mysql"
-        # mysql -h mysql -P 3306 -u root -p123456 -D rwmeta
-        endpoint: "mysql://root:123456@mysql:3306/rwmeta"
-
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -804,7 +790,19 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test ({{matrix.label}} backend)"
-    matrix: *sql-backend
+    matrix:
+      setup:
+        label: []
+        endpoint: []
+      adjustments:
+        - with:
+            label: "postgres"
+            # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
+            endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
+        - with:
+            label: "mysql"
+            # mysql -h mysql -P 3306 -u root -p123456 -D rwmeta
+            endpoint: "mysql://root:123456@mysql:3306/rwmeta"
     command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-env-backend"
     env:
       RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
