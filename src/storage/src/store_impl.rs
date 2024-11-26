@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
@@ -41,6 +41,9 @@ use crate::monitor::{
 };
 use crate::opts::StorageOpts;
 use crate::StateStore;
+
+static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
+    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
 
 mod opaque_type {
     use super::*;
@@ -613,12 +616,10 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        let metrics_registry = PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone());
-
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
-                .with_metrics_registry(metrics_registry.clone())
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
@@ -664,9 +665,7 @@ impl StateStoreImpl {
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
-                .with_metrics_registry(PrometheusMetricsRegistry::new(
-                    GLOBAL_METRICS_REGISTRY.clone(),
-                ))
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
                     state_store_metrics.clone(),
                 )))
