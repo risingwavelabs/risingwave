@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod iceberg_source_rewriter;
 mod plan_cloner;
 mod share_source_rewriter;
 
-pub use iceberg_source_rewriter::*;
 use itertools::Itertools;
 use paste::paste;
 pub use plan_cloner::*;
