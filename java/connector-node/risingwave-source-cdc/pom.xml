@@ -68,6 +68,7 @@
         <dependency>
             <groupId>org.mongodb</groupId>
             <artifactId>mongodb-driver-sync</artifactId>
+            <version>4.11.5</version>
         </dependency>
     </dependencies>
 </project>
