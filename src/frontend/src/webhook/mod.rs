@@ -178,7 +178,7 @@ impl WebhookService {
             .allow_origin(cors::Any)
             .allow_methods(vec![Method::POST]);
 
-        let api_router = Router::new()
+        let api_router: Router = Router::new()
             .route("/:database/:schema/:table", post(handle_post_request))
             .layer(
                 ServiceBuilder::new()
@@ -187,7 +187,7 @@ impl WebhookService {
             )
             .layer(cors_layer);
 
-        let app = Router::new()
+        let app: Router = Router::new()
             .nest("/webhook", api_router)
             .layer(CompressionLayer::new());
 
