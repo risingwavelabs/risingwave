@@ -23,6 +23,7 @@ pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+use crate::common::WorkerType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -220,7 +221,11 @@ impl stream_plan::MaterializeNode {
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
     pub fn parallelism(&self) -> usize {
-        self.parallelism as usize
+        assert_eq!(self.r#type(), WorkerType::ComputeNode);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
     }
 }
 
@@ -299,6 +304,25 @@ impl stream_plan::StreamNode {
         }
 
         None
+    }
+}
+
+impl stream_plan::FragmentTypeFlag {
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn backfill_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::SourceScan as i32
+            | stream_plan::FragmentTypeFlag::StreamScan as i32
+    }
+
+    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
+    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
+    pub fn source_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
+    }
+
+    /// Note: this doesn't include `FsFetch` created in old versions.
+    pub fn rate_limit_fragments() -> i32 {
+        Self::backfill_rate_limit_fragments() | Self::source_rate_limit_fragments()
     }
 }
 

@@ -34,7 +34,7 @@ use risingwave_common::{
 };
 
 use crate::store::{
-    ChangeLogValue, IterItem, StateStoreIterItem, StateStoreIterItemRef, StateStoreReadLogItem,
+    ChangeLogValue, IterItem, StateStoreKeyedRow, StateStoreKeyedRowRef, StateStoreReadLogItem,
     StateStoreReadLogItemRef,
 };
 
@@ -70,8 +70,8 @@ pub fn global_storage_metrics(metric_level: MetricLevel) -> MonitoredStorageMetr
 
 impl MonitoredStorageMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
-        // 256B ~ max 4GB
-        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 256B ~ max 64GB
+        let size_buckets = exponential_buckets(256.0, 16.0, 8).unwrap();
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----
@@ -500,7 +500,7 @@ impl StateStoreIterStats {
 }
 
 impl StateStoreIterStatsTrait for StateStoreIterStats {
-    type Item = StateStoreIterItem;
+    type Item = StateStoreKeyedRow;
 
     fn new(table_id: u32, metrics: &MonitoredStorageMetrics, iter_init_duration: Duration) -> Self {
         Self::for_table_metrics(table_id, metrics, |metrics| {
@@ -511,7 +511,7 @@ impl StateStoreIterStatsTrait for StateStoreIterStats {
         }
     }
 
-    fn observe(&mut self, (key, value): StateStoreIterItemRef<'_>) {
+    fn observe(&mut self, (key, value): StateStoreKeyedRowRef<'_>) {
         self.inner.total_items += 1;
         self.inner.total_size += key.encoded_len() + value.len();
     }

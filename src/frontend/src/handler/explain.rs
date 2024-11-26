@@ -230,6 +230,9 @@ async fn do_handle_explain(
                     match explain_format {
                         ExplainFormat::Text => blocks.push(plan.explain_to_string()),
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
+                        ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
+                        ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
+                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
                     }
                 }
             }

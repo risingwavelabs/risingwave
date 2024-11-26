@@ -232,7 +232,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
-                        is_shared,
+                        is_shared && !source.with_properties.is_cdc_connector(),
                     )
                     .boxed()
                 }

@@ -37,6 +37,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -92,10 +93,21 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
     pub reserved_memory_bytes: Option<usize>,
 
+    /// Target memory usage for Memory Manager.
+    /// If not set, the default value is `total_memory_bytes` - `reserved_memory_bytes`
+    ///
+    /// It's strongly recommended to set it for standalone deployment.
+    #[clap(long, env = "RW_MEMORY_MANAGER_TARGET_BYTES")]
+    pub memory_manager_target_bytes: Option<usize>,
+
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[clap(long, env = "RW_NODE_LABEL", default_value_t = default_node_label())]
+    pub node_label: String,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
@@ -240,6 +252,10 @@ pub fn default_total_memory_bytes() -> usize {
 
 pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+pub fn default_node_label() -> String {
+    DEFAULT_COMPUTE_NODE_LABEL.to_string()
 }
 
 pub fn default_role() -> Role {

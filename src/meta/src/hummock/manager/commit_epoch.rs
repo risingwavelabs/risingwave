@@ -15,7 +15,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::ChangeLogDelta;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
@@ -112,7 +114,7 @@ impl HummockManager {
         let state_table_info = &version.latest_version().state_table_info;
         let mut table_compaction_group_mapping = state_table_info.build_table_compaction_group_id();
         let mut new_table_ids = HashMap::new();
-        let mut new_compaction_groups = HashMap::new();
+        let mut new_compaction_groups = Vec::new();
         let mut compaction_group_manager_txn = None;
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
 
@@ -143,14 +145,13 @@ impl HummockManager {
                     )
                 };
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-            new_compaction_groups.insert(new_compaction_group_id, compaction_group_config.clone());
-            compaction_group_manager.insert(
-                new_compaction_group_id,
-                CompactionGroup {
-                    group_id: new_compaction_group_id,
-                    compaction_config: compaction_group_config,
-                },
-            );
+            let new_compaction_group = CompactionGroup {
+                group_id: new_compaction_group_id,
+                compaction_config: compaction_group_config.clone(),
+            };
+
+            new_compaction_groups.push(new_compaction_group.clone());
+            compaction_group_manager.insert(new_compaction_group_id, new_compaction_group);
 
             on_handle_add_new_table(
                 state_table_info,
@@ -165,12 +166,35 @@ impl HummockManager {
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
 
-        let modified_compaction_groups: Vec<_> = commit_sstables.keys().cloned().collect();
+        let modified_compaction_groups = commit_sstables.keys().cloned().collect_vec();
+        // fill compaction_groups
+        let mut group_id_to_config = HashMap::new();
+        if let Some(compaction_group_manager) = compaction_group_manager_txn.as_ref() {
+            for cg_id in &modified_compaction_groups {
+                let compaction_group = compaction_group_manager
+                    .get(cg_id)
+                    .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                    .compaction_config();
+                group_id_to_config.insert(*cg_id, compaction_group);
+            }
+        } else {
+            let compaction_group_manager = self.compaction_group_manager.read().await;
+            for cg_id in &modified_compaction_groups {
+                let compaction_group = compaction_group_manager
+                    .try_get_compaction_group_config(*cg_id)
+                    .unwrap_or_else(|| panic!("compaction group {} should be created", cg_id))
+                    .compaction_config();
+                group_id_to_config.insert(*cg_id, compaction_group);
+            }
+        }
+
+        let group_id_to_sub_levels =
+            rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
         let time_travel_delta = version.pre_commit_epoch(
             &tables_to_commit,
             new_compaction_groups,
-            commit_sstables,
+            group_id_to_sub_levels,
             &new_table_ids,
             new_table_watermarks,
             change_log_delta,
@@ -294,29 +318,20 @@ impl HummockManager {
     async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = {
-            std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            )
-        };
-
-        let mut table_infos = self.history_table_throughput.write();
-        let max_table_stat_throuput_window_seconds = std::cmp::max(
-            self.env.opts.table_stat_throuput_window_seconds_for_split,
-            self.env.opts.table_stat_throuput_window_seconds_for_merge,
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
 
-        let max_sample_size = (max_table_stat_throuput_window_seconds as f64
-            / checkpoint_secs as f64)
-            .ceil() as usize;
+        let mut table_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.write();
+        let timestamp = chrono::Utc::now().timestamp();
+
         for (table_id, stat) in table_stats {
-            let throughput = (stat.total_value_size + stat.total_key_size) as u64;
-            let entry = table_infos.entry(table_id).or_default();
-            entry.push_back(throughput);
-            if entry.len() > max_sample_size {
-                entry.pop_front();
-            }
+            let throughput = ((stat.total_value_size + stat.total_key_size) as f64
+                / checkpoint_secs as f64) as u64;
+            table_throughput_statistic_manager
+                .add_table_throughput_with_ts(table_id, throughput, timestamp);
         }
     }
 
@@ -327,6 +342,7 @@ impl HummockManager {
     ) -> Result<BTreeMap<CompactionGroupId, Vec<SstableInfo>>> {
         let mut new_sst_id_number = 0;
         let mut sst_to_cg_vec = Vec::with_capacity(sstables.len());
+        let commit_object_id_vec = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
         for commit_sst in sstables {
             let mut group_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
             for table_id in &commit_sst.sst_info.table_ids {
@@ -395,6 +411,12 @@ impl HummockManager {
             }
         }
 
+        // order check
+        for ssts in commit_sstables.values() {
+            let object_ids = ssts.iter().map(|s| s.object_id).collect_vec();
+            assert!(is_ordered_subset(&commit_object_id_vec, &object_ids));
+        }
+
         Ok(commit_sstables)
     }
 }
@@ -418,4 +440,58 @@ fn on_handle_add_new_table(
     }
 
     Ok(())
+}
+
+/// Rewrite the commit sstables to sub-levels based on the compaction group config.
+/// The type of `compaction_group_manager_txn` is too complex to be used in the function signature. So we use `HashMap` instead.
+fn rewrite_commit_sstables_to_sub_level(
+    commit_sstables: BTreeMap<CompactionGroupId, Vec<SstableInfo>>,
+    group_id_to_config: &HashMap<CompactionGroupId, Arc<CompactionConfig>>,
+) -> BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>> {
+    let mut overlapping_sstables: BTreeMap<u64, Vec<Vec<SstableInfo>>> = BTreeMap::new();
+    for (group_id, inserted_table_infos) in commit_sstables {
+        let config = group_id_to_config
+            .get(&group_id)
+            .expect("compaction group should exist");
+
+        let mut accumulated_size = 0;
+        let mut ssts = vec![];
+        let sub_level_size_limit = config
+            .max_overlapping_level_size
+            .unwrap_or(compaction_config::max_overlapping_level_size());
+
+        let level = overlapping_sstables.entry(group_id).or_default();
+
+        for sst in inserted_table_infos {
+            accumulated_size += sst.sst_size;
+            ssts.push(sst);
+            if accumulated_size > sub_level_size_limit {
+                level.push(ssts);
+
+                // reset the accumulated size and ssts
+                accumulated_size = 0;
+                ssts = vec![];
+            }
+        }
+
+        if !ssts.is_empty() {
+            level.push(ssts);
+        }
+
+        // The uploader organizes the ssts in decreasing epoch order, so the level needs to be reversed to ensure that the latest epoch is at the top.
+        level.reverse();
+    }
+
+    overlapping_sstables
+}
+
+fn is_ordered_subset(vec_1: &Vec<u64>, vec_2: &Vec<u64>) -> bool {
+    let mut vec_2_iter = vec_2.iter().peekable();
+    for item in vec_1 {
+        if vec_2_iter.peek() == Some(&item) {
+            vec_2_iter.next();
+        }
+    }
+
+    vec_2_iter.peek().is_none()
 }

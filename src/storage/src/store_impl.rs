@@ -222,7 +222,6 @@ macro_rules! dispatch_state_store {
 
 #[cfg(any(debug_assertions, test, feature = "test"))]
 pub mod verify {
-    use std::collections::HashSet;
     use std::fmt::Debug;
     use std::future::Future;
     use std::marker::PhantomData;
@@ -231,7 +230,6 @@ pub mod verify {
 
     use bytes::Bytes;
     use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -279,18 +277,18 @@ pub mod verify {
         type Iter = impl StateStoreReadIter;
         type RevIter = impl StateStoreReadIter;
 
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
+        ) -> StorageResult<Option<StateStoreKeyedRow>> {
             let actual = self
                 .actual
-                .get(key.clone(), epoch, read_options.clone())
+                .get_keyed_row(key.clone(), epoch, read_options.clone())
                 .await;
             if let Some(expected) = &self.expected {
-                let expected = expected.get(key, epoch, read_options).await;
+                let expected = expected.get_keyed_row(key, epoch, read_options).await;
                 assert_result_eq(&actual, &expected);
             }
             actual
@@ -316,7 +314,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -338,7 +336,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -455,7 +453,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -476,7 +474,7 @@ pub mod verify {
                     None
                 };
 
-                Ok(verify_iter::<StateStoreIterItem>(actual, expected))
+                Ok(verify_iter::<StateStoreKeyedRow>(actual, expected))
             }
         }
 
@@ -573,20 +571,6 @@ pub mod verify {
             options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.actual.try_wait_epoch(epoch, options)
-        }
-
-        fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-            let expected_future = self
-                .expected
-                .as_ref()
-                .map(|expected| expected.sync(epoch, table_ids.clone()));
-            let actual_future = self.actual.sync(epoch, table_ids);
-            async move {
-                if let Some(expected_future) = expected_future {
-                    expected_future.await?;
-                }
-                actual_future.await
-            }
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
@@ -824,20 +808,16 @@ impl AsHummock for SledStateStore {
 
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
-    use std::collections::HashSet;
     use std::future::Future;
     use std::ops::{Deref, DerefMut};
     use std::sync::Arc;
 
     use bytes::Bytes;
     use dyn_clone::{clone_trait_object, DynClone};
-    use futures::future::BoxFuture;
-    use futures::FutureExt;
     use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-    use risingwave_hummock_sdk::{HummockReadEpoch, SyncResult};
+    use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
     use crate::hummock::HummockStorage;
@@ -869,17 +849,17 @@ pub mod boxed_state_store {
 
     // For StateStoreRead
 
-    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreIterItem>;
+    pub type BoxStateStoreReadIter = BoxStateStoreIter<'static, StateStoreKeyedRow>;
     pub type BoxStateStoreReadChangeLogIter = BoxStateStoreIter<'static, StateStoreReadLogItem>;
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
+        ) -> StorageResult<Option<StateStoreKeyedRow>>;
 
         async fn iter(
             &self,
@@ -905,13 +885,13 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
-        async fn get(
+        async fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
-            self.get(key, epoch, read_options).await
+        ) -> StorageResult<Option<StateStoreKeyedRow>> {
+            self.get_keyed_row(key, epoch, read_options).await
         }
 
         async fn iter(
@@ -947,7 +927,7 @@ pub mod boxed_state_store {
     }
 
     // For LocalStateStore
-    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreIterItem>;
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn get(
@@ -1159,12 +1139,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> StorageResult<()>;
 
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> BoxFuture<'static, StorageResult<SyncResult>>;
-
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
     }
 
@@ -1176,14 +1150,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> StorageResult<()> {
             self.try_wait_epoch(epoch, options).await
-        }
-
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> BoxFuture<'static, StorageResult<SyncResult>> {
-            self.sync(epoch, table_ids).boxed()
         }
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
@@ -1198,13 +1164,13 @@ pub mod boxed_state_store {
         type Iter = BoxStateStoreReadIter;
         type RevIter = BoxStateStoreReadIter;
 
-        fn get(
+        fn get_keyed_row(
             &self,
             key: TableKey<Bytes>,
             epoch: u64,
             read_options: ReadOptions,
-        ) -> impl Future<Output = StorageResult<Option<Bytes>>> + Send + '_ {
-            self.deref().get(key, epoch, read_options)
+        ) -> impl Future<Output = StorageResult<Option<StateStoreKeyedRow>>> + Send + '_ {
+            self.deref().get_keyed_row(key, epoch, read_options)
         }
 
         fn iter(
@@ -1263,14 +1229,6 @@ pub mod boxed_state_store {
             options: TryWaitEpochOptions,
         ) -> impl Future<Output = StorageResult<()>> + Send + '_ {
             self.deref().try_wait_epoch(epoch, options)
-        }
-
-        fn sync(
-            &self,
-            epoch: u64,
-            table_ids: HashSet<TableId>,
-        ) -> impl Future<Output = StorageResult<SyncResult>> + Send + 'static {
-            self.deref().sync(epoch, table_ids)
         }
 
         fn new_local(
