@@ -33,7 +33,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-risedev ci-start iceberg-engine
+risedev ci-start ci-iceberg-engine
 sleep 1
 
 
