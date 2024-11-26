@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::bail;
+use thiserror_ext::AsReport as _;
 
 use super::plan_node::RewriteExprsRecursive;
 use super::plan_visitor::has_logical_max_one_row;
@@ -35,53 +36,53 @@ use crate::utils::Condition;
 use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
-    pub(crate) fn optimize_by_rules(self, stage: &OptimizationStage) -> PlanRef {
-        let OptimizationStage {
-            stage_name,
-            rules,
-            apply_order,
-        } = stage;
+    fn optimize_by_rules_inner(
+        self,
+        heuristic_optimizer: &mut HeuristicOptimizer<'_>,
+        stage_name: &str,
+    ) -> Result<PlanRef> {
+        let ctx = self.ctx();
 
-        let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
-        let plan = heuristic_optimizer.optimize(self);
+        let result = heuristic_optimizer.optimize(self);
         let stats = heuristic_optimizer.get_stats();
 
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace && stats.has_applied_rule() {
+        if ctx.is_explain_trace() && stats.has_applied_rule() {
             ctx.trace(format!("{}:", stage_name));
             ctx.trace(format!("{}", stats));
-            ctx.trace(plan.explain_to_string());
+            ctx.trace(match &result {
+                Ok(plan) => plan.explain_to_string(),
+                Err(error) => format!("Optimization failed: {}", error.as_report()),
+            });
         }
         ctx.add_rule_applied(stats.total_applied());
 
-        plan
+        result
     }
 
-    pub(crate) fn optimize_by_rules_until_fix_point(self, stage: &OptimizationStage) -> PlanRef {
-        let OptimizationStage {
+    pub(crate) fn optimize_by_rules(
+        self,
+        OptimizationStage {
             stage_name,
             rules,
             apply_order,
-        } = stage;
+        }: &OptimizationStage,
+    ) -> Result<PlanRef> {
+        self.optimize_by_rules_inner(&mut HeuristicOptimizer::new(apply_order, rules), stage_name)
+    }
 
-        let mut output_plan = self;
+    pub(crate) fn optimize_by_rules_until_fix_point(
+        mut self,
+        OptimizationStage {
+            stage_name,
+            rules,
+            apply_order,
+        }: &OptimizationStage,
+    ) -> Result<PlanRef> {
         loop {
             let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
-            output_plan = heuristic_optimizer.optimize(output_plan);
-            let stats = heuristic_optimizer.get_stats();
-
-            let ctx = output_plan.ctx();
-            let explain_trace = ctx.is_explain_trace();
-            if explain_trace && stats.has_applied_rule() {
-                ctx.trace(format!("{}:", stage_name));
-                ctx.trace(format!("{}", stats));
-                ctx.trace(output_plan.explain_to_string());
-            }
-            ctx.add_rule_applied(stats.total_applied());
-
-            if !stats.has_applied_rule() {
-                return output_plan;
+            self = self.optimize_by_rules_inner(&mut heuristic_optimizer, stage_name)?;
+            if !heuristic_optimizer.get_stats().has_applied_rule() {
+                return Ok(self);
             }
         }
     }
@@ -496,22 +497,22 @@ impl LogicalOptimizer {
             return Ok(plan);
         }
         // Simple Unnesting.
-        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
+        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING)?;
         debug_assert!(!HasMaxOneRowApply().visit(plan.clone()));
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);
         // In order to unnest values with correlated input ref, we need to extract project first.
-        plan = plan.optimize_by_rules(&VALUES_EXTRACT_PROJECT);
+        plan = plan.optimize_by_rules(&VALUES_EXTRACT_PROJECT)?;
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
         plan = if enable_share_plan {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)?
         } else {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)?
         };
-        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
+        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY)?;
 
         // Check if all `Apply`s are eliminated and the subquery is unnested.
         plan.check_apply_elimination()?;
@@ -574,9 +575,9 @@ impl LogicalOptimizer {
         }
 
         // Convert grouping sets at first because other agg rule can't handle grouping sets.
-        plan = plan.optimize_by_rules(&GROUPING_SETS);
+        plan = plan.optimize_by_rules(&GROUPING_SETS)?;
         // Remove project to make common sub-plan sharing easier.
-        plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+        plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         // If share plan is disable, we need to remove all the share operator generated by the
         // binder, e.g. CTE and View. However, we still need to share source to ensure self
@@ -591,7 +592,7 @@ impl LogicalOptimizer {
                 ctx.trace(plan.explain_to_string());
             }
         } else {
-            plan = plan.optimize_by_rules(&DAG_TO_TREE);
+            plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
             // Replace source to share source.
             // Perform share source at the beginning so that we can benefit from predicate pushdown
@@ -602,13 +603,13 @@ impl LogicalOptimizer {
                 ctx.trace(plan.explain_to_string());
             }
         }
-        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
-        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE)?;
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN)?;
         // Convert `generate_series` ends with `now()` to a `Now` source. Only for streaming mode.
         // Should be applied before converting table function to project set.
-        plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW);
+        plan = plan.optimize_by_rules(&STREAM_GENERATE_SERIES_WITH_NOW)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
@@ -620,7 +621,7 @@ impl LogicalOptimizer {
 
         // Same to batch plan optimization, this rule shall be applied before
         // predicate push down
-        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY)?;
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
@@ -629,7 +630,7 @@ impl LogicalOptimizer {
             // Merge inner joins and intermediate filters into multijoin
             // This rule assumes that filters have already been pushed down near to
             // their relevant joins.
-            plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
+            plan = plan.optimize_by_rules(&TO_MULTI_JOIN)?;
 
             // Reorder multijoin into join tree.
             if plan
@@ -638,9 +639,9 @@ impl LogicalOptimizer {
                 .config()
                 .streaming_enable_bushy_join()
             {
-                plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_ORDERING);
+                plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_ORDERING)?;
             } else {
-                plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING);
+                plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING)?;
             }
         }
 
@@ -649,38 +650,38 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // For stream, push down predicates with now into a left-semi join
-        plan = plan.optimize_by_rules(&FILTER_WITH_NOW_TO_JOIN);
+        plan = plan.optimize_by_rules(&FILTER_WITH_NOW_TO_JOIN)?;
 
         // Push down the calculation of inputs of join's condition.
-        plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
+        plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN)?;
 
-        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW)?;
         // Must push down predicates again after split over window so that OverWindow can be
         // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
-        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         let force_split_distinct_agg = ctx.session_ctx().config().force_split_distinct_agg();
         // TODO: better naming of the OptimizationStage
         // Convert distinct aggregates.
         plan = if force_split_distinct_agg {
-            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)?
         } else {
-            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM)
+            plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM)?
         };
 
-        plan = plan.optimize_by_rules(&SIMPLIFY_AGG);
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
-        plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+        plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+        plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
-        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -698,6 +699,9 @@ impl LogicalOptimizer {
                 }
                 ExplainFormat::Yaml => {
                     ctx.store_logical(plan.explain_to_yaml());
+                }
+                ExplainFormat::Dot => {
+                    ctx.store_logical(plan.explain_to_dot());
                 }
             }
         }
@@ -718,27 +722,27 @@ impl LogicalOptimizer {
         plan = Self::inline_now_proc_time(plan, &ctx);
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
-        plan = plan.optimize_by_rules(&DAG_TO_TREE);
+        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
-        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH);
-        plan = plan.optimize_by_rules(&GROUPING_SETS);
-        plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
-        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
-        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
+        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH)?;
+        plan = plan.optimize_by_rules(&GROUPING_SETS)?;
+        plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR)?;
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE)?;
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN)?;
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER)?;
         // Table function should be converted into `file_scan` before `project_set`.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN);
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY);
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT);
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
         // Filter simplification must be applied before predicate push-down
         // otherwise the filter for some nodes (e.g., `LogicalScan`)
         // may not be properly applied.
-        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY);
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY)?;
 
         // Predicate Push-down
         let mut last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
@@ -748,10 +752,10 @@ impl LogicalOptimizer {
             // Merge inner joins and intermediate filters into multijoin
             // This rule assumes that filters have already been pushed down near to
             // their relevant joins.
-            plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
+            plan = plan.optimize_by_rules(&TO_MULTI_JOIN)?;
 
             // Reorder multijoin into left-deep join tree.
-            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING);
+            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING)?;
         }
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
@@ -762,24 +766,24 @@ impl LogicalOptimizer {
         }
 
         // Push down the calculation of inputs of join's condition.
-        plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
+        plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN)?;
 
-        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW)?;
         // Must push down predicates again after split over window so that OverWindow can be
         // optimized to TopN.
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
             last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
-        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
-        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         // Convert distinct aggregates.
-        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
+        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)?;
 
-        plan = plan.optimize_by_rules(&SIMPLIFY_AGG);
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
-        plan = plan.optimize_by_rules(&JOIN_COMMUTE);
+        plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
@@ -789,17 +793,17 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
-        plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+        plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
-        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT);
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
 
-        plan = plan.optimize_by_rules(&PULL_UP_HOP);
+        plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
-        plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
+        plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
 
-        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
-        plan = plan.optimize_by_rules(&DAG_TO_TREE);
+        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -817,6 +821,9 @@ impl LogicalOptimizer {
                 }
                 ExplainFormat::Yaml => {
                     ctx.store_logical(plan.explain_to_yaml());
+                }
+                ExplainFormat::Dot => {
+                    ctx.store_logical(plan.explain_to_dot());
                 }
             }
         }

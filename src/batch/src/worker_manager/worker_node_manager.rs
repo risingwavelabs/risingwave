@@ -412,12 +412,11 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
-                    internal_rpc_host_addr: "".to_string(),
+                    ..Default::default()
                 }),
                 transactional_id: Some(1),
                 ..Default::default()
@@ -427,12 +426,11 @@ mod tests {
                 r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
-                parallelism: 0,
                 property: Some(Property {
                     is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
-                    internal_rpc_host_addr: "".to_string(),
+                    ..Default::default()
                 }),
                 transactional_id: Some(2),
                 ..Default::default()

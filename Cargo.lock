@@ -1079,9 +1079,9 @@ dependencies = [
 
 [[package]]
 name = "async-nats"
-version = "0.37.0"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd3bdd6ea595b2ea504500a3566071beb81125fc15d40a6f6bffa43575f64152"
+checksum = "76433c4de73442daedb3a59e991d94e85c14ebfc33db53dfcd347a21cd6ef4f8"
 dependencies = [
  "base64 0.22.0",
  "bytes",
@@ -1090,6 +1090,7 @@ dependencies = [
  "nkeys",
  "nuid",
  "once_cell",
+ "pin-project",
  "portable-atomic",
  "rand",
  "regex",
@@ -1106,6 +1107,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.0",
  "tokio-util",
+ "tokio-websockets",
  "tracing",
  "tryhard",
  "url",
@@ -6327,7 +6329,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.3.141592654"
-source = "git+https://github.com/risingwavelabs/icelake.git?rev=1783f8f106958d6d0ce0249c1c708934a15c2a47#1783f8f106958d6d0ce0249c1c708934a15c2a47"
+source = "git+https://github.com/risingwavelabs/icelake.git?rev=0ec44fa826c91139c9cf459b005741df990ae9da#0ec44fa826c91139c9cf459b005741df990ae9da"
 dependencies = [
  "anyhow",
  "apache-avro 0.17.0 (git+https://github.com/apache/avro.git)",
@@ -14297,9 +14299,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7c19760dc47062bca5c1b3699b032111c93802d51ac47660db11b08afc6bad2"
+checksum = "ef4323942237f7cc071061f2c5f0db919e6053c2cdf58c6bc974883073429737"
 dependencies = [
  "thiserror 1.0.63",
  "thiserror-ext-derive",
@@ -14307,9 +14309,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.1.2"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "667c8c48f68021098038115926c64d9950b0582062ae63f7d30638b1168daf03"
+checksum = "96541747c50e6c73e094737938f4f5dfaf50c48a31adff4197a3e2a481371674"
 dependencies = [
  "either",
  "proc-macro2",
@@ -14663,6 +14665,27 @@ dependencies = [
  "pin-project-lite",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "tokio-websockets"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f591660438b3038dd04d16c938271c79e7e06260ad2ea2885a4861bfb238605d"
+dependencies = [
+ "base64 0.22.0",
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "http 1.1.0",
+ "httparse",
+ "rand",
+ "ring 0.17.5",
+ "rustls-native-certs 0.8.0",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.26.0",
+ "tokio-util",
 ]
 
 [[package]]

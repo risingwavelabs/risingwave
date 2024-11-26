@@ -163,7 +163,7 @@ impl CatalogController {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn extract_fragment_and_actors_from_table_fragments(
+    pub fn extract_fragment_and_actors_from_fragments(
         PbTableFragments {
             table_id,
             fragments,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, LazyLock};
@@ -22,7 +22,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
 use crate::mem_table::MemtableLocalStateStore;
@@ -745,16 +745,6 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     ) -> StorageResult<()> {
         // memory backend doesn't need to wait for epoch, so this is a no-op.
         Ok(())
-    }
-
-    #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let result = self.inner.flush();
-        // memory backend doesn't need to push to S3, so this is a no-op
-        async move {
-            result?;
-            Ok(SyncResult::default())
-        }
     }
 
     async fn new_local(&self, option: NewLocalOptions) -> Self::Local {
