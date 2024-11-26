@@ -578,7 +578,7 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        // compaction_scheduler,
+        backup_manager.clone(),
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(

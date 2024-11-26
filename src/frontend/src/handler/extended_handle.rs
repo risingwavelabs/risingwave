@@ -20,7 +20,7 @@ use bytes::Bytes;
 use pgwire::types::Format;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
+use risingwave_sqlparser::ast::{CreateSink, DeclareCursor, Query, Statement};
 
 use super::query::BoundResult;
 use super::{fetch_cursor, handle, query, HandlerArgs, RwPgResponse};
@@ -112,6 +112,13 @@ pub async fn handle_parse(
         Statement::FetchCursor { .. } => {
             fetch_cursor::handle_parse(handler_args, statement, specific_param_types).await
         }
+        Statement::DeclareCursor { stmt } => {
+            if let DeclareCursor::Query(_) = stmt.declare_cursor {
+                query::handle_parse(handler_args, statement, specific_param_types)
+            } else {
+                bail_not_implemented!("DECLARE SUBSCRIPTION CURSOR with parameters");
+            }
+        }
         Statement::CreateView {
             query,
             materialized,
@@ -166,6 +173,7 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                dependent_udfs,
                 ..
             } = bound_result;
 
@@ -176,6 +184,7 @@ pub fn handle_bind(
                 param_types,
                 parsed_params: Some(parsed_params),
                 dependent_relations,
+                dependent_udfs,
                 bound: new_bound,
             };
             Ok(Portal::Portal(PortalResult {

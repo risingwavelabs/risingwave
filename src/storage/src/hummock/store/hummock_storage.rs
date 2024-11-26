@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::is_max_epoch;
@@ -30,7 +29,7 @@ use risingwave_hummock_sdk::key::{
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{HummockReadEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -572,6 +571,21 @@ impl HummockStorage {
             .expect("should send success");
         rx.await.expect("should await success")
     }
+
+    pub async fn sync(
+        &self,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
+    ) -> StorageResult<SyncResult> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.hummock_event_sender.send(HummockEvent::SyncEpoch {
+            sync_result_sender: tx,
+            sync_table_epochs,
+        });
+        let synced_data = rx
+            .await
+            .map_err(|_| HummockError::other("failed to receive sync result"))??;
+        Ok(synced_data.into_sync_result())
+    }
 }
 
 impl StateStoreRead for HummockStorage {
@@ -704,20 +718,6 @@ impl StateStore for HummockStorage {
         Ok(())
     }
 
-    fn sync(&self, epoch: u64, table_ids: HashSet<TableId>) -> impl SyncFuture {
-        let (tx, rx) = oneshot::channel();
-        let _ = self.hummock_event_sender.send(HummockEvent::SyncEpoch {
-            new_sync_epoch: epoch,
-            sync_result_sender: tx,
-            table_ids,
-        });
-        rx.map(|recv_result| {
-            Ok(recv_result
-                .map_err(|_| HummockError::other("failed to receive sync result"))??
-                .into_sync_result())
-        })
-    }
-
     fn new_local(&self, option: NewLocalOptions) -> impl Future<Output = Self::Local> + Send + '_ {
         self.new_local_inner(option)
     }
@@ -730,7 +730,7 @@ impl HummockStorage {
         epoch: u64,
         table_ids: HashSet<TableId>,
     ) -> StorageResult<risingwave_hummock_sdk::SyncResult> {
-        self.sync(epoch, table_ids).await
+        self.sync(vec![(epoch, table_ids)]).await
     }
 
     /// Used in the compaction test tool

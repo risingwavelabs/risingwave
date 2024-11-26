@@ -25,7 +25,7 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{
@@ -281,14 +281,20 @@ impl TraceSpan {
     }
 
     pub fn new_sync_span(
-        epoch: u64,
-        table_ids: &HashSet<TableId>,
+        sync_table_epochs: &Vec<(HummockEpoch, HashSet<TableId>)>,
         storage_type: StorageType,
     ) -> MayTraceSpan {
         Self::new_global_op(
             Operation::Sync(
-                epoch,
-                table_ids.iter().map(|table_id| table_id.table_id).collect(),
+                sync_table_epochs
+                    .iter()
+                    .map(|(epoch, table_ids)| {
+                        (
+                            *epoch,
+                            table_ids.iter().map(|table_id| table_id.table_id).collect(),
+                        )
+                    })
+                    .collect(),
             ),
             storage_type,
         )

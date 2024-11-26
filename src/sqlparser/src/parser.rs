@@ -3462,7 +3462,7 @@ impl Parser<'_> {
             } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
                 AlterSourceOperation::SetSourceRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA after SET");
+                return self.expected("SCHEMA or SOURCE_RATE_LIMIT after SET");
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -4039,11 +4039,13 @@ impl Parser<'_> {
                             Keyword::JSON,
                             Keyword::XML,
                             Keyword::YAML,
+                            Keyword::DOT,
                         ])? {
                             Keyword::TEXT => ExplainFormat::Text,
                             Keyword::JSON => ExplainFormat::Json,
                             Keyword::XML => ExplainFormat::Xml,
                             Keyword::YAML => ExplainFormat::Yaml,
+                            Keyword::DOT => ExplainFormat::Dot,
                             _ => unreachable!("{}", keyword),
                         }
                     }

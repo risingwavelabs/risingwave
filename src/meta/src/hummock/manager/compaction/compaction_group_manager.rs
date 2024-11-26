@@ -138,7 +138,7 @@ impl HummockManager {
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments_vec(
         &self,
-        table_fragments: &[crate::model::TableFragments],
+        table_fragments: &[crate::model::StreamJobFragments],
     ) {
         self.unregister_table_ids(
             table_fragments
@@ -164,6 +164,7 @@ impl HummockManager {
             .cloned()
             .filter(|table_id| !valid_ids.contains(table_id))
             .collect_vec();
+
         // As we have released versioning lock, the version that `to_unregister` is calculated from
         // may not be the same as the one used in unregister_table_ids. It is OK.
         self.unregister_table_ids(to_unregister).await
@@ -276,10 +277,22 @@ impl HummockManager {
         &self,
         table_ids: impl IntoIterator<Item = TableId> + Send,
     ) -> Result<()> {
-        let mut table_ids = table_ids.into_iter().peekable();
-        if table_ids.peek().is_none() {
+        let table_ids = table_ids.into_iter().collect_vec();
+        if table_ids.is_empty() {
             return Ok(());
         }
+
+        {
+            // Remove table write throughput statistics
+            // The Caller acquires `Send`, so we should safely use `write` lock before the await point.
+            // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
+            let mut table_write_throughput_statistic_manager =
+                self.table_write_throughput_statistic_manager.write();
+            for table_id in table_ids.iter().unique() {
+                table_write_throughput_statistic_manager.remove_table(table_id.table_id);
+            }
+        }
+
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let mut version = HummockVersionTransaction::new(
@@ -292,7 +305,7 @@ impl HummockManager {
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
-        for table_id in table_ids.unique() {
+        for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
@@ -356,6 +369,7 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+
         // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())
     }
@@ -588,6 +602,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::DisableAutoGroupScheduling(c) => {
                 target.disable_auto_group_scheduling = Some(*c);
             }
+            MutableConfig::MaxOverlappingLevelSize(c) => {
+                target.max_overlapping_level_size = Some(*c);
+            }
         }
     }
 }
@@ -683,7 +700,7 @@ mod tests {
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::model::TableFragments;
+    use crate::model::StreamJobFragments;
 
     #[tokio::test]
     async fn test_inner() {
@@ -752,7 +769,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
-        let table_fragment_1 = TableFragments::for_test(
+        let table_fragment_1 = StreamJobFragments::for_test(
             TableId::new(10),
             BTreeMap::from([(
                 1,
@@ -763,7 +780,7 @@ mod tests {
                 },
             )]),
         );
-        let table_fragment_2 = TableFragments::for_test(
+        let table_fragment_2 = StreamJobFragments::for_test(
             TableId::new(20),
             BTreeMap::from([(
                 2,
@@ -790,7 +807,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.table_id().table_id),
+                Some(table_fragment_1.stream_job_id().table_id),
                 table_fragment_1.internal_table_ids(),
             )
             .await
@@ -798,7 +815,7 @@ mod tests {
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_2.table_id().table_id),
+                Some(table_fragment_2.stream_job_id().table_id),
                 table_fragment_2.internal_table_ids(),
             )
             .await
@@ -827,7 +844,7 @@ mod tests {
 
         compaction_group_manager
             .register_table_fragments(
-                Some(table_fragment_1.table_id().table_id),
+                Some(table_fragment_1.stream_job_id().table_id),
                 table_fragment_1.internal_table_ids(),
             )
             .await

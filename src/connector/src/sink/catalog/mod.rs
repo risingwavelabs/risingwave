@@ -343,9 +343,6 @@ pub struct SinkCatalog {
     /// Owner of the sink.
     pub owner: UserId,
 
-    // Relations on which the sink depends.
-    pub dependent_relations: Vec<TableId>,
-
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
@@ -382,6 +379,7 @@ pub struct SinkCatalog {
 
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
+        #[allow(deprecated)] // for `dependent_relations`
         PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
@@ -395,11 +393,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|id| id.table_id)
-                .collect_vec(),
+            dependent_relations: vec![],
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -507,11 +501,6 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             properties: pb.properties,
             owner: pb.owner.into(),
-            dependent_relations: pb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
             format_desc,
             connection_id: pb.connection_id.map(ConnectionId),
