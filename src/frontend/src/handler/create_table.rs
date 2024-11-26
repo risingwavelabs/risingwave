@@ -972,42 +972,41 @@ pub(super) async fn handle_create_table_plan(
         &cdc_table_info,
     )?;
 
-    let ((plan, source, table), job_type) =
-        match (format_encode, cdc_table_info.as_ref()) {
-            (Some(format_encode), None) => (
-                gen_create_table_plan_with_source(
-                    handler_args,
-                    explain_options,
-                    table_name.clone(),
-                    column_defs,
-                    wildcard_idx,
-                    constraints,
-                    format_encode,
-                    source_watermarks,
-                    col_id_gen,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                    engine,
-                )
-                .await?,
-                TableJobType::General,
-            ),
-            (None, None) => {
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let (plan, table) = gen_create_table_plan(
-                    context,
-                    table_name.clone(),
-                    column_defs,
-                    constraints,
-                    col_id_gen,
-                    source_watermarks,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                    engine,
-                )?;
+    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+        (Some(format_encode), None) => (
+            gen_create_table_plan_with_source(
+                handler_args,
+                explain_options,
+                table_name.clone(),
+                column_defs,
+                wildcard_idx,
+                constraints,
+                format_encode,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+                engine,
+            )
+            .await?,
+            TableJobType::General,
+        ),
+        (None, None) => {
+            let context = OptimizerContext::new(handler_args, explain_options);
+            let (plan, table) = gen_create_table_plan(
+                context,
+                table_name.clone(),
+                column_defs,
+                constraints,
+                col_id_gen,
+                source_watermarks,
+                append_only,
+                on_conflict,
+                with_version_column,
+                engine,
+            )?;
 
             ((plan, None, table), TableJobType::General)
         }
@@ -1093,27 +1092,27 @@ pub(super) async fn handle_create_table_plan(
                 }
             };
 
-                let context: OptimizerContextRef =
-                    OptimizerContext::new(handler_args, explain_options).into();
-                let (plan, table) = gen_create_table_plan_for_cdc_table(
-                    context,
-                    source,
-                    cdc_table.external_table_name.clone(),
-                    column_defs,
-                    columns,
-                    pk_names,
-                    cdc_with_options,
-                    col_id_gen,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                    table_name,
-                    resolved_table_name,
-                    database_id,
-                    schema_id,
-                    TableId::placeholder(),
-                    engine,
-                )?;
+            let context: OptimizerContextRef =
+                OptimizerContext::new(handler_args, explain_options).into();
+            let (plan, table) = gen_create_table_plan_for_cdc_table(
+                context,
+                source,
+                cdc_table.external_table_name.clone(),
+                column_defs,
+                columns,
+                pk_names,
+                cdc_with_options,
+                col_id_gen,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+                table_name,
+                resolved_table_name,
+                database_id,
+                schema_id,
+                TableId::placeholder(),
+                engine,
+            )?;
 
             ((plan, None, table), TableJobType::SharedCdcSource)
         }
