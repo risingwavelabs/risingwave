@@ -81,9 +81,10 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 # foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "99005412eac1bca6aa7c73d750efc9cdb8ae176e", features = [
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "153b618c52a418e79d57116c22337f7ebad39b1b", features = [
     "tracing",
     "nightly",
+    "prometheus",
 ] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",

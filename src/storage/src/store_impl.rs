@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions,
+    PrometheusMetricsRegistry, RateLimitPicker,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -613,15 +613,12 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        if cfg!(not(madsim)) {
-            metrics_prometheus::Recorder::builder()
-                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
-                .build_and_install();
-        }
-
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
+                .with_metrics_registry(PrometheusMetricsRegistry::new(
+                    GLOBAL_METRICS_REGISTRY.clone(),
+                ))
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
@@ -667,6 +664,9 @@ impl StateStoreImpl {
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
+                .with_metrics_registry(PrometheusMetricsRegistry::new(
+                    GLOBAL_METRICS_REGISTRY.clone(),
+                ))
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
                     state_store_metrics.clone(),
                 )))
