@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,11 +29,17 @@ use tokio::sync::{oneshot, watch};
 use tokio::time::Interval;
 
 use super::notifier::Notifier;
-use super::{Command, GlobalBarrierWorkerContext, NewBarrier, Scheduled};
+use super::{Command, Scheduled};
+use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::{MetaError, MetaResult};
+
+pub(super) struct NewBarrier {
+    pub command: Option<(DatabaseId, Command, Vec<Notifier>)>,
+    pub span: tracing::Span,
+    pub checkpoint: bool,
+}
 
 /// A queue for scheduling barriers.
 ///
@@ -99,7 +105,7 @@ impl ScheduledQueue {
         if let QueueStatus::Blocked(reason) = &self.status
             && !matches!(
                 scheduled.command,
-                Command::DropStreamingJobs { .. } | Command::CancelStreamingJob(_)
+                Command::DropStreamingJobs { .. } | Command::DropSubscription { .. }
             )
         {
             return Err(MetaError::unavailable(reason));
@@ -192,7 +198,7 @@ impl BarrierScheduler {
 
         if let Some(idx) = queue.queue.iter().position(|scheduled| {
             if let Command::CreateStreamingJob { info, .. } = &scheduled.command
-                && info.table_fragments.table_id() == table_id
+                && info.stream_job_fragments.stream_job_id() == table_id
             {
                 true
             } else {
@@ -307,7 +313,7 @@ pub struct ScheduledBarriers {
     inner: Arc<Inner>,
 }
 
-/// Held by the [`super::GlobalBarrierWorker`] to execute these commands.
+/// Held by the [`crate::barrier::worker::GlobalBarrierWorker`] to execute these commands.
 pub(super) struct PeriodicBarriers {
     min_interval: Interval,
 
@@ -389,6 +395,11 @@ impl ScheduledBarriers {
 }
 
 impl ScheduledBarriers {
+    /// Pre buffered drop and cancel command, return true if any.
+    pub(super) fn pre_apply_drop_cancel(&self) -> bool {
+        self.pre_apply_drop_cancel_scheduled()
+    }
+
     /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
     /// specific reason.
     pub(super) fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {
@@ -409,23 +420,20 @@ impl ScheduledBarriers {
 
     /// Try to pre apply drop and cancel scheduled command and return them if any.
     /// It should only be called in recovery.
-    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> (Vec<ActorId>, HashSet<TableId>) {
+    pub(super) fn pre_apply_drop_cancel_scheduled(&self) -> bool {
         let mut queue = self.inner.queue.lock();
         assert_matches!(queue.status, QueueStatus::Blocked(_));
-        let (mut dropped_actors, mut cancel_table_ids) = (vec![], HashSet::new());
+        let mut applied = false;
 
         while let Some(ScheduledQueueItem {
             notifiers, command, ..
         }) = queue.queue.pop_front()
         {
             match command {
-                Command::DropStreamingJobs { actors, .. } => {
-                    dropped_actors.extend(actors);
+                Command::DropStreamingJobs { .. } => {
+                    applied = true;
                 }
-                Command::CancelStreamingJob(table_fragments) => {
-                    let table_id = table_fragments.table_id();
-                    cancel_table_ids.insert(table_id);
-                }
+                Command::DropSubscription { .. } => {}
                 _ => {
                     unreachable!("only drop and cancel streaming jobs should be buffered");
                 }
@@ -434,7 +442,7 @@ impl ScheduledBarriers {
                 notify.notify_collected();
             });
         }
-        (dropped_actors, cancel_table_ids)
+        applied
     }
 }
 

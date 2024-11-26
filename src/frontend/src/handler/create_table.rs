@@ -217,6 +217,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
                 version: ColumnDescVersion::Pr13707,
+                system_column: None,
             },
             is_hidden: false,
         });
@@ -1297,6 +1298,7 @@ pub async fn generate_stream_graph_for_replace_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
+    include_column_options: IncludeOption,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1315,7 +1317,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 append_only,
                 on_conflict,
                 with_version_column,
-                vec![],
+                include_column_options,
             )
             .await?,
             TableJobType::General,
@@ -1437,8 +1439,10 @@ fn get_source_and_resolved_table_name(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::{
+        Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
+    };
+    use risingwave_common::types::{DataType, StructType};
 
     use super::*;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
@@ -1503,10 +1507,10 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
             "v1" => DataType::Int16,
-            "v2" => DataType::new_struct(
-                vec![DataType::Int64,DataType::Float64,DataType::Float64],
-                vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
-            ),
+            "v2" => StructType::new(
+                vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
+            ).into(),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 
         assert_eq!(columns, expected_columns);

@@ -18,7 +18,6 @@
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <parquet.version>1.14.0</parquet.version>
         <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
 
@@ -44,7 +43,7 @@
         <dependency>
             <groupId>io.delta</groupId>
             <artifactId>delta-standalone_2.12</artifactId>
-            <version>0.6.0</version>
+            <version>3.2.1</version>
         </dependency>
         <dependency>
             <groupId>org.apache.parquet</groupId>
@@ -74,6 +73,7 @@
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client</artifactId>
+            <version>${hadoop.version}</version>
         </dependency>
     </dependencies>
 </project>

@@ -83,10 +83,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(
-                    DatabaseId::new(database_id as _),
-                    Command::pause(PausedReason::Manual),
-                )
+                .run_command(database_id, Command::pause(PausedReason::Manual))
                 .await?;
         }
         Ok(Response::new(PauseResponse {}))
@@ -96,10 +93,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         for database_id in self.metadata_manager.list_active_database_ids().await? {
             self.barrier_scheduler
-                .run_command(
-                    DatabaseId::new(database_id as _),
-                    Command::resume(PausedReason::Manual),
-                )
+                .run_command(database_id, Command::resume(PausedReason::Manual))
                 .await?;
         }
         Ok(Response::new(ResumeResponse {}))
@@ -120,12 +114,12 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
@@ -438,5 +432,17 @@ impl StreamManagerService for StreamServiceImpl {
             .collect_vec();
 
         Ok(Response::new(ListActorSplitsResponse { actor_splits }))
+    }
+
+    async fn list_rate_limits(
+        &self,
+        _request: Request<ListRateLimitsRequest>,
+    ) -> Result<Response<ListRateLimitsResponse>, Status> {
+        let rate_limits = self
+            .metadata_manager
+            .catalog_controller
+            .list_rate_limits()
+            .await?;
+        Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 }

@@ -325,6 +325,7 @@ message ExprNode {
     HAS_SCHEMA_PRIVILEGE = 2409;
     PG_IS_IN_RECOVERY = 2411;
     RW_RECOVERY_STATUS = 2412;
+    RW_EPOCH_TO_TS = 2413;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -610,10 +611,10 @@ message UserDefinedFunction {
   // - If `language` is `rust` or `wasm`, the zstd-compressed wasm binary.
   optional bytes compressed_binary = 10;
   bool always_retry_on_network_error = 9;
-  // The runtime used when javascript is used as the language. Could be "quickjs" or "deno".
+  // The runtime selected when multiple runtimes are available for the language. Now is not used.
   optional string runtime = 11;
-  // The function type, which is used to execute the function. Could be "sync", "async", "generator" or "async_generator"
-  optional string function_type = 12;
+  reserved 12;
+  reserved "function_type";
 }
 
 // Additional information for user defined table/aggregate functions.
@@ -627,5 +628,6 @@ message UserDefinedFunctionMetadata {
   optional string body = 7;
   optional bytes compressed_binary = 10;
   optional string runtime = 11;
-  optional string function_type = 12;
+  reserved 12;
+  reserved "function_type";
 }

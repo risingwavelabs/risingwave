@@ -109,6 +109,10 @@ sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, $mode, python_client"
+python3 -m pip install --break-system-packages psycopg
+python3 ./e2e_test/python_client/main.py
+
 echo "--- e2e, $mode, subscription"
 python3 -m pip install --break-system-packages psycopg2-binary
 sqllogictest -p 4566 -d dev './e2e_test/subscription/check_sql_statement.slt'
@@ -136,7 +140,6 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/external_udf.slt'
 pkill java
 
 echo "--- e2e, $mode, embedded udf"
-python3 -m pip install --break-system-packages flask waitress
 sqllogictest -p 4566 -d dev './e2e_test/udf/wasm_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/rust_udf.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/js_udf.slt'

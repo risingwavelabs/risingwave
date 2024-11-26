@@ -47,21 +47,20 @@ impl UserDefinedFunction {
         let catalog = FunctionCatalog {
             // FIXME(yuhao): function id is not in udf proto.
             id: FunctionId::placeholder(),
-            name: udf.get_name().clone(),
+            name: udf.name.clone(),
             // FIXME(yuhao): owner is not in udf proto.
             owner: u32::MAX - 1,
             kind: FunctionKind::Scalar,
             arg_names: udf.arg_names.clone(),
             arg_types,
             return_type,
-            language: udf.get_language().clone(),
+            language: udf.language.clone(),
+            runtime: udf.runtime.clone(),
             identifier: udf.identifier.clone(),
             body: udf.body.clone(),
             link: udf.link.clone(),
             compressed_binary: udf.compressed_binary.clone(),
             always_retry_on_network_error: udf.always_retry_on_network_error,
-            function_type: udf.function_type.clone(),
-            runtime: udf.runtime.clone(),
         };
 
         Ok(Self {
@@ -93,13 +92,12 @@ impl Expr for UserDefinedFunction {
                     .map(|t| t.to_protobuf())
                     .collect(),
                 language: self.catalog.language.clone(),
+                runtime: self.catalog.runtime.clone(),
                 identifier: self.catalog.identifier.clone(),
                 link: self.catalog.link.clone(),
                 body: self.catalog.body.clone(),
                 compressed_binary: self.catalog.compressed_binary.clone(),
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
-                function_type: self.catalog.function_type.clone(),
-                runtime: self.catalog.runtime.clone(),
             })),
         }
     }

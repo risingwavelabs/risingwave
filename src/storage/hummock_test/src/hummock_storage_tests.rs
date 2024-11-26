@@ -476,7 +476,7 @@ async fn test_state_store_sync() {
         .committed()
         .table_committed_epoch(TEST_TABLE_ID)
         .unwrap();
-    let epoch1 = test_epoch(base_epoch.next_epoch());
+    let epoch1 = base_epoch.next_epoch();
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
@@ -1133,6 +1133,13 @@ async fn test_iter_with_min_epoch() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
 
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+
     let epoch1 = (31 * 1000) << 16;
     test_env
         .storage
@@ -1149,7 +1156,10 @@ async fn test_iter_with_min_epoch() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
 
-    hummock_storage.init_for_test(epoch1).await.unwrap();
+    hummock_storage
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
 
     hummock_storage
         .ingest_batch(
@@ -1422,7 +1432,16 @@ async fn test_hummock_version_reader() {
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
         .collect();
     {
-        hummock_storage.init_for_test(epoch1).await.unwrap();
+        let prev_epoch = test_env
+            .manager
+            .get_current_version()
+            .await
+            .table_committed_epoch(TEST_TABLE_ID)
+            .unwrap();
+        hummock_storage
+            .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+            .await
+            .unwrap();
         hummock_storage
             .ingest_batch(
                 batch_epoch1,
@@ -1852,7 +1871,16 @@ async fn test_get_with_min_epoch() {
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
-    hummock_storage.init_for_test(epoch1).await.unwrap();
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    hummock_storage
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
 
     let gen_key = |index: usize| -> TableKey<Bytes> {
         gen_key_from_str(VirtualNode::ZERO, format!("key_{}", index).as_str())
@@ -2125,9 +2153,21 @@ async fn test_table_watermark() {
     test_env
         .storage
         .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
-    local1.init_for_test(epoch1).await.unwrap();
+    let prev_epoch = test_env
+        .manager
+        .get_current_version()
+        .await
+        .table_committed_epoch(TEST_TABLE_ID)
+        .unwrap();
+    local1
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
     local1.update_vnode_bitmap(vnode_bitmap1.clone());
-    local2.init_for_test(epoch1).await.unwrap();
+    local2
+        .init_for_test_with_prev_epoch(epoch1, prev_epoch)
+        .await
+        .unwrap();
     local2.update_vnode_bitmap(vnode_bitmap2.clone());
 
     fn gen_inner_key(index: usize) -> Bytes {
@@ -2825,4 +2865,131 @@ async fn test_commit_multi_epoch() {
             .unwrap();
         assert_eq!(info.committed_epoch, epoch3);
     }
+}
+
+#[tokio::test]
+async fn test_commit_with_large_size() {
+    let test_env = prepare_hummock_test_env().await;
+    let context_id = test_env.meta_client.context_id();
+    let existing_table_id = TableId::new(1);
+    let initial_epoch = INVALID_EPOCH;
+
+    let commit_epoch =
+        |epoch, ssts: Vec<SstableInfo>, new_table_fragment_infos, tables_to_commit: &[TableId]| {
+            let manager = &test_env.manager;
+            let tables_to_commit = tables_to_commit
+                .iter()
+                .map(|table_id| (*table_id, epoch))
+                .collect();
+            let sst_to_context = ssts.iter().map(|sst| (sst.object_id, context_id)).collect();
+
+            let sstables = ssts
+                .into_iter()
+                .map(|sst| LocalSstableInfo {
+                    table_stats: sst
+                        .table_ids
+                        .iter()
+                        .map(|&table_id| {
+                            (
+                                table_id,
+                                TableStats {
+                                    total_compressed_size: 10,
+                                    ..Default::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    sst_info: sst,
+                    created_at: u64::MAX,
+                })
+                .collect_vec();
+
+            async move {
+                manager
+                    .commit_epoch(CommitEpochInfo {
+                        new_table_watermarks: Default::default(),
+                        sst_to_context,
+                        sstables,
+                        new_table_fragment_infos,
+                        change_log_delta: Default::default(),
+                        tables_to_commit,
+                    })
+                    .await
+                    .unwrap();
+            }
+        };
+
+    let epoch1 = initial_epoch.next_epoch();
+    let sst1_epoch1 = SstableInfo {
+        sst_id: 11,
+        object_id: 1,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    let sst1_epoch2 = SstableInfo {
+        sst_id: 12,
+        object_id: 2,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    let sst1_epoch3 = SstableInfo {
+        sst_id: 13,
+        object_id: 3,
+        table_ids: vec![existing_table_id.table_id],
+        file_size: 512 << 20,
+        sst_size: 512 << 20,
+        ..Default::default()
+    };
+
+    commit_epoch(
+        epoch1,
+        vec![
+            sst1_epoch3.clone(),
+            sst1_epoch2.clone(),
+            sst1_epoch1.clone(),
+        ],
+        vec![NewTableFragmentInfo {
+            table_ids: HashSet::from_iter([existing_table_id]),
+        }],
+        &[existing_table_id],
+    )
+    .await;
+
+    let cg_id =
+        get_compaction_group_id_by_table_id(test_env.manager.clone(), existing_table_id.table_id())
+            .await;
+
+    let l0_sub_levels = test_env
+        .manager
+        .get_current_version()
+        .await
+        .levels
+        .get(&cg_id)
+        .unwrap()
+        .l0
+        .clone();
+
+    println!("l0_sub_levels {:?}", l0_sub_levels.sub_levels);
+    assert_eq!(3, l0_sub_levels.sub_levels.len());
+    assert_eq!(1, l0_sub_levels.sub_levels[0].table_infos.len());
+    assert_eq!(
+        sst1_epoch1.object_id,
+        l0_sub_levels.sub_levels[0].table_infos[0].object_id
+    );
+    assert_eq!(1, l0_sub_levels.sub_levels[1].table_infos.len());
+    assert_eq!(
+        sst1_epoch2.object_id,
+        l0_sub_levels.sub_levels[1].table_infos[0].object_id
+    );
+    assert_eq!(1, l0_sub_levels.sub_levels[2].table_infos.len());
+    assert_eq!(
+        sst1_epoch3.object_id,
+        l0_sub_levels.sub_levels[2].table_infos[0].object_id
+    );
 }

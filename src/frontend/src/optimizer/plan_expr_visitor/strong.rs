@@ -326,7 +326,8 @@ impl Strong {
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
-            | ExprType::InetNtoa => false,
+            | ExprType::InetNtoa
+            | ExprType::RwEpochToTs => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

@@ -136,6 +136,7 @@ stream_memory_controller_threshold_stable = 0.72
 stream_memory_controller_eviction_factor_aggressive = 2.0
 stream_memory_controller_eviction_factor_graceful = 1.5
 stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_update_interval_ms = 100
 stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
@@ -176,7 +177,8 @@ compactor_iter_max_io_retry_times = 8
 table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
-time_travel_version_cache_capacity = 32
+compactor_max_preload_meta_file_count = 32
+time_travel_version_cache_capacity = 2
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"

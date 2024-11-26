@@ -142,7 +142,7 @@ def section_overview(panels):
             [
                 panels.target(
                     f"{metric('all_barrier_nums')} >= bool 200",
-                    "Too Many Barriers",
+                    "Too Many Barriers {{database_id}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",

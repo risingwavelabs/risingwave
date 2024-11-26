@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
@@ -29,7 +29,7 @@ use risingwave_connector::source::{
     SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
-use risingwave_meta_model::{DatabaseId, SourceId};
+use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::Dispatcher;
@@ -42,7 +42,7 @@ use tokio::{select, time};
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::MetadataManager;
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
 use crate::MetaResult;
 
@@ -763,7 +763,7 @@ impl SourceManager {
     }
 
     /// For dropping MV.
-    pub async fn drop_source_fragments_vec(&self, table_fragments: &[TableFragments]) {
+    pub async fn drop_source_fragments_vec(&self, table_fragments: &[StreamJobFragments]) {
         let mut core = self.core.lock().await;
 
         // Extract the fragments that include source operators.
@@ -878,11 +878,11 @@ impl SourceManager {
     }
 
     /// Allocates splits to actors for a newly created source executor.
-    pub async fn allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
+    pub async fn allocate_splits(&self, job_id: &TableId) -> MetaResult<SplitAssignment> {
         let core = self.core.lock().await;
         let table_fragments = core
             .metadata_manager
-            .get_job_fragments_by_id(table_id)
+            .get_job_fragments_by_id(job_id)
             .await?;
 
         let source_fragments = table_fragments.stream_source_fragments();
@@ -1130,10 +1130,7 @@ impl SourceManager {
                 let command = Command::SourceSplitAssignment(split_assignment);
                 tracing::info!(command = ?command, "pushing down split assignment command");
                 self.barrier_scheduler
-                    .run_command(
-                        risingwave_common::catalog::DatabaseId::new(database_id as _),
-                        command,
-                    )
+                    .run_command(database_id, command)
                     .await?;
             }
         }

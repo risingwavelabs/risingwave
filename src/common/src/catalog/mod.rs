@@ -120,6 +120,17 @@ pub fn row_id_column_desc() -> ColumnDesc {
     ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
+pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
+pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
+pub fn rw_timestamp_column_desc() -> ColumnDesc {
+    ColumnDesc::named_with_system_column(
+        RW_TIMESTAMP_COLUMN_NAME,
+        RW_TIMESTAMP_COLUMN_ID,
+        DataType::Timestamptz,
+        SystemColumn::RwTimestamp,
+    )
+}
+
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 
 // The number of columns output by the cdc source job
@@ -156,6 +167,8 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
+
+pub type ObjectId = u32;
 
 #[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
 #[display("{database_id}")]

@@ -6,7 +6,7 @@
     LogicalProject { exprs: [t1.v1] }
     └─LogicalShare { id: 2 }
       └─LogicalProject { exprs: [t1.v1, t1.v2] }
-        └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -17,10 +17,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t2.v3, t2.v4, t1.v1] }
     └─LogicalJoin { type: Inner, on: (t2.v3 = t1.v1), output: all }
-      ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id] }
+      ├─LogicalScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id, t2._rw_timestamp] }
       └─LogicalShare { id: 2 }
         └─LogicalProject { exprs: [t1.v1] }
-          └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+          └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], stream_key: [t2._row_id, t1._row_id, v3], pk_columns: [t2._row_id, t1._row_id, v3], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t2.v3, t2._row_id, t1._row_id) }
@@ -39,7 +39,7 @@
       └─LogicalProject { exprs: [t1.v1] }
         └─LogicalShare { id: 2 }
           └─LogicalProject { exprs: [t1.v1, t1.v2] }
-            └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
+            └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: NoCheck }
     └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -53,7 +53,7 @@
         └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
           ├─LogicalAgg { group_key: [t1.x], aggs: [] }
           │ └─LogicalProject { exprs: [t1.x] }
-          │   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
+          │   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id, t1._rw_timestamp] }
           └─LogicalProject { exprs: [0.1:Decimal] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: Ensure we can bind CTE with aliases in both table name and columns
@@ -65,17 +65,17 @@
     └─LogicalJoin { type: Inner, on: (t1.x = t1.x), output: all }
       ├─LogicalShare { id: 2 }
       │ └─LogicalProject { exprs: [t1.x, t1.y] }
-      │   └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      │   └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
       └─LogicalShare { id: 2 }
         └─LogicalProject { exprs: [t1.x, t1.y] }
-          └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+          └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
 - sql: |
     create table t (v int, c varchar);
     with dict(abbr, real) as (values ('cn', 'China'), ('us', 'United States')) select * from t join dict on t.c = dict.abbr;
   logical_plan: |-
     LogicalProject { exprs: [t.v, t.c, *VALUES*_0.column_0, *VALUES*_0.column_1] }
     └─LogicalJoin { type: Inner, on: (t.c = *VALUES*_0.column_0), output: all }
-      ├─LogicalScan { table: t, columns: [t.v, t.c, t._row_id] }
+      ├─LogicalScan { table: t, columns: [t.v, t.c, t._row_id, t._rw_timestamp] }
       └─LogicalShare { id: 1 }
         └─LogicalValues { rows: [['cn':Varchar, 'China':Varchar], ['us':Varchar, 'United States':Varchar]], schema: Schema { fields: [*VALUES*_0.column_0:Varchar, *VALUES*_0.column_1:Varchar] } }
   stream_plan: |-
