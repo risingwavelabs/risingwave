@@ -73,7 +73,7 @@
         <jackson.version>2.18.1</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.20.4</testcontainers.version>
-        <aws.version>2.29.20</aws.version>
+        <aws.version>2.29.21</aws.version>
         <jetty.version>12.0.15</jetty.version>
         <parquet.version>1.14.4</parquet.version>
     </properties>
@@ -326,7 +326,7 @@
             <dependency>
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
-                <version>3.47.0.0</version>
+                <version>3.47.1.0</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
