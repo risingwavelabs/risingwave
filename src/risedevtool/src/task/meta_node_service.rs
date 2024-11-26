@@ -15,10 +15,12 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 
 use anyhow::{anyhow, bail, Context, Result};
 use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
+use tempfile::NamedTempFile;
 use url::Url;
 
 use super::{risingwave_cmd, ExecuteContext, Task};
@@ -28,7 +30,8 @@ use crate::{
     MetaNodeConfig,
 };
 
-/// URL for connecting to the SQL meta store.
+/// URL for connecting to the SQL meta store, retrieved from the env var `RISEDEV_SQL_ENDPOINT`.
+/// If it is not set, a temporary sqlite file is created and used.
 ///
 /// # Examples
 ///
@@ -36,8 +39,22 @@ use crate::{
 /// - `postgresql://localhost:5432/metastore`
 /// - `sqlite:///path/to/file.db`
 /// - `sqlite::memory:`
-fn sql_endpoint_from_env() -> Result<String> {
-    env::var("RISEDEV_SQL_ENDPOINT").context("env RISEDEV_SQL_ENDPOINT not set")
+fn sql_endpoint_from_env() -> String {
+    static SQL_ENDPOINT: LazyLock<String> = LazyLock::new(|| {
+        if let Ok(endpoint) = env::var("RISEDEV_SQL_ENDPOINT") {
+            endpoint
+        } else {
+            let temp_path = NamedTempFile::with_suffix(".db").unwrap().into_temp_path();
+            let temp_sqlite_endpoint = format!("sqlite://{}?mode=rwc", temp_path.to_string_lossy());
+            tracing::warn!(
+                "env RISEDEV_SQL_ENDPOINT not set, use temporary sqlite `{}`",
+                temp_sqlite_endpoint
+            );
+            temp_sqlite_endpoint
+        }
+    });
+
+    SQL_ENDPOINT.to_owned()
 }
 
 pub struct MetaNodeService {
@@ -154,7 +171,7 @@ impl MetaNodeService {
                     .arg(&mysql_store_config.database);
             }
             MetaBackend::Env => {
-                let endpoint = sql_endpoint_from_env()?;
+                let endpoint = sql_endpoint_from_env();
                 is_persistent_meta_store = true;
 
                 cmd.arg("--backend")
@@ -273,11 +290,6 @@ impl Task for MetaNodeService {
                 ctx.pb.set_message("initializing meta store from env...");
                 initialize_meta_store()?;
             }
-        } else if sql_endpoint_from_env().is_ok() {
-            bail!(
-                "should specify `meta-backend: env` for meta-node service \
-                 when env RISEDEV_SQL_ENDPOINT is set"
-            );
         }
 
         if !self.config.user_managed {
@@ -307,7 +319,7 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
         .enable_all()
         .build()?;
 
-    let endpoint: Url = sql_endpoint_from_env()?
+    let endpoint: Url = sql_endpoint_from_env()
         .parse()
         .context("invalid url for SQL endpoint")?;
     let scheme = endpoint.scheme();
