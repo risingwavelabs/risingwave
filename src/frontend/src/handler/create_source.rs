@@ -1495,7 +1495,7 @@ pub async fn bind_create_source_or_table_with_connector(
     col_id_gen: &mut ColumnIdGenerator,
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
-    is_shared: bool,
+    is_shared_non_cdc: bool,
     source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
@@ -1559,7 +1559,8 @@ pub async fn bind_create_source_or_table_with_connector(
         check_and_add_timestamp_column(&with_properties, &mut columns);
 
         // For shared sources, we will include partition and offset cols in the SourceExecutor's *output*, to be used by the SourceBackfillExecutor.
-        if is_shared {
+        // For shared CDC source, the schema is different. See debezium_cdc_source_schema, CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS
+        if is_shared_non_cdc {
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &columns,
                 &with_properties.get_connector().unwrap(),
@@ -1687,14 +1688,14 @@ pub async fn handle_create_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
-    let is_shared = create_cdc_source_job
-        || (with_properties.is_shareable_non_cdc_connector()
-            && session
-                .env()
-                .streaming_config()
-                .developer
-                .enable_shared_source
-            && session.config().streaming_use_shared_source());
+    let is_shared_non_cdc = with_properties.is_shareable_non_cdc_connector()
+        && session
+            .env()
+            .streaming_config()
+            .developer
+            .enable_shared_source
+        && session.config().streaming_use_shared_source();
+    let is_shared = create_cdc_source_job || is_shared_non_cdc;
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &format_encode)?
@@ -1722,7 +1723,7 @@ pub async fn handle_create_source(
         stmt.include_column_options,
         &mut col_id_gen,
         true,
-        is_shared,
+        is_shared_non_cdc,
         overwrite_options.source_rate_limit,
     )
     .await?;
@@ -1963,14 +1964,6 @@ pub mod tests {
                 ),
                 (
                     "_rw_table_name",
-                    Varchar,
-                ),
-                (
-                    "_rw_mysql-cdc_partition",
-                    Varchar,
-                ),
-                (
-                    "_rw_mysql-cdc_offset",
                     Varchar,
                 ),
                 (
