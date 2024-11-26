@@ -170,7 +170,6 @@ profile:
       RW_SQL_PASSWORD: "postgres"
       RW_SQL_ENDPOINT: "db:5432"
       RW_SQL_DATABASE: "metadata"
-      CONNECTOR_LIBS_PATH: ".risingwave/bin/connector-node/libs"
     steps:
       - use: minio
       - use: postgres
