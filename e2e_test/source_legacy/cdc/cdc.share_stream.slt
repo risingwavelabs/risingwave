@@ -135,7 +135,7 @@ create table orders_test (
 ) from mysql_mytest table 'mytest.orders';
 
 statement error
-CREATE TABLE test_default_value (
+CREATE TABLE test_my_default_value (
     id int,
     name varchar,
     city varchar DEFAULT 'Beijing',
@@ -143,7 +143,7 @@ CREATE TABLE test_default_value (
 ) FROM mysql_mytest TABLE 'mytest.test_my_default_value';
 
 statement ok
-CREATE TABLE test_default_value (
+CREATE TABLE test_my_default_value (
     id int,
     name varchar,
     city varchar,
@@ -154,10 +154,10 @@ statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
-INSERT INTO test_default_value VALUES (2, 'jack');
+INSERT INTO test_my_default_value VALUES (2, 'jack');
 
 query II
-select * from test_default_value;
+select * from test_my_default_value;
 ----
 2 jack Shanghai
 
@@ -604,7 +604,7 @@ select * from upper_orders_shared order by id;
 1 happy
 
 statement ok
-CREATE TABLE test_default_value (
+CREATE TABLE test_pg_default_value (
     id int,
     name varchar,
     city varchar,
@@ -615,9 +615,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
-INSERT INTO test_default_value VALUES (1, 'noris');
+INSERT INTO test_pg_default_value VALUES (1, 'noris');
 
 query II
-select * from test_default_value;
+select * from test_pg_default_value;
 ----
 1 noris Shanghai
