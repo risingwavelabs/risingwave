@@ -71,15 +71,6 @@ impl StructType {
         }))
     }
 
-    pub(super) fn from_parts(field_names: Vec<String>, field_types: Vec<DataType>) -> Self {
-        // TODO: enable this assertion
-        // debug_assert!(field_names.len() == field_types.len());
-        Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
-        }))
-    }
-
     /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
         Self(Arc::new(StructTypeInner {

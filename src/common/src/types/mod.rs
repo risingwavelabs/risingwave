@@ -30,6 +30,7 @@ use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
+use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
 use thiserror_ext::AsReport;
@@ -241,7 +242,11 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
-                DataType::new_struct(fields, field_names)
+                if proto.field_names.is_empty() {
+                    StructType::unnamed(fields).into()
+                } else {
+                    StructType::new(field_names.into_iter().zip_eq_fast(fields)).into()
+                }
             }
             PbTypeName::List => DataType::List(
                 // The first (and only) item is the list element type.
@@ -403,10 +408,6 @@ impl DataType {
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
             _ => None,
         }
-    }
-
-    pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
-        Self::Struct(StructType::from_parts(field_names, fields))
     }
 
     pub fn as_struct(&self) -> &StructType {
