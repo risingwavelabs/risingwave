@@ -205,11 +205,7 @@ impl IcebergCommon {
                     }
                 }
             }
-            let enable_config_load = if let Some(enable_config_load) = self.enable_config_load {
-                enable_config_load
-            } else {
-                false
-            };
+            let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
                 "iceberg.table.io.disable_config_load".to_string(),
                 enable_config_load.to_string(),

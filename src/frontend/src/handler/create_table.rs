@@ -1296,6 +1296,12 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
+            // 1. fetch iceberg engine options via environment variables
+            // 2. create a hummock table
+            // 3. create an iceberg sink
+            // 4. create an iceberg source
+
+            // TODO(iceberg): fetch these options from meta node instead of environment variables.
             let iceberg_engine_opts = IcebergEngineOpts::default();
 
             let s3_endpoint = iceberg_engine_opts.s3_endpoint;
@@ -1535,6 +1541,7 @@ pub async fn handle_create_table(
             with.insert("enable_config_load".to_string(), "true".to_string());
             source_handler_args.with_options = WithOptions::new_with_options(with);
 
+            // TODO(iceberg): make iceberg engine table creation ddl atomic
             catalog_writer
                 .create_table(source, table, graph, job_type)
                 .await?;

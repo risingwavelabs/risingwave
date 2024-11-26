@@ -103,7 +103,7 @@ pub async fn handle_drop_table(
                 None
             };
 
-            // TODO(iceberg): handle drop table failures in the middle.
+            // TODO(iceberg): make iceberg engine table drop ddl atomic
             // Drop sink
             // Drop iceberg table
             //   - Purge table from warehouse
