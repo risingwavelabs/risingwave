@@ -613,12 +613,12 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
+        let metrics_registry = PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone());
+
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
-                .with_metrics_registry(PrometheusMetricsRegistry::new(
-                    GLOBAL_METRICS_REGISTRY.clone(),
-                ))
+                .with_metrics_registry(metrics_registry.clone())
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
