@@ -1543,7 +1543,6 @@ fn bind_webhook_info(
         .into(),
     };
 
-    // TODO(kexiang): use real column name
     let secure_compare_context = SecureCompareContext {
         column_name: columns_defs[0].name.real_value(),
         secret_name,
