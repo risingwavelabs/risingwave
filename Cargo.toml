@@ -81,7 +81,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 # foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "7f5da82d1c98be2d6eaf57b51328a7a9a8ab1018", features = [
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "19bc2def14dfa8bb7d6581fb625584694bc7f4a0", features = [
     "tracing",
     "nightly",
     "prometheus",
