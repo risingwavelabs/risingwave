@@ -956,116 +956,156 @@ pub(super) async fn handle_create_table_plan(
         &cdc_table_info,
     )?;
 
-    let ((plan, source, table), job_type) =
-        match (format_encode, cdc_table_info.as_ref()) {
-            (Some(format_encode), None) => (
-                gen_create_table_plan_with_source(
-                    handler_args,
-                    explain_options,
-                    table_name.clone(),
-                    column_defs,
-                    wildcard_idx,
-                    constraints,
-                    format_encode,
-                    source_watermarks,
-                    col_id_gen,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                )
-                .await?,
-                TableJobType::General,
-            ),
-            (None, None) => {
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let (plan, table) = gen_create_table_plan(
-                    context,
-                    table_name.clone(),
-                    column_defs,
-                    constraints,
-                    col_id_gen,
-                    source_watermarks,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
+    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+        (Some(format_encode), None) => (
+            gen_create_table_plan_with_source(
+                handler_args,
+                explain_options,
+                table_name.clone(),
+                column_defs,
+                wildcard_idx,
+                constraints,
+                format_encode,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+            )
+            .await?,
+            TableJobType::General,
+        ),
+        (None, None) => {
+            let context = OptimizerContext::new(handler_args, explain_options);
+            let (plan, table) = gen_create_table_plan(
+                context,
+                table_name.clone(),
+                column_defs,
+                constraints,
+                col_id_gen,
+                source_watermarks,
+                append_only,
+                on_conflict,
+                with_version_column,
+            )?;
+
+            ((plan, None, table), TableJobType::General)
+        }
+
+        (None, Some(cdc_table)) => {
+            sanity_check_for_cdc_table(
+                append_only,
+                &column_defs,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
+            let session = &handler_args.session;
+            let db_name = session.database();
+            let (schema_name, resolved_table_name) =
+                Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+            let (database_id, schema_id) =
+                session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+            // cdc table cannot be append-only
+            let (format_encode, source_name) =
+                Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+
+            let source = {
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                let schema_name = format_encode
+                    .clone()
+                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+                let (source, _) = catalog_reader.get_source_by_name(
+                    db_name,
+                    SchemaPath::Name(schema_name.as_str()),
+                    source_name.as_str(),
                 )?;
+                source.clone()
+            };
+            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
-                ((plan, None, table), TableJobType::General)
-            }
+            let (columns, pk_names) = match wildcard_idx {
+                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                None => {
+                    for column_def in &column_defs {
+                        for option_def in &column_def.options {
+                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                                return Err(ErrorCode::NotSupported(
+                                            "Default value for columns defined on the table created from a CDC source".into(),
+                                            "Remove the default value expression in the column definitions".into(),
+                                        )
+                                            .into());
+                            }
+                        }
+                    }
 
-            (None, Some(cdc_table)) => {
-                sanity_check_for_cdc_table(
-                    append_only,
-                    &column_defs,
-                    &wildcard_idx,
-                    &constraints,
-                    &source_watermarks,
-                )?;
+                    let (mut columns, pk_names) =
+                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                    // read default value definition from external db
+                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
+                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                        .context("failed to extract external table config")?;
 
-                let session = &handler_args.session;
-                let db_name = session.database();
-                let (schema_name, resolved_table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-                let (database_id, schema_id) =
-                    session.get_database_and_schema_id_for_create(schema_name.clone())?;
+                    let table = ExternalTableImpl::connect(config)
+                        .await
+                        .context("failed to auto derive table schema")?;
+                    let external_columns: Vec<_> = table
+                        .column_descs()
+                        .iter()
+                        .cloned()
+                        .map(|column_desc| ColumnCatalog {
+                            column_desc,
+                            is_hidden: false,
+                        })
+                        .collect();
+                    for (col, external_col) in
+                        columns.iter_mut().zip_eq_fast(external_columns.into_iter())
+                    {
+                        col.column_desc.generated_or_default_column =
+                            external_col.column_desc.generated_or_default_column;
+                    }
+                    (columns, pk_names)
+                }
+            };
 
-                // cdc table cannot be append-only
-                let (format_encode, source_name) =
-                    Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+            let context: OptimizerContextRef =
+                OptimizerContext::new(handler_args, explain_options).into();
+            let (plan, table) = gen_create_table_plan_for_cdc_table(
+                context,
+                source,
+                cdc_table.external_table_name.clone(),
+                column_defs,
+                columns,
+                pk_names,
+                cdc_with_options,
+                col_id_gen,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+                table_name,
+                resolved_table_name,
+                database_id,
+                schema_id,
+                TableId::placeholder(),
+            )?;
 
-                let source = {
-                    let catalog_reader = session.env().catalog_reader().read_guard();
-                    let schema_name = format_encode
-                        .clone()
-                        .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
-                    let (source, _) = catalog_reader.get_source_by_name(
-                        db_name,
-                        SchemaPath::Name(schema_name.as_str()),
-                        source_name.as_str(),
-                    )?;
-                    source.clone()
-                };
-                let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
-
-                let (columns, pk_names) = match wildcard_idx {
-                    Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
-                    None => bind_cdc_table_schema(&column_defs, &constraints, None)?,
-                };
-
-                let context: OptimizerContextRef =
-                    OptimizerContext::new(handler_args, explain_options).into();
-                let (plan, table) = gen_create_table_plan_for_cdc_table(
-                    context,
-                    source,
-                    cdc_table.external_table_name.clone(),
-                    column_defs,
-                    columns,
-                    pk_names,
-                    cdc_with_options,
-                    col_id_gen,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                    table_name,
-                    resolved_table_name,
-                    database_id,
-                    schema_id,
-                    TableId::placeholder(),
-                )?;
-
-                ((plan, None, table), TableJobType::SharedCdcSource)
-            }
-            (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+            ((plan, None, table), TableJobType::SharedCdcSource)
+        }
+        (Some(_), Some(_)) => {
+            return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into()),
-        };
+            .into())
+        }
+    };
     Ok((plan, source, table, job_type))
 }
 
