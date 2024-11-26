@@ -5077,7 +5077,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=430045c580854d449f178389eae22ab9e0d0480f#430045c580854d449f178389eae22ab9e0d0480f"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5095,7 +5095,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=430045c580854d449f178389eae22ab9e0d0480f#430045c580854d449f178389eae22ab9e0d0480f"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -5113,7 +5113,7 @@ dependencies = [
 [[package]]
 name = "foyer-memory"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=430045c580854d449f178389eae22ab9e0d0480f#430045c580854d449f178389eae22ab9e0d0480f"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5136,7 +5136,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=430045c580854d449f178389eae22ab9e0d0480f#430045c580854d449f178389eae22ab9e0d0480f"
+source = "git+https://github.com/mrcroxx/foyer?rev=99005412eac1bca6aa7c73d750efc9cdb8ae176e#99005412eac1bca6aa7c73d750efc9cdb8ae176e"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
