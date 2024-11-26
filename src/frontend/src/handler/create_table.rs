@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::str::ParseBoolError;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -73,8 +72,8 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::OverwriteOptions;
-use crate::{Binder, TableCatalog, WithOptions};
+use crate::utils::{IcebergEngineOpts, OverwriteOptions};
+use crate::{Binder, FrontendOpts, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
@@ -1297,50 +1296,48 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            let s3_endpoint = if let Ok(s3_endpoint) = std::env::var("AWS_ENDPOINT_URL") {
-                Some(s3_endpoint)
-            } else {
-                None
-            };
+            let iceberg_engine_opts = IcebergEngineOpts::default();
 
-            let Ok(s3_region) = std::env::var("AWS_REGION") else {
+            let s3_endpoint = iceberg_engine_opts.s3_endpoint;
+
+            let s3_ak = iceberg_engine_opts.s3_ak;
+
+            let s3_sk = iceberg_engine_opts.s3_sk;
+
+            let Some(s3_region) = iceberg_engine_opts.s3_region else {
                 bail!("To create an iceberg engine table, AWS_REGION needed to be set");
             };
 
-            let Ok(s3_bucket) = std::env::var("AWS_S3_BUCKET") else {
+            let Some(s3_bucket) = iceberg_engine_opts.s3_bucket else {
                 bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
             };
 
-            let Ok(data_directory) = std::env::var("RW_DATA_DIRECTORY") else {
+            let Some(data_directory) = iceberg_engine_opts.data_directory else {
                 bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
             };
 
-            let s3_ak = if let Ok(s3_ak) = std::env::var("AWS_ACCESS_KEY_ID") {
-                Some(s3_ak)
-            } else {
-                None
-            };
-
-            let s3_sk = if let Ok(s3_sk) = std::env::var("AWS_SECRET_ACCESS_KEY") {
-                Some(s3_sk)
-            } else {
-                None
-            };
-
-            let Ok(meta_store_endpoint) = std::env::var("RW_SQL_ENDPOINT") else {
+            let Some(meta_store_endpoint) = iceberg_engine_opts.meta_store_endpoint else {
                 bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
             };
 
-            let Ok(meta_store_database) = std::env::var("RW_SQL_DATABASE") else {
+            let Some(meta_store_database) = iceberg_engine_opts.meta_store_database else {
                 bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
             };
 
-            let Ok(meta_store_user) = std::env::var("RW_SQL_USERNAME") else {
+            let Some(meta_store_user) = iceberg_engine_opts.meta_store_user else {
                 bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
             };
 
-            let Ok(meta_store_password) = std::env::var("RW_SQL_PASSWORD") else {
+            let Some(meta_store_password) = iceberg_engine_opts.meta_store_password else {
                 bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
+            };
+
+            let Some(meta_store_backend) = iceberg_engine_opts.meta_store_backend else {
+                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
+            };
+
+            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                bail!("failed to parse meta backend: {}", meta_store_backend);
             };
 
             let rw_db_name = session
@@ -1396,7 +1393,7 @@ pub async fn handle_create_table(
                     .collect::<Vec<String>>();
             }
 
-            // There is a table without primary key. We will use _row_id as primary key
+            // For the table without primary key. We will use `_row_id` as primary key
             let sink_from = if pks.is_empty() {
                 pks = vec![ROWID_PREFIX.to_string()];
                 let [stmt]: [_; 1] =
@@ -1428,13 +1425,6 @@ pub async fn handle_create_table(
                 emit_mode: None,
                 sink_schema: None,
                 into_table_name: None,
-            };
-
-            let Ok(meta_store_backend) = std::env::var("RW_BACKEND") else {
-                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
-            };
-            let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-                bail!("failed to parse meta backend: {}", meta_store_backend);
             };
 
             let catalog_uri = match meta_backend {

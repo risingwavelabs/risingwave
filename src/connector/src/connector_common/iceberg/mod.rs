@@ -19,13 +19,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use clap::ValueEnum;
 use iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
 use icelake::catalog::{
     load_iceberg_base_catalog_config, BaseCatalogConfig, CATALOG_NAME, CATALOG_TYPE,
 };
 use risingwave_common::bail;
-use risingwave_common::config::MetaBackend;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use url::Url;
