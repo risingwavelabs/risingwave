@@ -13,7 +13,7 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: rw-ci-cache-bucket
-    args: '--no-progress'
+    args: "--no-progress"
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
@@ -789,24 +789,11 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end test (postgres backend)"
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-pg-backend"
-    if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-      - "docslt"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: pg-mysql-backend-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
-    retry: *auto-retry
-
-  - label: "end-to-end test (mysql backend)"
-    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-mysql-backend"
+  - label: "end-to-end test ({{matrix.backend}} backend)"
+    matrix:
+      setup:
+        backend: ["pg", "mysql"]
+    command: "ci/scripts/e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe-{{matrix.backend}}-backend"
     if: build.pull_request.labels includes "ci/run-e2e-test-other-backends" || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
     depends_on:
       - "build"
