@@ -33,6 +33,7 @@ use crate::{MetaError, MetaResult};
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
+#[strum_discriminants(name(StreamingJobType))]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -258,6 +259,10 @@ impl StreamingJob {
             StreamingJob::Index(index, _) => index.owner,
             StreamingJob::Source(source) => source.owner,
         }
+    }
+
+    pub fn job_type(&self) -> StreamingJobType {
+        self.into()
     }
 
     pub fn job_type_str(&self) -> &'static str {
