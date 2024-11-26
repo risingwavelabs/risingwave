@@ -1,0 +1,21 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+create table t(id int primary key, xxname varchar) engine = iceberg;
+
+statement ok
+insert into t values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??
+select * from t;
+----
+1 xxx
+
+statement ok
+DROP TABLE t;

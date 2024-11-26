@@ -128,7 +128,7 @@ profile:
       - use: kafka
         persist-data: true
 
-  iceberg:
+  iceberg-engine:
     env:
       AWS_ENDPOINT_URL: "http://127.0.0.1:9301"
       AWS_REGION: "ap-southeast-2"
