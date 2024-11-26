@@ -1,0 +1,99 @@
+control substitution on
+
+system ok
+rpk topic delete -r nexmark-* || true
+
+system ok
+rpk topic create nexmark-auction -p 4 &&
+rpk topic create nexmark-bid -p 4 &&
+rpk topic create nexmark-person -p 4
+
+include ./create_tables.slt.part
+
+include ./insert_auction.slt.part
+include ./insert_bid.slt.part
+include ./insert_person.slt.part
+
+statement ok
+flush;
+
+statement ok
+create sink nexmark_auction FROM auction
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-auction'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink nexmark_bid FROM bid
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-bid'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink nexmark_person FROM person
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-person'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+sleep 5s
+
+statement ok
+DROP SINK nexmark_auction;
+
+statement ok
+DROP SINK nexmark_bid;
+
+statement ok
+DROP SINK nexmark_person;
+
+# statement ok
+# create sink nexmark_events AS
+#     WITH event_person AS (
+#         SELECT
+#             0 AS event_type,
+#             row(id, name, email_address, credit_card, city, state, date_time, extra)::struct<"id" BIGINT, "name" VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, "city" VARCHAR, "state" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS person,
+#             NULL::struct<"id" BIGINT, "item_name" VARCHAR, "description" VARCHAR, "initial_bid" BIGINT, "reserve" BIGINT, "date_time" TIMESTAMP, "expires" TIMESTAMP, "seller" BIGINT, "category" BIGINT, "extra" VARCHAR> AS auction,
+#             NULL::struct<"auction" BIGINT, "bidder" BIGINT, "price" BIGINT, "channel" VARCHAR, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS bid
+#         FROM person
+#     ),
+#     event_auction AS (
+#         SELECT
+#             1 AS event_type,
+#             NULL::struct<"id" BIGINT, "name" VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, "city" VARCHAR, "state" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS person,
+#             row(id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra)::struct<"id" BIGINT, "item_name" VARCHAR, "description" VARCHAR, "initial_bid" BIGINT, "reserve" BIGINT, "date_time" TIMESTAMP, "expires" TIMESTAMP, "seller" BIGINT, "category" BIGINT, "extra" VARCHAR> AS auction,
+#             NULL::struct<"auction" BIGINT, "bidder" BIGINT, "price" BIGINT, "channel" VARCHAR, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS bid
+#         FROM auction
+#     ),
+#     event_bid AS (
+#         SELECT
+#             2 AS event_type,
+#             NULL::struct<"id" BIGINT, "name" VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, "city" VARCHAR, "state" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS person,
+#             NULL::struct<"id" BIGINT, "item_name" VARCHAR, "description" VARCHAR, "initial_bid" BIGINT, "reserve" BIGINT, "date_time" TIMESTAMP, "expires" TIMESTAMP, "seller" BIGINT, "category" BIGINT, "extra" VARCHAR> AS auction,
+#             row(auction, bidder, price, channel, url, date_time, extra)::struct<"auction" BIGINT, "bidder" BIGINT, "price" BIGINT, "channel" VARCHAR, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR> AS bid
+#         FROM bid
+#     )
+#     SELECT * FROM event_person
+#     UNION ALL
+#     SELECT * FROM event_auction
+#     UNION ALL
+#     SELECT * FROM event_bid
+# WITH (
+#     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+#     topic = 'nexmark-events'
+# ) FORMAT PLAIN ENCODE JSON (
+#     force_append_only='true'
+# );
+
+# statement ok
+# DROP SINK nexmark_events;
+
+include ./drop_tables.slt.part

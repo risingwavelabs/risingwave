@@ -31,8 +31,10 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
+    source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
@@ -1493,6 +1495,7 @@ pub async fn bind_create_source_or_table_with_connector(
     col_id_gen: &mut ColumnIdGenerator,
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
+    is_shared: bool,
     source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
@@ -1554,6 +1557,20 @@ pub async fn bind_create_source_or_table_with_connector(
     if is_create_source {
         // must behind `handle_addition_columns`
         check_and_add_timestamp_column(&with_properties, &mut columns);
+
+        // For shared sources, we will include partition and offset cols in the SourceExecutor's *output*, to be used by the SourceBackfillExecutor.
+        if is_shared {
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &columns,
+                &with_properties.get_connector().unwrap(),
+                true,
+            );
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
+                if !existed {
+                    columns.push(ColumnCatalog::hidden(c));
+                }
+            }
+        }
     }
 
     // resolve privatelink connection for Kafka
@@ -1705,6 +1722,7 @@ pub async fn handle_create_source(
         stmt.include_column_options,
         &mut col_id_gen,
         true,
+        is_shared,
         overwrite_options.source_rate_limit,
     )
     .await?;
@@ -1777,8 +1795,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{
-        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
-        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -1932,15 +1949,37 @@ pub mod tests {
             .columns
             .iter()
             .map(|col| (col.name(), col.data_type().clone()))
-            .collect::<HashMap<&str, DataType>>();
+            .collect::<Vec<(&str, DataType)>>();
 
-        let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
-            "payload" => DataType::Jsonb,
-            OFFSET_COLUMN_NAME => DataType::Varchar,
-            TABLE_NAME_COLUMN_NAME => DataType::Varchar,
-        };
-        assert_eq!(columns, expected_columns);
+        expect_test::expect![[r#"
+            [
+                (
+                    "payload",
+                    Jsonb,
+                ),
+                (
+                    "_rw_offset",
+                    Varchar,
+                ),
+                (
+                    "_rw_table_name",
+                    Varchar,
+                ),
+                (
+                    "_rw_mysql-cdc_partition",
+                    Varchar,
+                ),
+                (
+                    "_rw_mysql-cdc_offset",
+                    Varchar,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
     }
 
     #[tokio::test]
@@ -1969,16 +2008,41 @@ pub mod tests {
             .unwrap();
         assert_eq!(source.name, "s");
 
-        let columns = GET_COLUMN_FROM_CATALOG(source);
-        let expect_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
-            "v1" => DataType::Int32,
-            "_rw_kafka_key" => DataType::Bytea,
-            // todo: kafka connector will automatically derive the column
-            // will change to a required field in the include clause
-            "_rw_kafka_timestamp" => DataType::Timestamptz,
-        };
-        assert_eq!(columns, expect_columns);
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "_rw_kafka_key",
+                    Bytea,
+                ),
+                (
+                    "_rw_kafka_timestamp",
+                    Timestamptz,
+                ),
+                (
+                    "_rw_kafka_partition",
+                    Varchar,
+                ),
+                (
+                    "_rw_kafka_offset",
+                    Varchar,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
 
         let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"
