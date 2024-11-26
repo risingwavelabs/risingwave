@@ -643,7 +643,7 @@ impl DatabaseCheckpointControl {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
                             info,
-                            replace_table_info: None,
+                            replace_stream_job: None,
                         }));
                     });
                 let task = task.get_or_insert_default();

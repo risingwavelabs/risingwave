@@ -597,6 +597,13 @@ impl StreamJobFragments {
         });
         self
     }
+
+    /// Panics if the fragment is not found.
+    pub fn fragment_mut(&mut self, fragment_id: FragmentId) -> &mut Fragment {
+        self.fragments
+            .get_mut(&fragment_id)
+            .unwrap_or_else(|| panic!("fragment {} not found", fragment_id))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

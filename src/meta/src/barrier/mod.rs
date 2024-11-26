@@ -44,8 +44,8 @@ mod utils;
 mod worker;
 
 pub use self::command::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
-    Reschedule, SnapshotBackfillInfo,
+    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
