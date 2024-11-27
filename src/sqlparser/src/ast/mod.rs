@@ -1901,7 +1901,6 @@ impl fmt::Display for Statement {
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 if let Some(info)= webhook_info {
-                    write!(f, " WITH (connector = 'webhook')")?;
                     write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
                     write!(f, " AS {}", info.signature_expr)?;
                 }
