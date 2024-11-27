@@ -1,0 +1,58 @@
+use anyhow::anyhow;
+use futures::StreamExt;
+use risingwave_common::config::ObjectStoreConfig;
+use risingwave_hummock_sdk::{get_object_id_from_path, get_sst_data_path, OBJECT_SUFFIX};
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::prefix::opendal_engine::get_object_prefix;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreImpl};
+
+pub async fn migrate_legacy_object(
+    url: String,
+    source_dir: String,
+    target_dir: String,
+) -> anyhow::Result<()> {
+    if source_dir.is_empty() {
+        return Err(anyhow!("the source_dir must not be empty"));
+    }
+    if target_dir.starts_with(&source_dir) {
+        return Err(anyhow!("the target_dir must not include source_dir"));
+    }
+    let mut config = ObjectStoreConfig::default();
+    config.s3.developer.use_opendal = true;
+    let store = build_remote_object_store(
+        &url,
+        ObjectStoreMetrics::unused().into(),
+        "migrate_legacy_object",
+        config.into(),
+    )
+    .await;
+    let ObjectStoreImpl::Opendal(opendal) = store else {
+        return Err(anyhow!("OpenDAL is required"));
+    };
+    let mut iter = opendal.list(&source_dir, None, None).await?;
+    let mut count = 0;
+    println!("Migration is started: from {source_dir} to {target_dir}.");
+    while let Some(object) = iter.next().await {
+        let object = object?;
+        if !object.key.ends_with(OBJECT_SUFFIX) {
+            println!("Skip non data object {}.", object.key);
+            continue;
+        }
+        let object_id = get_object_id_from_path(&object.key);
+        let legacy_prefix = get_object_prefix(object_id, false);
+        let legacy_path = get_sst_data_path(&legacy_prefix, &source_dir, object_id);
+        if object.key != legacy_path {
+            return Err(anyhow!(format!(
+                "the source object store does not appear to be legacy: {} versus {}",
+                object.key, legacy_path
+            )));
+        }
+        let to_object_path =
+            get_sst_data_path(&get_object_prefix(object_id, true), &target_dir, object_id);
+        println!("from {legacy_path} to {to_object_path}");
+        opendal.inner().copy(&legacy_path, &to_object_path).await?;
+        count += 1;
+    }
+    println!("Migration is finished. {count} objects have been migrated from {source_dir} to {target_dir}.");
+    Ok(())
+}

@@ -95,10 +95,10 @@ impl ObjectStore for OpendalObjectStore {
 
     fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
         match self.media_type {
-            MediaType::S3 => prefix::s3::get_object_prefix(obj_id),
-            MediaType::Minio => prefix::s3::get_object_prefix(obj_id),
             MediaType::Memory => String::default(),
-            MediaType::Hdfs
+            MediaType::S3
+            | MediaType::Minio
+            | MediaType::Hdfs
             | MediaType::Gcs
             | MediaType::Obs
             | MediaType::Oss
@@ -278,6 +278,13 @@ impl ObjectStore for OpendalObjectStore {
 
     fn support_streaming_upload(&self) -> bool {
         self.op.info().native_capability().write_can_multi
+    }
+}
+
+impl OpendalObjectStore {
+    pub async fn copy(&self, from_path: &str, to_path: &str) -> ObjectResult<()> {
+        self.op.copy(from_path, to_path).await?;
+        Ok(())
     }
 }
 
