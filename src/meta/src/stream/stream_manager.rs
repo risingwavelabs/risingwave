@@ -287,7 +287,10 @@ impl GlobalStreamManager {
                         .await
                     {
                         // try to cancel buffered creating command.
-                        if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
+                        if self
+                            .barrier_scheduler
+                            .try_cancel_scheduled_create(database_id, table_id)
+                        {
                             tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
                         } else if !table_fragments.is_created() {
                             tracing::debug!(

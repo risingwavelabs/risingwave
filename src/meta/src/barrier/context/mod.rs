@@ -19,6 +19,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
@@ -42,8 +43,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
 
     async fn next_scheduled(&self) -> Scheduled;
-    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason);
-    fn mark_ready(&self);
+    fn abort_and_mark_blocked(
+        &self,
+        database_id: Option<DatabaseId>,
+        recovery_reason: RecoveryReason,
+    );
+    fn mark_ready(&self, database_id: Option<DatabaseId>);
 
     fn post_collect_command<'a>(
         &'a self,

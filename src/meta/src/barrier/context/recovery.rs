@@ -134,7 +134,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered mview progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel();
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
 
                     let mut active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -178,7 +178,7 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     };
 
-                    if self.scheduled_barriers.pre_apply_drop_cancel() {
+                    if self.scheduled_barriers.pre_apply_drop_cancel(None) {
                         info = self.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
