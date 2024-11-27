@@ -172,3 +172,13 @@ impl BarrierWorkerRuntimeInfoSnapshot {
         Ok(())
     }
 }
+
+#[expect(dead_code)]
+struct DatabaseRuntimeInfoSnapshot {
+    database_fragment_info: InflightDatabaseInfo,
+    state_table_committed_epochs: HashMap<TableId, u64>,
+    subscription_info: InflightSubscriptionInfo,
+    stream_actors: HashMap<ActorId, StreamActor>,
+    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
+}

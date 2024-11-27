@@ -974,16 +974,16 @@ impl CatalogController {
     /// collected
     pub async fn load_all_actors(
         &self,
-    ) -> MetaResult<
-        HashMap<
-            risingwave_common::catalog::DatabaseId,
-            HashMap<
-                risingwave_common::catalog::TableId,
-                HashMap<crate::model::FragmentId, InflightFragmentInfo>,
-            >,
-        >,
-    > {
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    {
         let inner = self.inner.read().await;
+        let filter_condition = actor::Column::Status.eq(ActorStatus::Running);
+        let filter_condition = if let Some(database_id) = database_id {
+            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        } else {
+            filter_condition
+        };
         let actor_info: Vec<(
             ActorId,
             WorkerId,
@@ -1001,7 +1001,7 @@ impl CatalogController {
             .column(object::Column::Oid)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
-            .filter(actor::Column::Status.eq(ActorStatus::Running))
+            .filter(filter_condition)
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -1011,18 +1011,16 @@ impl CatalogController {
 
         for (actor_id, worker_id, fragment_id, state_table_ids, database_id, job_id) in actor_info {
             let fragment_infos = database_fragment_infos
-                .entry(risingwave_common::catalog::DatabaseId::new(
-                    database_id as _,
-                ))
+                .entry(database_id)
                 .or_default()
-                .entry(risingwave_common::catalog::TableId::new(job_id as _))
+                .entry(job_id)
                 .or_default();
             let state_table_ids = state_table_ids.into_inner();
             let state_table_ids = state_table_ids
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
-            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
+            match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
                     assert_eq!(info.state_table_ids, state_table_ids);

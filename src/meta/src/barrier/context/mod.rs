@@ -29,7 +29,8 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::ScheduledBarriers;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason, Scheduled,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot,
+    RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -69,6 +70,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> MetaResult<StreamingControlHandle>;
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
+
+    #[expect(dead_code)]
+    async fn reload_database_runtime_info(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {

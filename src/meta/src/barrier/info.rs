@@ -78,6 +78,10 @@ impl InflightDatabaseInfo {
     pub fn job_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         self.jobs.keys().cloned()
     }
+
+    pub fn contains_job(&self, job_id: TableId) -> bool {
+        self.jobs.contains_key(&job_id)
+    }
 }
 
 impl InflightDatabaseInfo {
@@ -89,14 +93,14 @@ impl InflightDatabaseInfo {
     }
 
     /// Resolve inflight actor info from given nodes and actors that are loaded from meta store. It will be used during recovery to rebuild all streaming actors.
-    pub fn new(
-        fragment_infos: HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>,
+    pub fn new<I: Iterator<Item = (FragmentId, InflightFragmentInfo)>>(
+        fragment_infos: impl Iterator<Item = (TableId, I)>,
     ) -> Self {
-        assert!(!fragment_infos.is_empty());
         let mut fragment_location = HashMap::new();
         let mut jobs = HashMap::new();
 
         for (job_id, job_fragment_info) in fragment_infos {
+            let job_fragment_info: HashMap<_, _> = job_fragment_info.collect();
             assert!(!job_fragment_info.is_empty());
             for fragment_id in job_fragment_info.keys() {
                 fragment_location
@@ -111,6 +115,7 @@ impl InflightDatabaseInfo {
                 },
             );
         }
+        assert!(!jobs.is_empty());
         Self {
             jobs,
             fragment_location,
