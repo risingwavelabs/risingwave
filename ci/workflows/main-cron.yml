@@ -33,7 +33,7 @@ docker-compose-common: &docker-compose-common
     config: ci/docker-compose.yml
     mount-buildkite-agent: true
     propagate-environment: true
-    run: rw-build-env
+    run: ci-standard-env
 
 steps:
   - label: "build"
@@ -93,44 +93,42 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (release, {{matrix.backend}} backend)"
-    key: "e2e-test-release"
-    <<: *sql-backend
-    command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-      - "docslt"
-    plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose-common
-          run: pg-mysql-backend-test-env
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
-    retry: *auto-retry
+  - group: "end-to-end test (release)"
+    steps:
+    - label: "end-to-end test (release, {{matrix.backend}} backend)"
+      key: "e2e-test-release"
+      <<: *sql-backend
+      command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-test"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      depends_on:
+        - "build"
+        - "build-other"
+        - "docslt"
+      plugins:
+        - docker-compose#v5.5.0: *docker-compose-common
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 30
+      retry: *auto-retry
 
-  - label: "slow end-to-end test (release)"
-    key: "slow-e2e-test-release"
-    command: "ci/scripts/slow-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-slow-e2e-tests"
-      || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-    plugins:
-      - docker-compose#v5.5.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 8
-    retry: *auto-retry
+    - label: "slow end-to-end test (release, {{matrix.backend}} backend)"
+      key: "slow-e2e-test-release"
+      <<: *sql-backend
+      command: "ci/scripts/slow-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+      if: |
+        !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-slow-e2e-tests"
+        || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+      depends_on:
+        - "build"
+        - "build-other"
+      plugins:
+        - docker-compose#v5.5.0: *docker-compose-common
+        - ./ci/plugins/upload-failure-logs
+      timeout_in_minutes: 8
+      retry: *auto-retry
 
   - label: "meta backup test (release)"
     key: "e2e-meta-backup-test-release"

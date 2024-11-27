@@ -44,7 +44,7 @@ docker-compose-common: &docker-compose-common
     config: ci/docker-compose.yml
     mount-buildkite-agent: true
     propagate-environment: true
-    run: rw-build-env
+    run: ci-standard-env
 
 steps:
   - label: "check ci image rebuild"
@@ -840,9 +840,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose-common
-          run: pg-mysql-backend-test-env
+      - docker-compose#v5.5.0: *docker-compose-common
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 32
     retry: *auto-retry
