@@ -555,9 +555,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -827,9 +826,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -866,9 +864,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -926,9 +923,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -938,9 +934,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
