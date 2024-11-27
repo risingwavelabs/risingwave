@@ -28,7 +28,7 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use thiserror_ext::AsReport;
 
 use crate::cmd_impl::hummock::{
-    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
+    build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions, migrate_legacy_object,
 };
 use crate::cmd_impl::meta::EtcdBackend;
 use crate::cmd_impl::throttle::apply_throttle;
@@ -337,6 +337,13 @@ enum HummockCommands {
         record_hybrid_remove_threshold_ms: Option<u32>,
         #[clap(long)]
         record_hybrid_fetch_threshold_ms: Option<u32>,
+    },
+    MigrateLegacyObject {
+        url: String,
+        source_dir: String,
+        target_dir: String,
+        #[clap(long, default_value = "1")]
+        concurrency: u32,
     },
 }
 
@@ -782,6 +789,14 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 record_hybrid_fetch_threshold_ms,
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::MigrateLegacyObject {
+            url,
+            source_dir,
+            target_dir,
+            concurrency,
+        }) => {
+            migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
         }
         Commands::Table(TableCommands::Scan {
             mv_name,

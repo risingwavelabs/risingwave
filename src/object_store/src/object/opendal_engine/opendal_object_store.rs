@@ -273,6 +273,13 @@ impl ObjectStore for OpendalObjectStore {
     }
 }
 
+impl OpendalObjectStore {
+    pub async fn copy(&self, from_path: &str, to_path: &str) -> ObjectResult<()> {
+        self.op.copy(from_path, to_path).await?;
+        Ok(())
+    }
+}
+
 struct OpendalStreamingUploaderExecute {
     /// To record metrics for uploading part.
     metrics: Arc<ObjectStoreMetrics>,
