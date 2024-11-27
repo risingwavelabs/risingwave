@@ -125,7 +125,7 @@ impl From<PbEngine> for Engine {
         match engine {
             PbEngine::Hummock => Self::Hummock,
             PbEngine::Iceberg => Self::Iceberg,
-            PbEngine::Unspecified => unreachable!("Unspecified engine"),
+            PbEngine::Unspecified => Self::Hummock,
         }
     }
 }
