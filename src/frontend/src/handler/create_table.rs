@@ -506,6 +506,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        false,
         rate_limit,
     )
     .await?;
