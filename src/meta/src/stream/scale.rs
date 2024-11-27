@@ -821,11 +821,8 @@ impl ScaleController {
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
                 if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
                     let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                    if let Some((
-                        _source_id,
-                        upstream_source_fragment_id,
-                        _do_not_use_upstream_actor_id,
-                    )) = stream_node.find_source_backfill()
+                    if let Some((_source_id, upstream_source_fragment_id)) =
+                        stream_node.find_source_backfill()
                     {
                         stream_source_backfill_fragment_ids
                             .insert(fragment.fragment_id, upstream_source_fragment_id);

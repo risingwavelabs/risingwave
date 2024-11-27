@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::stream_plan::DispatcherType;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
@@ -27,15 +30,37 @@ CREATE SOURCE s(v1 int, v2 varchar) WITH (
     topic='shared_source'
 ) FORMAT PLAIN ENCODE JSON;"#;
 
-fn source_backfill_upstream(fragment: &Fragment) -> Vec<(u32, u32)> {
-    fragment
+/// `Ve<(backfill_fragment_id, source_fragment_id)>`
+fn source_backfill_upstream(
+    source_backfill_fragment: &Fragment,
+    source_fragment: &Fragment,
+) -> Vec<(u32, u32)> {
+    let mut no_shuffle_downstream_to_upstream = HashMap::new();
+    for source_actor in &source_fragment.actors {
+        for dispatcher in &source_actor.dispatcher {
+            if dispatcher.r#type == DispatcherType::NoShuffle as i32 {
+                assert_eq!(dispatcher.downstream_actor_id.len(), 1);
+                let downstream_actor_id = dispatcher.downstream_actor_id[0];
+                no_shuffle_downstream_to_upstream
+                    .insert(downstream_actor_id, source_actor.actor_id);
+            }
+        }
+    }
+
+    source_backfill_fragment
         .actors
         .iter()
-        .map(|actor| {
-            let (_, _source_fragment_id, source_actor_id) =
-                actor.get_nodes().unwrap().find_source_backfill().unwrap();
-            assert!(source_actor_id.len() == 1);
-            (actor.actor_id, source_actor_id[0])
+        .map(|backfill_actor| {
+            let (_, source_fragment_id) = backfill_actor
+                .get_nodes()
+                .unwrap()
+                .find_source_backfill()
+                .unwrap();
+            assert_eq!(source_fragment.fragment_id, source_fragment_id);
+            (
+                backfill_actor.actor_id,
+                no_shuffle_downstream_to_upstream[&backfill_actor.actor_id],
+            )
         })
         .collect_vec()
 }
@@ -44,9 +69,16 @@ async fn validate_splits_aligned(cluster: &mut Cluster) -> Result<()> {
     let source_backfill_fragment = cluster
         .locate_one_fragment([identity_contains("StreamSourceScan")])
         .await?;
+    let source_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("Source"),
+            no_identity_contains("StreamSourceScan"),
+        ])
+        .await?;
     // The result of scaling is non-deterministic.
     // So we just print the result here, instead of asserting with a fixed value.
-    let actor_upstream = source_backfill_upstream(&source_backfill_fragment.inner);
+    let actor_upstream =
+        source_backfill_upstream(&source_backfill_fragment.inner, &source_fragment.inner);
     tracing::info!(
         "{}",
         actor_upstream

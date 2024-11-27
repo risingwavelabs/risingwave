@@ -543,7 +543,9 @@ message HopWindowNode {
 }
 
 message MergeNode {
-  // Note: `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
+  // **WARNING**: Use this field with caution.
+  //
+  // `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
   // See `compose_fragment`.
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;

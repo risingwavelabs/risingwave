@@ -1303,7 +1303,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .context(format!("fragment {} not found", fragment_id))?;
-        let (_source_id, upstream_source_fragment_id, _do_not_use_upstream_actor_id) = fragment
+        let (_source_id, upstream_source_fragment_id) = fragment
             .stream_node
             .to_protobuf()
             .find_source_backfill()
@@ -1494,7 +1494,7 @@ impl CatalogController {
 
         let mut source_fragment_ids = HashMap::new();
         for (fragment_id, _, stream_node) in fragments {
-            if let Some((source_id, upstream_source_fragment_id, _do_not_use_upstream_actor_id)) =
+            if let Some((source_id, upstream_source_fragment_id)) =
                 stream_node.to_protobuf().find_source_backfill()
             {
                 source_fragment_ids

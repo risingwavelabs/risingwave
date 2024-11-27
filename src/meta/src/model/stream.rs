@@ -434,7 +434,7 @@ impl StreamJobFragments {
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some((source_id, upstream_source_fragment_id, _upstream_actor_id)) =
+                if let Some((source_id, upstream_source_fragment_id)) =
                     actor.nodes.as_ref().unwrap().find_source_backfill()
                 {
                     source_backfill_fragments
