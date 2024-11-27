@@ -129,9 +129,6 @@ profile:
         persist-data: true
 
   iceberg-engine:
-    env:
-      AWS_REGION: "ap-southeast-2"
-      CONNECTOR_LIBS_PATH: ".risingwave/bin/connector-node/libs"
     steps:
       - use: minio
       - use: postgres

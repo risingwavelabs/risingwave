@@ -7,6 +7,7 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
+export AWS_REGION="us-east-1"
 
 while getopts 'p:' opt; do
     case ${opt} in

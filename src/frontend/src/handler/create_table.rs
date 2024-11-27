@@ -33,6 +33,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_connector::jvm_runtime::JVM;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
@@ -1640,6 +1641,10 @@ pub async fn create_iceberg_engine_table(
     with.insert("table.name".to_string(), iceberg_table_name.to_string());
     with.insert("enable_config_load".to_string(), "true".to_string());
     source_handler_args.with_options = WithOptions::new_with_options(with);
+
+    // before we create the table, ensure the JVM is initialized as we use jdbc catalog right now.
+    // If JVM isn't initialized successfully, current not atomic ddl will result in a partially created iceberg engine table.
+    let _ = JVM.get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
     // TODO(iceberg): make iceberg engine table creation ddl atomic
