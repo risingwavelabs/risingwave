@@ -11370,6 +11370,7 @@ dependencies = [
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
+ "url",
  "uuid",
  "workspace-hack",
  "zstd 0.13.0",

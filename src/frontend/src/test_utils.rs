@@ -1086,6 +1086,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_rate_limits(&self) -> RpcResult<Vec<RateLimitInfo>> {
         Ok(vec![])
     }
+
+    async fn get_meta_store_endpoint(&self) -> RpcResult<String> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

@@ -130,23 +130,14 @@ profile:
 
   iceberg-engine:
     env:
-      AWS_ENDPOINT_URL: "http://127.0.0.1:9301"
       AWS_REGION: "ap-southeast-2"
-      AWS_S3_BUCKET: "hummock001"
-      RW_DATA_DIRECTORY: "data-dir"
-      AWS_ACCESS_KEY_ID: "hummockadmin"
-      AWS_SECRET_ACCESS_KEY: "hummockadmin"
-      RW_BACKEND: "postgres"
-      RW_SQL_USERNAME: "postgres"
-      RW_SQL_PASSWORD: "postgres"
-      RW_SQL_ENDPOINT: "127.0.0.1:8432"
-      RW_SQL_DATABASE: "metadata"
       CONNECTOR_LIBS_PATH: ".risingwave/bin/connector-node/libs"
     steps:
       - use: minio
       - use: postgres
         port: 8432
         user: postgres
+        password: postgres
         database: metadata
       - use: meta-node
         meta-backend: postgres

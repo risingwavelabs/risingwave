@@ -52,6 +52,7 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
+use risingwave_common::system_param::reader::SystemParamsRead;
 
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
@@ -1336,51 +1337,64 @@ pub async fn handle_create_table(
                 .await?;
         }
         Engine::Iceberg => {
-            // 1. fetch iceberg engine options via environment variables
+            // 1. fetch iceberg engine options from the meta node.
             // 2. create a hummock table
             // 3. create an iceberg sink
             // 4. create an iceberg source
 
-            // TODO(iceberg): fetch these options from meta node instead of environment variables.
-            let iceberg_engine_opts = IcebergEngineOpts::default();
+            let meta_client = session.env().meta_client();
+            let system_params = meta_client.get_system_params().await?;
+            let state_store_endpoint = system_params.state_store().to_string();
+            let data_directory = system_params.data_directory().to_string();
+            let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
-            let s3_endpoint = iceberg_engine_opts.s3_endpoint;
-
-            let s3_ak = iceberg_engine_opts.s3_ak;
-
-            let s3_sk = iceberg_engine_opts.s3_sk;
-
-            let Some(s3_region) = iceberg_engine_opts.s3_region else {
+            let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                s3_region
+            } else {
                 bail!("To create an iceberg engine table, AWS_REGION needed to be set");
             };
 
-            let Some(s3_bucket) = iceberg_engine_opts.s3_bucket else {
-                bail!("To create an iceberg engine table, AWS_S3_BUCKET needed to be set");
+            let (s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
+                s3 if s3.starts_with("hummock+s3://") => {
+                    (s3.strip_prefix("hummock+s3://").unwrap().to_string(), None, None, None)
+                }
+                minio if minio.starts_with("hummock+minio://") => {
+                    let server = minio.strip_prefix("hummock+minio://").unwrap();
+                    let (access_key_id, rest) = server.split_once(':').unwrap();
+                    let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+                    let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+                        rest = rest_stripped;
+                        "https://"
+                    } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+                        rest = rest_stripped;
+                        "http://"
+                    } else {
+                        "http://"
+                    };
+                    let (address, bucket) = rest.split_once('/').unwrap();
+                    (bucket.to_string(), Some((endpoint_prefix.to_string() + address).to_string()), Some(access_key_id.to_string()), Some(secret_access_key.to_string()))
+                }
+                _ => {
+                    bail!("iceberg engine can't operate with this state store endpoint: {}", state_store_endpoint);
+                }
             };
 
-            let Some(data_directory) = iceberg_engine_opts.data_directory else {
-                bail!("To create an iceberg engine table, RW_DATA_DIRECTORY needed to be set");
-            };
 
-            let Some(meta_store_endpoint) = iceberg_engine_opts.meta_store_endpoint else {
-                bail!("To create an iceberg engine table, RW_SQL_ENDPOINT needed to be set");
-            };
-
-            let Some(meta_store_database) = iceberg_engine_opts.meta_store_database else {
-                bail!("To create an iceberg engine table, RW_SQL_DATABASE needed to be set");
-            };
-
-            let Some(meta_store_user) = iceberg_engine_opts.meta_store_user else {
-                bail!("To create an iceberg engine table, RW_SQL_USERNAME needed to be set");
-            };
-
-            let Some(meta_store_password) = iceberg_engine_opts.meta_store_password else {
-                bail!("To create an iceberg engine table, RW_SQL_PASSWORD needed to be set");
-            };
-
-            let Some(meta_store_backend) = iceberg_engine_opts.meta_store_backend else {
-                bail!("To create an iceberg engine table, RW_BACKEND needed to be set");
-            };
+            let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
+                ErrorCode::InternalError("failed to parse the meta store endpoint".to_string())
+            })?;
+            let meta_store_backend = meta_store_endpoint.scheme().to_string();
+            let meta_store_user = meta_store_endpoint.username().to_string();
+            let meta_store_password = meta_store_endpoint.password().ok_or_else(|| {
+                ErrorCode::InternalError("failed to parse password from meta store endpoint".to_string())
+            })?.to_string();
+            let meta_store_host = meta_store_endpoint.host_str().ok_or_else(|| {
+                ErrorCode::InternalError("failed to parse host from meta store endpoint".to_string())
+            })?.to_string();
+            let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+                ErrorCode::InternalError("failed to parse port from meta store endpoint".to_string())
+            })?;
+            let meta_store_database = meta_store_endpoint.path().trim_start_matches('/').to_string();
 
             let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
                 bail!("failed to parse meta backend: {}", meta_store_backend);
@@ -1476,22 +1490,21 @@ pub async fn handle_create_table(
             let catalog_uri = match meta_backend {
                 MetaBackend::Postgres => {
                     format!(
-                        "jdbc:postgresql://{}/{}",
-                        meta_store_endpoint.clone(),
+                        "jdbc:postgresql://{}:{}/{}",
+                        meta_store_host.clone(),
+                        meta_store_port.clone(),
                         meta_store_database.clone()
                     )
                 }
                 MetaBackend::Mysql => {
                     format!(
-                        "jdbc:mysql://{}/{}",
-                        meta_store_endpoint.clone(),
+                        "jdbc:mysql://{}:{}/{}",
+                        meta_store_host.clone(),
+                        meta_store_port.clone(),
                         meta_store_database.clone()
                     )
                 }
-                MetaBackend::Sqlite => {
-                    format!("jdbc:sqlite:{}", meta_store_database.clone())
-                }
-                MetaBackend::Sql | MetaBackend::Mem => {
+                MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
                     bail!(
                         "Unsupported meta backend for iceberg engine table: {}",
                         meta_store_backend

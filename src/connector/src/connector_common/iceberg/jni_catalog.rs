@@ -285,7 +285,7 @@ impl CatalogV2 for JniCatalog {
         .map_err(|e| {
             iceberg::Error::new(
                 iceberg::ErrorKind::Unexpected,
-                "Failed to crete iceberg table.",
+                "Failed to create iceberg table.",
             )
             .with_source(e)
         })?
