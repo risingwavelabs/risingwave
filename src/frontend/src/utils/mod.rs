@@ -32,10 +32,8 @@ pub use rewrite_index::*;
 mod index_set;
 pub use index_set::*;
 pub(crate) mod group_by;
-mod iceberg_engine_opts;
 pub mod overwrite_options;
 pub use group_by::*;
-pub use iceberg_engine_opts::*;
 pub use overwrite_options::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};

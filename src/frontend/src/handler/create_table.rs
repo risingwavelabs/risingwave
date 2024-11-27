@@ -28,6 +28,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -52,7 +53,6 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
-use risingwave_common::system_param::reader::SystemParamsRead;
 
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
@@ -73,7 +73,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::{IcebergEngineOpts, OverwriteOptions};
+use crate::utils::OverwriteOptions;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -1355,14 +1355,18 @@ pub async fn handle_create_table(
             };
 
             let (s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
-                s3 if s3.starts_with("hummock+s3://") => {
-                    (s3.strip_prefix("hummock+s3://").unwrap().to_string(), None, None, None)
-                }
+                s3 if s3.starts_with("hummock+s3://") => (
+                    s3.strip_prefix("hummock+s3://").unwrap().to_string(),
+                    None,
+                    None,
+                    None,
+                ),
                 minio if minio.starts_with("hummock+minio://") => {
                     let server = minio.strip_prefix("hummock+minio://").unwrap();
                     let (access_key_id, rest) = server.split_once(':').unwrap();
                     let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
-                    let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+                    let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://")
+                    {
                         rest = rest_stripped;
                         "https://"
                     } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
@@ -1372,29 +1376,51 @@ pub async fn handle_create_table(
                         "http://"
                     };
                     let (address, bucket) = rest.split_once('/').unwrap();
-                    (bucket.to_string(), Some((endpoint_prefix.to_string() + address).to_string()), Some(access_key_id.to_string()), Some(secret_access_key.to_string()))
+                    (
+                        bucket.to_string(),
+                        Some((endpoint_prefix.to_string() + address).to_string()),
+                        Some(access_key_id.to_string()),
+                        Some(secret_access_key.to_string()),
+                    )
                 }
                 _ => {
-                    bail!("iceberg engine can't operate with this state store endpoint: {}", state_store_endpoint);
+                    bail!(
+                        "iceberg engine can't operate with this state store endpoint: {}",
+                        state_store_endpoint
+                    );
                 }
             };
-
 
             let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
                 ErrorCode::InternalError("failed to parse the meta store endpoint".to_string())
             })?;
             let meta_store_backend = meta_store_endpoint.scheme().to_string();
             let meta_store_user = meta_store_endpoint.username().to_string();
-            let meta_store_password = meta_store_endpoint.password().ok_or_else(|| {
-                ErrorCode::InternalError("failed to parse password from meta store endpoint".to_string())
-            })?.to_string();
-            let meta_store_host = meta_store_endpoint.host_str().ok_or_else(|| {
-                ErrorCode::InternalError("failed to parse host from meta store endpoint".to_string())
-            })?.to_string();
+            let meta_store_password = meta_store_endpoint
+                .password()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError(
+                        "failed to parse password from meta store endpoint".to_string(),
+                    )
+                })?
+                .to_string();
+            let meta_store_host = meta_store_endpoint
+                .host_str()
+                .ok_or_else(|| {
+                    ErrorCode::InternalError(
+                        "failed to parse host from meta store endpoint".to_string(),
+                    )
+                })?
+                .to_string();
             let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-                ErrorCode::InternalError("failed to parse port from meta store endpoint".to_string())
+                ErrorCode::InternalError(
+                    "failed to parse port from meta store endpoint".to_string(),
+                )
             })?;
-            let meta_store_database = meta_store_endpoint.path().trim_start_matches('/').to_string();
+            let meta_store_database = meta_store_endpoint
+                .path()
+                .trim_start_matches('/')
+                .to_string();
 
             let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
                 bail!("failed to parse meta backend: {}", meta_store_backend);

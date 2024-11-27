@@ -11,7 +11,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 MigrationTable::alter()
                     .table(Table::Table)
-                    .add_column(ColumnDef::new(Table::Engine).string().not_null())
+                    .add_column(ColumnDef::new(Table::Engine).string())
                     .to_owned(),
             )
             .await
@@ -31,7 +31,6 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-
 enum Table {
     Table,
     Engine,
