@@ -149,6 +149,11 @@ pub struct FrontendOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
     #[clap(long, hide = true, env = "ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,

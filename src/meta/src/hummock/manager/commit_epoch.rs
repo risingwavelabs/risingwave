@@ -318,29 +318,20 @@ impl HummockManager {
     async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = {
-            std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            )
-        };
-
-        let mut table_infos = self.history_table_throughput.write();
-        let max_table_stat_throuput_window_seconds = std::cmp::max(
-            self.env.opts.table_stat_throuput_window_seconds_for_split,
-            self.env.opts.table_stat_throuput_window_seconds_for_merge,
+        let checkpoint_secs = std::cmp::max(
+            1,
+            params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
 
-        let max_sample_size = (max_table_stat_throuput_window_seconds as f64
-            / checkpoint_secs as f64)
-            .ceil() as usize;
+        let mut table_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.write();
+        let timestamp = chrono::Utc::now().timestamp();
+
         for (table_id, stat) in table_stats {
-            let throughput = (stat.total_value_size + stat.total_key_size) as u64;
-            let entry = table_infos.entry(table_id).or_default();
-            entry.push_back(throughput);
-            if entry.len() > max_sample_size {
-                entry.pop_front();
-            }
+            let throughput = ((stat.total_value_size + stat.total_key_size) as f64
+                / checkpoint_secs as f64) as u64;
+            table_throughput_statistic_manager
+                .add_table_throughput_with_ts(table_id, throughput, timestamp);
         }
     }
 

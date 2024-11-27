@@ -836,8 +836,7 @@ impl HummockManager {
                     self.calculate_vnode_partition(
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
-                    )
-                    .await;
+                    );
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
@@ -1429,7 +1428,7 @@ impl HummockManager {
         }
     }
 
-    pub(crate) async fn calculate_vnode_partition(
+    pub(crate) fn calculate_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
@@ -1473,21 +1472,17 @@ impl HummockManager {
                 .env
                 .opts
                 .compact_task_table_size_partition_threshold_high;
-            use risingwave_common::system_param::reader::SystemParamsRead;
-            let params = self.env.system_params_reader().await;
-            let barrier_interval_ms = params.barrier_interval_ms() as u64;
-            let checkpoint_secs = std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            );
             // check latest write throughput
-            let history_table_throughput = self.history_table_throughput.read();
+            let table_write_throughput_statistic_manager =
+                self.table_write_throughput_statistic_manager.read();
+            let timestamp = chrono::Utc::now().timestamp();
             for (table_id, compact_table_size) in table_size_info {
-                let write_throughput = history_table_throughput
-                    .get(&table_id)
-                    .map(|que| que.back().cloned().unwrap_or(0))
-                    .unwrap_or(0)
-                    / checkpoint_secs;
+                let write_throughput = table_write_throughput_statistic_manager
+                    .get_table_throughput_descending(table_id, timestamp)
+                    .peekable()
+                    .peek()
+                    .map(|item| item.throughput)
+                    .unwrap_or(0);
                 if compact_table_size > compact_task_table_size_partition_threshold_high
                     && default_partition_count > 0
                 {

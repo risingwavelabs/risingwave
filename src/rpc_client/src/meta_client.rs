@@ -54,6 +54,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -68,7 +69,6 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -585,6 +585,29 @@ impl MetaClient {
             object: Some(object),
         };
         let resp = self.inner.alter_swap_rename(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<WaitVersion> {
+        let request = AlterSecretRequest {
+            secret_id,
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.alter_secret(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -2095,6 +2118,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
+            ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

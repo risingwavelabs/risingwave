@@ -38,6 +38,9 @@ impl ObserverState for ComputeObserverNode {
                     Operation::Delete => {
                         LocalSecretManager::global().remove_secret(s.id);
                     }
+                    Operation::Update => {
+                        LocalSecretManager::global().update_secret(s.id, s.value);
+                    }
                     _ => {
                         panic!("error type notification");
                     }
