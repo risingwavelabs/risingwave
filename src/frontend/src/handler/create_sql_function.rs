@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use fancy_regex::Regex;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -188,15 +188,11 @@ pub async fn handle_create_sql_function(
                 return_type = bind_data_type(&columns[0].data_type)?;
             } else {
                 // return type is a struct for multiple columns
-                let datatypes = columns
+                let fields = columns
                     .iter()
-                    .map(|c| bind_data_type(&c.data_type))
+                    .map(|c| Ok((c.name.real_value(), bind_data_type(&c.data_type)?)))
                     .collect::<Result<Vec<_>>>()?;
-                let names = columns
-                    .iter()
-                    .map(|c| c.name.real_value())
-                    .collect::<Vec<_>>();
-                return_type = DataType::new_struct(datatypes, names);
+                return_type = StructType::new(fields).into();
             }
             Kind::Table(TableFunction {})
         }

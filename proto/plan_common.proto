@@ -236,6 +236,7 @@ message Cardinality {
 // Provide statement-local context, e.g. session info like time zone, for execution.
 message ExprContext {
   string time_zone = 1;
+  bool strict_mode = 2;
 }
 
 message AdditionalColumnKey {}
