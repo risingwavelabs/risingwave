@@ -30,7 +30,7 @@ CREATE SOURCE s(v1 int, v2 varchar) WITH (
     topic='shared_source'
 ) FORMAT PLAIN ENCODE JSON;"#;
 
-/// `Ve<(backfill_fragment_id, source_fragment_id)>`
+/// Returns `Vec<(backfill_actor_id, source_actor_id)>`
 fn source_backfill_upstream(
     source_backfill_fragment: &Fragment,
     source_fragment: &Fragment,
