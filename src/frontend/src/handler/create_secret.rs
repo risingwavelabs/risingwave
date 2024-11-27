@@ -58,7 +58,7 @@ pub async fn handle_create_secret(
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_secret(
-            stmt.secret_name.real_value(),
+            secret_name,
             database_id,
             schema_id,
             session.user_id(),
