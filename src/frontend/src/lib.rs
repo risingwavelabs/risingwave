@@ -210,7 +210,7 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
-        let webhook_liston_addr = opts.webhook_listen_addr.parse().unwrap();
+        let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
 
