@@ -43,6 +43,7 @@ use crate::utils::WithOptions;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
+mod alter_secret;
 mod alter_set_schema;
 mod alter_source_column;
 mod alter_source_with_sr;
@@ -1082,6 +1083,11 @@ pub async fn handle(
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
+        Statement::AlterSecret {
+            name,
+            with_options,
+            operation,
+        } => alter_secret::handle_alter_secret(handler_args, name, with_options, operation).await,
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
         }

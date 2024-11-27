@@ -51,6 +51,7 @@ pub enum MetaBackend {
     Sqlite,
     Postgres,
     Mysql,
+    Env,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
