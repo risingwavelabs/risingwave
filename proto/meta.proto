@@ -413,6 +413,12 @@ message GetClusterRecoveryStatusResponse {
   RecoveryStatus status = 1;
 }
 
+message GetMetaStoreInfoRequest {}
+
+message GetMetaStoreInfoResponse {
+  string meta_store_endpoint = 1;
+}
+
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
@@ -420,6 +426,7 @@ service ClusterService {
   rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
   rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
+  rpc GetMetaStoreInfo(GetMetaStoreInfoRequest) returns (GetMetaStoreInfoResponse);
 }
 
 enum SubscribeType {
