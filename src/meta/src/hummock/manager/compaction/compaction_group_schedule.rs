@@ -327,10 +327,6 @@ impl HummockManager {
         drop(versioning_guard);
         drop(compaction_guard);
         if !canceled_tasks.is_empty() {
-            tracing::info!(
-                "merge_compaction_group_impl: canceled_tasks: {}",
-                canceled_tasks.len()
-            );
             self.report_compact_tasks(canceled_tasks).await?;
         }
 
@@ -566,10 +562,6 @@ impl HummockManager {
         drop(versioning_guard);
         drop(compaction_guard);
         if !canceled_tasks.is_empty() {
-            tracing::info!(
-                "split_compaction_group_impl: canceled_tasks: {}",
-                canceled_tasks.len()
-            );
             self.report_compact_tasks(canceled_tasks).await?;
         }
 
