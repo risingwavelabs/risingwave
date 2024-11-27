@@ -566,9 +566,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -588,9 +587,8 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -610,9 +608,8 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -636,9 +633,8 @@ profile:
       - use: minio
         api-requests-max: 30
         api-requests-deadline: 3s
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -660,9 +656,8 @@ profile:
       - use: minio
         api-requests-max: 30
         api-requests-deadline: 2s
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -684,9 +679,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -743,9 +737,8 @@ profile:
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -897,9 +890,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -910,9 +902,8 @@ profile:
     config-path: src/config/ci-compaction-test.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -955,9 +946,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -1017,9 +1007,8 @@ profile:
     config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
       - use: frontend
       - use: compactor
