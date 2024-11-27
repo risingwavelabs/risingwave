@@ -226,7 +226,7 @@ pub fn start(
                 .collect::<HashSet<_>>(),
         );
 
-        let webhook_service = crate::webhook::WebhookService::new(webhook_liston_addr);
+        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
         let _task = tokio::spawn(webhook_service.serve());
 
         pg_serve(
