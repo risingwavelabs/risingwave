@@ -66,9 +66,6 @@ select * from mv1 order by v1;
 3031-01-01 21:00:00+00:00
 
 
-halt
-
-
 statement ok
 DROP SOURCE kafkasource CASCADE;
 
