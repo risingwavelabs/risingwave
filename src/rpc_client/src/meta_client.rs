@@ -1252,9 +1252,9 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
-    pub async fn list_meta_store_endpoint(&self) -> Result<String> {
-        let req = ListMetaStoreInfoRequest {};
-        let resp = self.inner.list_meta_store_info(req).await?;
+    pub async fn get_meta_store_endpoint(&self) -> Result<String> {
+        let req = GetMetaStoreInfoRequest {};
+        let resp = self.inner.get_meta_store_info(req).await?;
         Ok(resp.meta_store_endpoint)
     }
 
@@ -2072,7 +2072,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
-            ,{ cluster_client, list_meta_store_info, ListMetaStoreInfoRequest, ListMetaStoreInfoResponse }
+            ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
