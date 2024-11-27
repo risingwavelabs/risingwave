@@ -20,7 +20,7 @@ use apache_avro::AvroResult;
 use itertools::Itertools;
 use risingwave_common::error::NotImplemented;
 use risingwave_common::log::LogSuppresser;
-use risingwave_common::types::{DataType, Decimal, MapType};
+use risingwave_common::types::{DataType, Decimal, MapType, StructType};
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 
@@ -190,12 +190,13 @@ fn avro_type_mapping(
                 return Ok(DataType::Decimal);
             }
 
-            let struct_fields = fields
-                .iter()
-                .map(|f| avro_type_mapping(&f.schema, map_handling))
-                .collect::<anyhow::Result<_>>()?;
-            let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
-            DataType::new_struct(struct_fields, struct_names)
+            StructType::new(
+                fields
+                    .iter()
+                    .map(|f| Ok((&f.name, avro_type_mapping(&f.schema, map_handling)?)))
+                    .collect::<anyhow::Result<Vec<_>>>()?,
+            )
+            .into()
         }
         Schema::Array(item_schema) => {
             let item_type = avro_type_mapping(item_schema.as_ref(), map_handling)?;
@@ -225,7 +226,7 @@ fn avro_type_mapping(
                     // Note: Avro union's variant tag is type name, not field name (unlike Rust enum, or Protobuf oneof).
 
                     // XXX: do we need to introduce union.handling.mode?
-                    let (fields, field_names) = union_schema
+                    let fields = union_schema
                         .variants()
                         .iter()
                         // null will mean the whole struct is null
@@ -233,13 +234,13 @@ fn avro_type_mapping(
                         .map(|variant| {
                             avro_type_mapping(variant, map_handling).and_then(|t| {
                                 let name = avro_schema_to_struct_field_name(variant)?;
-                                Ok((t, name))
+                                Ok((name, t))
                             })
                         })
-                        .process_results(|it| it.unzip::<_, _, Vec<_>, Vec<_>>())
+                        .try_collect::<_, Vec<_>, _>()
                         .context("failed to convert Avro union to struct")?;
 
-                    DataType::new_struct(fields, field_names)
+                    StructType::new(fields).into()
                 }
             }
         }
