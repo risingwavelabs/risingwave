@@ -24,9 +24,9 @@ explain create materialized view mv1 as select v1 from kafkasource where v1 betw
 StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
 └─StreamDynamicFilter { predicate: (v1 <= $expr1), output: [v1, _row_id], cleaned_by_watermark: true }
   ├─StreamProject { exprs: [v1, _row_id], output_watermarks: [v1] }
-  │ └─StreamDynamicFilter { predicate: (v1 >= now), output_watermarks: [v1], output: [v1, _rw_kafka_timestamp, _row_id, _rw_kafka_partition, _rw_kafka_offset], cleaned_by_watermark: true }
-  │   ├─StreamRowIdGen { row_id_index: 2 }
-  │   │ └─StreamSourceScan { columns: [v1, _rw_kafka_timestamp, _row_id, _rw_kafka_partition, _rw_kafka_offset] }
+  │ └─StreamDynamicFilter { predicate: (v1 >= now), output_watermarks: [v1], output: [v1, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], cleaned_by_watermark: true }
+  │   ├─StreamRowIdGen { row_id_index: 4 }
+  │   │ └─StreamSourceScan { columns: [v1, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   │   └─StreamExchange { dist: Broadcast }
   │     └─StreamNow
   └─StreamExchange { dist: Broadcast }
