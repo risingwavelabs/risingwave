@@ -109,6 +109,12 @@ pub struct SessionConfig {
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
 
+    /// Evaluate expression in strict mode for batch queries.
+    /// If set to false, an expression failure will not cause an error but leave a null value
+    /// on the result set.
+    #[parameter(default = true)]
+    batch_expr_strict_mode: bool,
+
     /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,

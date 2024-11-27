@@ -3026,9 +3026,11 @@ impl Parser<'_> {
             self.parse_alter_system()
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
             self.parse_alter_subscription()
+        } else if self.parse_keyword(Keyword::SECRET) {
+            self.parse_alter_secret()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER"
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3539,6 +3541,19 @@ impl Parser<'_> {
         }
         let value = self.parse_set_variable()?;
         Ok(Statement::AlterSystem { param, value })
+    }
+
+    pub fn parse_alter_secret(&mut self) -> PResult<Statement> {
+        let secret_name = self.parse_object_name()?;
+        let with_options = self.parse_with_properties()?;
+        self.expect_keyword(Keyword::AS)?;
+        let new_credential = self.parse_value()?;
+        let operation = AlterSecretOperation::ChangeCredential { new_credential };
+        Ok(Statement::AlterSecret {
+            name: secret_name,
+            with_options,
+            operation,
+        })
     }
 
     /// Parse a copy statement

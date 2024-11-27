@@ -10,6 +10,11 @@ CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 statement ok
 CREATE SECRET iceberg_s3_access_key WITH (
   backend = 'meta'
+) as 'hummockadmin_wrong';
+
+statement ok
+ALTER SECRET iceberg_s3_access_key WITH (
+  backend = 'meta'
 ) as 'hummockadmin';
 
 statement ok

@@ -1678,6 +1678,7 @@ mod tests {
                     mview_definition: "".to_string(),
                     expr_context: Some(PbExprContext {
                         time_zone: String::from("America/New_York"),
+                        strict_mode: false,
                     }),
                 }
             })
@@ -1798,6 +1799,7 @@ mod tests {
                         .map(VnodeBitmap::from),
                     expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
+                        strict_mode: false,
                     }),
                 }
             })

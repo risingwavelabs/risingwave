@@ -16,6 +16,7 @@ use std::iter::Peekable;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_expr::expr::LogReport;
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
@@ -29,6 +30,7 @@ use super::NonStrictExpression;
 use crate::expr::{
     BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
 };
+use crate::expr_context::strict_mode;
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, Result};
 
@@ -46,6 +48,21 @@ pub fn build_non_strict_from_prost(
     ExprBuilder::new_non_strict(error_report)
         .build(prost)
         .map(NonStrictExpression)
+}
+
+/// Build a strict or non-strict expression according to expr context.
+///
+/// When strict mode is off, the expression will not fail but leave a null value as result.
+///
+/// Unlike [`build_non_strict_from_prost`], the returning value here can be either non-strict or
+/// strict. Thus, the caller is supposed to handle potential errors under strict mode.
+pub fn build_batch_expr_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    if strict_mode()? {
+        build_from_prost(prost)
+    } else {
+        // TODO(eric): report errors to users via psql notice
+        Ok(ExprBuilder::new_non_strict(LogReport).build(prost)?.boxed())
+    }
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
