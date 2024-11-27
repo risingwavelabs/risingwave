@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::{DataType, MapType};
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
@@ -1008,13 +1008,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
-        AstDataType::Struct(types) => DataType::new_struct(
+        AstDataType::Struct(types) => StructType::new(
             types
                 .iter()
-                .map(|f| bind_data_type(&f.data_type))
+                .map(|f| Ok((f.name.real_value(), bind_data_type(&f.data_type)?)))
                 .collect::<Result<Vec<_>>>()?,
-            types.iter().map(|f| f.name.real_value()).collect_vec(),
-        ),
+        )
+        .into(),
         AstDataType::Map(kv) => {
             let key = bind_data_type(&kv.0)?;
             let value = bind_data_type(&kv.1)?;

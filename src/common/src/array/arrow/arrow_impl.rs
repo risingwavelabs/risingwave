@@ -485,7 +485,7 @@ pub trait FromArrow {
             fields
                 .iter()
                 .map(|f| Ok((f.name().clone(), self.from_field(f)?)))
-                .try_collect::<_, _, ArrayError>()?,
+                .try_collect::<_, Vec<_>, ArrayError>()?,
         ))
     }
 
