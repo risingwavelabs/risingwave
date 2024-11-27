@@ -185,6 +185,7 @@ pub async fn get_replace_table_plan(
         with_version_column,
         wildcard_idx,
         cdc_table_info,
+        include_column_options,
         ..
     } = definition
     else {
@@ -207,6 +208,7 @@ pub async fn get_replace_table_plan(
         with_version_column,
         cdc_table_info,
         new_version_columns,
+        include_column_options,
     )
     .await?;
 
