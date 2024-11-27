@@ -20,7 +20,6 @@ use std::sync::LazyLock;
 use anyhow::{anyhow, bail, Context, Result};
 use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
-use tempfile::NamedTempFile;
 use url::Url;
 
 use super::{risingwave_cmd, ExecuteContext, Task};
@@ -48,13 +47,19 @@ fn sql_endpoint_from_env() -> String {
             );
             endpoint
         } else {
-            let temp_path = NamedTempFile::with_suffix(".db").unwrap().into_temp_path();
-            let temp_sqlite_endpoint = format!("sqlite://{}?mode=rwc", temp_path.to_string_lossy());
+            // `meta-backend: env` is specified, but env var is not set.
+            // Act as if `meta-backend: sqlite` is specified.
+            // Not using a temporary file because we want to persist the data across restarts.
+            let prefix_data = env::var("PREFIX_DATA").unwrap();
+            let path = PathBuf::from(&prefix_data)
+                .join("meta-backend-env-fallback-sqlite")
+                .join("metadata.db");
+            let sqlite_endpoint = format!("sqlite://{}?mode=rwc", path.to_string_lossy());
             tracing::warn!(
-                "env RISEDEV_SQL_ENDPOINT not set, use temporary sqlite `{}`",
-                temp_sqlite_endpoint
+                "env RISEDEV_SQL_ENDPOINT not set, use fallback sqlite `{}`",
+                sqlite_endpoint
             );
-            temp_sqlite_endpoint
+            sqlite_endpoint
         }
     });
 
