@@ -458,7 +458,7 @@ impl StreamFragmentGraph {
     /// `fragment_id`, `vnode_count`. They will be all filled after a `TableFragments` is built.
     /// Be careful when using the returned values.
     ///
-    /// See also [`crate::model::TableFragments::internal_tables`].
+    /// See also [`crate::model::StreamJobFragments::internal_tables`].
     pub fn incomplete_internal_tables(&self) -> BTreeMap<u32, Table> {
         let mut tables = BTreeMap::new();
         for fragment in self.fragments.values() {

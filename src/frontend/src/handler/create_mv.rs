@@ -15,10 +15,9 @@
 use std::collections::HashSet;
 
 use either::Either;
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{FunctionId, ObjectId, TableId};
 use risingwave_pb::catalog::PbTable;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
@@ -93,15 +92,7 @@ pub fn gen_create_mv_plan(
 ) -> Result<(PlanRef, PbTable)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(query)?;
-    gen_create_mv_plan_bound(
-        session,
-        context,
-        bound,
-        binder.included_relations(),
-        name,
-        columns,
-        emit_mode,
-    )
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
 }
 
 /// Generate create MV plan from a bound query
@@ -109,7 +100,6 @@ pub fn gen_create_mv_plan_bound(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
@@ -147,16 +137,8 @@ pub fn gen_create_mv_plan_bound(
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
     let plan: PlanRef = materialize.into();
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
 
     table.owner = session.user_id();
-
-    // record dependent relations.
-    table.dependent_relations = dependent_relations
-        .into_iter()
-        .map(|t| t.table_id)
-        .collect_vec();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -176,10 +158,14 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound = binder.bind_query(query)?;
-        (binder.included_relations(), bound)
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound,
+        )
     };
     handle_create_mv_bound(
         handler_args,
@@ -187,6 +173,7 @@ pub async fn handle_create_mv(
         name,
         bound,
         dependent_relations,
+        dependent_udfs,
         columns,
         emit_mode,
     )
@@ -199,6 +186,7 @@ pub async fn handle_create_mv_bound(
     name: ObjectName,
     query: BoundQuery,
     dependent_relations: HashSet<TableId>,
+    dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
@@ -215,7 +203,7 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph) = {
+    let (table, graph, dependencies) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         if !context.with_options().is_empty() {
             // get other useful fields by `remove`, the logic here is to reject unknown options.
@@ -232,19 +220,25 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_string());
         }
 
-        let (plan, table) = gen_create_mv_plan_bound(
-            &session,
-            context.into(),
-            query,
-            dependent_relations,
-            name,
-            columns,
-            emit_mode,
-        )?;
+        let (plan, table) =
+            gen_create_mv_plan_bound(&session, context.into(), query, name, columns, emit_mode)?;
+
+        // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+        // during binding instead of visiting the optimized plan.
+        let dependencies =
+            RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
+                .into_iter()
+                .map(|id| id.table_id() as ObjectId)
+                .chain(
+                    dependent_udfs
+                        .into_iter()
+                        .map(|id| id.function_id() as ObjectId),
+                )
+                .collect();
 
         let graph = build_graph(plan)?;
 
-        (table, graph)
+        (table, graph, dependencies)
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -262,7 +256,7 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph)
+        .create_materialized_view(table, graph, dependencies)
         .await?;
 
     Ok(PgResponse::empty_result(
@@ -278,7 +272,7 @@ pub mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
@@ -320,16 +314,16 @@ pub mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::new_struct(
-            vec![DataType::Varchar, DataType::Varchar],
-            vec!["address".to_string(), "zipcode".to_string()],
-        );
+        let city_type = StructType::new(vec![
+            ("address", DataType::Varchar),
+            ("zipcode", DataType::Varchar),
+        ])
+        .into();
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
-            "country" => DataType::new_struct(
-                 vec![DataType::Varchar,city_type,DataType::Varchar],
-                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
-            ),
+            "country" => StructType::new(
+                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
+            ).into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
         assert_eq!(columns, expected_columns);

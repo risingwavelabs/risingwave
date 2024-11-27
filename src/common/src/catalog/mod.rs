@@ -177,6 +177,8 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
+pub type ObjectId = u32;
+
 #[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
 #[display("{database_id}")]
 pub struct DatabaseId {
