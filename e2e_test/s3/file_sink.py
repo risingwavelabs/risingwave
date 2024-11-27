@@ -11,6 +11,7 @@ from time import sleep
 from minio import Minio
 from random import uniform
 from time import sleep
+import numpy as np
 import time
 
 def gen_data(file_num, item_num_per_file):
@@ -23,6 +24,12 @@ def gen_data(file_num, item_num_per_file):
             'sex': item_id % 2,
             'mark': (-1) ** (item_id % 2),
             'test_int': pa.scalar(1, type=pa.int32()),
+            'test_int8': pa.scalar(1, type=pa.int8()),
+            'test_uint8': pa.scalar(item_id % 256, type=pa.uint8()),  # UInt8
+            'test_uint16': pa.scalar(item_id % 65536, type=pa.uint16()),  # UInt16
+            'test_uint32': pa.scalar(item_id % (2**32), type=pa.uint32()),  # UInt32
+            'test_uint64': pa.scalar(item_id % (2**64), type=pa.uint64()),  # UInt64
+            'test_float_16': pa.scalar(np.float16(4.0), type=pa.float16()),
             'test_real': pa.scalar(4.0, type=pa.float32()),
             'test_double_precision': pa.scalar(5.0, type=pa.float64()),
             'test_varchar': pa.scalar('7', type=pa.string()),
@@ -62,6 +69,12 @@ def do_test(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
@@ -137,6 +150,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_int8,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
@@ -172,6 +191,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
@@ -209,7 +234,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     stmt = f'select count(*), sum(id) from test_parquet_sink_table'
     print(f'Execute reading sink files: {stmt}')
 
-    print(f'Create snowflake s3 sink ')
+    print(f'Create s3 sink json format')
     # Execute a SELECT statement
     cur.execute(f'''CREATE sink test_file_sink_json as select
         id,
@@ -217,6 +242,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_int8,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
@@ -252,6 +283,12 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,

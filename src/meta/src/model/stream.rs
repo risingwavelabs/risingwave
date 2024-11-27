@@ -144,6 +144,7 @@ impl StreamContext {
         PbExprContext {
             // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
             time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
+            strict_mode: false,
         }
     }
 
@@ -599,6 +600,13 @@ impl StreamJobFragments {
             });
         });
         self
+    }
+
+    /// Panics if the fragment is not found.
+    pub fn fragment_mut(&mut self, fragment_id: FragmentId) -> &mut Fragment {
+        self.fragments
+            .get_mut(&fragment_id)
+            .unwrap_or_else(|| panic!("fragment {} not found", fragment_id))
     }
 }
 

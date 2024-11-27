@@ -2684,7 +2684,7 @@ dependencies = [
  "hyper 0.14.27",
  "hyper-tls 0.5.0",
  "lz4",
- "sealed 0.4.0",
+ "sealed",
  "serde",
  "static_assertions",
  "thiserror 1.0.63",
@@ -5070,12 +5070,12 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ffa01d910407917a7c268fddf2be41163028693556b833a55f59351deffa011"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
+ "equivalent",
  "fastrace",
  "foyer-common",
  "foyer-memory",
@@ -5088,61 +5088,51 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "797addbeabe5c42db9615e4d350a9b9d1597bebc07eefbd032d0e173430c8868"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
 dependencies = [
+ "ahash 0.8.11",
  "bytes",
  "cfg-if",
- "crossbeam",
  "fastrace",
  "futures",
  "hashbrown 0.14.5",
  "itertools 0.13.0",
  "madsim-tokio",
- "metrics",
  "parking_lot 0.12.1",
  "pin-project",
+ "prometheus",
  "serde",
-]
-
-[[package]]
-name = "foyer-intrusive"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ee0c1f19c7736f34e37e7cd4c1d5ceef3a32e24dbb14fcf2fcc836ce1cbfc4"
-dependencies = [
- "foyer-common",
- "itertools 0.13.0",
 ]
 
 [[package]]
 name = "foyer-memory"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b46b30275039721c05b390d4df00eff88814b1877ee06d56b61a859a5cf9577"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
  "cmsketch",
+ "equivalent",
  "fastrace",
  "foyer-common",
- "foyer-intrusive",
  "futures",
  "hashbrown 0.14.5",
+ "intrusive-collections",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
+ "paste",
  "pin-project",
  "serde",
+ "thiserror 2.0.3",
  "tracing",
 ]
 
 [[package]]
 name = "foyer-storage"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038ecf3211a5f984d534a5654a41613be7334fe8f5aab529708866da2de62d82"
+version = "0.13.0-dev"
+source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5155,6 +5145,7 @@ dependencies = [
  "bytes",
  "clap",
  "either",
+ "equivalent",
  "fastrace",
  "flume",
  "foyer-common",
@@ -5172,7 +5163,7 @@ dependencies = [
  "pin-project",
  "rand",
  "serde",
- "thiserror 1.0.63",
+ "thiserror 2.0.3",
  "tracing",
  "twox-hash",
  "zstd 0.13.0",
@@ -6558,6 +6549,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
+name = "intrusive-collections"
+version = "0.9.7"
+source = "git+https://github.com/foyer-rs/intrusive-rs?rev=94cfac4701dbc0033b7bc27e31c46bf3a12d96d7#94cfac4701dbc0033b7bc27e31c46bf3a12d96d7"
+dependencies = [
+ "memoffset",
+]
+
+[[package]]
 name = "io-extras"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7479,45 +7478,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "metrics"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "884adb57038347dfbaf2d5065887b6cf4312330dc8e94bc30a1a839bd79d3261"
-dependencies = [
- "ahash 0.8.11",
- "portable-atomic",
-]
-
-[[package]]
-name = "metrics-prometheus"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51557a875fdbd5b953b698ecd6cd06efef47618e02d95ad912e2392e5b5617ff"
-dependencies = [
- "arc-swap",
- "metrics",
- "metrics-util",
- "once_cell",
- "prometheus",
- "sealed 0.5.0",
- "smallvec",
- "thiserror 1.0.63",
-]
-
-[[package]]
-name = "metrics-util"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4259040465c955f9f2f1a4a8a16dc46726169bca0f88e8fb2dbeced487c3e828"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
- "hashbrown 0.14.5",
- "metrics",
- "num_cpus",
 ]
 
 [[package]]
@@ -10403,6 +10363,7 @@ dependencies = [
  "google-cloud-pubsub",
  "indicatif",
  "itertools 0.13.0",
+ "log",
  "madsim-rdkafka",
  "madsim-tokio",
  "redis",
@@ -10412,10 +10373,12 @@ dependencies = [
  "serde_json",
  "serde_with 3.8.1",
  "serde_yaml",
+ "sqlx",
  "tempfile",
  "thiserror-ext",
  "tracing",
  "tracing-subscriber",
+ "url",
  "workspace-hack",
  "yaml-rust",
 ]
@@ -12085,7 +12048,6 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
- "metrics-prometheus",
  "moka",
  "more-asserts",
  "nix 0.29.0",
@@ -12962,18 +12924,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "sealed"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4a8caec23b7800fb97971a1c6ae365b6239aaeddfb934d6265f8505e795699d"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "syn 2.0.87",
 ]
 
 [[package]]
