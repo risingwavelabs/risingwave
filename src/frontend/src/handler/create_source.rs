@@ -1564,7 +1564,7 @@ pub async fn bind_create_source_or_table_with_connector(
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &columns,
                 &with_properties.get_connector().unwrap(),
-                true,
+                true, // col_id filled below at col_id_gen.generate
             );
             for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
                 if !existed {
