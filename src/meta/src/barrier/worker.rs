@@ -512,12 +512,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         err: Option<MetaError>,
         recovery_reason: RecoveryReason,
     ) {
-        self.context.abort_and_mark_blocked(recovery_reason);
+        self.context.abort_and_mark_blocked(None, recovery_reason);
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
 
         self.recovery_inner(paused_reason, err).await;
-        self.context.mark_ready();
+        self.context.mark_ready(None);
     }
 
     async fn recovery_inner(
