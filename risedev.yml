@@ -117,6 +117,7 @@ profile:
       - use: postgres
         port: 8432
         user: postgres
+        password: postgres
         database: metadata
       - use: meta-node
         meta-backend: postgres

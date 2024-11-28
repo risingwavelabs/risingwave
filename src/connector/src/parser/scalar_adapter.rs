@@ -315,6 +315,22 @@ impl ScalarAdapter {
     }
 }
 
+pub fn validate_pg_type_to_rw_type(pg_type: &DataType, rw_type: &DataType) -> bool {
+    if pg_type == rw_type {
+        return true;
+    }
+    match rw_type {
+        DataType::Varchar => matches!(pg_type, DataType::Decimal | DataType::Int256),
+        DataType::List(box DataType::Varchar) => {
+            matches!(
+                pg_type,
+                DataType::List(box (DataType::Decimal | DataType::Int256))
+            )
+        }
+        _ => false,
+    }
+}
+
 fn pg_numeric_is_special(val: &PgNumeric) -> bool {
     matches!(
         val,
