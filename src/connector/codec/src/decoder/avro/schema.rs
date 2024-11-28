@@ -224,7 +224,7 @@ fn avro_type_mapping(
             let unique_name = name.fullname(None);
             if ancestor_records.contains(&unique_name) {
                 bail!(
-                    "circular reference detected: {} -> {}",
+                    "circular reference detected in Avro schema: {} -> {}",
                     ancestor_records.join(" -> "),
                     unique_name
                 );

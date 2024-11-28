@@ -31,7 +31,7 @@ db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
   1: connector error
-  2: circular reference detected: Node -> Node
+  2: circular reference detected in Avro schema: Node -> Node
 
 
 system ok
