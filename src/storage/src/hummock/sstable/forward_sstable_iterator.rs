@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering::{Equal, Less};
 use std::ops::Bound::*;
 use std::sync::Arc;
 
@@ -244,7 +243,10 @@ impl SstableIterator {
         if self.last_table_id != new_table_id {
             self.last_table_id = new_table_id;
             self.is_current_block_valid = block_iter.is_valid()
-                && block_iter.key().le(&FullKey::decode(&self.key_range.right)); // block_iter is not None
+                && match self.key_range.right_exclusive {
+                    true => block_iter.key().lt(&FullKey::decode(&self.key_range.right)), /* key < right */
+                    false => block_iter.key().le(&FullKey::decode(&self.key_range.right)), /* key <= right */
+                };
         }
 
         Ok(())
@@ -258,8 +260,7 @@ impl SstableIterator {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
+                FullKey::decode(&block_meta.smallest_key).le(&key)
             })
             .saturating_sub(1) // considering the boundary of 0
     }
@@ -274,15 +275,6 @@ impl HummockIterator for SstableIterator {
         if !block_iter.try_next() {
             // seek to next block
             self.seek_idx(self.cur_idx + 1, None).await?;
-        } else {
-            // block_iter try_next success, update the current block state
-            let new_table_id = block_iter.table_id().table_id();
-            if self.last_table_id != new_table_id {
-                // light weight check
-                self.last_table_id = new_table_id;
-                self.is_current_block_valid = block_iter.is_valid()
-                    && block_iter.key().le(&FullKey::decode(&self.key_range.right));
-            }
         }
 
         Ok(())
@@ -305,6 +297,10 @@ impl HummockIterator for SstableIterator {
     async fn rewind(&mut self) -> HummockResult<()> {
         self.init_block_prefetch_range(0);
         let start_seek_idx = self.calculate_block_idx_by_key(FullKey::decode(&self.key_range.left));
+        assert!(
+            FullKey::decode(&self.sst.meta.block_metas[start_seek_idx].smallest_key)
+                .le(&FullKey::decode(&self.key_range.left))
+        );
 
         // seek_idx will update the current block iter state
         self.seek_idx(start_seek_idx, None).await?;
@@ -671,21 +667,75 @@ mod tests {
                 }
             };
 
-            let kv_pairs = vec![
-                (k1.clone(), HummockValue::put(test_value_of(1))),
-                (k2.clone(), HummockValue::put(test_value_of(2))),
-            ];
-
-            let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
-                default_builder_opt_for_test(),
-                10,
-                kv_pairs.into_iter(),
-                sstable_store.clone(),
-                vec![1, 2],
-            )
-            .await;
+            let k3 = {
+                let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                table_key.extend_from_slice(format!("key_test_{:05}", 3).as_bytes());
+                let uk = UserKey::for_test(TableId::from(3), table_key);
+                FullKey {
+                    user_key: uk,
+                    epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(1)),
+                }
+            };
 
             {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let key_range = KeyRange {
+                    left: k1.encode().into(),
+                    right: k3.encode().into(),
+                    right_exclusive: false,
+                };
+                let mut sstable_iter = SstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    key_range.clone(),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+
+                let mut cnt = 0;
+                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(3, cnt);
+                assert_eq!(last_key, k3.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
                 let key_range = KeyRange {
                     left: k1.encode().into(),
                     right: k2.encode().into(),
@@ -709,8 +759,93 @@ mod tests {
                     sstable_iter.next().await.unwrap();
                 }
 
-                // table_id not change, key_range check can not be done
                 assert_eq!(2, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let key_range = KeyRange {
+                    left: k1.encode().into(),
+                    right: k3.encode().into(),
+                    right_exclusive: true,
+                };
+                let mut sstable_iter = SstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    key_range.clone(),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+
+                let mut cnt = 0;
+                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(2, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let key_range = KeyRange {
+                    left: k2.encode().into(),
+                    right: k3.encode().into(),
+                    right_exclusive: true,
+                };
+                let mut sstable_iter = SstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    key_range.clone(),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+
+                let mut cnt = 0;
+                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(1, cnt);
                 assert_eq!(last_key, k2.clone());
             }
         }
