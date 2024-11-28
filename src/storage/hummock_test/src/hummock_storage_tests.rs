@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
@@ -2526,12 +2526,13 @@ async fn test_commit_multi_epoch() {
     };
 
     let epoch1 = initial_epoch.next_epoch();
-    let sst1_epoch1 = SstableInfo {
+    let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,
@@ -2574,12 +2575,13 @@ async fn test_commit_multi_epoch() {
         version.levels.keys().cloned().collect()
     };
 
-    let sst1_epoch2 = SstableInfo {
+    let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 22,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
         ..Default::default()
-    };
+    }
+    .into();
 
     let epoch2 = epoch1.next_epoch();
 
@@ -2625,12 +2627,13 @@ async fn test_commit_multi_epoch() {
 
     let new_table_id = TableId::new(2);
 
-    let sst2_epoch1 = SstableInfo {
+    let sst2_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 33,
         object_id: 3,
         table_ids: vec![new_table_id.table_id],
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,
@@ -2667,12 +2670,13 @@ async fn test_commit_multi_epoch() {
         new_cg_id
     };
 
-    let sst2_epoch2 = SstableInfo {
+    let sst2_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 44,
         object_id: 4,
         table_ids: vec![new_table_id.table_id],
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch2,
@@ -2707,12 +2711,13 @@ async fn test_commit_multi_epoch() {
 
     let epoch3 = epoch2.next_epoch();
 
-    let sst_epoch3 = SstableInfo {
+    let sst_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 55,
         object_id: 5,
         table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch3,

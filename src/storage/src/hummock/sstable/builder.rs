@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -497,7 +497,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let sst_info = SstableInfo {
+        let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
             bloom_filter_kind,
@@ -515,7 +515,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
             range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
-        };
+        }
+        .into();
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
             meta.encoded_size(),

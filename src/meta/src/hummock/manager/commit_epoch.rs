@@ -414,7 +414,8 @@ impl HummockManager {
 
         for (mut sst, group_table_ids) in sst_to_cg_vec {
             for (group_id, _match_ids) in group_table_ids {
-                let branch_sst = split_sst(&mut sst.sst_info, &mut new_sst_id);
+                let (modified_sst_info, branch_sst) = split_sst(&sst.sst_info, &mut new_sst_id);
+                sst.sst_info = modified_sst_info;
                 commit_sstables
                     .entry(group_id)
                     .or_default()

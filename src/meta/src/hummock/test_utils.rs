@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
@@ -166,30 +166,33 @@ pub fn generate_test_sstables_with_table_id(
 ) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
-        sst_info.push(SstableInfo {
-            object_id: sst_id,
-            sst_id,
-            key_range: KeyRange {
-                left: Bytes::from(key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                )),
-                right: Bytes::from(key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                )),
-                right_exclusive: false,
-            },
-            file_size: 2,
-            table_ids: vec![table_id],
-            uncompressed_file_size: 2,
-            max_epoch: epoch,
-            ..Default::default()
-        });
+        sst_info.push(
+            SstableInfoInner {
+                object_id: sst_id,
+                sst_id,
+                key_range: KeyRange {
+                    left: Bytes::from(key_with_epoch(
+                        format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
+                            .as_bytes()
+                            .to_vec(),
+                        epoch,
+                    )),
+                    right: Bytes::from(key_with_epoch(
+                        format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
+                            .as_bytes()
+                            .to_vec(),
+                        epoch,
+                    )),
+                    right_exclusive: false,
+                },
+                file_size: 2,
+                table_ids: vec![table_id],
+                uncompressed_file_size: 2,
+                max_epoch: epoch,
+                ..Default::default()
+            }
+            .into(),
+        );
     }
     sst_info
 }
@@ -197,20 +200,23 @@ pub fn generate_test_sstables_with_table_id(
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
-        sst_info.push(SstableInfo {
-            object_id: sst_id,
-            sst_id,
-            key_range: KeyRange {
-                left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
-                right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
-                right_exclusive: false,
-            },
-            file_size: 2,
-            table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            uncompressed_file_size: 2,
-            max_epoch: epoch,
-            ..Default::default()
-        });
+        sst_info.push(
+            SstableInfoInner {
+                object_id: sst_id,
+                sst_id,
+                key_range: KeyRange {
+                    left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
+                    right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
+                    right_exclusive: false,
+                },
+                file_size: 2,
+                table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
+                uncompressed_file_size: 2,
+                max_epoch: epoch,
+                ..Default::default()
+            }
+            .into(),
+        );
     }
     sst_info
 }

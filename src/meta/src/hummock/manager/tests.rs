@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ssts;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
@@ -64,7 +64,11 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
 }
 
 fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo {
-    SstableInfo {
+    gen_sstable_info_impl(sst_id, idx, table_ids).into()
+}
+
+fn gen_sstable_info_impl(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfoInner {
+    SstableInfoInner {
         sst_id,
         key_range: KeyRange {
             left: iterator_test_key_of_epoch(1, idx, 1).into(),
@@ -1205,7 +1209,7 @@ async fn test_version_stats() {
         .into_iter()
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
-            sst_info: SstableInfo {
+            sst_info: SstableInfoInner {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
                 key_range: KeyRange {
@@ -1216,7 +1220,8 @@ async fn test_version_stats() {
                 file_size: 1024 * 1024 * 1024,
                 table_ids: table_ids.clone(),
                 ..Default::default()
-            },
+            }
+            .into(),
             table_stats: table_ids
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
@@ -1314,7 +1319,7 @@ async fn test_split_compaction_group_on_commit() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange::default(),
@@ -1322,7 +1327,8 @@ async fn test_split_compaction_group_on_commit() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -1402,7 +1408,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange {
@@ -1414,11 +1420,12 @@ async fn test_split_compaction_group_on_demand_basic() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 11,
             sst_id: 11,
             key_range: KeyRange {
@@ -1430,7 +1437,8 @@ async fn test_split_compaction_group_on_demand_basic() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -1500,7 +1508,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange::default(),
@@ -1508,7 +1516,8 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -1585,7 +1594,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange {
@@ -1597,11 +1606,12 @@ async fn test_split_compaction_group_trivial_expired() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 11,
             sst_id: 11,
             table_ids: vec![101],
@@ -1613,15 +1623,28 @@ async fn test_split_compaction_group_trivial_expired() {
                 right_exclusive: false,
             },
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
-    let mut sst_3 = sst_2.clone();
-    let mut sst_4 = sst_1.clone();
-    sst_3.sst_info.sst_id = 8;
-    sst_3.sst_info.object_id = 8;
-    sst_4.sst_info.sst_id = 9;
-    sst_4.sst_info.object_id = 9;
+    let sst_3 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 8,
+            object_id: 8,
+            ..sst_2.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_2.clone()
+    };
+    let sst_4 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 9,
+            object_id: 9,
+            ..sst_1.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_1.clone()
+    };
     hummock_manager
         .commit_epoch_for_test(
             30,
@@ -1696,7 +1719,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfo {
+            vec![SstableInfoInner {
                 object_id: 12,
                 sst_id: 12,
                 key_range: KeyRange::default(),
@@ -1704,7 +1727,8 @@ async fn test_split_compaction_group_trivial_expired() {
                 min_epoch: 20,
                 max_epoch: 20,
                 ..Default::default()
-            }],
+            }
+            .into()],
             None,
         )
         .await
@@ -1751,7 +1775,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         .unwrap();
 
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange {
@@ -1763,7 +1787,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -1781,7 +1806,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             compaction_task.task_id,
             TaskStatus::Success,
             vec![
-                SstableInfo {
+                SstableInfoInner {
                     object_id: 11,
                     sst_id: 11,
                     table_ids: vec![100, 101],
@@ -1791,8 +1816,9 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right_exclusive: false,
                     },
                     ..Default::default()
-                },
-                SstableInfo {
+                }
+                .into(),
+                SstableInfoInner {
                     object_id: 12,
                     sst_id: 12,
                     table_ids: vec![100],
@@ -1802,7 +1828,8 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
                         right_exclusive: false,
                     },
                     ..Default::default()
-                },
+                }
+                .into(),
             ],
             None,
         )
@@ -1884,7 +1911,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange {
@@ -1896,11 +1923,12 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 11,
             sst_id: 11,
             key_range: KeyRange {
@@ -1912,7 +1940,8 @@ async fn test_compaction_task_expiration_due_to_split_group() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
@@ -2188,9 +2217,14 @@ async fn test_partition_level() {
     const MB: u64 = 1024 * 1024;
     let mut selector = default_compaction_selector();
     for epoch in 31..100 {
-        let mut sst = gen_local_sstable_info(global_sst_id, 10, vec![100]);
-        sst.sst_info.file_size = 10 * MB;
-        sst.sst_info.uncompressed_file_size = 10 * MB;
+        let mut sst = gen_sstable_info_impl(global_sst_id, 10, vec![100]);
+        sst.file_size = 10 * MB;
+        sst.uncompressed_file_size = 10 * MB;
+        let sst = LocalSstableInfo {
+            sst_info: sst.into(),
+            table_stats: Default::default(),
+        };
+
         hummock_manager
             .commit_epoch_for_test(
                 epoch,
@@ -2205,7 +2239,7 @@ async fn test_partition_level() {
             .await
             .unwrap()
         {
-            let mut sst = gen_sstable_info(global_sst_id, 10, vec![100]);
+            let mut sst = gen_sstable_info_impl(global_sst_id, 10, vec![100]);
             sst.file_size = task
                 .input_ssts
                 .iter()
@@ -2219,7 +2253,7 @@ async fn test_partition_level() {
                 .sum::<u64>();
             global_sst_id += 1;
             let ret = hummock_manager
-                .report_compact_task(task.task_id, TaskStatus::Success, vec![sst], None)
+                .report_compact_task(task.task_id, TaskStatus::Success, vec![sst.into()], None)
                 .await
                 .unwrap();
             assert!(ret);
@@ -2263,7 +2297,7 @@ async fn test_unregister_moved_table() {
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 10,
             sst_id: 10,
             key_range: KeyRange {
@@ -2275,11 +2309,12 @@ async fn test_unregister_moved_table() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     let sst_2 = LocalSstableInfo {
-        sst_info: SstableInfo {
+        sst_info: SstableInfoInner {
             object_id: 11,
             sst_id: 11,
             key_range: KeyRange {
@@ -2291,7 +2326,8 @@ async fn test_unregister_moved_table() {
             min_epoch: 20,
             max_epoch: 20,
             ..Default::default()
-        },
+        }
+        .into(),
         table_stats: Default::default(),
     };
     hummock_manager
