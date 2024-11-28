@@ -289,7 +289,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg engine test"
-    if: build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-iceberg-engine-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-iceberg-engine-tests?(,|$$)/
     command: "ci/scripts/e2e-iceberg-engine-test.sh -p ci-dev"
     depends_on:
       - "build"
