@@ -552,9 +552,9 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (_, secret_refs) = context.with_options().clone().into_parts();
-    if !secret_refs.is_empty() {
-        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference is not allowed in options when creating table without external source".to_string()).into());
+    let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
+    if !secret_refs.is_empty() || !connection_refs.is_empty() {
+        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference and Connection reference are not allowed in options when creating table without external source".to_string()).into());
     }
 
     gen_create_table_plan_without_source(
