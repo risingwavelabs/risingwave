@@ -370,7 +370,9 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
             // SQLite in-memory database does not need initialization.
         } else {
             let filename = options.get_filename();
-            fs_err::write(filename, b"").context("failed to empty SQLite file")?;
+            if std::fs::exists(filename)? {
+                fs_err::write(filename, b"").context("failed to empty SQLite file")?;
+            }
         }
 
         return Ok(());
