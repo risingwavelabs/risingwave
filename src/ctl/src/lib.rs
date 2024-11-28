@@ -279,6 +279,8 @@ enum HummockCommands {
         url: String,
         source_dir: String,
         target_dir: String,
+        #[clap(long, default_value = "100")]
+        concurrency: u32,
     },
 }
 
@@ -726,8 +728,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             url,
             source_dir,
             target_dir,
+            concurrency,
         }) => {
-            migrate_legacy_object(url, source_dir, target_dir).await?;
+            migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
         }
         Commands::Table(TableCommands::Scan {
             mv_name,

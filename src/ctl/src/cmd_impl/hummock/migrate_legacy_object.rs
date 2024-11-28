@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Instant;
+
 use anyhow::anyhow;
+use futures::future::try_join_all;
 use futures::StreamExt;
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::{get_object_id_from_path, get_sst_data_path, OBJECT_SUFFIX};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::prefix::opendal_engine::get_object_prefix;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreImpl};
+use risingwave_object_store::object::{
+    build_remote_object_store, ObjectStoreImpl, OpendalObjectStore,
+};
 
 pub async fn migrate_legacy_object(
     url: String,
     source_dir: String,
     target_dir: String,
+    concurrency: u32,
 ) -> anyhow::Result<()> {
     let source_dir = source_dir.trim_end_matches('/');
     let target_dir = target_dir.trim_end_matches('/');
@@ -50,6 +56,8 @@ pub async fn migrate_legacy_object(
     let mut iter = opendal.list(source_dir, None, None).await?;
     let mut count = 0;
     println!("Migration is started: from {source_dir} to {target_dir}.");
+    let mut from_to = Vec::with_capacity(concurrency as usize);
+    let timer = Instant::now();
     while let Some(object) = iter.next().await {
         let object = object?;
         if !object.key.ends_with(OBJECT_SUFFIX) {
@@ -60,26 +68,42 @@ pub async fn migrate_legacy_object(
                 "{legacy_path} versus {source_dir}"
             );
             let new_path = format!("{}{}", target_dir, &legacy_path[source_dir.len()..]);
-            println!("From {legacy_path} to {new_path}");
-            opendal.inner().copy(&legacy_path, &new_path).await?;
-            count += 1;
-            continue;
+            from_to.push((legacy_path, new_path));
+        } else {
+            let object_id = get_object_id_from_path(&object.key);
+            let legacy_prefix = get_object_prefix(object_id, false);
+            let legacy_path = get_sst_data_path(&legacy_prefix, source_dir, object_id);
+            if object.key != legacy_path {
+                return Err(anyhow!(format!(
+                    "the source object store does not appear to be legacy: {} versus {}",
+                    object.key, legacy_path
+                )));
+            }
+            let new_path =
+                get_sst_data_path(&get_object_prefix(object_id, true), target_dir, object_id);
+            from_to.push((legacy_path, new_path));
         }
-        let object_id = get_object_id_from_path(&object.key);
-        let legacy_prefix = get_object_prefix(object_id, false);
-        let legacy_path = get_sst_data_path(&legacy_prefix, source_dir, object_id);
-        if object.key != legacy_path {
-            return Err(anyhow!(format!(
-                "the source object store does not appear to be legacy: {} versus {}",
-                object.key, legacy_path
-            )));
-        }
-        let new_path =
-            get_sst_data_path(&get_object_prefix(object_id, true), target_dir, object_id);
-        println!("From {legacy_path} to {new_path}.");
-        opendal.inner().copy(&legacy_path, &new_path).await?;
         count += 1;
+        if from_to.len() >= concurrency as usize {
+            copy(std::mem::take(&mut from_to).into_iter(), opendal.inner()).await?;
+        }
     }
-    println!("Migration is finished. {count} objects have been migrated from {source_dir} to {target_dir}.");
+    if !from_to.is_empty() {
+        copy(from_to.into_iter(), opendal.inner()).await?;
+    }
+    let cost = timer.elapsed();
+    println!("Migration is finished in {} seconds. {count} objects have been migrated from {source_dir} to {target_dir}.", cost.as_secs());
+    Ok(())
+}
+
+async fn copy(
+    from_to: impl Iterator<Item = (String, String)>,
+    opendal: &OpendalObjectStore,
+) -> anyhow::Result<()> {
+    let futures = from_to.map(|(from_path, to_path)| async move {
+        println!("From {from_path} to {to_path}");
+        opendal.copy(&from_path, &to_path).await
+    });
+    try_join_all(futures).await?;
     Ok(())
 }
