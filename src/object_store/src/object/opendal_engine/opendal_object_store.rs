@@ -95,10 +95,10 @@ impl ObjectStore for OpendalObjectStore {
 
     fn get_object_prefix(&self, obj_id: u64, use_new_object_prefix_strategy: bool) -> String {
         match self.media_type {
+            MediaType::S3 => prefix::s3::get_object_prefix(obj_id),
+            MediaType::Minio => prefix::s3::get_object_prefix(obj_id),
             MediaType::Memory => String::default(),
-            MediaType::S3
-            | MediaType::Minio
-            | MediaType::Hdfs
+            MediaType::Hdfs
             | MediaType::Gcs
             | MediaType::Obs
             | MediaType::Oss
