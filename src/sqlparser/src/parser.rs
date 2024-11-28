@@ -3585,7 +3585,7 @@ impl Parser<'_> {
         let secret_name = self.parse_object_name()?;
         let with_options = self.parse_with_properties()?;
         self.expect_keyword(Keyword::AS)?;
-        let new_credential = self.parse_value()?;
+        let new_credential = self.ensure_parse_value()?;
         let operation = AlterSecretOperation::ChangeCredential { new_credential };
         Ok(Statement::AlterSecret {
             name: secret_name,
@@ -3676,7 +3676,7 @@ impl Parser<'_> {
                         );
                     }
                     let secret = self.parse_secret_ref()?;
-                    Ok(Value::Ref(secret))
+                    Ok(SqlOptionValue::SecretRef(secret))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
@@ -3692,14 +3692,14 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_secret_ref(&mut self) -> PResult<SecretRef> {
+    fn parse_secret_ref(&mut self) -> PResult<SecretRefValue> {
         let secret_name = self.parse_object_name()?;
         let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
             SecretRefAsType::File
         } else {
             SecretRefAsType::Text
         };
-        Ok(SecretRef {
+        Ok(SecretRefValue {
             secret_name,
             ref_as,
         })
