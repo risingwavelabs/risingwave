@@ -51,9 +51,10 @@ fn sql_endpoint_from_env() -> String {
             // Act as if `meta-backend: sqlite` is specified.
             // Not using a temporary file because we want to persist the data across restarts.
             let prefix_data = env::var("PREFIX_DATA").unwrap();
-            let path = PathBuf::from(&prefix_data)
-                .join("meta-backend-env-fallback-sqlite")
-                .join("metadata.db");
+            let dir = PathBuf::from(&prefix_data).join("meta-backend-env-fallback-sqlite");
+            fs_err::create_dir_all(&dir).unwrap();
+
+            let path = dir.join("metadata.db");
             let sqlite_endpoint = format!("sqlite://{}?mode=rwc", path.to_string_lossy());
             tracing::warn!(
                 "env RISEDEV_SQL_ENDPOINT not set, use fallback sqlite `{}`",
