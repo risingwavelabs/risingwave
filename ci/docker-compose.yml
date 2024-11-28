@@ -25,11 +25,7 @@ services:
       - MYSQL_USER=mysqluser
       - MYSQL_PASSWORD=mysqlpw
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -u root -p123456"
-        ]
+      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -106,7 +102,6 @@ services:
       - sqlserver-server
     volumes:
       - ..:/risingwave
-
 
   rw-build-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
@@ -191,7 +186,7 @@ services:
     ports:
       - 6378:6379
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 30s
       retries: 50
@@ -211,7 +206,7 @@ services:
       - 8030:8030
       - 8040:8040
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9030" ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -231,14 +226,13 @@ services:
     container_name: starrocks-fe-server
     image: starrocks/fe-ubuntu:3.1.7
     hostname: starrocks-fe-server
-    command:
-      /opt/starrocks/fe/bin/start_fe.sh
+    command: /opt/starrocks/fe/bin/start_fe.sh
     ports:
       - 28030:8030
       - 29020:9020
       - 29030:9030
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9030"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9030" ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -259,10 +253,10 @@ services:
     depends_on:
       - starrocks-fe-server
 
-# # Temporary workaround for json schema registry test since redpanda only supports
-# # protobuf/avro schema registry. Should be removed after the support.
-# # Related tracking issue:
-# # https://github.com/redpanda-data/redpanda/issues/1878
+  # # Temporary workaround for json schema registry test since redpanda only supports
+  # # protobuf/avro schema registry. Should be removed after the support.
+  # # Related tracking issue:
+  # # https://github.com/redpanda-data/redpanda/issues/1878
   schemaregistry:
     container_name: schemaregistry
     hostname: schemaregistry
@@ -287,7 +281,7 @@ services:
       - "8080"
       - "6650"
     healthcheck:
-      test: [ "CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      test: [ "CMD-SHELL", "bin/pulsar-admin brokers healthcheck" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -309,37 +303,43 @@ services:
     container_name: mongodb-setup
     depends_on:
       - mongodb
-    entrypoint:
-      [
-        "bash",
-        "-c",
-        "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10"
-      ]
+    entrypoint: [ "bash", "-c", "sleep 10 && mongo --host mongodb:27017 /config-replica.js && sleep 10" ]
     restart: "no"
     volumes:
       - ./mongodb/config-replica.js:/config-replica.js
 
   mongo_data_generator:
-      build:
-        context: .
-        dockerfile: ./mongodb/Dockerfile.generator
-      container_name: mongo_data_generator
-      depends_on:
-        - mongodb
-      environment:
-        MONGO_HOST: mongodb
-        MONGO_PORT: 27017
-        MONGO_DB_NAME: random_data
+    build:
+      context: .
+      dockerfile: ./mongodb/Dockerfile.generator
+    container_name: mongo_data_generator
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DB_NAME: random_data
   mqtt-server:
     image: eclipse-mosquitto
     command:
-    - sh
-    - -c
-    - echo "running command"; printf 'allow_anonymous true\nlistener 1883 0.0.0.0' > /mosquitto/config/mosquitto.conf; echo "starting service..."; cat /mosquitto/config/mosquitto.conf;/docker-entrypoint.sh;/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+      - sh
+      - -c
+      - echo "running command"; printf 'allow_anonymous true\nlistener 1883 0.0.0.0' > /mosquitto/config/mosquitto.conf; echo "starting service..."; cat /mosquitto/config/mosquitto.conf;/docker-entrypoint.sh;/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
     ports:
       - 1883:1883
     healthcheck:
-      test: ["CMD-SHELL", "(mosquitto_sub -h localhost -p 1883 -t 'topic' -E -i probe 2>&1 | grep Error) && exit 1 || exit 0"]
+      test: [ "CMD-SHELL", "(mosquitto_sub -h localhost -p 1883 -t 'topic' -E -i probe 2>&1 | grep Error) && exit 1 || exit 0" ]
       interval: 10s
       timeout: 10s
       retries: 6
+  nats:
+    image: nats:latest
+    command: [ "-js" ]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8222/healthz" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
