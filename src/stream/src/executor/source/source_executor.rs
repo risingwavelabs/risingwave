@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
+use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -38,6 +41,8 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tracing::Instrument;
 
 use super::executor_core::StreamSourceCore;
 use super::{
@@ -195,6 +200,76 @@ impl<S: StateStore> SourceExecutor<S> {
             apply_rate_limit(stream, self.rate_limit_rps).boxed(),
             latest_splits,
         ))
+    }
+
+    pub async fn prepare_source_stream_build(
+        &self,
+        source_desc: &SourceDesc,
+    ) -> (Vec<ColumnId>, SourceContext) {
+        let column_ids = source_desc
+            .columns
+            .iter()
+            .map(|column_desc| column_desc.column_id)
+            .collect_vec();
+
+        let (schema_change_tx, mut schema_change_rx) =
+            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+        let schema_change_tx = if self.is_auto_schema_change_enable() {
+            let meta_client = self.actor_ctx.meta_client.clone();
+            // spawn a task to handle schema change event from source parser
+            let _join_handle = tokio::task::spawn(async move {
+                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
+                    let table_ids = schema_change.table_ids();
+                    tracing::info!(
+                        target: "auto_schema_change",
+                        "recv a schema change event for tables: {:?}", table_ids);
+                    // TODO: retry on rpc error
+                    if let Some(ref meta_client) = meta_client {
+                        match meta_client
+                            .auto_schema_change(schema_change.to_protobuf())
+                            .await
+                        {
+                            Ok(_) => {
+                                tracing::info!(
+                                    target: "auto_schema_change",
+                                    "schema change success for tables: {:?}", table_ids);
+                                finish_tx.send(()).unwrap();
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    target: "auto_schema_change",
+                                    error = ?e.as_report(), "schema change error");
+                                finish_tx.send(()).unwrap();
+                            }
+                        }
+                    }
+                }
+            });
+            Some(schema_change_tx)
+        } else {
+            info!("auto schema change is disabled in config");
+            None
+        };
+
+        let source_ctx = SourceContext::new(
+            self.actor_ctx.id,
+            self.stream_source_core.as_ref().unwrap().source_id,
+            self.actor_ctx.fragment_id,
+            self.stream_source_core
+                .as_ref()
+                .unwrap()
+                .source_name
+                .clone(),
+            source_desc.metrics.clone(),
+            SourceCtrlOpts {
+                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                rate_limit: self.rate_limit_rps,
+            },
+            source_desc.source.config.clone(),
+            schema_change_tx,
+        );
+
+        (column_ids, source_ctx)
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -490,19 +565,48 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
-        let (source_chunk_reader, latest_splits) = self
-            .build_stream_source_reader(
-                &source_desc,
-                recover_state,
-                // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
-                // It's highly probable that the work of scanning historical data cannot be shared,
-                // so don't waste work on it.
-                // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
-                // Note that shared CDC source is special. It already starts from latest.
-                self.is_shared_non_cdc && is_uninitialized,
+
+        let mut barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> = None;
+        let seek_to_latest = self.is_shared_non_cdc && is_uninitialized;
+        let source_reader = source_desc.source.clone();
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc).await;
+        let source_ctx = Arc::new(source_ctx);
+        let mut build_source_stream_fut = Box::pin(async move {
+            let backoff = get_backoff_strategy();
+            tokio_retry::Retry::spawn(backoff, || async {
+                source_reader
+                    .build_stream(
+                        recover_state.clone(),
+                        column_ids.clone(),
+                        source_ctx.clone(),
+                        seek_to_latest,
+                    )
+                    .await
+            })
+            .instrument(tracing::info_span!("build_source_stream_with_retry"))
+            .await
+            .expect("Retry build source stream until success.")
+        });
+
+        loop {
+            if let Some(barrier) = build_source_stream_and_poll_barrier(
+                &mut barrier_stream,
+                &mut reader_and_splits,
+                &mut build_source_stream_fut,
             )
-            .instrument_await("source_build_reader")
-            .await?;
+            .await?
+            {
+                yield barrier;
+            } else {
+                assert!(reader_and_splits.is_some());
+                break;
+            }
+        }
+
+        let (source_chunk_reader, latest_splits) =
+            reader_and_splits.expect("source reader and splits must be created");
+
         let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
@@ -515,7 +619,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
         let mut command_paused = false;
@@ -734,6 +837,39 @@ impl<S: StateStore> SourceExecutor<S> {
             yield Message::Barrier(barrier);
         }
     }
+}
+
+async fn build_source_stream_and_poll_barrier(
+    barrier_stream: &mut BoxStream<'static, StreamExecutorResult<Message>>,
+    reader_and_splits: &mut Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)>,
+    build_future: &mut Pin<
+        Box<impl Future<Output = (BoxChunkSourceStream, Option<Vec<SplitImpl>>)>>,
+    >,
+) -> StreamExecutorResult<Option<Message>> {
+    if reader_and_splits.is_some() {
+        return Ok(None);
+    }
+
+    tokio::select! {
+        biased;
+        build_ret = &mut *build_future => {
+            *reader_and_splits = Some(build_ret);
+            Ok(None)
+        }
+        msg = barrier_stream.next() => {
+            msg.transpose()
+        }
+    }
+}
+
+fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
+    const BASE_DELAY: Duration = Duration::from_secs(1);
+    const BACKOFF_FACTOR: u64 = 2;
+    const MAX_DELAY: Duration = Duration::from_secs(10);
+    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
+        .factor(BACKOFF_FACTOR)
+        .max_delay(MAX_DELAY)
+        .map(jitter)
 }
 
 impl<S: StateStore> Execute for SourceExecutor<S> {
