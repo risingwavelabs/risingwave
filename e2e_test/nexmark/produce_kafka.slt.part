@@ -1,0 +1,58 @@
+control substitution on
+
+system ok
+rpk topic delete -r nexmark-* || true
+
+system ok
+rpk topic create nexmark-auction -p 4 &&
+rpk topic create nexmark-bid -p 4 &&
+rpk topic create nexmark-person -p 4
+
+include ./create_tables.slt.part
+
+include ./insert_auction.slt.part
+include ./insert_bid.slt.part
+include ./insert_person.slt.part
+
+statement ok
+flush;
+
+statement ok
+create sink nexmark_auction FROM auction
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-auction'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink nexmark_bid FROM bid
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-bid'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink nexmark_person FROM person
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-person'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+sleep 5s
+
+statement ok
+DROP SINK nexmark_auction;
+
+statement ok
+DROP SINK nexmark_bid;
+
+statement ok
+DROP SINK nexmark_person;
+
+include ./drop_tables.slt.part

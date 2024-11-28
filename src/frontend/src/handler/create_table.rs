@@ -36,22 +36,25 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
+use risingwave_pb::secret::secret_ref::PbRefAsType;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    CdcTableInfo, ColumnDef, ColumnOption, DataType, DataType as AstDataType, ExplainOptions,
+    Format, FormatEncodeOptions, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
+    TableConstraint, WebhookSourceInfo,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
-use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
@@ -506,6 +509,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        false,
         rate_limit,
     )
     .await?;
@@ -540,6 +544,7 @@ pub(crate) fn gen_create_table_plan(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
@@ -564,6 +569,7 @@ pub(crate) fn gen_create_table_plan(
         on_conflict,
         with_version_column,
         Some(col_id_gen.into_version()),
+        webhook_info,
     )
 }
 
@@ -580,6 +586,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     version: Option<TableVersion>,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
@@ -621,6 +628,7 @@ pub(crate) fn gen_create_table_plan_without_source(
         None,
         database_id,
         schema_id,
+        webhook_info,
     )
 }
 
@@ -651,6 +659,7 @@ fn gen_table_plan_with_source(
         Some(cloned_source_catalog),
         database_id,
         schema_id,
+        None,
     )
 }
 
@@ -671,6 +680,7 @@ fn gen_table_plan_inner(
     source_catalog: Option<SourceCatalog>,
     database_id: DatabaseId,
     schema_id: SchemaId,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
@@ -741,6 +751,7 @@ fn gen_table_plan_inner(
         is_external_source,
         retention_seconds,
         None,
+        webhook_info,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -866,6 +877,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         true,
         None,
         Some(cdc_table_id),
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -947,6 +959,7 @@ pub(super) async fn handle_create_table_plan(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    webhook_info: Option<WebhookSourceInfo>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
@@ -977,6 +990,10 @@ pub(super) async fn handle_create_table_plan(
             TableJobType::General,
         ),
         (None, None) => {
+            let webhook_info = webhook_info
+                .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
+                .transpose()?;
+
             let context = OptimizerContext::new(handler_args, explain_options);
             let (plan, table) = gen_create_table_plan(
                 context,
@@ -988,6 +1005,7 @@ pub(super) async fn handle_create_table_plan(
                 append_only,
                 on_conflict,
                 with_version_column,
+                webhook_info,
             )?;
 
             ((plan, None, table), TableJobType::General)
@@ -1254,6 +1272,7 @@ pub async fn handle_create_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
+    webhook_info: Option<WebhookSourceInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1286,6 +1305,7 @@ pub async fn handle_create_table(
             on_conflict,
             with_version_column,
             include_column_options,
+            webhook_info,
         )
         .await?;
 
@@ -1318,7 +1338,8 @@ pub fn check_create_table_with_source(
     if cdc_table_info.is_some() {
         return Ok(format_encode);
     }
-    let defined_source = with_options.contains_key(UPSTREAM_SOURCE_KEY);
+    let defined_source = with_options.is_source_connector();
+
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),
@@ -1386,6 +1407,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 append_only,
                 on_conflict,
                 with_version_column,
+                original_catalog.webhook_info.clone(),
             )?;
             ((plan, None, table), TableJobType::General)
         }
@@ -1487,6 +1509,65 @@ fn get_source_and_resolved_table_name(
     };
 
     Ok((source, resolved_table_name, database_id, schema_id))
+}
+
+// validate the webhook_info and also bind the webhook_info to protobuf
+fn bind_webhook_info(
+    session: &Arc<SessionImpl>,
+    columns_defs: &[ColumnDef],
+    webhook_info: WebhookSourceInfo,
+) -> Result<PbWebhookSourceInfo> {
+    // validate columns
+    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &DataType::Jsonb {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Table with webhook source should have exactly one JSONB column".to_owned(),
+        )
+        .into());
+    }
+
+    let WebhookSourceInfo {
+        secret_ref,
+        signature_expr,
+    } = webhook_info;
+
+    // validate secret_ref
+    let db_name = session.database();
+    let (schema_name, secret_name) =
+        Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+    let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+    let pb_secret_ref = PbSecretRef {
+        secret_id: secret_catalog.id.secret_id(),
+        ref_as: match secret_ref.ref_as {
+            SecretRefAsType::Text => PbRefAsType::Text,
+            SecretRefAsType::File => PbRefAsType::File,
+        }
+        .into(),
+    };
+
+    let secure_compare_context = SecureCompareContext {
+        column_name: columns_defs[0].name.real_value(),
+        secret_name,
+    };
+    let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
+    let expr = binder.bind_expr(signature_expr.clone())?;
+
+    // validate expr, ensuring it is SECURE_COMPARE()
+    if expr.as_function_call().is_none()
+        || expr.as_function_call().unwrap().func_type()
+            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The signature verification function must be SECURE_COMPARE()".to_owned(),
+        )
+        .into());
+    }
+
+    let pb_webhook_info = PbWebhookSourceInfo {
+        secret_ref: Some(pb_secret_ref),
+        signature_expr: Some(expr.to_expr_proto()),
+    };
+
+    Ok(pb_webhook_info)
 }
 
 #[cfg(test)]

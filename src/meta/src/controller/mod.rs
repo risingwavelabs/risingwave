@@ -60,20 +60,24 @@ impl From<sea_orm::DbErr> for MetaError {
 #[derive(Clone)]
 pub struct SqlMetaStore {
     pub conn: DatabaseConnection,
+    pub endpoint: String,
 }
 
 pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
 
 impl SqlMetaStore {
-    pub fn new(conn: DatabaseConnection) -> Self {
-        Self { conn }
+    pub fn new(conn: DatabaseConnection, endpoint: String) -> Self {
+        Self { conn, endpoint }
     }
 
     #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
         let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
-        Self { conn }
+        Self {
+            conn,
+            endpoint: IN_MEMORY_STORE.to_string(),
+        }
     }
 
     /// Check whether the cluster, which uses SQL as the backend, is a new cluster.
@@ -198,6 +202,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
+            webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
         }
     }
 }

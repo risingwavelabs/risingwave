@@ -56,7 +56,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
     match meta_store_backend {
         MetaStoreBackend::Mem => {
             let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
-            Ok(SqlMetaStore::new(conn))
+            Ok(SqlMetaStore::new(conn, IN_MEMORY_STORE.to_string()))
         }
         MetaStoreBackend::Sql { endpoint, config } => {
             let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
@@ -66,7 +66,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
             } else {
                 config.max_connections
             };
-            let mut options = sea_orm::ConnectOptions::new(endpoint);
+            let mut options = sea_orm::ConnectOptions::new(endpoint.clone());
             options
                 .max_connections(max_connection)
                 .min_connections(config.min_connections)
@@ -76,7 +76,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
             let conn = sea_orm::Database::connect(options)
                 .await
                 .map_err(|e| BackupError::MetaStorage(e.into()))?;
-            Ok(SqlMetaStore::new(conn))
+            Ok(SqlMetaStore::new(conn, endpoint))
         }
     }
 }
