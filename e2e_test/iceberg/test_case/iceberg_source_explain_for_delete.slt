@@ -16,7 +16,7 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     connector = 'iceberg',
     type = 'upsert',
     database.name = 'demo_db',
-    table.name = 'test_all_delete',
+    table.name = 'test_explain_for_delete',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://hummock001/iceberg-data',
@@ -48,8 +48,15 @@ WITH (
     catalog.type = 'storage',
     warehouse.path = 's3a://hummock001/iceberg-data',
     database.name = 'demo_db',
-    table.name = 'test_all_delete',
+    table.name = 'test_explain_for_delete',
 );
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
+7 8 9
 
 query I
 explain select * from iceberg_t1_source;
@@ -67,6 +74,12 @@ statement ok
 flush;
 
 sleep 5s
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
 
 query I
 explain select * from iceberg_t1_source;
