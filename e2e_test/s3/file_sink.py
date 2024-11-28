@@ -338,16 +338,13 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
 
     print('File sink test pass!')
-<<<<<<<< HEAD:e2e_test/s3/fs_parquet_source_and_sink.py
     cur.execute(f'drop sink test_file_sink')
     cur.execute(f'drop table test_sink_table')
-========
-    cur.execute(f'drop sink test_file_sink_parquet')
     cur.execute(f'drop table test_parquet_sink_table')
     cur.execute(f'drop sink test_file_sink_json')
     cur.execute(f'drop table test_json_sink_table')
     cur.execute(f'drop table s3_test_parquet')
->>>>>>>> f3e9a3be19 (refactor(test): reorganize file connector CI tests (#19230)):e2e_test/s3/file_sink.py
+
     cur.close()
     conn.close()
 
