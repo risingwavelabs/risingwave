@@ -475,7 +475,7 @@ pub async fn handle_show_object(
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_string(),
-                    parallelism: worker.get_parallelism() as _,
+                    parallelism: worker.parallelism() as _,
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
                     is_unschedulable: property.map(|p| p.is_unschedulable),
@@ -684,7 +684,6 @@ pub fn handle_show_create_object(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::ops::Index;
 
     use futures_async_stream::for_await;
@@ -720,36 +719,78 @@ mod tests {
         let sql = "show columns from t";
         let mut pg_response = frontend.run_sql(sql).await.unwrap();
 
-        let mut columns = HashMap::new();
+        let mut columns = Vec::new();
         #[for_await]
         for row_set in pg_response.values_stream() {
             let row_set = row_set.unwrap();
             for row in row_set {
-                columns.insert(
+                columns.push((
                     std::str::from_utf8(row.index(0).as_ref().unwrap())
                         .unwrap()
                         .to_string(),
                     std::str::from_utf8(row.index(1).as_ref().unwrap())
                         .unwrap()
                         .to_string(),
-                );
+                ));
             }
         }
 
-        let expected_columns: HashMap<String, String> = maplit::hashmap! {
-            "id".into() => "integer".into(),
-            "country.zipcode".into() => "character varying".into(),
-            "zipcode".into() => "bigint".into(),
-            "country.city.address".into() => "character varying".into(),
-            "country.address".into() => "character varying".into(),
-            "country.city".into() => "test.City".into(),
-            "country.city.zipcode".into() => "character varying".into(),
-            "rate".into() => "real".into(),
-            "country".into() => "test.Country".into(),
-            "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
-            "_row_id".into() => "serial".into(),
-        };
-
-        assert_eq!(columns, expected_columns);
+        expect_test::expect![[r#"
+            [
+                (
+                    "id",
+                    "integer",
+                ),
+                (
+                    "country",
+                    "test.Country",
+                ),
+                (
+                    "country.address",
+                    "character varying",
+                ),
+                (
+                    "country.city",
+                    "test.City",
+                ),
+                (
+                    "country.city.address",
+                    "character varying",
+                ),
+                (
+                    "country.city.zipcode",
+                    "character varying",
+                ),
+                (
+                    "country.zipcode",
+                    "character varying",
+                ),
+                (
+                    "zipcode",
+                    "bigint",
+                ),
+                (
+                    "rate",
+                    "real",
+                ),
+                (
+                    "_rw_kafka_timestamp",
+                    "timestamp with time zone",
+                ),
+                (
+                    "_rw_kafka_partition",
+                    "character varying",
+                ),
+                (
+                    "_rw_kafka_offset",
+                    "character varying",
+                ),
+                (
+                    "_row_id",
+                    "serial",
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
     }
 }

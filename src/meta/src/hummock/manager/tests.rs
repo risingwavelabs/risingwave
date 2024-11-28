@@ -36,10 +36,10 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     LocalSstableInfo, SyncResult, FIRST_VERSION_ID,
 };
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::HummockPinnedVersion;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -385,11 +385,11 @@ async fn test_release_context_resource() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )
@@ -468,11 +468,11 @@ async fn test_hummock_manager_basic() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )

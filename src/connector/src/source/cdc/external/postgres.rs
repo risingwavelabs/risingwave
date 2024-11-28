@@ -13,36 +13,25 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use futures::stream::BoxStream;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
-use postgres_openssl::MakeTlsConnector;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::postgres::def::{ColumnType, TableInfo};
-use sea_schema::postgres::discovery::SchemaDiscovery;
 use serde_derive::{Deserialize, Serialize};
-use sqlx::postgres::{PgConnectOptions, PgSslMode};
-use sqlx::PgPool;
-use thiserror_ext::AsReport;
 use tokio_postgres::types::PgLsn;
-use tokio_postgres::NoTls;
 
+use crate::connector_common::create_pg_client;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::postgres_row_to_owned_row;
 use crate::parser::scalar_adapter::ScalarAdapter;
-#[cfg(not(madsim))]
-use crate::source::cdc::external::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName, SslMode,
+    SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -76,189 +65,6 @@ impl PostgresOffset {
                 .context("invalid postgres lsn")?,
         })
     }
-}
-
-pub struct PostgresExternalTable {
-    column_descs: Vec<ColumnDesc>,
-    pk_names: Vec<String>,
-}
-
-impl PostgresExternalTable {
-    pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
-        tracing::debug!("connect to postgres external table");
-        let mut options = PgConnectOptions::new()
-            .username(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .database(&config.database)
-            .ssl_mode(match config.ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if config.ssl_mode == SslMode::VerifyCa || config.ssl_mode == SslMode::VerifyFull {
-            if let Some(ref root_cert) = config.ssl_root_cert {
-                options = options.ssl_root_cert(root_cert.as_str());
-            }
-        }
-
-        let connection = PgPool::connect_with(options).await?;
-        let schema_discovery = SchemaDiscovery::new(connection, config.schema.as_str());
-        // fetch column schema and primary key
-        let empty_map = HashMap::new();
-        let table_schema = schema_discovery
-            .discover_table(
-                TableInfo {
-                    name: config.table.clone(),
-                    of_type: None,
-                },
-                &empty_map,
-            )
-            .await?;
-
-        let mut column_descs = vec![];
-        for col in &table_schema.columns {
-            let data_type = type_to_rw_type(&col.col_type)?;
-            let column_desc = if let Some(ref default_expr) = col.default {
-                // parse the value of "column_default" field in information_schema.columns,
-                // non number data type will be stored as "'value'::type"
-                let val_text = default_expr
-                    .0
-                    .split("::")
-                    .map(|s| s.trim_matches('\''))
-                    .next()
-                    .expect("default value expression");
-
-                match ScalarImpl::from_text(val_text, &data_type) {
-                    Ok(scalar) => ColumnDesc::named_with_default_value(
-                        col.name.clone(),
-                        ColumnId::placeholder(),
-                        data_type.clone(),
-                        Some(scalar),
-                    ),
-                    Err(err) => {
-                        tracing::warn!(error=%err.as_report(), "failed to parse postgres default value expression, only constant is supported");
-                        ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type)
-                    }
-                }
-            } else {
-                ColumnDesc::named(col.name.clone(), ColumnId::placeholder(), data_type)
-            };
-            column_descs.push(column_desc);
-        }
-
-        if table_schema.primary_key_constraints.is_empty() {
-            return Err(anyhow!("Postgres table doesn't define the primary key").into());
-        }
-        let mut pk_names = vec![];
-        table_schema.primary_key_constraints.iter().for_each(|pk| {
-            pk_names.extend(pk.columns.clone());
-        });
-
-        Ok(Self {
-            column_descs,
-            pk_names,
-        })
-    }
-
-    pub fn column_descs(&self) -> &Vec<ColumnDesc> {
-        &self.column_descs
-    }
-
-    pub fn pk_names(&self) -> &Vec<String> {
-        &self.pk_names
-    }
-}
-
-fn type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
-    let dtype = match col_type {
-        ColumnType::SmallInt | ColumnType::SmallSerial => DataType::Int16,
-        ColumnType::Integer | ColumnType::Serial => DataType::Int32,
-        ColumnType::BigInt | ColumnType::BigSerial => DataType::Int64,
-        ColumnType::Money | ColumnType::Decimal(_) | ColumnType::Numeric(_) => DataType::Decimal,
-        ColumnType::Real => DataType::Float32,
-        ColumnType::DoublePrecision => DataType::Float64,
-        ColumnType::Varchar(_) | ColumnType::Char(_) | ColumnType::Text => DataType::Varchar,
-        ColumnType::Bytea => DataType::Bytea,
-        ColumnType::Timestamp(_) => DataType::Timestamp,
-        ColumnType::TimestampWithTimeZone(_) => DataType::Timestamptz,
-        ColumnType::Date => DataType::Date,
-        ColumnType::Time(_) | ColumnType::TimeWithTimeZone(_) => DataType::Time,
-        ColumnType::Interval(_) => DataType::Interval,
-        ColumnType::Boolean => DataType::Boolean,
-        ColumnType::Point => DataType::Struct(StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])),
-        ColumnType::Uuid => DataType::Varchar,
-        ColumnType::Xml => DataType::Varchar,
-        ColumnType::Json => DataType::Jsonb,
-        ColumnType::JsonBinary => DataType::Jsonb,
-        ColumnType::Array(def) => {
-            let item_type = match def.col_type.as_ref() {
-                Some(ty) => type_to_rw_type(ty.as_ref())?,
-                None => {
-                    return Err(anyhow!("ARRAY type missing element type").into());
-                }
-            };
-
-            DataType::List(Box::new(item_type))
-        }
-        ColumnType::PgLsn => DataType::Int64,
-        ColumnType::Cidr
-        | ColumnType::Inet
-        | ColumnType::MacAddr
-        | ColumnType::MacAddr8
-        | ColumnType::Int4Range
-        | ColumnType::Int8Range
-        | ColumnType::NumRange
-        | ColumnType::TsRange
-        | ColumnType::TsTzRange
-        | ColumnType::DateRange
-        | ColumnType::Enum(_) => DataType::Varchar,
-
-        ColumnType::Line => {
-            return Err(anyhow!("LINE type not supported").into());
-        }
-        ColumnType::Lseg => {
-            return Err(anyhow!("LSEG type not supported").into());
-        }
-        ColumnType::Box => {
-            return Err(anyhow!("BOX type not supported").into());
-        }
-        ColumnType::Path => {
-            return Err(anyhow!("PATH type not supported").into());
-        }
-        ColumnType::Polygon => {
-            return Err(anyhow!("POLYGON type not supported").into());
-        }
-        ColumnType::Circle => {
-            return Err(anyhow!("CIRCLE type not supported").into());
-        }
-        ColumnType::Bit(_) => {
-            return Err(anyhow!("BIT type not supported").into());
-        }
-        ColumnType::VarBit(_) => {
-            return Err(anyhow!("VARBIT type not supported").into());
-        }
-        ColumnType::TsVector => {
-            return Err(anyhow!("TSVECTOR type not supported").into());
-        }
-        ColumnType::TsQuery => {
-            return Err(anyhow!("TSQUERY type not supported").into());
-        }
-        ColumnType::Unknown(name) => {
-            // NOTES: user-defined enum type is classified as `Unknown`
-            tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
-            DataType::Varchar
-        }
-    };
-
-    Ok(dtype)
 }
 
 pub struct PostgresExternalTableReader {
@@ -312,76 +118,16 @@ impl PostgresExternalTableReader {
             "create postgres external table reader"
         );
 
-        let mut pg_config = tokio_postgres::Config::new();
-        pg_config
-            .user(&config.username)
-            .password(&config.password)
-            .host(&config.host)
-            .port(config.port.parse::<u16>().unwrap())
-            .dbname(&config.database);
-
-        let (_verify_ca, verify_hostname) = match config.ssl_mode {
-            SslMode::VerifyCa => (true, false),
-            SslMode::VerifyFull => (true, true),
-            _ => (false, false),
-        };
-
-        #[cfg(not(madsim))]
-        let connector = match config.ssl_mode {
-            SslMode::Disabled => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
-                MaybeMakeTlsConnector::NoTls(NoTls)
-            }
-            SslMode::Preferred => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Prefer);
-                match SslConnector::builder(SslMethod::tls()) {
-                    Ok(mut builder) => {
-                        // disable certificate verification for `prefer`
-                        builder.set_verify(SslVerifyMode::NONE);
-                        MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "SSL connector error");
-                        MaybeMakeTlsConnector::NoTls(NoTls)
-                    }
-                }
-            }
-            SslMode::Required => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
-                let mut builder = SslConnector::builder(SslMethod::tls())?;
-                // disable certificate verification for `require`
-                builder.set_verify(SslVerifyMode::NONE);
-                MaybeMakeTlsConnector::Tls(MakeTlsConnector::new(builder.build()))
-            }
-
-            SslMode::VerifyCa | SslMode::VerifyFull => {
-                pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
-                let mut builder = SslConnector::builder(SslMethod::tls())?;
-                if let Some(ssl_root_cert) = config.ssl_root_cert {
-                    builder.set_ca_file(ssl_root_cert).map_err(|e| {
-                        anyhow!(format!("bad ssl root cert error: {}", e.to_report_string()))
-                    })?;
-                }
-                let mut connector = MakeTlsConnector::new(builder.build());
-                if !verify_hostname {
-                    connector.set_callback(|config, _| {
-                        config.set_verify_hostname(false);
-                        Ok(())
-                    });
-                }
-                MaybeMakeTlsConnector::Tls(connector)
-            }
-        };
-        #[cfg(madsim)]
-        let connector = NoTls;
-
-        let (client, connection) = pg_config.connect(connector).await?;
-
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                tracing::error!(error = %e.as_report(), "postgres connection error");
-            }
-        });
+        let client = create_pg_client(
+            &config.username,
+            &config.password,
+            &config.host,
+            &config.port,
+            &config.database,
+            &config.ssl_mode,
+            &config.ssl_root_cert,
+        )
+        .await?;
 
         let field_names = rw_schema
             .fields
@@ -521,9 +267,8 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
 
-    use crate::source::cdc::external::postgres::{
-        PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
-    };
+    use crate::connector_common::PostgresExternalTable;
+    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
     #[ignore]
@@ -543,10 +288,23 @@ mod tests {
             encrypt: "false".to_string(),
         };
 
-        let table = PostgresExternalTable::connect(config).await.unwrap();
+        let table = PostgresExternalTable::connect(
+            &config.username,
+            &config.password,
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.database,
+            &config.schema,
+            &config.table,
+            &config.ssl_mode,
+            &config.ssl_root_cert,
+            false,
+        )
+        .await
+        .unwrap();
 
-        println!("columns: {:?}", &table.column_descs);
-        println!("primary keys: {:?}", &table.pk_names);
+        println!("columns: {:?}", &table.column_descs());
+        println!("primary keys: {:?}", &table.pk_names());
     }
 
     #[test]

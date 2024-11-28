@@ -65,6 +65,7 @@ async fn do_handle_explain(
                 cdc_table_info,
                 include_column_options,
                 wildcard_idx,
+                webhook_info,
                 ..
             } => {
                 let format_encode = format_encode.map(|s| s.into_v2_with_warning());
@@ -83,6 +84,7 @@ async fn do_handle_explain(
                     on_conflict,
                     with_version_column,
                     include_column_options,
+                    webhook_info,
                 )
                 .await?;
                 let context = plan.ctx();
@@ -232,6 +234,7 @@ async fn do_handle_explain(
                         ExplainFormat::Json => blocks.push(plan.explain_to_json()),
                         ExplainFormat::Xml => blocks.push(plan.explain_to_xml()),
                         ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
+                        ExplainFormat::Dot => blocks.push(plan.explain_to_dot()),
                     }
                 }
             }

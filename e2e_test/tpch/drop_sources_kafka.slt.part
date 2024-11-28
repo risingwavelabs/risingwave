@@ -1,0 +1,23 @@
+statement ok
+DROP SOURCE supplier CASCADE;
+
+statement ok
+DROP SOURCE region CASCADE;
+
+statement ok
+DROP SOURCE  nation CASCADE;
+
+statement ok
+DROP SOURCE lineitem CASCADE;
+
+statement ok
+DROP SOURCE orders CASCADE;
+
+statement ok
+DROP SOURCE customer CASCADE;
+
+statement ok
+DROP SOURCE partsupp CASCADE;
+
+statement ok
+DROP SOURCE part CASCADE;

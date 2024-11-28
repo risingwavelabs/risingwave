@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
@@ -27,7 +28,7 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, RecoveryReason, ReplaceTablePlan, Scheduled,
+    CreateStreamingJobType, RecoveryReason, ReplaceStreamJobPlan, Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::{MetaError, MetaResult};
@@ -42,16 +43,20 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason) {
+    fn abort_and_mark_blocked(
+        &self,
+        database_id: Option<DatabaseId>,
+        recovery_reason: RecoveryReason,
+    ) {
         self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering");
+            .abort_and_mark_blocked(database_id, "cluster is under recovering");
     }
 
-    fn mark_ready(&self) {
-        self.scheduled_barriers.mark_ready();
+    fn mark_ready(&self, database_id: Option<DatabaseId>) {
+        self.scheduled_barriers.mark_ready(database_id);
         self.set_status(BarrierManagerStatus::Running);
     }
 
@@ -164,7 +169,7 @@ impl CommandContext {
 
             Command::CreateStreamingJob { info, job_type } => {
                 let CreateStreamingJobCommandInfo {
-                    table_fragments,
+                    stream_job_fragments,
                     dispatchers,
                     init_split_assignment,
                     ..
@@ -172,16 +177,16 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_table_fragments(
-                        table_fragments.table_id().table_id as _,
-                        table_fragments.actor_ids(),
+                    .post_collect_job_fragments(
+                        stream_job_fragments.stream_job_id().table_id as _,
+                        stream_job_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
                     )
                     .await?;
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                    new_table_fragments,
+                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
+                    new_fragments,
                     dispatchers,
                     init_split_assignment,
                     ..
@@ -190,9 +195,9 @@ impl CommandContext {
                     barrier_manager_context
                         .metadata_manager
                         .catalog_controller
-                        .post_collect_table_fragments(
-                            new_table_fragments.table_id().table_id as _,
-                            new_table_fragments.actor_ids(),
+                        .post_collect_job_fragments(
+                            new_fragments.stream_job_id().table_id as _,
+                            new_fragments.actor_ids(),
                             dispatchers.clone(),
                             init_split_assignment,
                         )
@@ -200,8 +205,8 @@ impl CommandContext {
                 }
 
                 // Extract the fragments that include source operators.
-                let source_fragments = table_fragments.stream_source_fragments();
-                let backfill_fragments = table_fragments.source_backfill_fragments()?;
+                let source_fragments = stream_job_fragments.stream_source_fragments();
+                let backfill_fragments = stream_job_fragments.source_backfill_fragments()?;
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(
@@ -223,9 +228,9 @@ impl CommandContext {
                     .await?;
             }
 
-            Command::ReplaceTable(ReplaceTablePlan {
-                old_table_fragments,
-                new_table_fragments,
+            Command::ReplaceStreamJob(ReplaceStreamJobPlan {
+                old_fragments,
+                new_fragments,
                 dispatchers,
                 init_split_assignment,
                 ..
@@ -234,9 +239,9 @@ impl CommandContext {
                 barrier_manager_context
                     .metadata_manager
                     .catalog_controller
-                    .post_collect_table_fragments(
-                        new_table_fragments.table_id().table_id as _,
-                        new_table_fragments.actor_ids(),
+                    .post_collect_job_fragments(
+                        new_fragments.stream_job_id().table_id as _,
+                        new_fragments.actor_ids(),
                         dispatchers.clone(),
                         init_split_assignment,
                     )
@@ -245,11 +250,11 @@ impl CommandContext {
                 // Apply the split changes in source manager.
                 barrier_manager_context
                     .source_manager
-                    .drop_source_fragments_vec(std::slice::from_ref(old_table_fragments))
+                    .drop_source_fragments_vec(std::slice::from_ref(old_fragments))
                     .await;
-                let source_fragments = new_table_fragments.stream_source_fragments();
+                let source_fragments = new_fragments.stream_source_fragments();
                 // XXX: is it possible to have backfill fragments here?
-                let backfill_fragments = new_table_fragments.source_backfill_fragments()?;
+                let backfill_fragments = new_fragments.source_backfill_fragments()?;
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(

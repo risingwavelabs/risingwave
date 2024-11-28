@@ -173,6 +173,7 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                dependent_udfs,
                 ..
             } = bound_result;
 
@@ -183,6 +184,7 @@ pub fn handle_bind(
                 param_types,
                 parsed_params: Some(parsed_params),
                 dependent_relations,
+                dependent_udfs,
                 bound: new_bound,
             };
             Ok(Portal::Portal(PortalResult {

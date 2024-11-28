@@ -304,7 +304,7 @@
     Failed to bind expression: concat_ws(v1, 1.2)
 
     Caused by:
-      Bind error: cannot cast type "integer" to "character varying" in Implicit context
+      cannot cast type "integer" to "character varying" in Implicit context
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;

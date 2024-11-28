@@ -1,0 +1,461 @@
+control substitution on
+
+system ok
+PGDATABASE=postgres psql -c "DROP DATABASE IF EXISTS sink_test WITH (FORCE)"
+
+statement ok
+drop table if exists rw_types_table cascade;
+
+statement ok
+drop table if exists rw_types_table_append_only cascade;
+
+system ok
+PGDATABASE=sink_test createdb
+
+################### test table pk can mismatch
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    smallint_column SMALLINT,
+    integer_column INTEGER,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
+);
+
+statement ok
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+drop table rw_types_table cascade;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table";
+
+################### test table col name cannot mismatch
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT,
+    varchar_column_mismatch_name VARCHAR,
+    text_column TEXT,
+    smallint_column SMALLINT,
+    integer_column INTEGER,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
+);
+
+statement error
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+drop table rw_types_table cascade;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table";
+
+################### test table col can be out of order
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    smallint_column SMALLINT,
+    integer_column INTEGER,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    timestamp_column TIMESTAMP
+);
+
+################### test sink with_options:primary_key mismatch should fail
+
+statement error
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id, date_column',
+);
+
+################### test pk match should work
+
+statement ok
+CREATE SINK postgres_rw_types_sink FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+################### test insert
+
+statement ok
+INSERT INTO rw_types_table (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column) VALUES
+    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}'),
+    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 'NAN'::decimal, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}'),
+    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, '+INF'::decimal, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}');
+
+statement ok
+flush;
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by id;');
+----
+1 Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+2 Varcharvalue2 Textvalue2 234 567 890 NaN 67.89 1.23 f 2023-05-23 23:45:01 2023-05-23 23:45:01 2 days {"key": "value2"}
+3 Varcharvalue1 Textvalue1 123 456 789 Infinity 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+
+################### test upsert (update)
+
+statement ok
+UPDATE rw_types_table SET varchar_column = 'Varcharvalue3', smallint_column = '300' WHERE id = 3;
+
+statement ok
+flush;
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by id;');
+----
+1 Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+2 Varcharvalue2 Textvalue2 234 567 890 NaN 67.89 1.23 f 2023-05-23 23:45:01 2023-05-23 23:45:01 2 days {"key": "value2"}
+3 Varcharvalue3 Textvalue1 123 300 789 Infinity 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+
+################### test delete
+
+statement ok
+DELETE FROM rw_types_table WHERE id = 3;
+
+statement ok
+flush;
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by id;');
+----
+1 Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+2 Varcharvalue2 Textvalue2 234 567 890 NaN 67.89 1.23 f 2023-05-23 23:45:01 2023-05-23 23:45:01 2 days {"key": "value2"}
+
+################### test upsert (insert)
+
+system ok
+PGDATABASE=sink_test psql -c "DELETE FROM pg_types_table WHERE id = 2"
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by id;');
+----
+1 Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+
+statement ok
+UPDATE rw_types_table SET varchar_column = 'Varcharvalue4', smallint_column = '400' WHERE id = 2;
+
+statement ok
+flush;
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by id;');
+----
+1 Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+2 Varcharvalue4 Textvalue2 234 400 890 NaN 67.89 1.23 f 2023-05-23 23:45:01 2023-05-23 23:45:01 2 days {"key": "value2"}
+
+################### cleanup sink
+
+statement ok
+DROP SINK postgres_rw_types_sink;
+
+statement ok
+DROP TABLE rw_types_table;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table"
+
+################### test append-only sink
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+)"
+
+statement ok
+CREATE TABLE rw_types_table_append_only (
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB
+) APPEND ONLY;
+
+statement ok
+CREATE SINK postgres_rw_types_sink_append_only FROM rw_types_table_append_only WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='append-only',
+);
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table;');
+----
+
+statement ok
+INSERT INTO rw_types_table_append_only (varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column) VALUES
+    ('Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}'),
+    ('Varcharvalue2', 'Textvalue2', 234, 567, 890, 'NAN'::decimal, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}'),
+    ('Varcharvalue3', 'Textvalue1', 333, 456, 789, '+INF'::decimal, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}');
+
+statement ok
+flush;
+
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select * from pg_types_table order by integer_column;');
+----
+Varcharvalue1 Textvalue1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+Varcharvalue2 Textvalue2 234 567 890 NaN 67.89 1.23 f 2023-05-23 23:45:01 2023-05-23 23:45:01 2 days {"key": "value2"}
+Varcharvalue3 Textvalue1 333 456 789 Infinity 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 1 day {"key": "value"}
+
+################### cleanup append-only sink
+
+statement ok
+DROP SINK postgres_rw_types_sink_append_only;
+
+statement ok
+DROP TABLE rw_types_table_append_only;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_types_table"
+
+################### Test pg special types
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TYPE MY_ENUM AS ENUM ('a', 'b', 'c');"
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    uuid_column UUID,
+    numeric_column NUMERIC,
+    myenum_column MY_ENUM,
+    numeric_decimal_array_column NUMERIC[],
+    numeric_utf8_array_column NUMERIC[],
+    enum_array_column MY_ENUM[],
+    int_column int[]
+)"
+
+statement ok
+CREATE TABLE rw_types_table (
+    id BIGINT PRIMARY KEY,
+    varchar_column VARCHAR,
+    text_column TEXT,
+    integer_column INTEGER,
+    smallint_column SMALLINT,
+    bigint_column BIGINT,
+    decimal_column DECIMAL,
+    real_column REAL,
+    double_column DOUBLE PRECISION,
+    boolean_column BOOLEAN,
+    date_column DATE,
+    time_column TIME,
+    timestamp_column TIMESTAMP,
+    interval_column INTERVAL,
+    jsonb_column JSONB,
+    uuid_column VARCHAR,
+    numeric_column VARCHAR,
+    myenum_column VARCHAR,
+    numeric_decimal_array_column DECIMAL[],
+    numeric_utf8_array_column VARCHAR[],
+    enum_array_column VARCHAR[],
+    int_column int[]
+)
+
+statement ok
+CREATE SINK rw_types_to_pg_types FROM rw_types_table WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_types_table',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+INSERT INTO rw_types_table (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, uuid_column, numeric_column, myenum_column, numeric_decimal_array_column, numeric_utf8_array_column, enum_array_column, int_column) VALUES
+    (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', '448be8d9-297f-4514-85c6-a360e82ae331', '123', 'a', ARRAY[1, 2, 3], ARRAY['1', '2', '3'], ARRAY['a', 'b', 'c'], ARRAY[1, 2, 3]),
+    (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 'NAN'::decimal, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', '14b4431e-203a-452b-a331-4d8a0d8f952e', '456', 'b', ARRAY[10, 20, 30], ARRAY['10', '20', '30'], ARRAY['a', 'b', 'c'], ARRAY[10, 20, 30]),
+    (3, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, '+INF'::decimal, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', '024d2719-ca29-45e1-bc58-4ed38777f4bf', '789', 'c', ARRAY[100, 200, 300], ARRAY['100', '200', '300'], ARRAY['a', 'b', 'c'], ARRAY[100, 200, 300]);
+
+statement ok
+flush;
+
+# NOTE(kwannoel): postgres_query doesn't support struct etc... yet.
+system ok
+PGDATABASE=sink_test psql --tuples-only -c "select * from pg_types_table order by id;"
+----
+  1 | Varcharvalue1  | Textvalue1  |            123 |             456 |           789 |          12.34 |       56.78 |         90.12 | t              | 2023-05-22  | 12:34:56    | 2023-05-22 12:34:56 | 1 day           | {"key": "value"}  | 448be8d9-297f-4514-85c6-a360e82ae331 |            123 | a             | {1,2,3}                      | {1,2,3}                   | {a,b,c}           | {1,2,3}
+  2 | Varcharvalue2  | Textvalue2  |            234 |             567 |           890 |            NaN |       67.89 |          1.23 | f              | 2023-05-23  | 23:45:01    | 2023-05-23 23:45:01 | 2 days          | {"key": "value2"} | 14b4431e-203a-452b-a331-4d8a0d8f952e |            456 | b             | {10,20,30}                   | {10,20,30}                | {a,b,c}           | {10,20,30}
+  3 | Varcharvalue1  | Textvalue1  |            123 |             456 |           789 |       Infinity |       56.78 |         90.12 | t              | 2023-05-22  | 12:34:56    | 2023-05-22 12:34:56 | 1 day           | {"key": "value"}  | 024d2719-ca29-45e1-bc58-4ed38777f4bf |            789 | c             | {100,200,300}                | {100,200,300}             | {a,b,c}           | {100,200,300}
+
+
+statement ok
+DROP SINK rw_types_to_pg_types;
+
+statement ok
+DROP TABLE rw_types_table;
+
+################### Drop DB
+
+system ok
+PGDATABASE=postgres psql -c "DROP DATABASE sink_test"

@@ -1,0 +1,34 @@
+query TT
+select data ->> 'source', data->> 'auth_algo' from github_hmac_sha256;
+----
+github hmac_sha256
+github hmac_sha256
+github hmac_sha256
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from github_hmac_sha1;
+----
+github hmac_sha1
+github hmac_sha1
+github hmac_sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from rudderstack;
+----
+rudderstack plain
+rudderstack plain
+rudderstack plain
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from segment_hmac_sha1;
+----
+segment hmac_sha1
+segment hmac_sha1
+segment hmac_sha1
+
+query TT
+select data ->> 'source', data->> 'auth_algo' from hubspot_sha256_v2;
+----
+hubspot sha256_v2
+hubspot sha256_v2
+hubspot sha256_v2

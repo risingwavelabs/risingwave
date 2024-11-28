@@ -49,6 +49,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
+use url::Url;
 use with_options::WithOptions;
 
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
@@ -283,7 +284,18 @@ impl IcebergSink {
                 names.push(self.config.common.table_name.to_string());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
-                        if warehouse_path.ends_with('/') {
+                        let url = Url::parse(warehouse_path);
+                        if url.is_err() {
+                            // For rest catalog, the warehouse_path could be a warehouse name.
+                            // In this case, we should specify the location when creating a table.
+                            if self.config.common.catalog_type() == "rest"
+                                || self.config.common.catalog_type() == "rest_rust"
+                            {
+                                None
+                            } else {
+                                bail!(format!("Invalid warehouse path: {}", warehouse_path))
+                            }
+                        } else if warehouse_path.ends_with('/') {
                             Some(format!("{}{}", warehouse_path, names.join("/")))
                         } else {
                             Some(format!("{}/{}", warehouse_path, names.join("/")))
@@ -1017,6 +1029,10 @@ mod test {
                 database_name: Some("demo_db".to_string()),
                 table_name: "demo_table".to_string(),
                 path_style_access: Some(true),
+                credential: None,
+                oauth2_server_uri: None,
+                scope: None,
+                token: None,
             },
             r#type: "upsert".to_string(),
             force_append_only: false,

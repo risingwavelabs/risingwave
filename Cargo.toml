@@ -80,7 +80,12 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
+# foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "19bc2def14dfa8bb7d6581fb625584694bc7f4a0", features = [
+    "tracing",
+    "nightly",
+    "prometheus",
+] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -163,7 +168,7 @@ parquet = { version = "53.2", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-thiserror-ext = "0.1.2"
+thiserror-ext = { version = "0.2.1", features = ["backtrace"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",

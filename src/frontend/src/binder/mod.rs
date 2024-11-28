@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -121,6 +122,9 @@ pub struct Binder {
     /// The included relations while binding a query.
     included_relations: HashSet<TableId>,
 
+    /// The included user-defined functions while binding a query.
+    included_udfs: HashSet<FunctionId>,
+
     param_types: ParameterTypes,
 
     /// The sql udf context that will be used during binding phase
@@ -128,6 +132,19 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// Information for `secure_compare` function. It's ONLY available when binding the
+    /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
+    secure_compare_context: Option<SecureCompareContext>,
+}
+
+// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
+#[derive(Default, Clone, Debug)]
+pub struct SecureCompareContext {
+    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
+    pub column_name: String,
+    /// The secret (usually a token provided by the webhook source user) to validate the calls
+    pub secret_name: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -324,9 +341,11 @@ impl Binder {
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
+            included_udfs: HashSet::new(),
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
+            secure_compare_context: None,
         }
     }
 
@@ -347,6 +366,15 @@ impl Binder {
 
     pub fn new_for_ddl(session: &SessionImpl) -> Binder {
         Self::new_inner(session, BindFor::Ddl, vec![])
+    }
+
+    pub fn new_for_ddl_with_secure_compare(
+        session: &SessionImpl,
+        ctx: SecureCompareContext,
+    ) -> Binder {
+        let mut binder = Self::new_inner(session, BindFor::Ddl, vec![]);
+        binder.secure_compare_context = Some(ctx);
+        binder
     }
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {
@@ -382,13 +410,18 @@ impl Binder {
         self.param_types.export()
     }
 
-    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// Get included relations in the query after binding. This is used for resolving relation
     /// dependencies. Note that it only contains referenced relations discovered during binding.
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> HashSet<TableId> {
-        self.included_relations.clone()
+    pub fn included_relations(&self) -> &HashSet<TableId> {
+        &self.included_relations
+    }
+
+    /// Get included user-defined functions in the query after binding.
+    pub fn included_udfs(&self) -> &HashSet<FunctionId> {
+        &self.included_udfs
     }
 
     fn push_context(&mut self) {
