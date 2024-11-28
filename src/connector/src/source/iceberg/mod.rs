@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod parquet_file_handler;
+pub mod parquet_file_reader;
 
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use itertools::Itertools;
-pub use parquet_file_handler::*;
+pub use parquet_file_reader::*;
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::JsonbVal;
