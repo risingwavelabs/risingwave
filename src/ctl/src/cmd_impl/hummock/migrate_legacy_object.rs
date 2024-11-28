@@ -25,6 +25,10 @@ pub async fn migrate_legacy_object(
     source_dir: String,
     target_dir: String,
 ) -> anyhow::Result<()> {
+    let source_dir = source_dir.trim_end_matches('/');
+    let target_dir = target_dir.trim_end_matches('/');
+    println!("Normalized source_dir: {source_dir}.");
+    println!("Normalized target_dir: {target_dir}.");
     if source_dir.is_empty() {
         return Err(anyhow!("the source_dir must not be empty"));
     }
@@ -49,7 +53,12 @@ pub async fn migrate_legacy_object(
     while let Some(object) = iter.next().await {
         let object = object?;
         if !object.key.ends_with(OBJECT_SUFFIX) {
-            println!("Skip non data object {}.", object.key);
+            let legacy_path = object.key;
+            assert_eq!(&legacy_path[..source_dir.len()], source_dir, "{legacy_path} versus {source_dir}");
+            let new_path = format!("{}{}", target_dir, &legacy_path[source_dir.len()..]);
+            println!("from {legacy_path} to {new_path}");
+            opendal.inner().copy(&legacy_path, &new_path).await?;
+            count += 1;
             continue;
         }
         let object_id = get_object_id_from_path(&object.key);
@@ -61,10 +70,10 @@ pub async fn migrate_legacy_object(
                 object.key, legacy_path
             )));
         }
-        let to_object_path =
+        let new_path =
             get_sst_data_path(&get_object_prefix(object_id, true), &target_dir, object_id);
-        println!("from {legacy_path} to {to_object_path}");
-        opendal.inner().copy(&legacy_path, &to_object_path).await?;
+        println!("from {legacy_path} to {new_path}");
+        opendal.inner().copy(&legacy_path, &new_path).await?;
         count += 1;
     }
     println!("Migration is finished. {count} objects have been migrated from {source_dir} to {target_dir}.");
