@@ -29,8 +29,8 @@ pub async fn migrate_legacy_object(
     let target_dir = target_dir.trim_end_matches('/');
     println!("Normalized source_dir: {source_dir}.");
     println!("Normalized target_dir: {target_dir}.");
-    if source_dir.is_empty() {
-        return Err(anyhow!("the source_dir must not be empty"));
+    if source_dir.is_empty() || target_dir.is_empty() {
+        return Err(anyhow!("the source_dir and target_dir must not be empty"));
     }
     if target_dir.starts_with(&source_dir) {
         return Err(anyhow!("the target_dir must not include source_dir"));
@@ -54,9 +54,13 @@ pub async fn migrate_legacy_object(
         let object = object?;
         if !object.key.ends_with(OBJECT_SUFFIX) {
             let legacy_path = object.key;
-            assert_eq!(&legacy_path[..source_dir.len()], source_dir, "{legacy_path} versus {source_dir}");
+            assert_eq!(
+                &legacy_path[..source_dir.len()],
+                source_dir,
+                "{legacy_path} versus {source_dir}"
+            );
             let new_path = format!("{}{}", target_dir, &legacy_path[source_dir.len()..]);
-            println!("from {legacy_path} to {new_path}");
+            println!("From {legacy_path} to {new_path}");
             opendal.inner().copy(&legacy_path, &new_path).await?;
             count += 1;
             continue;
@@ -72,7 +76,7 @@ pub async fn migrate_legacy_object(
         }
         let new_path =
             get_sst_data_path(&get_object_prefix(object_id, true), &target_dir, object_id);
-        println!("from {legacy_path} to {new_path}");
+        println!("From {legacy_path} to {new_path}.");
         opendal.inner().copy(&legacy_path, &new_path).await?;
         count += 1;
     }
