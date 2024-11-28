@@ -42,6 +42,10 @@ use crate::{
 fn sql_endpoint_from_env() -> String {
     static SQL_ENDPOINT: LazyLock<String> = LazyLock::new(|| {
         if let Ok(endpoint) = env::var("RISEDEV_SQL_ENDPOINT") {
+            tracing::info!(
+                "sql endpoint from env RISEDEV_SQL_ENDPOINT resolved to `{}`",
+                endpoint
+            );
             endpoint
         } else {
             let temp_path = NamedTempFile::with_suffix(".db").unwrap().into_temp_path();
