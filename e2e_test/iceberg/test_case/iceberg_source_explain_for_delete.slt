@@ -51,6 +51,9 @@ WITH (
     table.name = 'test_explain_for_delete',
 );
 
+statement ok
+flush;
+
 query I
 select * from iceberg_t1_source order by i1;
 ----
