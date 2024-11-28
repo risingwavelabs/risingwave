@@ -46,6 +46,7 @@ use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 async fn test_merger_sum_aggr() {
     let expr_context = ExprContext {
         time_zone: String::from("UTC"),
+        strict_mode: false,
     };
 
     let barrier_test_env = LocalBarrierTestEnv::for_test().await;

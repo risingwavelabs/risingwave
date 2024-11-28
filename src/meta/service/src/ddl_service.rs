@@ -182,6 +182,27 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(DropSecretResponse { version }))
     }
 
+    async fn alter_secret(
+        &self,
+        request: Request<AlterSecretRequest>,
+    ) -> Result<Response<AlterSecretResponse>, Status> {
+        let req = request.into_inner();
+        let pb_secret = Secret {
+            id: req.get_secret_id(),
+            name: req.get_name().clone(),
+            database_id: req.get_database_id(),
+            value: req.get_value().clone(),
+            owner: req.get_owner_id(),
+            schema_id: req.get_schema_id(),
+        };
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSecret(pb_secret))
+            .await?;
+
+        Ok(Response::new(AlterSecretResponse { version }))
+    }
+
     async fn create_schema(
         &self,
         request: Request<CreateSchemaRequest>,

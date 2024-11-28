@@ -29,4 +29,9 @@ pub use connection::{
 };
 
 mod iceberg;
+#[cfg(not(madsim))]
+mod maybe_tls_connector;
+pub mod postgres;
+
 pub use iceberg::IcebergCommon;
+pub use postgres::{create_pg_client, PostgresExternalTable, SslMode};

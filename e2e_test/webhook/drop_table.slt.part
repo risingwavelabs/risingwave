@@ -1,0 +1,14 @@
+statement ok
+DROP TABLE hubspot_sha256_v2;
+
+statement ok
+DROP TABLE segment_hmac_sha1;
+
+statement ok
+DROP TABLE github_hmac_sha256;
+
+statement ok
+DROP TABLE github_hmac_sha1;
+
+statement ok
+DROP TABLE rudderstack;

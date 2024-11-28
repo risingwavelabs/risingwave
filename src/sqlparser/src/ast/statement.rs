@@ -297,6 +297,11 @@ impl Parser<'_> {
                 }
             }
             Ok(expected.into())
+        } else if connector.contains("webhook") {
+            parser_err!(
+                "Source with webhook connector is not supported. \
+                 Please use the `CREATE TABLE ... WITH ...` statement instead.",
+            );
         } else {
             Ok(parse_format_encode(self)?)
         }

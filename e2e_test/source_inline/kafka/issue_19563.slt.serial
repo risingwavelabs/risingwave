@@ -1,0 +1,73 @@
+control substitution on
+
+# Note: rw_fragments is not isolated by schema so we make the test serial.
+
+system ok
+rpk topic create test-topic-19563 -p 6
+
+statement ok
+CREATE SOURCE kafkasource (
+    v1 timestamp with time zone
+)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test-topic-19563',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON (
+    timestamptz.handling.mode = 'utc_without_suffix'
+);
+
+# Note that StreamSourceScan is in the StreamDynamicFilter fragment, which has 3 upstream fragments.
+query T
+explain create materialized view mv1 as select v1 from kafkasource where v1 between now() and now() + interval '1 day' * 365 * 2000;
+----
+StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+└─StreamDynamicFilter { predicate: (v1 <= $expr1), output: [v1, _row_id], cleaned_by_watermark: true }
+  ├─StreamProject { exprs: [v1, _row_id], output_watermarks: [v1] }
+  │ └─StreamDynamicFilter { predicate: (v1 >= now), output_watermarks: [v1], output: [v1, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], cleaned_by_watermark: true }
+  │   ├─StreamRowIdGen { row_id_index: 4 }
+  │   │ └─StreamSourceScan { columns: [v1, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+  │   └─StreamExchange { dist: Broadcast }
+  │     └─StreamNow
+  └─StreamExchange { dist: Broadcast }
+    └─StreamProject { exprs: [AddWithTimeZone(now, '730000 days':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+      └─StreamNow
+
+
+# The following test is adapted from `temporal_filter.slt`.
+
+# This statement should be correct for the next ~1000 years
+# We cannot have a variable interval for now, so we use 2000 year's worth of days as the upper bound.
+statement ok
+create materialized view mv1 as select v1 from kafkasource where v1 between now() and now() + interval '1 day' * 365 * 2000;
+
+query I
+select array_length(upstream_fragment_ids) from rw_fragments where array_contains(flags, Array['SOURCE_SCAN']);
+----
+3
+
+system ok
+cat <<EOF | rpk topic produce test-topic-19563
+{"v1": "3031-01-01 19:00:00"}
+{"v1": "3031-01-01 20:00:00"}
+{"v1": "3031-01-01 21:00:00"}
+{"v1": "5031-01-01 21:00:00"}
+{"v1": "0001-01-01 21:00:00"}
+EOF
+
+sleep 3s
+
+# Below lower bound and above upper bound are not shown
+query I
+select * from mv1 order by v1;
+----
+3031-01-01 19:00:00+00:00
+3031-01-01 20:00:00+00:00
+3031-01-01 21:00:00+00:00
+
+
+statement ok
+DROP SOURCE kafkasource CASCADE;
+
+system ok
+rpk topic delete test-topic-18308
