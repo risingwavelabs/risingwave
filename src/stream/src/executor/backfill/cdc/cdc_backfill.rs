@@ -45,7 +45,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::executor::source::get_unlimited_backoff_strategy;
+use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
@@ -189,7 +189,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut table_reader: Option<ExternalTableReaderImpl> = None;
         let external_table = self.external_table.clone();
         let mut future = Box::pin(async move {
-            let backoff = get_unlimited_backoff_strategy();
+            let backoff = get_infinite_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
                 match external_table.create_table_reader().await {
                     Ok(reader) => Ok(reader),

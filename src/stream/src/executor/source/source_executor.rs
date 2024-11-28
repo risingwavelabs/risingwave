@@ -41,7 +41,6 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Instrument;
 
 use super::executor_core::StreamSourceCore;
@@ -51,7 +50,7 @@ use super::{
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::get_unlimited_backoff_strategy;
+use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::UpdateMutation;
 
@@ -129,8 +128,7 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
         seek_to_latest: bool,
     ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
-        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc).await;
-
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
         let (stream, latest_splits) = source_desc
             .source
             .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
@@ -144,7 +142,7 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 
     /// build the source column ids and the source context which will be used to build the source stream
-    pub async fn prepare_source_stream_build(
+    pub fn prepare_source_stream_build(
         &self,
         source_desc: &SourceDesc,
     ) -> (Vec<ColumnId>, SourceContext) {
@@ -512,10 +510,10 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> = None;
         let seek_to_latest = self.is_shared_non_cdc && is_uninitialized;
         let source_reader = source_desc.source.clone();
-        let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc).await;
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
         let source_ctx = Arc::new(source_ctx);
         let mut build_source_stream_fut = Box::pin(async move {
-            let backoff = get_unlimited_backoff_strategy();
+            let backoff = get_infinite_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
                 match source_reader
                     .build_stream(

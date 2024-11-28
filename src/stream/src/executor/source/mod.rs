@@ -185,7 +185,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
     }
 }
 
-pub fn get_unlimited_backoff_strategy() -> impl Iterator<Item = Duration> {
+pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
     const BASE_DELAY: Duration = Duration::from_secs(1);
     const BACKOFF_FACTOR: u64 = 2;
     const MAX_DELAY: Duration = Duration::from_secs(10);
