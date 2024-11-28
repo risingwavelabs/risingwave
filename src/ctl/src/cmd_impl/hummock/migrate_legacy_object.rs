@@ -32,7 +32,7 @@ pub async fn migrate_legacy_object(
     if source_dir.is_empty() || target_dir.is_empty() {
         return Err(anyhow!("the source_dir and target_dir must not be empty"));
     }
-    if target_dir.starts_with(&source_dir) {
+    if target_dir.starts_with(source_dir) {
         return Err(anyhow!("the target_dir must not include source_dir"));
     }
     let mut config = ObjectStoreConfig::default();
@@ -47,7 +47,7 @@ pub async fn migrate_legacy_object(
     let ObjectStoreImpl::Opendal(opendal) = store else {
         return Err(anyhow!("OpenDAL is required"));
     };
-    let mut iter = opendal.list(&source_dir, None, None).await?;
+    let mut iter = opendal.list(source_dir, None, None).await?;
     let mut count = 0;
     println!("Migration is started: from {source_dir} to {target_dir}.");
     while let Some(object) = iter.next().await {
@@ -67,7 +67,7 @@ pub async fn migrate_legacy_object(
         }
         let object_id = get_object_id_from_path(&object.key);
         let legacy_prefix = get_object_prefix(object_id, false);
-        let legacy_path = get_sst_data_path(&legacy_prefix, &source_dir, object_id);
+        let legacy_path = get_sst_data_path(&legacy_prefix, source_dir, object_id);
         if object.key != legacy_path {
             return Err(anyhow!(format!(
                 "the source object store does not appear to be legacy: {} versus {}",
@@ -75,7 +75,7 @@ pub async fn migrate_legacy_object(
             )));
         }
         let new_path =
-            get_sst_data_path(&get_object_prefix(object_id, true), &target_dir, object_id);
+            get_sst_data_path(&get_object_prefix(object_id, true), target_dir, object_id);
         println!("From {legacy_path} to {new_path}.");
         opendal.inner().copy(&legacy_path, &new_path).await?;
         count += 1;
