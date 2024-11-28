@@ -20,14 +20,11 @@ use crate::source::nats::split::NatsSplit;
 use crate::source::SplitImpl;
 
 pub fn fill_adaptive_split(
-    discovered_splits: BTreeMap<Arc<str>, SplitImpl>,
+    split_template: &SplitImpl,
     actor_in_use: &HashSet<u32>,
 ) -> ConnectorResult<BTreeMap<Arc<str>, SplitImpl>> {
-    debug_assert!(discovered_splits.len() == 1);
-    let split = discovered_splits.values().next().unwrap();
-
     // Just Nats is adaptive for now
-    if let SplitImpl::Nats(split) = split {
+    if let SplitImpl::Nats(split) = split_template {
         let mut new_splits = BTreeMap::new();
         for actor_id in actor_in_use {
             let actor_id: Arc<str> = actor_id.to_string().into();
@@ -40,7 +37,7 @@ pub fn fill_adaptive_split(
                 )),
             );
         }
-        tracing::info!(
+        tracing::debug!(
             "Filled adaptive splits for Nats source, {} splits in total",
             new_splits.len()
         );
@@ -48,7 +45,7 @@ pub fn fill_adaptive_split(
     } else {
         Err(ConnectorError::from(anyhow::anyhow!(
             "Unsupported split type, expect Nats SplitImpl but get {:?}",
-            split
+            split_template
         )))
     }
 }

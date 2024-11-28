@@ -299,6 +299,36 @@ pub struct SourceManagerRunningInfo {
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
+async fn handle_discover_splits(
+    handle: &ConnectorSourceWorkerHandle,
+    source_id: SourceId,
+    actors: &HashSet<ActorId>,
+) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
+    let Some(mut discovered_splits) = handle.discovered_splits().await else {
+        tracing::info!(
+            "The discover loop for source {} is not ready yet; we'll wait for the next run",
+            source_id
+        );
+        return Ok(BTreeMap::new());
+    };
+    if discovered_splits.is_empty() {
+        tracing::warn!("No splits discovered for source {}", source_id);
+    }
+
+    if handle.enable_adaptive_splits {
+        // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
+        // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
+        // And prev splits record should be dropped via CN.
+
+        debug_assert!(handle.enable_drop_split);
+        debug_assert!(discovered_splits.len() == 1);
+        discovered_splits =
+            fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+    }
+
+    Ok(discovered_splits)
+}
+
 impl SourceManagerCore {
     fn new(
         metadata_manager: MetadataManager,
@@ -324,7 +354,7 @@ impl SourceManagerCore {
     async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
-        for (source_id, handle) in &self.managed_sources {
+        'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
                 Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
                 _ => {
@@ -333,19 +363,7 @@ impl SourceManagerCore {
             };
             let backfill_fragment_ids = self.backfill_fragments.get(source_id);
 
-            let Some(mut discovered_splits) = handle.discovered_splits().await else {
-                tracing::info!(
-                    "The discover loop for source {} is not ready yet; we'll wait for the next run",
-                    source_id
-                );
-                continue;
-            };
-
-            if discovered_splits.is_empty() {
-                tracing::warn!("No splits discovered for source {}", source_id);
-            }
-
-            for &fragment_id in source_fragment_ids {
+            'loop_fragment: for &fragment_id in source_fragment_ids {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
@@ -354,21 +372,20 @@ impl SourceManagerCore {
                     Ok(actors) => {
                         if actors.is_empty() {
                             tracing::warn!("No actors found for fragment {}", fragment_id);
-                            continue;
+                            continue 'loop_fragment;
                         }
                         actors
                     }
                     Err(err) => {
                         tracing::warn!(error = %err.as_report(), "Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
-                        continue;
+                        continue 'loop_fragment;
                     }
                 };
 
-                if handle.enable_adaptive_splits {
-                    // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
-                    // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
-                    // And prev splits record should be dropped via CN.
-                    discovered_splits = fill_adaptive_split(discovered_splits, &actors)?;
+                let discovered_splits = handle_discover_splits(handle, *source_id, &actors).await?;
+                if discovered_splits.is_empty() {
+                    // The discover loop for this source is not ready yet; we'll wait for the next run
+                    continue 'loop_source;
                 }
 
                 let prev_actor_splits: HashMap<_, _> = actors
@@ -908,7 +925,7 @@ impl SourceManager {
 
         let mut assigned = HashMap::new();
 
-        for (source_id, fragments) in source_fragments {
+        'loop_source: for (source_id, fragments) in source_fragments {
             let handle = core
                 .managed_sources
                 .get(&source_id)
@@ -927,15 +944,8 @@ impl SourceManager {
                     .context("failed to receive sync call response")??;
             }
 
-            let splits = handle.discovered_splits().await.unwrap();
-
-            if splits.is_empty() {
-                tracing::warn!("no splits detected for source {}", source_id);
-                continue;
-            }
-
             for fragment_id in fragments {
-                let empty_actor_splits = table_fragments
+                let empty_actor_splits: HashMap<u32, Vec<SplitImpl>> = table_fragments
                     .fragments
                     .get(&fragment_id)
                     .unwrap()
@@ -943,6 +953,12 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
+                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
+                let splits = handle_discover_splits(handle, source_id, &actor_hashset).await?;
+                if splits.is_empty() {
+                    tracing::warn!("no splits detected for source {}", source_id);
+                    continue 'loop_source;
+                }
 
                 if let Some(diff) = reassign_splits(
                     fragment_id,
