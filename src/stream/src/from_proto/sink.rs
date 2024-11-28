@@ -275,7 +275,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
-                );
+                )
+                .await;
 
                 SinkExecutor::new(
                     params.actor_context,
