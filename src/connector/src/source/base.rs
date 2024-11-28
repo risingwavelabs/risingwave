@@ -452,9 +452,12 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
     }
 
     /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.

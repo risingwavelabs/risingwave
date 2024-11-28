@@ -110,7 +110,7 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
-    let enable_scale_in = connector_properties.enable_split_scale_in();
+    let enable_scale_in = connector_properties.enable_drop_split();
     let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
@@ -143,7 +143,7 @@ pub async fn create_source_worker_handle(
         handle,
         sync_call_tx,
         splits,
-        enable_scale_in,
+        enable_drop_split: enable_scale_in,
         enable_adaptive_splits,
     })
 }
@@ -264,7 +264,7 @@ pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
-    enable_scale_in: bool,
+    enable_drop_split: bool,
     enable_adaptive_splits: bool,
 }
 
@@ -389,7 +389,7 @@ impl SourceManagerCore {
                     prev_actor_splits,
                     &discovered_splits,
                     SplitDiffOptions {
-                        enable_scale_in: handle.enable_scale_in,
+                        enable_scale_in: handle.enable_drop_split,
                         enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
@@ -1072,7 +1072,7 @@ impl SourceManager {
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
 
-        let enable_scale_in = connector_properties.enable_split_scale_in();
+        let enable_drop_split = connector_properties.enable_drop_split();
         let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
@@ -1111,7 +1111,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits,
-                enable_scale_in,
+                enable_drop_split,
                 enable_adaptive_splits,
             },
         );
