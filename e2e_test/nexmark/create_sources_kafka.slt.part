@@ -1,0 +1,48 @@
+control substitution on
+
+statement ok
+CREATE SOURCE person (
+    "id" BIGINT,
+    "name" VARCHAR,
+    "email_address" VARCHAR,
+    "credit_card" VARCHAR,
+    "city" VARCHAR,
+    "state" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR,
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-person'
+) FORMAT PLAIN ENCODE JSON;
+
+
+statement ok
+CREATE SOURCE auction (
+    "id" BIGINT,
+    "item_name" VARCHAR,
+    "description" VARCHAR,
+    "initial_bid" BIGINT,
+    "reserve" BIGINT,
+    "date_time" TIMESTAMP,
+    "expires" TIMESTAMP,
+    "seller" BIGINT,
+    "category" BIGINT,
+    "extra" VARCHAR,
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-auction'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE bid (
+    "auction" BIGINT,
+    "bidder" BIGINT,
+    "price" BIGINT,
+    "channel" VARCHAR,
+    "url" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'nexmark-bid'
+) FORMAT PLAIN ENCODE JSON;
