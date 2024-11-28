@@ -128,68 +128,8 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
         seek_to_latest: bool,
     ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc).await;
 
-        let (schema_change_tx, mut schema_change_rx) =
-            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable() {
-            let meta_client = self.actor_ctx.meta_client.clone();
-            // spawn a task to handle schema change event from source parser
-            let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::info!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
-                        match meta_client
-                            .auto_schema_change(schema_change.to_protobuf())
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
-                                finish_tx.send(()).unwrap();
-                            }
-                        }
-                    }
-                }
-            });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
-
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.as_ref().unwrap().source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core
-                .as_ref()
-                .unwrap()
-                .source_name
-                .clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                rate_limit: self.rate_limit_rps,
-            },
-            source_desc.source.config.clone(),
-            schema_change_tx,
-        );
         let (stream, latest_splits) = source_desc
             .source
             .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
@@ -202,6 +142,7 @@ impl<S: StateStore> SourceExecutor<S> {
         ))
     }
 
+    /// build the source column ids and the source context which will be used to build the source stream
     pub async fn prepare_source_stream_build(
         &self,
         source_desc: &SourceDesc,
@@ -575,20 +516,27 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut build_source_stream_fut = Box::pin(async move {
             let backoff = get_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
-                source_reader
+                match source_reader
                     .build_stream(
                         recover_state.clone(),
                         column_ids.clone(),
                         source_ctx.clone(),
                         seek_to_latest,
                     )
-                    .await
+                    .await {
+                    Ok((stream, latest_splits)) => Ok((stream, latest_splits)),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to build source stream, retrying...");
+                        Err(e)
+                    },
+                }
             })
             .instrument(tracing::info_span!("build_source_stream_with_retry"))
             .await
             .expect("Retry build source stream until success.")
         });
 
+        // loop to create source stream until success
         loop {
             if let Some(barrier) = build_source_stream_and_poll_barrier(
                 &mut barrier_stream,
@@ -597,15 +545,21 @@ impl<S: StateStore> SourceExecutor<S> {
             )
             .await?
             {
-                yield barrier;
+                if let Message::Barrier(barrier) = barrier {
+                    // bump state store epoch
+                    let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
+                } else {
+                    unreachable!("Only barrier message is expected when building source stream.");
+                }
             } else {
                 assert!(reader_and_splits.is_some());
+                tracing::info!("source stream created successfully");
                 break;
             }
         }
-
         let (source_chunk_reader, latest_splits) =
-            reader_and_splits.expect("source reader and splits must be created");
+            reader_and_splits.expect("source chunk reader and splits must be created");
 
         let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
         if let Some(latest_splits) = latest_splits {

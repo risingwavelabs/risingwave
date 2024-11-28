@@ -32,6 +32,7 @@ use risingwave_connector::parser::{
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Instrument;
 
@@ -191,7 +192,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut future = Box::pin(async move {
             let backoff = get_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
-                external_table.create_table_reader().await
+                match external_table.create_table_reader().await {
+                    Ok(reader) => Ok(reader),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to create cdc table reader, retrying...");
+                        Err(e)
+                    }
+                }
             })
             .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
             .await
@@ -222,7 +229,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             } else {
                 assert!(table_reader.is_some(), "table reader must created");
-                tracing::info!(table_id, upstream_table_name, "table reader create success");
+                tracing::info!(
+                    table_id,
+                    upstream_table_name,
+                    "table reader created successfully"
+                );
                 break;
             }
         }
