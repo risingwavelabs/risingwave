@@ -37,12 +37,6 @@ pub fn generate_internal_table_name_with_type(
     )
 }
 
-pub fn valid_table_name(table_name: &str) -> bool {
-    static INTERNAL_TABLE_NAME: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"__internal_.*_\d+").unwrap());
-    !INTERNAL_TABLE_NAME.is_match(table_name)
-}
-
 pub fn get_dist_key_in_pk_indices<I: Eq + Copy + Debug, O: TryFrom<usize>>(
     dist_key_indices: &[I],
     pk_indices: &[I],
