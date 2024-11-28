@@ -58,7 +58,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
-use risingwave_pb::catalog::WatermarkDesc;
+use risingwave_pb::catalog::{PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -656,6 +656,7 @@ impl PlanRoot {
         with_external_source: bool,
         retention_seconds: Option<NonZeroU32>,
         cdc_table_id: Option<String>,
+        webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
@@ -891,6 +892,7 @@ impl PlanRoot {
             version,
             retention_seconds,
             cdc_table_id,
+            webhook_info,
             engine,
         )
     }

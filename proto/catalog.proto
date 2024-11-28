@@ -94,6 +94,11 @@ message StreamSourceInfo {
   map<string, secret.SecretRef> format_encode_secret_refs = 16;
 }
 
+message WebhookSourceInfo {
+  secret.SecretRef secret_ref = 1;
+  expr.ExprNode signature_expr = 2;
+}
+
 message Source {
   // For shared source, this is the same as the job id.
   // For non-shared source and table with connector, this is a different oid.
@@ -443,6 +448,9 @@ message Table {
   // Please note that this field is not intended to describe the expected vnode count
   // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.max_parallelism`.
   optional uint32 maybe_vnode_count = 40;
+
+  // The information used by webhook source to validate the incoming data.
+  optional WebhookSourceInfo webhook_info = 41;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

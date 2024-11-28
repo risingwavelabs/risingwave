@@ -348,6 +348,7 @@ pub async fn handle(
             with_version_column,
             cdc_table_info,
             include_column_options,
+            webhook_info,
             engine,
         } => {
             if or_replace {
@@ -385,6 +386,7 @@ pub async fn handle(
                 with_version_column,
                 cdc_table_info,
                 include_column_options,
+                webhook_info,
                 engine,
             )
             .await

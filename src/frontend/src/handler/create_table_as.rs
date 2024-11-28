@@ -114,6 +114,7 @@ pub async fn handle_create_as(
             on_conflict,
             with_version_column,
             Some(col_id_gen.into_version()),
+            None,
             engine,
         )?;
         let graph = build_graph(plan)?;

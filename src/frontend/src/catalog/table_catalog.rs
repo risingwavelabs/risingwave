@@ -25,7 +25,7 @@ use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -180,6 +180,9 @@ pub struct TableCatalog {
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
     pub vnode_count: VnodeCount,
+
+    pub webhook_info: Option<PbWebhookSourceInfo>,
+
     pub engine: Engine,
 }
 
@@ -486,6 +489,7 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            webhook_info: self.webhook_info.clone(),
             engine: self.engine.to_protobuf().into(),
         }
     }
@@ -685,6 +689,7 @@ impl From<PbTable> for TableCatalog {
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
+            webhook_info: tb.webhook_info,
             engine,
         }
     }
@@ -778,6 +783,7 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            webhook_info: None,
             engine: PbEngine::Hummock.into(),
         }
         .into();
@@ -846,6 +852,7 @@ mod tests {
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
+                webhook_info: None,
                 engine: Engine::Hummock,
             }
         );

@@ -21,6 +21,7 @@ async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
@@ -99,6 +100,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.6", features = [
+  "add-extension",
+  "cors",
+  "compression-gzip",
+] }
 tracing = "0.1"
 url = "2.5.0"
 uuid = "1"

@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
@@ -37,6 +38,7 @@ use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -2556,8 +2558,13 @@ impl Parser<'_> {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
+        let contain_webhook =
+            connector.is_some() && connector.as_ref().unwrap().contains(WEBHOOK_CONNECTOR);
 
-        let format_encode = if let Some(connector) = connector {
+        // webhook connector does not require row format
+        let format_encode = if let Some(connector) = connector
+            && !contain_webhook
+        {
             Some(self.parse_format_encode_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
@@ -2579,6 +2586,28 @@ impl Parser<'_> {
             Some(CdcTableInfo {
                 source_name,
                 external_table_name,
+            })
+        } else {
+            None
+        };
+
+        let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
+            if !contain_webhook {
+                parser_err!("VALIDATE is only supported for tables created with webhook source");
+            }
+
+            self.expect_keyword(Keyword::SECRET)?;
+            let secret_ref = self.parse_secret_ref()?;
+            if secret_ref.ref_as == SecretRefAsType::File {
+                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            };
+
+            self.expect_keyword(Keyword::AS)?;
+            let signature_expr = self.parse_function()?;
+
+            Some(WebhookSourceInfo {
+                secret_ref,
+                signature_expr,
             })
         } else {
             None
@@ -2615,6 +2644,7 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            webhook_info,
             engine,
         })
     }
@@ -3637,16 +3667,8 @@ impl Parser<'_> {
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
                 Keyword::SECRET => {
-                    let secret_name = self.parse_object_name()?;
-                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
-                        SecretRefAsType::File
-                    } else {
-                        SecretRefAsType::Text
-                    };
-                    Ok(Value::Ref(SecretRef {
-                        secret_name,
-                        ref_as,
-                    }))
+                    let secret = self.parse_secret_ref()?;
+                    Ok(Value::Ref(secret))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
@@ -3658,6 +3680,19 @@ impl Parser<'_> {
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             _ => self.expected_at(checkpoint, "a value"),
         }
+    }
+
+    fn parse_secret_ref(&mut self) -> PResult<SecretRef> {
+        let secret_name = self.parse_object_name()?;
+        let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+            SecretRefAsType::File
+        } else {
+            SecretRefAsType::Text
+        };
+        Ok(SecretRef {
+            secret_name,
+            ref_as,
+        })
     }
 
     fn parse_set_variable(&mut self) -> PResult<SetVariableValue> {
@@ -5094,7 +5129,6 @@ impl Parser<'_> {
 
         let source = Box::new(self.parse_query()?);
         let returning = self.parse_returning(Optional)?;
-
         Ok(Statement::Insert {
             table_name,
             columns,
