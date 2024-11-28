@@ -2925,32 +2925,35 @@ async fn test_commit_with_large_size() {
         };
 
     let epoch1 = initial_epoch.next_epoch();
-    let sst1_epoch1 = SstableInfo {
+    let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
-    let sst1_epoch2 = SstableInfo {
+    let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 12,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
-    let sst1_epoch3 = SstableInfo {
+    let sst1_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 13,
         object_id: 3,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,
