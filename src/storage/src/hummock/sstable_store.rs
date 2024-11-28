@@ -715,7 +715,10 @@ mod tests {
             holder,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
-            info.key_range.clone(),
+            (
+                *info.table_ids.first().unwrap(),
+                *info.table_ids.last().unwrap(),
+            ),
         );
         iter.rewind().await.unwrap();
         for i in x_range {

@@ -234,7 +234,10 @@ async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
         table,
         sstable_store.clone(),
         default_read_options,
-        info.key_range.clone(),
+        (
+            *info.table_ids.first().unwrap(),
+            *info.table_ids.last().unwrap(),
+        ),
     );
     iter.rewind().await.unwrap();
     while iter.is_valid() {

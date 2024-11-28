@@ -877,7 +877,10 @@ impl HummockVersionReader {
                 table_holder,
                 self.sstable_store.clone(),
                 sst_read_options.clone(),
-                sstable_info.key_range.clone(),
+                (
+                    *sstable_info.table_ids.first().unwrap(),
+                    *sstable_info.table_ids.last().unwrap(),
+                ),
             ));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -900,10 +903,10 @@ impl HummockVersionReader {
                 if table_infos.peek().is_none() {
                     continue;
                 }
-                let sstables = table_infos.cloned().collect_vec();
-                if sstables.len() > 1 {
+                let sstable_infos = table_infos.cloned().collect_vec();
+                if sstable_infos.len() > 1 {
                     factory.add_concat_sst_iter(
-                        sstables,
+                        sstable_infos,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     );
@@ -911,7 +914,7 @@ impl HummockVersionReader {
                 } else {
                     let sstable = self
                         .sstable_store
-                        .sstable(&sstables[0], local_stats)
+                        .sstable(&sstable_infos[0], local_stats)
                         .await?;
 
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
@@ -933,7 +936,10 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        sstables[0].key_range.clone(),
+                        (
+                            *sstable_infos[0].table_ids.first().unwrap(),
+                            *sstable_infos[0].table_ids.last().unwrap(),
+                        ),
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -968,7 +974,10 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        sstable_info.key_range.clone(),
+                        (
+                            *sstable_info.table_ids.first().unwrap(),
+                            *sstable_info.table_ids.last().unwrap(),
+                        ),
                     ));
                     local_stats.overlapping_iter_count += 1;
                 }
@@ -1018,23 +1027,26 @@ impl HummockVersionReader {
         });
 
         async fn make_iter(
-            ssts: impl Iterator<Item = &SstableInfo>,
+            sstable_infos: impl Iterator<Item = &SstableInfo>,
             sstable_store: &SstableStoreRef,
             read_options: Arc<SstableIteratorReadOptions>,
             local_stat: &mut StoreLocalStatistic,
         ) -> HummockResult<MergeIterator<SstableIterator>> {
-            let iters = try_join_all(ssts.map(|sst| {
+            let iters = try_join_all(sstable_infos.map(|sstable_info| {
                 let sstable_store = sstable_store.clone();
                 let read_options = read_options.clone();
                 async move {
                     let mut local_stat = StoreLocalStatistic::default();
-                    let table_holder = sstable_store.sstable(sst, &mut local_stat).await?;
+                    let table_holder = sstable_store.sstable(sstable_info, &mut local_stat).await?;
                     Ok::<_, HummockError>((
                         SstableIterator::new(
                             table_holder,
                             sstable_store,
                             read_options,
-                            sst.key_range.clone(),
+                            (
+                                *sstable_info.table_ids.first().unwrap(),
+                                *sstable_info.table_ids.last().unwrap(),
+                            ),
                         ),
                         local_stat,
                     ))

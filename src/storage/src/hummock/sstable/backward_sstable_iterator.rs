@@ -16,8 +16,8 @@ use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use foyer::CacheHint;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::key_range::KeyRange;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -163,7 +163,7 @@ impl SstableIteratorType for BackwardSstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         _: Arc<SstableIteratorReadOptions>,
-        _key_range: KeyRange,
+        _read_table_id_range: (StateTableId, StateTableId),
     ) -> Self {
         BackwardSstableIterator::new(sstable, sstable_store)
     }

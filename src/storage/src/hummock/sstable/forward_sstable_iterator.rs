@@ -18,7 +18,6 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
@@ -33,7 +32,7 @@ pub trait SstableIteratorType: HummockIterator + 'static {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
-        key_range: KeyRange,
+        read_table_id_range: (StateTableId, StateTableId),
     ) -> Self;
 }
 
@@ -54,14 +53,14 @@ pub struct SstableIterator {
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
+    // is_current_block_valid: bool,
+    // // The key range of the iterator
+    // key_range: KeyRange,
 
-    is_current_block_valid: bool,
-    // The key range of the iterator
-    key_range: KeyRange,
-
-    // used for checking if the block is valid
-    // it's a light weight check only when the table id changes
-    last_table_id: StateTableId,
+    // // used for checking if the block is valid
+    // // it's a light weight check only when the table id changes
+    // last_table_id: StateTableId,
+    read_block_meta_range: (usize, usize),
 }
 
 impl SstableIterator {
@@ -69,8 +68,19 @@ impl SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
-        key_range: KeyRange,
+        read_table_id_range: (StateTableId, StateTableId),
     ) -> Self {
+        let mut start_idx = 0;
+        let mut end_idx = sstable.meta.block_metas.len() - 1;
+
+        while sstable.meta.block_metas[start_idx].table_id().table_id() < read_table_id_range.0 {
+            start_idx += 1;
+        }
+
+        while sstable.meta.block_metas[end_idx].table_id().table_id() > read_table_id_range.1 {
+            end_idx -= 1;
+        }
+
         Self {
             block_iter: None,
             cur_idx: 0,
@@ -81,16 +91,15 @@ impl SstableIterator {
             options,
             preload_end_block_idx: 0,
             preload_retry_times: 0,
-            is_current_block_valid: true,
-            key_range,
-            last_table_id: StateTableId::default(),
+            read_block_meta_range: (start_idx, end_idx),
         }
     }
 
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
         self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.meta.block_metas;
+            let block_metas = &self.sst.meta.block_metas
+                [self.read_block_meta_range.0..=self.read_block_meta_range.1];
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx < block_metas.len() {
                 let end_idx = match bound {
@@ -134,7 +143,7 @@ impl SstableIterator {
         tokio::task::consume_budget().await;
 
         let mut hit_cache = false;
-        if idx >= self.sst.block_count() {
+        if idx > self.read_block_meta_range.1 {
             self.block_iter = None;
             return Ok(());
         }
@@ -239,23 +248,12 @@ impl SstableIterator {
         }
 
         self.cur_idx = idx;
-        let new_table_id = block_iter.table_id().table_id();
-        if self.last_table_id != new_table_id {
-            self.last_table_id = new_table_id;
-            self.is_current_block_valid = block_iter.is_valid()
-                && match self.key_range.right_exclusive {
-                    true => block_iter.key().lt(&FullKey::decode(&self.key_range.right)), /* key < right */
-                    false => block_iter.key().le(&FullKey::decode(&self.key_range.right)), /* key <= right */
-                };
-        }
 
         Ok(())
     }
 
     fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
-        self.sst
-            .meta
-            .block_metas
+        self.sst.meta.block_metas[self.read_block_meta_range.0..=self.read_block_meta_range.1]
             .partition_point(|block_meta| {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
@@ -264,6 +262,10 @@ impl SstableIterator {
             })
             .saturating_sub(1) // considering the boundary of 0
     }
+
+    // fn block_meta_range(&self) -> &[BlockMeta] {
+    //     &self.sst.meta.block_metas[self.read_block_meta_range.0..=self.read_block_meta_range.1]
+    // }
 }
 
 impl HummockIterator for SstableIterator {
@@ -291,19 +293,13 @@ impl HummockIterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid()) && self.is_current_block_valid
+        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
         self.init_block_prefetch_range(0);
-        let start_seek_idx = self.calculate_block_idx_by_key(FullKey::decode(&self.key_range.left));
-        assert!(
-            FullKey::decode(&self.sst.meta.block_metas[start_seek_idx].smallest_key)
-                .le(&FullKey::decode(&self.key_range.left))
-        );
-
         // seek_idx will update the current block iter state
-        self.seek_idx(start_seek_idx, None).await?;
+        self.seek_idx(self.read_block_meta_range.0, None).await?;
         Ok(())
     }
 
@@ -336,9 +332,9 @@ impl SstableIteratorType for SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
-        key_range: KeyRange,
+        read_table_id_range: (StateTableId, StateTableId),
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options, key_range)
+        SstableIterator::new(sstable, sstable_store, options, read_table_id_range)
     }
 }
 
@@ -377,7 +373,10 @@ mod tests {
             handle,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
-            sstable_info.key_range,
+            (
+                *sstable_info.table_ids.first().unwrap(),
+                *sstable_info.table_ids.last().unwrap(),
+            ),
         );
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
@@ -421,7 +420,10 @@ mod tests {
             sstable,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
-            sstable_info.key_range,
+            (
+                *sstable_info.table_ids.first().unwrap(),
+                *sstable_info.table_ids.last().unwrap(),
+            ),
         );
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -530,7 +532,10 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store.clone(),
             options.clone(),
-            KeyRange::inf(),
+            (
+                *sst_info.table_ids.first().unwrap(),
+                *sst_info.table_ids.last().unwrap(),
+            ),
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
@@ -553,7 +558,10 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store,
             options.clone(),
-            KeyRange::inf(),
+            (
+                *sst_info.table_ids.first().unwrap(),
+                *sst_info.table_ids.last().unwrap(),
+            ),
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
@@ -569,7 +577,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_key_range() {
+    async fn test_read_table_id_range() {
         {
             let sstable_store = mock_sstable_store().await;
             let (sstable, sstable_info) =
@@ -579,69 +587,14 @@ mod tests {
                 sstable,
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
-                sstable_info.key_range,
+                (
+                    *sstable_info.table_ids.first().unwrap(),
+                    *sstable_info.table_ids.last().unwrap(),
+                ),
             );
             sstable_iter.rewind().await.unwrap();
             assert!(sstable_iter.is_valid());
             assert_eq!(sstable_iter.key(), test_key_of(0).to_ref());
-        }
-
-        {
-            let sstable_store = mock_sstable_store().await;
-            let (sstable, _sstable_info) =
-                gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
-                    .await;
-            // test skip key_range left
-            let key_range = KeyRange {
-                left: test_key_of(5000).encode().into(),
-                right: test_key_of(100000).encode().into(),
-                right_exclusive: false,
-            };
-            let mut sstable_iter = SstableIterator::create(
-                sstable,
-                sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::default()),
-                key_range.clone(),
-            );
-            sstable_iter.rewind().await.unwrap();
-            assert!(sstable_iter.is_valid());
-            assert!(sstable_iter.key().le(&FullKey::decode(&key_range.left)));
-        }
-
-        {
-            let sstable_store = mock_sstable_store().await;
-            let (sstable, _sstable_info) =
-                gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
-                    .await;
-            // test skip key_range left
-            let start_idx = 5000;
-            let end_idx = 6000;
-            let key_range = KeyRange {
-                left: test_key_of(start_idx).encode().into(),
-                right: test_key_of(end_idx).encode().into(),
-                right_exclusive: false,
-            };
-            let mut sstable_iter = SstableIterator::create(
-                sstable,
-                sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::default()),
-                key_range.clone(),
-            );
-            sstable_iter.rewind().await.unwrap();
-            assert!(sstable_iter.is_valid());
-            assert!(sstable_iter.key().le(&FullKey::decode(&key_range.left)));
-
-            let mut cnt = 0;
-            let mut last_key = FullKey::decode(&key_range.left).to_vec();
-            while sstable_iter.is_valid() {
-                last_key = sstable_iter.key().to_vec();
-                cnt += 1;
-                sstable_iter.next().await.unwrap();
-            }
-
-            // table_id not change, key_range check can not be done
-            assert!(cnt > (end_idx - start_idx + 1));
-            assert_ne!(last_key, test_key_of(end_idx));
         }
 
         {
@@ -692,24 +645,18 @@ mod tests {
                     vec![1, 2, 3],
                 )
                 .await;
-
-                let key_range = KeyRange {
-                    left: k1.encode().into(),
-                    right: k3.encode().into(),
-                    right_exclusive: false,
-                };
                 let mut sstable_iter = SstableIterator::create(
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    key_range.clone(),
+                    (0, 3),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
-                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+                assert!(sstable_iter.key().eq(&k1.to_ref()));
 
                 let mut cnt = 0;
-                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                let mut last_key = k1.clone();
                 while sstable_iter.is_valid() {
                     last_key = sstable_iter.key().to_vec();
                     cnt += 1;
@@ -736,23 +683,18 @@ mod tests {
                 )
                 .await;
 
-                let key_range = KeyRange {
-                    left: k1.encode().into(),
-                    right: k2.encode().into(),
-                    right_exclusive: false,
-                };
                 let mut sstable_iter = SstableIterator::create(
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    key_range.clone(),
+                    (1, 2),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
-                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+                assert!(sstable_iter.key().eq(&k1.to_ref()));
 
                 let mut cnt = 0;
-                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                let mut last_key = k1.clone();
                 while sstable_iter.is_valid() {
                     last_key = sstable_iter.key().to_vec();
                     cnt += 1;
@@ -779,23 +721,18 @@ mod tests {
                 )
                 .await;
 
-                let key_range = KeyRange {
-                    left: k1.encode().into(),
-                    right: k3.encode().into(),
-                    right_exclusive: true,
-                };
                 let mut sstable_iter = SstableIterator::create(
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    key_range.clone(),
+                    (2, 3),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
-                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
 
                 let mut cnt = 0;
-                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                let mut last_key = k1.clone();
                 while sstable_iter.is_valid() {
                     last_key = sstable_iter.key().to_vec();
                     cnt += 1;
@@ -803,7 +740,7 @@ mod tests {
                 }
 
                 assert_eq!(2, cnt);
-                assert_eq!(last_key, k2.clone());
+                assert_eq!(last_key, k3.clone());
             }
 
             {
@@ -822,23 +759,18 @@ mod tests {
                 )
                 .await;
 
-                let key_range = KeyRange {
-                    left: k2.encode().into(),
-                    right: k3.encode().into(),
-                    right_exclusive: true,
-                };
                 let mut sstable_iter = SstableIterator::create(
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    key_range.clone(),
+                    (2, 2),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
-                assert!(sstable_iter.key().eq(&FullKey::decode(&key_range.left)));
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
 
                 let mut cnt = 0;
-                let mut last_key = FullKey::decode(&key_range.left).to_vec();
+                let mut last_key = k1.clone();
                 while sstable_iter.is_valid() {
                     last_key = sstable_iter.key().to_vec();
                     cnt += 1;

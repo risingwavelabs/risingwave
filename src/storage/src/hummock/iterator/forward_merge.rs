@@ -135,13 +135,19 @@ mod test {
                 sstable_store.sstable(&table0, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
-                table0.key_range.clone(),
+                (
+                    *table0.table_ids.first().unwrap(),
+                    *table0.table_ids.last().unwrap(),
+                ),
             ),
             SstableIterator::create(
                 sstable_store.sstable(&table1, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
-                table1.key_range.clone(),
+                (
+                    *table1.table_ids.first().unwrap(),
+                    *table1.table_ids.last().unwrap(),
+                ),
             ),
         ]);
 
