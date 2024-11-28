@@ -89,7 +89,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                     object_name,
                     self.columns.clone(),
                     Some(self.parser_config.common.rw_columns.clone()),
-                    self.source_ctx.source_ctrl_opts.chunk_size,
+                    self.source_ctx.source_ctrl_opts.max_chunk_size,
                     split.offset,
                 )
                 .await?;
@@ -169,7 +169,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 &fragment_id,
             ]);
 
-        let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
+        let max_chunk_size = source_ctx.source_ctrl_opts.max_chunk_size;
         let mut batch = Vec::with_capacity(max_chunk_size);
         let mut line_buf = String::new();
 

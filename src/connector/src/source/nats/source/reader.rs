@@ -115,7 +115,7 @@ impl SplitReader for NatsSplitReader {
 impl NatsSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
-        let capacity = self.source_ctx.source_ctrl_opts.chunk_size;
+        let capacity = self.source_ctx.source_ctrl_opts.max_chunk_size;
         let messages = self.consumer.messages().await?;
         #[for_await]
         for msgs in messages.ready_chunks(capacity) {

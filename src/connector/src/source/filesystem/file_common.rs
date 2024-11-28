@@ -24,8 +24,8 @@ use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
-///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
-/// and can be a local file, a distributed file system, or am object in S3 bucket.
+/// [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
+/// and can be a local file, a distributed file system, or an object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct FsSplit {
     pub name: String,
@@ -73,7 +73,7 @@ impl FsSplit {
     }
 }
 
-///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
+/// [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct OpendalFsSplit<Src: OpendalSource> {

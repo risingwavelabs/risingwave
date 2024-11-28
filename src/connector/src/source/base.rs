@@ -144,9 +144,7 @@ pub const MAX_CHUNK_SIZE: usize = 1024;
 #[derive(Debug, Clone)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
-    pub chunk_size: usize,
-    /// Rate limit of source
-    pub rate_limit: Option<u32>,
+    pub max_chunk_size: usize,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
@@ -224,8 +222,7 @@ impl SourceContext {
             "dummy".to_string(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
-                chunk_size: MAX_CHUNK_SIZE,
-                rate_limit: None,
+                max_chunk_size: MAX_CHUNK_SIZE,
             },
             ConnectorProperties::default(),
             None,

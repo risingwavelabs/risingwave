@@ -151,8 +151,7 @@ impl SourceExecutor {
             "NA".to_owned(), // source name was not passed in batch plan
             self.metrics,
             SourceCtrlOpts {
-                chunk_size: self.chunk_size,
-                rate_limit: None,
+                max_chunk_size: self.chunk_size,
             },
             ConnectorProperties::default(),
             None,
