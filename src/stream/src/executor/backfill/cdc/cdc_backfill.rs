@@ -14,7 +14,6 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::time::Duration;
 
 use either::Either;
 use futures::stream;
@@ -33,7 +32,6 @@ use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReader
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::Instrument;
 
 use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -47,6 +45,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
+use crate::executor::source::get_unlimited_backoff_strategy;
 use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
@@ -190,7 +189,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut table_reader: Option<ExternalTableReaderImpl> = None;
         let external_table = self.external_table.clone();
         let mut future = Box::pin(async move {
-            let backoff = get_backoff_strategy();
+            let backoff = get_unlimited_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
                 match external_table.create_table_reader().await {
                     Ok(reader) => Ok(reader),
@@ -780,16 +779,6 @@ async fn build_reader_and_poll_upstream(
             msg.transpose()
         }
     }
-}
-
-fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
-    const BASE_DELAY: Duration = Duration::from_secs(1);
-    const BACKOFF_FACTOR: u64 = 2;
-    const MAX_DELAY: Duration = Duration::from_secs(10);
-    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
-        .factor(BACKOFF_FACTOR)
-        .max_delay(MAX_DELAY)
-        .map(jitter)
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]

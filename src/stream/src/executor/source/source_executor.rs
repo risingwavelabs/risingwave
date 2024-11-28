@@ -51,6 +51,7 @@ use super::{
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
+use crate::executor::source::get_unlimited_backoff_strategy;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::UpdateMutation;
 
@@ -514,7 +515,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc).await;
         let source_ctx = Arc::new(source_ctx);
         let mut build_source_stream_fut = Box::pin(async move {
-            let backoff = get_backoff_strategy();
+            let backoff = get_unlimited_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
                 match source_reader
                     .build_stream(
@@ -814,16 +815,6 @@ async fn build_source_stream_and_poll_barrier(
             msg.transpose()
         }
     }
-}
-
-fn get_backoff_strategy() -> impl Iterator<Item = Duration> {
-    const BASE_DELAY: Duration = Duration::from_secs(1);
-    const BACKOFF_FACTOR: u64 = 2;
-    const MAX_DELAY: Duration = Duration::from_secs(10);
-    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
-        .factor(BACKOFF_FACTOR)
-        .max_delay(MAX_DELAY)
-        .map(jitter)
 }
 
 impl<S: StateStore> Execute for SourceExecutor<S> {

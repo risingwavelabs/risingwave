@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use governor::clock::MonotonicClock;
@@ -49,6 +50,7 @@ pub use source_backfill_state_table::BackfillStateTableHandler;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
@@ -181,4 +183,14 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
             }
         }
     }
+}
+
+pub fn get_unlimited_backoff_strategy() -> impl Iterator<Item = Duration> {
+    const BASE_DELAY: Duration = Duration::from_secs(1);
+    const BACKOFF_FACTOR: u64 = 2;
+    const MAX_DELAY: Duration = Duration::from_secs(10);
+    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
+        .factor(BACKOFF_FACTOR)
+        .max_delay(MAX_DELAY)
+        .map(jitter)
 }
