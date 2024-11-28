@@ -541,6 +541,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan(
     context: OptimizerContext,
     table_name: ObjectName,
