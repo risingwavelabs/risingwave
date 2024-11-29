@@ -122,7 +122,7 @@ impl SessionParamsController {
         param.value = Set(new_param.clone());
         param.update(&self.db).await?;
 
-        self.notify_workers(name.to_string(), new_param.clone());
+        self.notify_workers(name.clone(), new_param.clone());
 
         Ok(new_param)
     }

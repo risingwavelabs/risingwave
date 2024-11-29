@@ -67,7 +67,7 @@ impl S3FileReader {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
-        let source_name = source_ctx.source_name.to_string();
+        let source_name = source_ctx.source_name.clone();
         let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
         let split_id = split.id();
 

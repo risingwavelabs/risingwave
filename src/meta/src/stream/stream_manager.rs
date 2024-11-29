@@ -391,7 +391,7 @@ impl GlobalStreamManager {
             upstream_root_actors,
             dispatchers,
             init_split_assignment,
-            definition: definition.to_string(),
+            definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
             ddl_type,

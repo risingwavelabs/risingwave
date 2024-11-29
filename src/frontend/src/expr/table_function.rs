@@ -337,10 +337,10 @@ impl TableFunction {
                             TokioPgType::JSONB => DataType::Jsonb,
                             TokioPgType::BYTEA => DataType::Bytea,
                             _ => {
-                                return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {}", column.type_())
-                                        .to_string(),
-                                )
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {}",
+                                    column.type_()
+                                ))
                                 .into());
                             }
                         };
@@ -493,10 +493,10 @@ impl TableFunction {
                             | MySqlColumnType::MYSQL_TYPE_SET
                             | MySqlColumnType::MYSQL_TYPE_GEOMETRY
                             | MySqlColumnType::MYSQL_TYPE_NULL => {
-                                return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {:?}", column.column_type())
-                                        .to_string(),
-                                )
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {:?}",
+                                    column.column_type()
+                                ))
                                 .into());
                             }
                         };

@@ -281,7 +281,7 @@ impl IcebergSink {
 
             let location = {
                 let mut names = namespace.clone().inner();
-                names.push(self.config.common.table_name.to_string());
+                names.push(self.config.common.table_name.clone());
                 match &self.config.common.warehouse_path {
                     Some(warehouse_path) => {
                         let url = Url::parse(warehouse_path);

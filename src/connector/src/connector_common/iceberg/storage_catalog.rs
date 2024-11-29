@@ -223,7 +223,7 @@ impl Catalog for StorageCatalog {
         let table_ident = TableIdent::new(namespace.clone(), creation.name.clone());
         let table_path = {
             let mut names = table_ident.namespace.clone().inner();
-            names.push(table_ident.name.to_string());
+            names.push(table_ident.name.clone());
             if self.warehouse.ends_with('/') {
                 format!("{}{}", self.warehouse, names.join("/"))
             } else {
@@ -259,7 +259,7 @@ impl Catalog for StorageCatalog {
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         let table_path = {
             let mut names = table.namespace.clone().inner();
-            names.push(table.name.to_string());
+            names.push(table.name.clone());
             if self.warehouse.ends_with('/') {
                 format!("{}{}", self.warehouse, names.join("/"))
             } else {
@@ -300,7 +300,7 @@ impl Catalog for StorageCatalog {
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
         let table_path = {
             let mut names = table.namespace.clone().inner();
-            names.push(table.name.to_string());
+            names.push(table.name.clone());
             if self.warehouse.ends_with('/') {
                 format!("{}{}", self.warehouse, names.join("/"))
             } else {

@@ -80,7 +80,7 @@ impl RowEncoder for TemplateEncoder {
         row: impl Row,
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
-        let mut s = self.template.to_string();
+        let mut s = self.template.clone();
 
         for idx in col_indices {
             let field = &self.schema[idx];

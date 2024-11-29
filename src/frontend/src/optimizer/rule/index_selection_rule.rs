@@ -607,7 +607,7 @@ impl IndexSelectionRule {
 
         Some(
             generic::TableScan::new(
-                index.index_table.name.to_string(),
+                index.index_table.name.clone(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()

@@ -32,7 +32,7 @@ pub(crate) async fn into_chunk_stream(
     let actor_id = source_ctx.actor_id.to_string();
     let fragment_id = source_ctx.fragment_id.to_string();
     let source_id = source_ctx.source_id.to_string();
-    let source_name = source_ctx.source_name.to_string();
+    let source_name = source_ctx.source_name.clone();
     let metrics = source_ctx.metrics.clone();
     let mut partition_input_count = HashMap::new();
     let mut partition_bytes_count = HashMap::new();

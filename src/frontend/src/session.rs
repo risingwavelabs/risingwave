@@ -1197,7 +1197,7 @@ impl SessionImpl {
     pub fn create_temporary_source(&self, source: SourceCatalog) {
         self.temporary_source_manager
             .lock()
-            .create_source(source.name.to_string(), source);
+            .create_source(source.name.clone(), source);
     }
 
     pub fn get_temporary_source(&self, name: &str) -> Option<SourceCatalog> {

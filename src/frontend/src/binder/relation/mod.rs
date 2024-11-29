@@ -300,11 +300,11 @@ impl Binder {
         let mut index = 0;
         columns.into_iter().for_each(|(is_hidden, mut field)| {
             let name = match is_hidden {
-                true => field.name.to_string(),
+                true => field.name.clone(),
                 false => alias_iter
                     .next()
                     .map(|t| t.real_value())
-                    .unwrap_or_else(|| field.name.to_string()),
+                    .unwrap_or_else(|| field.name.clone()),
             };
             field.name.clone_from(&name);
             self.context.columns.push(ColumnBinding::new(

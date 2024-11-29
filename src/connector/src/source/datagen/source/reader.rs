@@ -154,7 +154,7 @@ impl SplitReader for DatagenSplitReader {
                 let actor_id = self.source_ctx.actor_id.to_string();
                 let fragment_id = self.source_ctx.fragment_id.to_string();
                 let source_id = self.source_ctx.source_id.to_string();
-                let source_name = self.source_ctx.source_name.to_string();
+                let source_name = self.source_ctx.source_name.clone();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 let partition_input_count_metric =
