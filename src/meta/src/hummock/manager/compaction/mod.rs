@@ -1121,7 +1121,6 @@ impl HummockManager {
         mut compaction_guard: RwLockWriteGuard<'_, Compaction>,
         mut versioning_guard: RwLockWriteGuard<'_, Versioning>,
     ) -> Result<Vec<bool>> {
-        // let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction: &mut Compaction = &mut compaction_guard;
         let start_time = Instant::now();
@@ -1131,7 +1130,6 @@ impl HummockManager {
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
-        // let mut versioning_guard = self.versioning.write().await;
         let versioning: &mut Versioning = &mut versioning_guard;
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
