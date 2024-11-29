@@ -190,6 +190,7 @@ pub struct StreamingMetrics {
     materialize_cache_hit_count: RelabeledGuardedIntCounterVec<3>,
     materialize_cache_total_count: RelabeledGuardedIntCounterVec<3>,
     materialize_input_row_count: RelabeledGuardedIntCounterVec<3>,
+    materialize_commit_epoch: RelabeledGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();
@@ -246,6 +247,15 @@ impl StreamingMetrics {
         let materialize_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_mview_input_row_count",
             "Total number of rows streamed into materialize executors",
+            &["actor_id", "table_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let materialize_commit_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "materialize_commit_epoch",
+            "The current (last) committed epoch",
             &["actor_id", "table_id", "fragment_id"],
             registry
         )
@@ -1134,6 +1144,7 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             materialize_input_row_count,
+            materialize_commit_epoch,
         }
     }
 
@@ -1493,6 +1504,9 @@ impl StreamingMetrics {
             materialize_input_row_count: self
                 .materialize_input_row_count
                 .with_guarded_label_values(label_list),
+            materialize_commit_epoch: self
+                .materialize_commit_epoch
+                .with_guarded_label_values(label_list),
         }
     }
 }
@@ -1526,6 +1540,7 @@ pub struct MaterializeMetrics {
     pub materialize_cache_hit_count: LabelGuardedIntCounter<3>,
     pub materialize_cache_total_count: LabelGuardedIntCounter<3>,
     pub materialize_input_row_count: LabelGuardedIntCounter<3>,
+    pub materialize_commit_epoch: LabelGuardedIntGauge<3>,
 }
 
 pub struct GroupTopNMetrics {
