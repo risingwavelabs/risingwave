@@ -91,8 +91,6 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
-    // use default before refinement.
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
@@ -107,7 +105,6 @@ pub async fn get_from_sstable_info(
     if !iter.is_valid() {
         return Ok(None);
     }
-
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
