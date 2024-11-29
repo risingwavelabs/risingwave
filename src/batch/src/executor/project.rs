@@ -149,7 +149,7 @@ mod tests {
             expr: expr_vec,
             child: Box::new(mock_executor),
             schema: Schema { fields },
-            identity: "ProjectExecutor".to_string(),
+            identity: "ProjectExecutor".to_owned(),
         });
 
         let fields = &proj_executor.schema().fields;
@@ -176,7 +176,7 @@ mod tests {
         let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
-            "ValuesExecutor".to_string(),
+            "ValuesExecutor".to_owned(),
             CHUNK_SIZE,
         ));
 
@@ -184,7 +184,7 @@ mod tests {
             expr: vec![Box::new(literal)],
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32),
-            identity: "ProjectExecutor2".to_string(),
+            identity: "ProjectExecutor2".to_owned(),
         });
         let mut stream = proj_executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();

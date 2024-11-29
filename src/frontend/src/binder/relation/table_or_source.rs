@@ -143,7 +143,7 @@ impl Binder {
                     } else {
                         return Err(CatalogError::NotFound(
                             "table or source",
-                            table_name.to_string(),
+                            table_name.to_owned(),
                         )
                         .into());
                     }
@@ -196,12 +196,12 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
+                    Err(CatalogError::NotFound("table or source", table_name.to_owned()).into())
                 })()?,
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_string(), alias)?;
+        self.bind_table_to_context(columns, table_name.to_owned(), alias)?;
         Ok(ret)
     }
 
@@ -339,7 +339,7 @@ impl Binder {
             columns
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
-            table_name.to_string(),
+            table_name.to_owned(),
             alias,
         )?;
 
@@ -391,7 +391,7 @@ impl Binder {
 
         if table.append_only && !is_insert {
             return Err(ErrorCode::BindError(
-                "append-only table does not support update or delete".to_string(),
+                "append-only table does not support update or delete".to_owned(),
             )
             .into());
         }

@@ -42,7 +42,7 @@ fn alter_prost_user_info(
         if require_super {
             return Err(PermissionDenied(
                 "must be superuser to alter superuser roles or change superuser attribute"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }
@@ -54,7 +54,7 @@ fn alter_prost_user_info(
                 UserOption::EncryptedPassword(_) | UserOption::Password(_)
             );
         if !session_user.can_create_user && !change_self_password {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+            return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
         }
     }
 
@@ -134,19 +134,19 @@ fn alter_rename_prost_user_info(
     session_user: &UserCatalog,
 ) -> Result<(UserInfo, Vec<UpdateField>)> {
     if session_user.id == user_info.id {
-        return Err(InternalError("session user cannot be renamed".to_string()).into());
+        return Err(InternalError("session user cannot be renamed".to_owned()).into());
     }
 
     if !session_user.is_super {
         if user_info.is_super {
             return Err(
-                PermissionDenied("must be superuser to rename superusers".to_string()).into(),
+                PermissionDenied("must be superuser to rename superusers".to_owned()).into(),
             );
         }
 
         if !session_user.can_create_user {
             return Err(
-                PermissionDenied("Do not have the privilege to rename user".to_string()).into(),
+                PermissionDenied("Do not have the privilege to rename user".to_owned()).into(),
             );
         }
     }
@@ -172,7 +172,7 @@ pub async fn handle_alter_user(
 
         let session_user = user_reader
             .get_user_by_name(session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_string()))?;
+            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {

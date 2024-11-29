@@ -33,7 +33,7 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
                 .all(|action| acl_sets.has_mode(action.into()));
             if !valid {
                 return Err(ErrorCode::BindError(
-                    "Invalid privilege type for the given object.".to_string(),
+                    "Invalid privilege type for the given object.".to_owned(),
                 )
                 .into());
             }
@@ -58,7 +58,7 @@ fn get_all_available_modes(object: &GrantObjects) -> Result<&AclModeSet> {
         }
         GrantObjects::Sinks(_) => Ok(&acl::ALL_AVAILABLE_SINK_MODES),
         _ => Err(
-            ErrorCode::BindError("Invalid privilege type for the given object.".to_string()).into(),
+            ErrorCode::BindError("Invalid privilege type for the given object.".to_owned()).into(),
         ),
     }
 }

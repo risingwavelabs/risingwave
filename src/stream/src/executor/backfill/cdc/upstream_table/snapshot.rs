@@ -302,11 +302,11 @@ mod tests {
         loop {
             let row_stream = reader.snapshot_read(
                 SchemaTableName {
-                    schema_name: "mydb".to_string(),
-                    table_name: "orders_rw".to_string(),
+                    schema_name: "mydb".to_owned(),
+                    table_name: "orders_rw".to_owned(),
                 },
                 start_pk.clone(),
-                vec!["o_orderkey".to_string()],
+                vec!["o_orderkey".to_owned()],
                 1000,
             );
             let mut builder = DataChunkBuilder::new(rw_schema.clone().data_types(), 256);

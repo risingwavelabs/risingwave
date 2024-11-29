@@ -102,7 +102,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
             println!(
                 "\tFragment{} ({})",
                 if ignore_id {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(" #{}", fragment.fragment_id)
                 },
@@ -117,7 +117,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                     println!(
                         "\t\tActor{} ({} splits): [{}]{}",
                         if ignore_id {
-                            "".to_string()
+                            "".to_owned()
                         } else {
                             format!(" #{:<3}", actor.actor_id,)
                         },
@@ -132,14 +132,14 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                             format!(
                                 " <- Upstream Actor{}: [{}]",
                                 if ignore_id {
-                                    "".to_string()
+                                    "".to_owned()
                                 } else {
                                     format!(" #{}", actor.upstream_actor_id[0])
                                 },
                                 upstream_splits.1
                             )
                         } else {
-                            "".to_string()
+                            "".to_owned()
                         }
                     );
                 } else {

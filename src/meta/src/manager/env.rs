@@ -303,7 +303,7 @@ impl MetaOpts {
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
-            advertise_addr: "".to_string(),
+            advertise_addr: "".to_owned(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,
             enable_trivial_move: true,
@@ -315,7 +315,7 @@ impl MetaOpts {
             secret_store_private_key: Some(
                 hex::decode("0123456789abcdef0123456789abcdef").unwrap(),
             ),
-            temp_secret_file_dir: "./secrets".to_string(),
+            temp_secret_file_dir: "./secrets".to_owned(),
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
             split_group_size_ratio: 0.9,

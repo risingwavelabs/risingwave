@@ -137,7 +137,7 @@ pub fn insert_privatelink_broker_rewrite_map(
     if let Some(endpoint) = privatelink_endpoint {
         for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
             // rewrite the broker address to endpoint:port
-            broker_rewrite_map.insert(broker.to_string(), format!("{}:{}", &endpoint, link.port));
+            broker_rewrite_map.insert(broker.to_owned(), format!("{}:{}", &endpoint, link.port));
         }
     } else {
         if svc.is_none() {
@@ -154,7 +154,7 @@ pub fn insert_privatelink_broker_rewrite_map(
             // rewrite the broker address to the dns name w/o az
             // requires the NLB has enabled the cross-zone load balancing
             broker_rewrite_map.insert(
-                broker.to_string(),
+                broker.to_owned(),
                 format!("{}:{}", &svc.endpoint_dns_name, link.port),
             );
         }
@@ -163,6 +163,6 @@ pub fn insert_privatelink_broker_rewrite_map(
     // save private link dns names into source properties, which
     // will be extracted into KafkaProperties
     let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
-    with_options.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_string(), json);
+    with_options.insert(PRIVATE_LINK_BROKER_REWRITE_MAP_KEY.to_owned(), json);
     Ok(())
 }

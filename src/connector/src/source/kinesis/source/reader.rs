@@ -131,7 +131,7 @@ impl KinesisSplitReader {
                 tracing::warn!(
                     "shard iterator is none unexpectedly, may reach the end of shard {}, latest seq {}, retrying in one second",
                     self.shard_id,
-                    self.latest_offset.as_ref().unwrap_or(&"None".to_string())
+                    self.latest_offset.as_ref().unwrap_or(&"None".to_owned())
                 );
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 self.new_shard_iter().await?;
@@ -348,8 +348,8 @@ mod tests {
                 assume_role_arn: None,
                 credentials_access_key: None,
                 credentials_secret_access_key: None,
-                stream_name: "kinesis_debug".to_string(),
-                stream_region: "cn-northwest-1".to_string(),
+                stream_name: "kinesis_debug".to_owned(),
+                stream_region: "cn-northwest-1".to_owned(),
                 endpoint: None,
                 session_token: None,
                 assume_role_external_id: None,
@@ -364,7 +364,7 @@ mod tests {
         let trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
             vec![KinesisSplit {
-                shard_id: "shardId-000000000001".to_string().into(),
+                shard_id: "shardId-000000000001".to_owned().into(),
                 next_offset: KinesisOffset::Earliest,
                 end_offset: KinesisOffset::None,
             }],
@@ -380,9 +380,9 @@ mod tests {
         let offset_reader = KinesisSplitReader::new(
             properties.clone(),
             vec![KinesisSplit {
-                shard_id: "shardId-000000000001".to_string().into(),
+                shard_id: "shardId-000000000001".to_owned().into(),
                 next_offset: KinesisOffset::AfterSequenceNumber(
-                    "49629139817504901062972448413535783695568426186596941842".to_string(),
+                    "49629139817504901062972448413535783695568426186596941842".to_owned(),
                 ),
                 end_offset: KinesisOffset::None,
             }],

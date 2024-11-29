@@ -32,7 +32,7 @@ impl Task for RedisReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
         ctx.pb.set_message("waiting for online...");
         let client = redis::Client::open(
-            "redis://".to_string() + &format!("{}:{}", self.config.address, self.config.port),
+            "redis://".to_owned() + &format!("{}:{}", self.config.address, self.config.port),
         )?;
 
         ctx.wait(|| {

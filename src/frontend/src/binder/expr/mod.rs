@@ -838,7 +838,7 @@ impl Binder {
             // Sanity check
             if constant_case_when_eval_inputs.len() != 1 {
                 return Err(ErrorCode::BindError(
-                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_owned()
                 )
                 .into());
             }
@@ -996,7 +996,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         column_id: ColumnId::new(0),
         name: column_def.name.real_value(),
         field_descs,
-        type_name: "".to_string(),
+        type_name: "".to_owned(),
         generated_or_default_column: None,
         description: None,
         additional_column: AdditionalColumn { column_type: None },

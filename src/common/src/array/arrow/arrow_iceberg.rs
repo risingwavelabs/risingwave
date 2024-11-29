@@ -165,9 +165,9 @@ impl IcebergCreateTableArrowConvert {
 
         let mut metadata = HashMap::new();
         // for iceberg-rust
-        metadata.insert("PARQUET:field_id".to_string(), field_id.to_string());
+        metadata.insert("PARQUET:field_id".to_owned(), field_id.to_string());
         // for icelake
-        metadata.insert("column_id".to_string(), field_id.to_string());
+        metadata.insert("column_id".to_owned(), field_id.to_string());
         arrow_field.set_metadata(metadata);
     }
 }

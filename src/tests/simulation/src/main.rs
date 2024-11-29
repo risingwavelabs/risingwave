@@ -164,9 +164,9 @@ async fn main() {
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
         per_session_queries: if args.use_arrangement_backfill {
-            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_string()].into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".to_owned()].into()
         } else {
-            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_string()].into()
+            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_owned()].into()
         },
     };
     let kill_opts = KillOpts {
@@ -264,11 +264,11 @@ async fn main() {
         cluster
             .run_on_client(async move {
                 risingwave_e2e_extended_mode_test::run_test_suit(
-                    "dev".to_string(),
-                    "root".to_string(),
-                    "frontend".to_string(),
+                    "dev".to_owned(),
+                    "root".to_owned(),
+                    "frontend".to_owned(),
                     4566,
-                    "".to_string(),
+                    "".to_owned(),
                 )
                 .await;
             })

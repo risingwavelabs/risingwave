@@ -102,14 +102,14 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
             cmd.get_program()
                 .to_str()
                 .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
-                .to_string(),
+                .to_owned(),
         );
     }
     for arg in cmd.get_args() {
         result.push(
             arg.to_str()
                 .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
-                .to_string(),
+                .to_owned(),
         );
     }
     Ok(result)
@@ -118,19 +118,19 @@ fn get_cmd_args(cmd: &Command, with_argv_0: bool) -> Result<Vec<String>> {
 fn get_cmd_envs(cmd: &Command, rust_backtrace: bool) -> Result<BTreeMap<String, String>> {
     let mut result = BTreeMap::new();
     if rust_backtrace {
-        result.insert("RUST_BACKTRACE".to_string(), "1".to_string());
+        result.insert("RUST_BACKTRACE".to_owned(), "1".to_owned());
     }
 
     for (k, v) in cmd.get_envs() {
         let k = k
             .to_str()
             .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
-            .to_string();
+            .to_owned();
         let v = if let Some(v) = v {
             Some(
                 v.to_str()
                     .ok_or_else(|| anyhow!("Cannot convert to UTF-8 string"))?
-                    .to_string(),
+                    .to_owned(),
             )
         } else {
             None
@@ -149,8 +149,8 @@ fn health_check_port(port: u16) -> HealthCheck {
                 port
             ),
         ],
-        interval: "1s".to_string(),
-        timeout: "5s".to_string(),
+        interval: "1s".to_owned(),
+        timeout: "5s".to_owned(),
         retries: 5,
     }
 }
@@ -164,8 +164,8 @@ fn health_check_port_prometheus(port: u16) -> HealthCheck {
                 port
             ),
         ],
-        interval: "1s".to_string(),
-        timeout: "5s".to_string(),
+        interval: "1s".to_owned(),
+        timeout: "5s".to_owned(),
         retries: 5,
     }
 }
@@ -195,7 +195,7 @@ impl Compose for ComputeNodeConfig {
             image: config.image.risingwave.clone(),
             environment,
             volumes: [
-                ("./risingwave.toml:/risingwave.toml".to_string()),
+                "./risingwave.toml:/risingwave.toml".to_owned(),
                 format!("{}:/filecache", self.id),
             ]
             .into_iter()
@@ -234,7 +234,7 @@ impl Compose for MetaNodeConfig {
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment,
-            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+            volumes: ["./risingwave.toml:/risingwave.toml".to_owned()]
                 .into_iter()
                 .collect(),
             command,
@@ -267,7 +267,7 @@ impl Compose for FrontendConfig {
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment,
-            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+            volumes: ["./risingwave.toml:/risingwave.toml".to_owned()]
                 .into_iter()
                 .collect(),
             command,
@@ -300,7 +300,7 @@ impl Compose for CompactorConfig {
         Ok(ComposeService {
             image: config.image.risingwave.clone(),
             environment,
-            volumes: [("./risingwave.toml:/risingwave.toml".to_string())]
+            volumes: ["./risingwave.toml:/risingwave.toml".to_owned()]
                 .into_iter()
                 .collect(),
             command,
@@ -392,7 +392,7 @@ impl Compose for RedPandaConfig {
             ports: vec![
                 format!("{}:{}", self.outside_port, self.outside_port),
                 // Redpanda admin port
-                "9644:9644".to_string(),
+                "9644:9644".to_owned(),
             ],
             healthcheck: Some(health_check_port(self.outside_port)),
             ..Default::default()
@@ -459,10 +459,10 @@ impl Compose for GrafanaConfig {
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![
                 format!("{}:/var/lib/grafana", self.id),
-                "./grafana.ini:/etc/grafana/grafana.ini".to_string(),
-                "./risedev-prometheus.yml:/etc/grafana/provisioning/datasources/risedev-prometheus.yml".to_string(),
-                "./risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/risedev-dashboard.yml".to_string(),
-                "./risingwave-dashboard.json:/risingwave-dashboard.json".to_string()
+                "./grafana.ini:/etc/grafana/grafana.ini".to_owned(),
+                "./risedev-prometheus.yml:/etc/grafana/provisioning/datasources/risedev-prometheus.yml".to_owned(),
+                "./risedev-dashboard.yml:/etc/grafana/provisioning/dashboards/risedev-dashboard.yml".to_owned(),
+                "./risingwave-dashboard.json:/risingwave-dashboard.json".to_owned()
             ],
             healthcheck: Some(health_check_port(self.port)),
             ..Default::default()
@@ -475,7 +475,7 @@ impl Compose for GrafanaConfig {
             )?;
             service.volumes.push(
                 "./risedev-tempo.yml:/etc/grafana/provisioning/datasources/risedev-tempo.yml"
-                    .to_string(),
+                    .to_owned(),
             );
         }
 

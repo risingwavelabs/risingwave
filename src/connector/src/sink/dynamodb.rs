@@ -338,7 +338,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
                 .zip_eq_debug(st.iter())
             {
                 let attr = map_data(sub_datum_ref, data_type)?;
-                map.insert(name.to_string(), attr);
+                map.insert(name.to_owned(), attr);
             }
             AttributeValue::M(map)
         }

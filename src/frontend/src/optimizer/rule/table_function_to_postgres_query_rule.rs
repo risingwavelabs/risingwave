@@ -38,7 +38,7 @@ impl Rule for TableFunctionToPostgresQueryRule {
             let fields = st
                 .types()
                 .zip_eq_debug(st.names())
-                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_string()))
+                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_owned()))
                 .collect_vec();
 
             let schema = Schema::new(fields);

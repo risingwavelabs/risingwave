@@ -161,8 +161,8 @@ impl CompleteBarrierTask {
                 .command
                 .as_ref()
                 .map(|command| command.to_string())
-                .unwrap_or_else(|| "barrier".to_string()),
-            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_string(),
+                .unwrap_or_else(|| "barrier".to_owned()),
+            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
         };
         env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);

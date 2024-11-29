@@ -336,8 +336,8 @@ mod tests {
             i32_fields.push(
                 FieldGeneratorImpl::with_number_sequence(
                     DataType::Int32,
-                    Some("1".to_string()),
-                    Some("20".to_string()),
+                    Some("1".to_owned()),
+                    Some("20".to_owned()),
                     split_index,
                     split_num,
                     0,

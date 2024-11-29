@@ -26,10 +26,10 @@ use risingwave_connector::parser::{DebeziumParser, SourceStreamChunkBuilder};
 fn generate_debezium_json_row(rng: &mut impl Rng, change_event: &str) -> String {
     let source = r#"{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null}"#;
     let (before, after) = match change_event {
-        "c" => ("null".to_string(), generate_json_row(rng)),
-        "r" => ("null".to_string(), generate_json_row(rng)),
+        "c" => ("null".to_owned(), generate_json_row(rng)),
+        "r" => ("null".to_owned(), generate_json_row(rng)),
         "u" => (generate_json_row(rng), generate_json_row(rng)),
-        "d" => (generate_json_row(rng), "null".to_string()),
+        "d" => (generate_json_row(rng), "null".to_owned()),
         _ => unreachable!(),
     };
     format!("{{\"before\": {before}, \"after\": {after}, \"source\": {source}, \"op\": \"{change_event}\", \"ts_ms\":1639551564960, \"transaction\":null}}")

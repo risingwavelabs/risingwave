@@ -58,7 +58,7 @@ pub fn default_opts_for_test() -> StorageOpts {
         share_buffers_sync_parallelism: 2,
         share_buffer_compaction_worker_threads_number: 1,
         shared_buffer_capacity_mb: 64,
-        data_directory: "hummock_001".to_string(),
+        data_directory: "hummock_001".to_owned(),
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,

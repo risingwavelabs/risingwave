@@ -81,7 +81,7 @@ impl LogScan {
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
-        out_column_names.push(OP_NAME.to_string());
+        out_column_names.push(OP_NAME.to_owned());
         out_column_names
     }
 
@@ -91,7 +91,7 @@ impl LogScan {
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect();
-        out_column_names.push(OP_NAME.to_string());
+        out_column_names.push(OP_NAME.to_owned());
         out_column_names
     }
 

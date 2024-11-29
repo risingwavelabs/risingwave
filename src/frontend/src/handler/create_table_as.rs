@@ -77,7 +77,7 @@ pub async fn handle_create_as(
 
     if column_defs.len() > columns.len() {
         return Err(ErrorCode::InvalidInputSyntax(
-            "too many column names were specified".to_string(),
+            "too many column names were specified".to_owned(),
         )
         .into());
     }
@@ -92,7 +92,7 @@ pub async fn handle_create_as(
         let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
         if !secret_refs.is_empty() || !connection_refs.is_empty() {
             return Err(crate::error::ErrorCode::InvalidParameterValue(
-                "Secret reference and Connection reference are not allowed in options for CREATE TABLE AS".to_string(),
+                "Secret reference and Connection reference are not allowed in options for CREATE TABLE AS".to_owned(),
             )
             .into());
         }

@@ -190,7 +190,7 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SessionParameter::find_by_id("deprecated_param".to_string())
+        assert!(SessionParameter::find_by_id("deprecated_param".to_owned())
             .one(&session_param_ctl.db)
             .await
             .unwrap()

@@ -221,7 +221,7 @@ mod tests {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
             TaskId::default(),
-            "MergeSortExchangeExecutor2".to_string(),
+            "MergeSortExchangeExecutor2".to_owned(),
             CHUNK_SIZE,
         ));
 

@@ -53,11 +53,11 @@ impl BoundShareInput {
                 let (fields, _name) = if let Relation::BaseTable(bound_base_table) = r {
                     (
                         bound_base_table.table_catalog.columns().to_vec(),
-                        bound_base_table.table_catalog.name().to_string(),
+                        bound_base_table.table_catalog.name().to_owned(),
                     )
                 } else {
                     return Err(ErrorCode::BindError(
-                        "Change log CTE must be a base table".to_string(),
+                        "Change log CTE must be a base table".to_owned(),
                     )
                     .into());
                 };
@@ -74,14 +74,14 @@ impl BoundShareInput {
                             false,
                             Field::with_name(
                                 risingwave_common::types::DataType::Int16,
-                                CHANGELOG_OP.to_string(),
+                                CHANGELOG_OP.to_owned(),
                             ),
                         ),
                         (
                             true,
                             Field::with_name(
                                 risingwave_common::types::DataType::Serial,
-                                _CHANGELOG_ROW_ID.to_string(),
+                                _CHANGELOG_ROW_ID.to_owned(),
                             ),
                         ),
                     ])

@@ -87,7 +87,7 @@ fn load_message_descriptor(
     file_name: &str,
     message_name: &str,
 ) -> anyhow::Result<MessageDescriptor> {
-    let location = "tests/test_data/".to_string() + file_name;
+    let location = "tests/test_data/".to_owned() + file_name;
     let file_content = fs_err::read_to_string(&location).unwrap();
 
     let pool = if file_name.ends_with(".proto") {
@@ -509,18 +509,18 @@ fn test_all_types() -> anyhow::Result<()> {
             sfixed32_field: -56789,
             sfixed64_field: -123456,
             bool_field: true,
-            string_field: "Hello, Prost!".to_string(),
+            string_field: "Hello, Prost!".to_owned(),
             bytes_field: b"byte data".to_vec(),
             enum_field: EnumType::Option1 as i32,
             nested_message_field: Some(NestedMessage {
                 id: 100,
-                name: "Nested".to_string(),
+                name: "Nested".to_owned(),
             }),
             repeated_int_field: vec![1, 2, 3, 4, 5],
             map_field: HashMap::from_iter([
-                ("key1".to_string(), 1),
-                ("key2".to_string(), 2),
-                ("key3".to_string(), 3),
+                ("key1".to_owned(), 1),
+                ("key2".to_owned(), 2),
+                ("key3".to_owned(), 3),
             ]),
             timestamp_field: Some(::prost_types::Timestamp {
                 seconds: 1630927032,
@@ -531,25 +531,25 @@ fn test_all_types() -> anyhow::Result<()> {
                 nanos: 500000000,
             }),
             any_field: Some(::prost_types::Any {
-                type_url: "type.googleapis.com/my_custom_type".to_string(),
+                type_url: "type.googleapis.com/my_custom_type".to_owned(),
                 value: b"My custom data".to_vec(),
             }),
             int32_value_field: Some(42),
-            string_value_field: Some("Hello, Wrapper!".to_string()),
+            string_value_field: Some("Hello, Wrapper!".to_owned()),
             example_oneof: Some(ExampleOneof::OneofInt32(123)),
             map_struct_field: HashMap::from_iter([
                 (
-                    "key1".to_string(),
+                    "key1".to_owned(),
                     NestedMessage {
                         id: 1,
-                        name: "A".to_string(),
+                        name: "A".to_owned(),
                     },
                 ),
                 (
-                    "key2".to_string(),
+                    "key2".to_owned(),
                     NestedMessage {
                         id: 2,
-                        name: "B".to_string(),
+                        name: "B".to_owned(),
                     },
                 ),
             ]),

@@ -135,7 +135,7 @@ pub async fn rpc_serve(
             ));
             let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await?;
             rpc_serve_with_store(
-                SqlMetaStore::new(conn, IN_MEMORY_STORE.to_string()),
+                SqlMetaStore::new(conn, IN_MEMORY_STORE.to_owned()),
                 dummy_election_client,
                 address_info,
                 max_cluster_heartbeat_interval,

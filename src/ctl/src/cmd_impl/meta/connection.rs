@@ -42,7 +42,7 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
                         serde_json::to_string(&params.get_properties()).unwrap()
                     )
                 }
-                None => "None".to_string(),
+                None => "None".to_owned(),
             }
         );
     }

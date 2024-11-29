@@ -76,7 +76,7 @@ impl KafkaMeta {
                 .iter()
                 .map(|header| {
                     Some(ScalarImpl::Struct(StructValue::new(vec![
-                        Some(ScalarImpl::Utf8(header.key.to_string().into())),
+                        Some(ScalarImpl::Utf8(header.key.to_owned().into())),
                         header.value.map(|byte| ScalarImpl::Bytea(byte.into())),
                     ])))
                 })

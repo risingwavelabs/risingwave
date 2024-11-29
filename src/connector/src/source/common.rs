@@ -43,7 +43,7 @@ pub(crate) async fn into_chunk_stream(
             let mut by_split_id = std::collections::HashMap::new();
 
             for msg in data_batch {
-                let split_id: String = msg.split_id.as_ref().to_string();
+                let split_id: String = msg.split_id.as_ref().to_owned();
                 by_split_id
                     .entry(split_id.clone())
                     .or_insert_with(Vec::new)

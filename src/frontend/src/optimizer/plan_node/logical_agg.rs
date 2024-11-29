@@ -1376,7 +1376,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -1394,7 +1394,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -1403,7 +1403,7 @@ impl ToStream for LogicalAgg {
             if eowc {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }

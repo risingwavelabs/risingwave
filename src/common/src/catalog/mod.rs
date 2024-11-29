@@ -533,10 +533,10 @@ impl ConflictBehavior {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            ConflictBehavior::NoCheck => "NoCheck".to_string(),
-            ConflictBehavior::Overwrite => "Overwrite".to_string(),
-            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
-            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+            ConflictBehavior::NoCheck => "NoCheck".to_owned(),
+            ConflictBehavior::Overwrite => "Overwrite".to_owned(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_owned(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_owned(),
         }
     }
 }

@@ -152,7 +152,7 @@ impl StorageCatalog {
 
             // Only push into paths if the entry is a metadata file.
             if entry.path().ends_with(".metadata.json") {
-                paths.push(entry.path().to_string());
+                paths.push(entry.path().to_owned());
             }
         }
 

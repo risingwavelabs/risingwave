@@ -360,7 +360,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut conn = self.conn.lock().await;
 
-        let sql = "SHOW MASTER STATUS".to_string();
+        let sql = "SHOW MASTER STATUS".to_owned();
         let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
         let row = rs
             .iter_mut()
@@ -608,17 +608,17 @@ mod tests {
     #[tokio::test]
     async fn test_mysql_schema() {
         let config = ExternalTableConfig {
-            connector: "mysql-cdc".to_string(),
-            host: "localhost".to_string(),
-            port: "8306".to_string(),
-            username: "root".to_string(),
-            password: "123456".to_string(),
-            database: "mydb".to_string(),
-            schema: "".to_string(),
-            table: "part".to_string(),
+            connector: "mysql-cdc".to_owned(),
+            host: "localhost".to_owned(),
+            port: "8306".to_owned(),
+            username: "root".to_owned(),
+            password: "123456".to_owned(),
+            database: "mydb".to_owned(),
+            schema: "".to_owned(),
+            table: "part".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
-            encrypt: "false".to_string(),
+            encrypt: "false".to_owned(),
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();
@@ -628,11 +628,11 @@ mod tests {
 
     #[test]
     fn test_mysql_filter_expr() {
-        let cols = vec!["id".to_string()];
+        let cols = vec!["id".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(`id` > :id)");
 
-        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = MySqlExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,
@@ -694,11 +694,11 @@ mod tests {
         let parser = MySqlExternalTableReader::get_cdc_offset_parser();
         println!("parsed offset: {:?}", parser(off0_str).unwrap());
         let table_name = SchemaTableName {
-            schema_name: "mytest".to_string(),
-            table_name: "t1".to_string(),
+            schema_name: "mytest".to_owned(),
+            table_name: "t1".to_owned(),
         };
 
-        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_string()], 1000);
+        let stream = reader.snapshot_read(table_name, None, vec!["v1".to_owned()], 1000);
         pin_mut!(stream);
         #[for_await]
         for row in stream {

@@ -70,7 +70,7 @@ impl SingleChunkExecutor {
         Self {
             chunk: Some(chunk),
             schema,
-            identity: "SingleChunkExecutor".to_string(),
+            identity: "SingleChunkExecutor".to_owned(),
         }
     }
 }
@@ -240,7 +240,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         dml_manager.clone(),
         insert_inner,
         1024,
-        "InsertExecutor".to_string(),
+        "InsertExecutor".to_owned(),
         vec![0], // ignore insertion order
         vec![],
         Some(row_id_index),
@@ -265,7 +265,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqExecutor2".to_string(),
+        "RowSeqExecutor2".to_owned(),
         None,
         None,
         None,
@@ -336,7 +336,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,
@@ -367,7 +367,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         dml_manager.clone(),
         delete_inner,
         1024,
-        "DeleteExecutor".to_string(),
+        "DeleteExecutor".to_owned(),
         false,
         0,
     ));
@@ -416,7 +416,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,
@@ -492,7 +492,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1,
-        "RowSeqScanExecutor2".to_string(),
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
         None,

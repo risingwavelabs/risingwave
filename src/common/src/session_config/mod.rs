@@ -332,7 +332,7 @@ fn check_client_encoding(val: &str) -> Result<(), String> {
     // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
     let clean = val.replace(|c: char| !c.is_ascii_alphanumeric(), "");
     if !clean.eq_ignore_ascii_case("UTF8") {
-        Err("Only support 'UTF8' for CLIENT_ENCODING".to_string())
+        Err("Only support 'UTF8' for CLIENT_ENCODING".to_owned())
     } else {
         Ok(())
     }
@@ -342,7 +342,7 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     if val == "hex" {
         Ok(())
     } else {
-        Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+        Err("Only support 'hex' for BYTEA_OUTPUT".to_owned())
     }
 }
 
@@ -417,10 +417,10 @@ mod test {
     #[test]
     fn test_session_config_alias() {
         let mut config = TestConfig::default();
-        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        config.set("test_param", "2".to_owned(), &mut ()).unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "2");
         config
-            .set("alias_param_test", "3".to_string(), &mut ())
+            .set("alias_param_test", "3".to_owned(), &mut ())
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());

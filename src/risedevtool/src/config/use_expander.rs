@@ -36,7 +36,7 @@ impl UseExpander {
             let v = v
                 .as_hash()
                 .ok_or_else(|| anyhow!("expect value to be a hashmap"))?;
-            template.insert(k.to_string(), v.clone());
+            template.insert(k.to_owned(), v.clone());
         }
         Ok(Self { template })
     }

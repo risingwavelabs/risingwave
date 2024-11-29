@@ -51,7 +51,7 @@ pub fn get_subject_by_strategy(
         }
         PbSchemaRegistryNameStrategy::RecordNameStrategy => {
             let record_name = record.ok_or_else(build_error_lack_field)?;
-            Ok(record_name.to_string())
+            Ok(record_name.to_owned())
         }
         PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
             let record_name = record.ok_or_else(build_error_lack_field)?;

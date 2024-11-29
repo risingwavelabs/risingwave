@@ -127,7 +127,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: "SeqScan".to_string(),
+                    identity: "SeqScan".to_owned(),
                     node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -228,7 +228,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let plan_node = PlanNode {
             children: vec![],
-            identity: "LocalLookupJoinExchangeExecutor".to_string(),
+            identity: "LocalLookupJoinExchangeExecutor".to_owned(),
             node_body: Some(exchange_node),
         };
 
@@ -597,7 +597,7 @@ mod tests {
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
-            identity: "TestLookupJoinExecutor".to_string(),
+            identity: "TestLookupJoinExecutor".to_owned(),
             shutdown_rx: ShutdownToken::empty(),
             mem_ctx: MemoryContext::none(),
         }

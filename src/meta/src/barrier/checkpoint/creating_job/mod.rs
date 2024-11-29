@@ -117,7 +117,7 @@ impl CreatingStreamingJobControl {
                 ..
             } => {
                 if create_mview_tracker.has_pending_finished_jobs() {
-                    "Snapshot finished".to_string()
+                    "Snapshot finished".to_owned()
                 } else {
                     let progress = create_mview_tracker
                         .gen_ddl_progress()

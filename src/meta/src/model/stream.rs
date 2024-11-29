@@ -169,7 +169,7 @@ impl StreamJobFragments {
             actor_splits: build_actor_connector_splits(&self.actor_splits),
             ctx: Some(self.ctx.to_protobuf()),
             parallelism: Some(self.assigned_parallelism.into()),
-            node_label: "".to_string(),
+            node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
         }

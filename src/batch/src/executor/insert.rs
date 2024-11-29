@@ -345,7 +345,7 @@ mod tests {
             dml_manager,
             Box::new(mock_executor),
             1024,
-            "InsertExecutor".to_string(),
+            "InsertExecutor".to_owned(),
             vec![0, 1, 2], // Ignoring insertion order
             vec![],
             row_id_index,

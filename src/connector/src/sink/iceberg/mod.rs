@@ -828,8 +828,8 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
         );
         let json_value = serde_json::Value::Object(
             vec![
-                (DATA_FILES.to_string(), json_data_files),
-                (DELETE_FILES.to_string(), json_delete_files),
+                (DATA_FILES.to_owned(), json_data_files),
+                (DELETE_FILES.to_owned(), json_delete_files),
             ]
             .into_iter()
             .collect(),
@@ -1011,35 +1011,35 @@ mod test {
             ("table.name", "demo_table"),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
         let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
 
         let expected_iceberg_config = IcebergConfig {
             common: IcebergCommon {
-                warehouse_path: Some("s3://iceberg".to_string()),
-                catalog_uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_string()),
-                region: Some("us-east-1".to_string()),
-                endpoint: Some("http://127.0.0.1:9301".to_string()),
-                access_key: "hummockadmin".to_string(),
-                secret_key: "hummockadmin".to_string(),
-                catalog_type: Some("jdbc".to_string()),
-                catalog_name: Some("demo".to_string()),
-                database_name: Some("demo_db".to_string()),
-                table_name: "demo_table".to_string(),
+                warehouse_path: Some("s3://iceberg".to_owned()),
+                catalog_uri: Some("jdbc://postgresql://postgres:5432/iceberg".to_owned()),
+                region: Some("us-east-1".to_owned()),
+                endpoint: Some("http://127.0.0.1:9301".to_owned()),
+                access_key: "hummockadmin".to_owned(),
+                secret_key: "hummockadmin".to_owned(),
+                catalog_type: Some("jdbc".to_owned()),
+                catalog_name: Some("demo".to_owned()),
+                database_name: Some("demo_db".to_owned()),
+                table_name: "demo_table".to_owned(),
                 path_style_access: Some(true),
                 credential: None,
                 oauth2_server_uri: None,
                 scope: None,
                 token: None,
             },
-            r#type: "upsert".to_string(),
+            r#type: "upsert".to_owned(),
             force_append_only: false,
-            primary_key: Some(vec!["v1".to_string()]),
+            primary_key: Some(vec!["v1".to_owned()]),
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
@@ -1080,7 +1080,7 @@ mod test {
             ("table.name", "t1"),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
         test_create_catalog(values).await;
@@ -1106,7 +1106,7 @@ mod test {
             ("table.name", "t1"),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
         test_create_catalog(values).await;
@@ -1134,7 +1134,7 @@ mod test {
             ("table.name", "t1"),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
         test_create_catalog(values).await;
@@ -1160,7 +1160,7 @@ mod test {
             ("table.name", "t1"),
         ]
         .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
 
         test_create_catalog(values).await;

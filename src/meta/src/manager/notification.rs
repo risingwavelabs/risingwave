@@ -419,11 +419,11 @@ mod tests {
     async fn test_multiple_subscribers_one_worker() {
         let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
         let worker_key1 = WorkerKey(HostAddress {
-            host: "a".to_string(),
+            host: "a".to_owned(),
             port: 1,
         });
         let worker_key2 = WorkerKey(HostAddress {
-            host: "a".to_string(),
+            host: "a".to_owned(),
             port: 2,
         });
         let (tx1, mut rx1) = mpsc::unbounded_channel();

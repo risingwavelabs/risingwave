@@ -123,7 +123,7 @@ impl ObjectStore for InMemObjectStore {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
         Ok(InMemStreamingUploader {
-            path: path.to_string(),
+            path: path.to_owned(),
             buf: BytesMut::new(),
             objects: self.objects.clone(),
         })
@@ -335,7 +335,7 @@ mod tests {
         assert!(err.is_object_not_found_error());
 
         let bytes = s3.read("/abc", 4..6).await.unwrap();
-        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_owned());
 
         // Overflow.
         s3.read("/abc", 4..8).await.unwrap_err();
@@ -367,7 +367,7 @@ mod tests {
         let read_obj = store.read("/abc", 4..6).await.unwrap();
         assert_eq!(
             String::from_utf8(read_obj.to_vec()).unwrap(),
-            "56".to_string()
+            "56".to_owned()
         );
     }
 

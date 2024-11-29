@@ -188,7 +188,7 @@ impl PlanRoot {
     pub fn set_out_names(&mut self, out_names: Vec<String>) -> Result<()> {
         if out_names.len() != self.out_fields.count_ones(..) {
             Err(ErrorCode::InvalidInputSyntax(
-                "number of column names does not match number of columns".to_string(),
+                "number of column names does not match number of columns".to_owned(),
             ))?
         }
         self.out_names = out_names;
@@ -307,8 +307,8 @@ impl PlanRoot {
 
         if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
             return Err(ErrorCode::NotSupported(
-                "do not support temporal join for batch queries".to_string(),
-                "please use temporal join in streaming queries".to_string(),
+                "do not support temporal join for batch queries".to_owned(),
+                "please use temporal join in streaming queries".to_owned(),
             )
             .into());
         }
@@ -526,15 +526,15 @@ impl PlanRoot {
 
         if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
             return Err(ErrorCode::NotSupported(
-                "exist dangling temporal scan".to_string(),
-                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+                "exist dangling temporal scan".to_owned(),
+                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_owned(),
             ).into());
         }
 
         if RwTimestampValidator::select_rw_timestamp_in_stream_query(plan.clone()) {
             return Err(ErrorCode::NotSupported(
-                "selecting `_rw_timestamp` in a streaming query is not allowed".to_string(),
-                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_string(),
+                "selecting `_rw_timestamp` in a streaming query is not allowed".to_owned(),
+                "please run the sql in batch mode or remove the column `_rw_timestamp` from the streaming query".to_owned(),
             ).into());
         }
 
@@ -566,7 +566,7 @@ impl PlanRoot {
                     return Err(ErrorCode::NotSupported(
                         err,
                         "Using JSONB columns as part of the join or aggregation keys can severely impair performance. \
-                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_string(),
+                        If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_owned(),
                     ).into());
                 }
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
@@ -863,7 +863,7 @@ impl PlanRoot {
             && version_column_index.is_some()
         {
             Err(ErrorCode::InvalidParameterValue(
-                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_string(),
+                "The with version column syntax cannot be used with the ignore behavior of on conflict".to_owned(),
             ))?
         }
 
@@ -1070,14 +1070,14 @@ fn find_version_column_index(
             | &DataType::Boolean = column.data_type()
             {
                 Err(ErrorCode::InvalidParameterValue(
-                    "The specified version column data type is invalid.".to_string(),
+                    "The specified version column data type is invalid.".to_owned(),
                 ))?
             }
             return Ok(Some(index));
         }
     }
     Err(ErrorCode::InvalidParameterValue(
-        "The specified version column name is not in the current columns.".to_string(),
+        "The specified version column name is not in the current columns.".to_owned(),
     ))?
 }
 

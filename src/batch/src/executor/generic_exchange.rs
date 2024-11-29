@@ -301,7 +301,7 @@ mod tests {
                     fields: vec![Field::unnamed(DataType::Int32)],
                 },
                 task_id: TaskId::default(),
-                identity: "GenericExchangeExecutor2".to_string(),
+                identity: "GenericExchangeExecutor2".to_owned(),
             },
         );
 

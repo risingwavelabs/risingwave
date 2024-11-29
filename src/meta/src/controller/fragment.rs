@@ -373,7 +373,7 @@ impl CatalogController {
                 }
                 .into(),
             ),
-            node_label: "".to_string(),
+            node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(max_parallelism as _),
         };
@@ -483,7 +483,7 @@ impl CatalogController {
                 dispatcher: pb_dispatcher,
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
-                mview_definition: "".to_string(),
+                mview_definition: "".to_owned(),
                 expr_context: pb_expr_context,
             })
         }
@@ -1698,7 +1698,7 @@ mod tests {
                         .get(&actor_id)
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
-                    mview_definition: "".to_string(),
+                    mview_definition: "".to_owned(),
                     expr_context: Some(PbExprContext {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
@@ -1800,7 +1800,7 @@ mod tests {
             .map(|actor_id| {
                 let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
-                        split_type: "dummy".to_string(),
+                        split_type: "dummy".to_owned(),
                         ..Default::default()
                     }],
                 }));

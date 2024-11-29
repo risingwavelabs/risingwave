@@ -101,7 +101,7 @@ impl ObserverState for FrontendObserverNode {
             Info::SessionParam(p) => {
                 self.session_params
                     .write()
-                    .set(&p.param, p.value().to_string(), &mut ())
+                    .set(&p.param, p.value().to_owned(), &mut ())
                     .unwrap();
             }
             Info::HummockStats(stats) => {

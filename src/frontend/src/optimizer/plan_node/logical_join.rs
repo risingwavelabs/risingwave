@@ -1369,7 +1369,7 @@ impl LogicalJoin {
 
         if predicate.eq_keys().is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires at least 1 equal condition".to_string(),
+                "AsOf join requires at least 1 equal condition".to_owned(),
             )
             .into());
         }
@@ -1393,8 +1393,8 @@ impl ToBatch for LogicalJoin {
     fn to_batch(&self) -> Result<PlanRef> {
         if JoinType::AsofInner == self.join_type() || JoinType::AsofLeftOuter == self.join_type() {
             return Err(ErrorCode::NotSupported(
-                "AsOf join in batch query".to_string(),
-                "AsOf join is only supported in streaming query".to_string(),
+                "AsOf join in batch query".to_owned(),
+                "AsOf join is only supported in streaming query".to_owned(),
             )
             .into());
         }
@@ -1444,8 +1444,8 @@ impl ToStream for LogicalJoin {
             .any(|cond| cond.count_nows() > 0)
         {
             return Err(ErrorCode::NotSupported(
-                "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_string(),
-                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_string()).into());
+                "optimizer has tried to separate the temporal predicate(with now() expression) from the on condition, but it still reminded in on join's condition. Considering move it into WHERE clause?".to_owned(),
+                 "please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information".to_owned()).into());
         }
 
         let predicate = EqJoinPredicate::create(
@@ -1479,7 +1479,7 @@ impl ToStream for LogicalJoin {
             Ok(dynamic_filter)
         } else {
             Err(RwError::from(ErrorCode::NotSupported(
-                "streaming nested-loop join".to_string(),
+                "streaming nested-loop join".to_owned(),
                 "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
                  Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
                  See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/".to_owned(),

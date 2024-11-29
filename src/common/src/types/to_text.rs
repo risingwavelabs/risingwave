@@ -233,10 +233,10 @@ mod tests {
         // f64 -> text.
         let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(1.234567890123456);
         tracing::info!("ret: {}", ret.to_text());
-        assert_eq!("1.234567890123456".to_string(), ret.to_text());
+        assert_eq!("1.234567890123456".to_owned(), ret.to_text());
 
         // f32 -> text.
         let ret: OrderedFloat<f32> = OrderedFloat::<f32>::from(1.234567);
-        assert_eq!("1.234567".to_string(), ret.to_text());
+        assert_eq!("1.234567".to_owned(), ret.to_text());
     }
 }

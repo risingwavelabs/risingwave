@@ -157,7 +157,7 @@ impl ActorBuilder {
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
                     })),
-                    identity: "MergeExecutor".to_string(),
+                    identity: "MergeExecutor".to_owned(),
                     ..stream_node.clone()
                 })
             }

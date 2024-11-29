@@ -101,7 +101,7 @@ impl SchemaCatalog {
 
     pub fn create_sys_view(&mut self, sys_view: Arc<ViewCatalog>) {
         self.view_by_name
-            .try_insert(sys_view.name().to_string(), sys_view.clone())
+            .try_insert(sys_view.name().to_owned(), sys_view.clone())
             .unwrap();
         self.view_by_id
             .try_insert(sys_view.id, sys_view.clone())
@@ -731,7 +731,7 @@ impl SchemaCatalog {
         inputs: &mut [ExprImpl],
     ) -> Option<&Arc<FunctionCatalog>> {
         infer_type_with_sigmap(
-            FuncName::Udf(name.to_string()),
+            FuncName::Udf(name.to_owned()),
             inputs,
             &self.function_registry,
         )
@@ -748,7 +748,7 @@ impl SchemaCatalog {
         let args = args.iter().map(|x| Some(x.clone())).collect_vec();
         let func = infer_type_name(
             &self.function_registry,
-            FuncName::Udf(name.to_string()),
+            FuncName::Udf(name.to_owned()),
             &args,
         )
         .ok()?;

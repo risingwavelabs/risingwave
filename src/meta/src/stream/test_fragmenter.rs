@@ -243,7 +243,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![],
         stream_key: vec![2],
         operator_id: 1,
-        identity: "ExchangeExecutor".to_string(),
+        identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -266,7 +266,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node],
         stream_key: vec![0, 1],
         operator_id: 2,
-        identity: "FilterExecutor".to_string(),
+        identity: "FilterExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -284,7 +284,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
         operator_id: 3,
-        identity: "SimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -309,7 +309,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![],
         stream_key: vec![0, 1],
         operator_id: 4,
-        identity: "ExchangeExecutor".to_string(),
+        identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -327,7 +327,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
         operator_id: 5,
-        identity: "SimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -355,7 +355,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![simple_agg_node_1],
         stream_key: vec![1, 2],
         operator_id: 6,
-        identity: "ProjectExecutor".to_string(),
+        identity: "ProjectExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -370,7 +370,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
-        identity: "MaterializeExecutor".to_string(),
+        identity: "MaterializeExecutor".to_owned(),
         ..Default::default()
     };
 

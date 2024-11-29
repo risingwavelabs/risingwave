@@ -94,13 +94,13 @@ impl TableFunction {
             // s3 secret key
             // file location
             if args.len() != 6 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_string()).into());
+                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_owned()).into());
             }
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
                     return Err(BindError(
-                        "file_scan function only accepts string arguments".to_string(),
+                        "file_scan function only accepts string arguments".to_owned(),
                     )
                     .into());
                 }
@@ -108,7 +108,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         if value.is_none() {
                             return Err(BindError(
-                                "file_scan function does not accept null arguments".to_string(),
+                                "file_scan function does not accept null arguments".to_owned(),
                             )
                             .into());
                         }
@@ -118,7 +118,7 @@ impl TableFunction {
                             }
                             _ => {
                                 return Err(BindError(
-                                    "file_scan function only accepts string arguments".to_string(),
+                                    "file_scan function only accepts string arguments".to_owned(),
                                 )
                                 .into())
                             }
@@ -129,7 +129,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "file_scan function only accepts constant arguments".to_string(),
+                            "file_scan function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
@@ -137,14 +137,14 @@ impl TableFunction {
             }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
-                    "file_scan function only accepts 'parquet' as file format".to_string(),
+                    "file_scan function only accepts 'parquet' as file format".to_owned(),
                 )
                 .into());
             }
 
             if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' as storage type".to_string(),
+                    "file_scan function only accepts 's3' as storage type".to_owned(),
                 )
                 .into());
             }
@@ -174,7 +174,7 @@ impl TableFunction {
 
                     if files.is_empty() {
                         return Err(BindError(
-                            "file_scan function only accepts non-empty directory".to_string(),
+                            "file_scan function only accepts non-empty directory".to_owned(),
                         )
                         .into());
                     }
@@ -244,7 +244,7 @@ impl TableFunction {
     pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let args = {
             if args.len() != 6 {
-                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
+                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_owned()).into());
             }
             let mut cast_args = Vec::with_capacity(6);
             for arg in args {
@@ -260,8 +260,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "postgres_query function does not accept null arguments"
-                                    .to_string(),
+                                "postgres_query function does not accept null arguments".to_owned(),
                             )
                             .into());
                         };
@@ -272,7 +271,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_string(),
+                            "postgres_query function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
@@ -320,7 +319,7 @@ impl TableFunction {
 
                     let mut rw_types = vec![];
                     for column in statement.columns() {
-                        let name = column.name().to_string();
+                        let name = column.name().to_owned();
                         let data_type = match *column.type_() {
                             TokioPgType::BOOL => DataType::Boolean,
                             TokioPgType::INT2 => DataType::Int16,
@@ -366,7 +365,7 @@ impl TableFunction {
         static MYSQL_ARGS_LEN: usize = 6;
         let args = {
             if args.len() != MYSQL_ARGS_LEN {
-                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_string()).into());
+                return Err(BindError("mysql_query function only accepts 6 arguments: mysql_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, mysql_query varchar)".to_owned()).into());
             }
             let mut cast_args = Vec::with_capacity(MYSQL_ARGS_LEN);
             for arg in args {
@@ -382,7 +381,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         let Some(scalar) = value else {
                             return Err(BindError(
-                                "mysql_query function does not accept null arguments".to_string(),
+                                "mysql_query function does not accept null arguments".to_owned(),
                             )
                             .into());
                         };
@@ -393,7 +392,7 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "mysql_query function only accepts constant arguments".to_string(),
+                            "mysql_query function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }

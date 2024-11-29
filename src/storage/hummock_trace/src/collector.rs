@@ -78,7 +78,7 @@ fn set_should_use_trace() -> bool {
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
     TRACE_RT.spawn(async move {
-        let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_string());
+        let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_owned());
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
 

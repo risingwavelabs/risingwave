@@ -210,7 +210,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         let vnode_expr_idx = new_exprs.len() - 1;
 
         let mut new = Self::new(new_exprs, input);
-        new.field_names.insert(vnode_expr_idx, "_vnode".to_string());
+        new.field_names.insert(vnode_expr_idx, "_vnode".to_owned());
         new
     }
 

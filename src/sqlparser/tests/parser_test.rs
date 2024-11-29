@@ -50,7 +50,7 @@ impl Display for TestCase {
 
 fn run_test_case(c: TestCase) -> Result<()> {
     let result = Parser::parse_sql(&c.input);
-    if let Some(error_msg) = c.error_msg.map(|s| s.trim().to_string()) {
+    if let Some(error_msg) = c.error_msg.map(|s| s.trim().to_owned()) {
         if result.is_ok() {
             return Err(anyhow!("Expected failure:\n  {}", error_msg));
         }
@@ -79,7 +79,7 @@ fn run_test_case(c: TestCase) -> Result<()> {
                 style(&formatted_sql).red(),
             ));
         }
-        if let Some(expected_formatted_ast) = c.formatted_ast.map(|s| s.trim().to_string()) {
+        if let Some(expected_formatted_ast) = c.formatted_ast.map(|s| s.trim().to_owned()) {
             let formatted_ast = format!("{:?}", ast);
             if formatted_ast != expected_formatted_ast {
                 return Err(anyhow!(

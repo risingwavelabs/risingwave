@@ -61,8 +61,8 @@ pub async fn handle_alter_source_column(
 
     if catalog.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
-            "alter table with connector with ALTER SOURCE statement".to_string(),
-            "try to use ALTER TABLE instead".to_string(),
+            "alter table with connector with ALTER SOURCE statement".to_owned(),
+            "try to use ALTER TABLE instead".to_owned(),
         )
         .into());
     };
@@ -75,15 +75,15 @@ pub async fn handle_alter_source_column(
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
             return Err(ErrorCode::NotSupported(
-                "alter source with schema registry".to_string(),
-                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+                "alter source with schema registry".to_owned(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
             )
             .into());
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
             return Err(ErrorCode::NotSupported(
-                "alter source with schema registry".to_string(),
-                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+                "alter source with schema registry".to_owned(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
             )
             .into());
         }

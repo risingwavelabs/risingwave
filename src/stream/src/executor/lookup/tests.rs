@@ -112,7 +112,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
         ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
-            identity: "MaterializeExecutor".to_string(),
+            identity: "MaterializeExecutor".to_owned(),
         },
         MaterializeExecutor::for_test(
             source,
@@ -197,7 +197,7 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
         ]),
         pk_indices: vec![1, 2],
-        identity: "LookupExecutor".to_string(),
+        identity: "LookupExecutor".to_owned(),
     };
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),
@@ -271,7 +271,7 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
         pk_indices: vec![1, 2],
-        identity: "LookupExecutor".to_string(),
+        identity: "LookupExecutor".to_owned(),
     };
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         ctx: ActorContext::for_test(0),

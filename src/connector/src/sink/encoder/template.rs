@@ -47,7 +47,7 @@ impl TemplateEncoder {
         let re = Regex::new(r"\{([^}]*)\}").unwrap();
         if !re.is_match(format) {
             return Err(SinkError::Redis(
-                "Can't find {} in key_format or value_format".to_string(),
+                "Can't find {} in key_format or value_format".to_owned(),
             ));
         }
         for capture in re.captures_iter(format) {

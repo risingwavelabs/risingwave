@@ -502,12 +502,12 @@ where
             .config
             .get("database")
             .cloned()
-            .unwrap_or_else(|| "dev".to_string());
+            .unwrap_or_else(|| "dev".to_owned());
         let user_name = msg
             .config
             .get("user")
             .cloned()
-            .unwrap_or_else(|| "root".to_string());
+            .unwrap_or_else(|| "root".to_owned());
 
         let session = self
             .session_mgr
@@ -713,7 +713,7 @@ where
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         record_sql_in_span(sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
-        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
+        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
 
         self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids)
             .await
@@ -786,8 +786,8 @@ where
     }
 
     fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
-        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
-        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
+        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
+        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
         let session = self.session.clone().unwrap();
 
         if self.portal_store.contains_key(&portal_name) {
@@ -832,7 +832,7 @@ where
     }
 
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
-        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
+        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_owned();
         let row_max = msg.max_rows as usize;
         let session = self.session.clone().unwrap();
 
@@ -865,7 +865,7 @@ where
     }
 
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
-        let name = cstr_to_str(&msg.name).unwrap().to_string();
+        let name = cstr_to_str(&msg.name).unwrap().to_owned();
         let session = self.session.clone().unwrap();
         //  b'S' => Statement
         //  b'P' => Portal
@@ -913,7 +913,7 @@ where
     }
 
     fn process_close_msg(&mut self, msg: FeCloseMessage) -> PsqlResult<()> {
-        let name = cstr_to_str(&msg.name).unwrap().to_string();
+        let name = cstr_to_str(&msg.name).unwrap().to_owned();
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
             if name.is_empty() {

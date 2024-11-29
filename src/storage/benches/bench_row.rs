@@ -47,7 +47,7 @@ impl Case {
         needed_ids: Option<Vec<ColumnId>>,
     ) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_owned(),
             schema: schema.clone(),
             column_ids: column_ids.clone(),
             rows,

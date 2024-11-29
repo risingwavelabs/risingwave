@@ -161,7 +161,7 @@ impl BatchSeqScan {
             range_strs.push(range_str.join(" AND "));
         }
         if self.scan_ranges.len() > explain_max_range {
-            range_strs.push("...".to_string());
+            range_strs.push("...".to_owned());
         }
         range_strs
     }

@@ -56,7 +56,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
     match meta_store_backend {
         MetaStoreBackend::Mem => {
             let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
-            Ok(SqlMetaStore::new(conn, IN_MEMORY_STORE.to_string()))
+            Ok(SqlMetaStore::new(conn, IN_MEMORY_STORE.to_owned()))
         }
         MetaStoreBackend::Sql { endpoint, config } => {
             let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {

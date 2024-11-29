@@ -364,7 +364,7 @@ impl Binder {
                 return Err(ErrorCode::BindError(
                     "Right table of a temporal join should not be a CTE. \
                  It should be a table, index, or materialized view"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -390,7 +390,7 @@ impl Binder {
 
             match cte_state {
                 BindingCteState::Init => {
-                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_string()).into())
+                    Err(ErrorCode::BindError("Base term of recursive CTE not found, consider writing it to left side of the `UNION ALL` operator".to_owned()).into())
                 }
                 BindingCteState::BaseResolved { base } => {
                     self.bind_table_to_context(
@@ -433,12 +433,12 @@ impl Binder {
         err_msg: &str,
     ) -> Result<(Relation, ObjectName)> {
         let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = arg else {
-            return Err(ErrorCode::BindError(err_msg.to_string()).into());
+            return Err(ErrorCode::BindError(err_msg.to_owned()).into());
         };
         let table_name = match expr {
             ParserExpr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
             ParserExpr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
-            _ => Err(ErrorCode::BindError(err_msg.to_string()).into()),
+            _ => Err(ErrorCode::BindError(err_msg.to_owned()).into()),
         }?;
 
         Ok((
@@ -459,7 +459,7 @@ impl Binder {
         {
             Ok(time_col)
         } else {
-            Err(ErrorCode::BindError(err_msg.to_string()).into())
+            Err(ErrorCode::BindError(err_msg.to_owned()).into())
         }
     }
 
@@ -470,10 +470,9 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         if args.is_empty() || args.len() > 2 {
-            return Err(ErrorCode::BindError(
-                "usage: rw_table(table_id[,schema_name])".to_string(),
-            )
-            .into());
+            return Err(
+                ErrorCode::BindError("usage: rw_table(table_id[,schema_name])".to_owned()).into(),
+            );
         }
 
         let table_id: TableId = args[0]
@@ -489,7 +488,7 @@ impl Binder {
 
         let schema = args
             .get(1)
-            .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
+            .map_or(DEFAULT_SCHEMA_NAME.to_owned(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
         self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, None)

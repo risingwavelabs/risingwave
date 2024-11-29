@@ -119,7 +119,7 @@ pub async fn load_file_descriptor_from_s3(
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()
-        .bucket(bucket.to_string())
+        .bucket(bucket.to_owned())
         .key(key)
         .send()
         .await

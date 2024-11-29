@@ -54,7 +54,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 let meta = attr.parse_meta().expect_or_abort("Failed to parse meta");
                 if let syn::Meta::NameValue(val) = meta {
                     if let syn::Lit::Str(desc) = val.lit {
-                        doc_list.push(desc.value().trim().to_string());
+                        doc_list.push(desc.value().trim().to_owned());
                     }
                 }
             }

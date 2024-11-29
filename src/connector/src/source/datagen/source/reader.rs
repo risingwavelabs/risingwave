@@ -292,7 +292,7 @@ fn generator_from_data_type(
                         split_num,
                         offset,
                     )?;
-                    Ok((field_name.to_string(), gen))
+                    Ok((field_name.to_owned(), gen))
                 })
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
@@ -355,24 +355,24 @@ mod tests {
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
             Column {
-                name: "random_int".to_string(),
+                name: "random_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },
             Column {
-                name: "random_float".to_string(),
+                name: "random_float".to_owned(),
                 data_type: DataType::Float32,
                 is_visible: true,
             },
             Column {
-                name: "sequence_int".to_string(),
+                name: "sequence_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },
             Column {
-                name: "struct".to_string(),
+                name: "struct".to_owned(),
                 data_type: DataType::Struct(StructType::new(vec![(
-                    "random_int".to_string(),
+                    "random_int".to_owned(),
                     DataType::Int32,
                 )])),
                 is_visible: true,
@@ -445,12 +445,12 @@ mod tests {
     async fn test_random_deterministic() -> Result<()> {
         let mock_datum = vec![
             Column {
-                name: "_".to_string(),
+                name: "_".to_owned(),
                 data_type: DataType::Int64,
                 is_visible: true,
             },
             Column {
-                name: "random_int".to_string(),
+                name: "random_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },

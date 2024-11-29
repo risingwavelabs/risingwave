@@ -71,7 +71,7 @@ pub async fn handle_create_view(
     } else {
         if columns.len() != schema.fields().len() {
             return Err(crate::error::ErrorCode::InternalError(
-                "view has different number of columns than the query's columns".to_string(),
+                "view has different number of columns than the query's columns".to_owned(),
             )
             .into());
         }
@@ -91,7 +91,7 @@ pub async fn handle_create_view(
     if !secret_refs.is_empty() || !connection_refs.is_empty() {
         return Err(crate::error::ErrorCode::InvalidParameterValue(
             "Secret reference and Connection reference are not allowed in create view options"
-                .to_string(),
+                .to_owned(),
         )
         .into());
     }

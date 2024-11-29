@@ -47,9 +47,9 @@ fn read_rw_connections(reader: &SysCatalogReaderImpl) -> Result<Vec<RwConnection
                     schema_id: schema.id() as i32,
                     owner: conn.owner as i32,
                     type_: conn.connection_type().into(),
-                    provider: "".to_string(),
+                    provider: "".to_owned(),
                     acl: vec![],
-                    connection_params: "".to_string(),
+                    connection_params: "".to_owned(),
                 };
                 match &conn.info {
                     risingwave_pb::catalog::connection::Info::PrivateLinkService(_) => {

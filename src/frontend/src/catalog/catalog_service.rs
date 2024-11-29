@@ -228,7 +228,7 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_database(PbDatabase {
-                name: db_name.to_string(),
+                name: db_name.to_owned(),
                 id: 0,
                 owner,
             })
@@ -246,7 +246,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_schema(PbSchema {
                 id: 0,
-                name: schema_name.to_string(),
+                name: schema_name.to_owned(),
                 database_id: db_id,
                 owner,
             })

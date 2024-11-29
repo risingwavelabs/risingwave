@@ -243,7 +243,7 @@ fn extract_comments(attrs: &[Attribute]) -> String {
                         ..
                     }) = &mnv.value
                     {
-                        return Some(lit_str.value().trim().to_string());
+                        return Some(lit_str.value().trim().to_owned());
                     }
                 }
             }
@@ -252,7 +252,7 @@ fn extract_comments(attrs: &[Attribute]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
-        .to_string()
+        .to_owned()
 }
 
 fn extract_serde_properties(field: &Field) -> SerdeProperties {
@@ -277,7 +277,7 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
                             if let Ok(value) = meta.value().and_then(|v| v.parse::<LitStr>()) {
                                 serde_props.default_func = Some(value.value());
                             } else {
-                                serde_props.default_func = Some("Default::default".to_string());
+                                serde_props.default_func = Some("Default::default".to_owned());
                             }
                         }
                         // drain the remaining meta. Otherwise parse_nested_meta returns err
@@ -381,7 +381,7 @@ fn extract_function_body(func: ItemFn) -> (String, FunctionInfo) {
         .trim_start_matches('{')
         .trim_end_matches('}')
         .trim()
-        .to_string();
+        .to_owned();
 
     (func.sig.ident.to_string(), FunctionInfo { body })
 }

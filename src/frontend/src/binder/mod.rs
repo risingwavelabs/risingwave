@@ -204,7 +204,7 @@ impl UdfContext {
     pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
         if ast.len() != 1 {
             return Err(ErrorCode::InvalidInputSyntax(
-                "the query for sql udf should contain only one statement".to_string(),
+                "the query for sql udf should contain only one statement".to_owned(),
             )
             .into());
         }
@@ -212,7 +212,7 @@ impl UdfContext {
         // Extract the expression out
         let Statement::Query(query) = ast[0].clone() else {
             return Err(ErrorCode::InvalidInputSyntax(
-                "invalid function definition, please recheck the syntax".to_string(),
+                "invalid function definition, please recheck the syntax".to_owned(),
             )
             .into());
         };
@@ -220,21 +220,21 @@ impl UdfContext {
         let SetExpr::Select(select) = query.body else {
             return Err(ErrorCode::InvalidInputSyntax(
                 "missing `select` body for sql udf expression, please recheck the syntax"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         };
 
         if select.projection.len() != 1 {
             return Err(ErrorCode::InvalidInputSyntax(
-                "`projection` should contain only one `SelectItem`".to_string(),
+                "`projection` should contain only one `SelectItem`".to_owned(),
             )
             .into());
         }
 
         let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
             return Err(ErrorCode::InvalidInputSyntax(
-                "expect `UnnamedExpr` for `projection`".to_string(),
+                "expect `UnnamedExpr` for `projection`".to_owned(),
             )
             .into());
         };
@@ -327,7 +327,7 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
-            db_name: session.database().to_string(),
+            db_name: session.database().to_owned(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
@@ -438,7 +438,7 @@ impl Binder {
         let (old_context, old_lateral_contexts) = self
             .upper_subquery_contexts
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?;
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_owned()))?;
         self.context = old_context;
         self.lateral_contexts = old_lateral_contexts;
         Ok(())
@@ -459,7 +459,7 @@ impl Binder {
         let mut old_context = self
             .lateral_contexts
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_owned()))?
             .context;
         old_context.merge_context(self.context.clone())?;
         self.context = old_context;

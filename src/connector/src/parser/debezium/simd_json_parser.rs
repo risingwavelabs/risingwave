@@ -604,7 +604,7 @@ mod tests {
                 SourceColumnDesc::simple("o_xml", DataType::Varchar, ColumnId::from(5)),
                 SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
                 SourceColumnDesc {
-                    name: "o_point".to_string(),
+                    name: "o_point".to_owned(),
                     data_type: DataType::Struct(StructType::new(vec![
                         ("x", DataType::Float32),
                         ("y", DataType::Float32),

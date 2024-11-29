@@ -42,7 +42,7 @@ fn read_rw_view_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwView>> {
         .flat_map(|schema| {
             schema.iter_view().map(|view| RwView {
                 id: view.id as i32,
-                name: view.name().to_string(),
+                name: view.name().to_owned(),
                 schema_id: schema.id() as i32,
                 owner: view.owner as i32,
                 definition: view.create_sql(schema.name()),

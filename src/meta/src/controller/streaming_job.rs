@@ -1886,7 +1886,7 @@ impl CatalogController {
                     job_id: job_id as u32,
                     fragment_type_mask: fragment_type_mask as u32,
                     rate_limit,
-                    node_name: node_name.unwrap().to_string(),
+                    node_name: node_name.unwrap().to_owned(),
                 });
             }
         }

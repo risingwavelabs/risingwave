@@ -59,7 +59,7 @@ fn telemetry_sink_build(
         PbTelemetryEventStage::CreateStreamJob,
         "sink",
         sink_id.sink_id() as i64,
-        Some(connector_name.to_string()),
+        Some(connector_name.to_owned()),
         Some(PbTelemetryDatabaseObject::Sink),
         attr,
     )
@@ -225,7 +225,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             actor_id: params.actor_context.id,
             sink_id,
             sink_name,
-            connector: connector.to_string(),
+            connector: connector.to_owned(),
         };
 
         let log_store_identity = format!(

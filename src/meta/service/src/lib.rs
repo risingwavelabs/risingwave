@@ -81,7 +81,7 @@ pub struct AddressInfo {
 impl Default for AddressInfo {
     fn default() -> Self {
         Self {
-            advertise_addr: "".to_string(),
+            advertise_addr: "".to_owned(),
             listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
             prometheus_addr: None,
             dashboard_addr: None,

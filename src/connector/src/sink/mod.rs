@@ -571,8 +571,8 @@ impl SinkWriterParam {
 
             actor_id: 1,
             sink_id: SinkId::new(1),
-            sink_name: "test_sink".to_string(),
-            connector: "test_connector".to_string(),
+            sink_name: "test_sink".to_owned(),
+            connector: "test_connector".to_owned(),
         }
     }
 }
@@ -607,13 +607,13 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }

@@ -39,7 +39,7 @@ pub(crate) fn init_env() {
     // more painful because we must use PGOPTIONS, and we want to preserve the
     // user's ability to set other variables through that.
     {
-        let mut pg_opts = var(VAR_PG_OPTS).unwrap_or_else(|_| "".to_string());
+        let mut pg_opts = var(VAR_PG_OPTS).unwrap_or_else(|_| "".to_owned());
         pg_opts.push_str(" -c intervalstyle=postgres_verbose");
         set_var(VAR_PG_OPTS, pg_opts);
     }

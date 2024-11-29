@@ -117,7 +117,7 @@ fn datum_to_bson(field: &Field, datum: DatumRef<'_>) -> Bson {
         (DataType::Int256, ScalarRefImpl::Int256(v)) => Bson::String(v.to_string()),
         (DataType::Float32, ScalarRefImpl::Float32(v)) => Bson::Double(v.into_inner() as f64),
         (DataType::Float64, ScalarRefImpl::Float64(v)) => Bson::Double(v.into_inner()),
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => Bson::String(v.to_string()),
+        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => Bson::String(v.to_owned()),
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => Bson::Boolean(v),
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             let decimal_str = v.to_string();

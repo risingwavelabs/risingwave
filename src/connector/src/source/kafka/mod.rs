@@ -220,28 +220,28 @@ mod test {
     fn test_parse_config_consumer_common() {
         let config: BTreeMap<String, String> = btreemap! {
             // common
-            "properties.bootstrap.server".to_string() => "127.0.0.1:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
             // kafka props
-            "scan.startup.mode".to_string() => "earliest".to_string(),
+            "scan.startup.mode".to_owned() => "earliest".to_owned(),
             // RdKafkaPropertiesCommon
-            "properties.message.max.bytes".to_string() => "12345".to_string(),
-            "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
+            "properties.message.max.bytes".to_owned() => "12345".to_owned(),
+            "properties.receive.message.max.bytes".to_owned() => "54321".to_owned(),
             // RdKafkaPropertiesConsumer
-            "properties.queued.min.messages".to_string() => "114514".to_string(),
-            "properties.queued.max.messages.kbytes".to_string() => "114514".to_string(),
-            "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
-            "properties.fetch.max.bytes".to_string() => "114514".to_string(),
-            "properties.enable.auto.commit".to_string() => "true".to_string(),
-            "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
+            "properties.queued.min.messages".to_owned() => "114514".to_owned(),
+            "properties.queued.max.messages.kbytes".to_owned() => "114514".to_owned(),
+            "properties.fetch.wait.max.ms".to_owned() => "114514".to_owned(),
+            "properties.fetch.max.bytes".to_owned() => "114514".to_owned(),
+            "properties.enable.auto.commit".to_owned() => "true".to_owned(),
+            "properties.fetch.queue.backoff.ms".to_owned() => "114514".to_owned(),
             // PrivateLink
-            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
+            "broker.rewrite.endpoints".to_owned() => "{\"broker1\": \"10.0.0.1:8001\"}".to_owned(),
         };
 
         let props: KafkaProperties =
             serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
 
-        assert_eq!(props.scan_startup_mode, Some("earliest".to_string()));
+        assert_eq!(props.scan_startup_mode, Some("earliest".to_owned()));
         assert_eq!(
             props.rdkafka_properties_common.receive_message_max_bytes,
             Some(54321)
@@ -275,7 +275,7 @@ mod test {
             Some(114514)
         );
         let hashmap: BTreeMap<String, String> = btreemap! {
-            "broker1".to_string() => "10.0.0.1:8001".to_string()
+            "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
     }

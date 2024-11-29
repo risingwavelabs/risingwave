@@ -515,7 +515,7 @@ mod tests {
 
     fn make_test_user(name: &str) -> PbUserInfo {
         PbUserInfo {
-            name: name.to_string(),
+            name: name.to_owned(),
             ..Default::default()
         }
     }
@@ -555,14 +555,14 @@ mod tests {
         mgr.update_user(
             PbUserInfo {
                 id: user_1.user_id as _,
-                name: "test_user_1_new".to_string(),
+                name: "test_user_1_new".to_owned(),
                 ..Default::default()
             },
             &[PbUpdateField::Rename],
         )
         .await?;
         let user_1 = mgr.get_user(user_1.user_id).await?;
-        assert_eq!(user_1.name, "test_user_1_new".to_string());
+        assert_eq!(user_1.name, "test_user_1_new".to_owned());
 
         let conn_with_option = make_privilege(
             PbObject::DatabaseId(TEST_DATABASE_ID as _),

@@ -191,7 +191,7 @@ impl SystemParamsController {
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<PbSystemParams> {
         let mut params_guard = self.params.write().await;
 
-        let Some(param) = SystemParameter::find_by_id(name.to_string())
+        let Some(param) = SystemParameter::find_by_id(name.to_owned())
             .one(&self.db)
             .await?
         else {
@@ -315,7 +315,7 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SystemParameter::find_by_id("deprecated_param".to_string())
+        assert!(SystemParameter::find_by_id("deprecated_param".to_owned())
             .one(&system_param_ctl.db)
             .await
             .unwrap()

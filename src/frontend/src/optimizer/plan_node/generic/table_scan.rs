@@ -233,7 +233,7 @@ impl TableScan {
         let new_predicate = self.predicate.clone().rewrite_expr(&mut rewriter);
 
         Self::new(
-            index_name.to_string(),
+            index_name.to_owned(),
             new_output_col_idx,
             index_table_catalog,
             vec![],

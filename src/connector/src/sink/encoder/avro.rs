@@ -236,7 +236,7 @@ impl MaybeData for DatumRef<'_> {
         let vs = d
             .iter()
             .map(|(k, v)| {
-                let k = k.into_utf8().to_string();
+                let k = k.into_utf8().to_owned();
                 let v = on_field(elem, v, avro)?;
                 Ok((k, v))
             })
@@ -542,7 +542,7 @@ mod tests {
     fn print_avro_value(v: &Value) -> String {
         match v {
             Value::Map(m) => {
-                let mut res = "Map({".to_string();
+                let mut res = "Map({".to_owned();
                 for (k, v) in m.iter().sorted_by_key(|x| x.0) {
                     res.push_str(&format!("{}: {}, ", k, print_avro_value(v)));
                 }

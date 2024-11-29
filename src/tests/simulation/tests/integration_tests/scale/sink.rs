@@ -79,7 +79,7 @@ async fn test_sink_append_only() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     let mut topics = HashMap::new();
-    topics.insert(APPEND_ONLY_TOPIC.to_string(), 3);
+    topics.insert(APPEND_ONLY_TOPIC.to_owned(), 3);
     cluster.create_kafka_topics(topics);
 
     time::sleep(Duration::from_secs(10)).await;
@@ -160,7 +160,7 @@ async fn test_sink_debezium() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     let mut topics = HashMap::new();
-    topics.insert(DEBEZIUM_TOPIC.to_string(), 3);
+    topics.insert(DEBEZIUM_TOPIC.to_owned(), 3);
     cluster.create_kafka_topics(topics);
 
     time::sleep(Duration::from_secs(10)).await;
@@ -242,10 +242,10 @@ fn check_payload(msg: &BorrowedMessage<'_>, payload: &[u8], i: i64) {
             let data: DebeziumPayload = serde_json::from_slice(payload).unwrap();
 
             if i == 1 {
-                assert_eq!(data.payload.op, "c".to_string());
+                assert_eq!(data.payload.op, "c".to_owned());
                 assert!(data.payload.before.is_none());
             } else {
-                assert_eq!(data.payload.op, "u".to_string());
+                assert_eq!(data.payload.op, "u".to_owned());
                 let before = data.payload.before.as_ref().unwrap();
                 assert_eq!(before.count, i - 1);
             }

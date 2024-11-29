@@ -349,7 +349,7 @@ pub fn version_archive_dir(root_dir: &str) -> String {
 }
 
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
-    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
+    checkpoint_path.trim_end_matches(|c| c != '/').to_owned()
 }
 
 /// Represents an epoch with a gap.

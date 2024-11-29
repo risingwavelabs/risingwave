@@ -36,10 +36,10 @@ pub async fn handle_create_database(
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(session.user_name()) {
             if !info.can_create_db && !info.is_super {
-                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
             }
         } else {
-            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
         }
     }
 
@@ -107,8 +107,8 @@ mod tests {
         let res = frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
-                "dev".to_string(),
-                "user".to_string(),
+                "dev".to_owned(),
+                "user".to_owned(),
                 user_id,
             )
             .await;
@@ -126,8 +126,8 @@ mod tests {
         frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
-                "dev".to_string(),
-                "user2".to_string(),
+                "dev".to_owned(),
+                "user2".to_owned(),
                 user_id,
             )
             .await

@@ -97,7 +97,7 @@ impl Op {
             Op::UpdateInsert => "UpdateInsert",
             Op::UpdateDelete => "UpdateDelete",
         }
-        .to_string()
+        .to_owned()
     }
 }
 

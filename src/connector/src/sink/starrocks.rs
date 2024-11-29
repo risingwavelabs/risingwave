@@ -170,7 +170,7 @@ impl StarrocksSink {
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
         if rw_fields_name.len() > starrocks_columns_desc.len() {
-            return Err(SinkError::Starrocks("The columns of the sink must be equal to or a superset of the target table's columns.".to_string()));
+            return Err(SinkError::Starrocks("The columns of the sink must be equal to or a superset of the target table's columns.".to_owned()));
         }
 
         for i in rw_fields_name {
@@ -216,19 +216,19 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("varchar"))
             }
             risingwave_common::types::DataType::Time => Err(SinkError::Starrocks(
-                "TIME is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
+                "TIME is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Timestamp => {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => Err(SinkError::Starrocks(
-                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_string(),
+                "TIMESTAMP WITH TIMEZONE is not supported for Starrocks sink as Starrocks doesn't store time values with timezone information. Please convert to TIMESTAMP first.".to_owned(),
             )),
             risingwave_common::types::DataType::Interval => Err(SinkError::Starrocks(
-                "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
+                "INTERVAL is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Struct(_) => Err(SinkError::Starrocks(
-                "STRUCT is not supported for Starrocks sink.".to_string(),
+                "STRUCT is not supported for Starrocks sink.".to_owned(),
             )),
             risingwave_common::types::DataType::List(list) => {
                 // For compatibility with older versions starrocks
@@ -239,17 +239,17 @@ impl StarrocksSink {
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
-                "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_string(),
+                "BYTEA is not supported for Starrocks sink. Please convert to VARCHAR or other supported types.".to_owned(),
             )),
             risingwave_common::types::DataType::Jsonb => Ok(starrocks_data_type.contains("json")),
             risingwave_common::types::DataType::Serial => {
                 Ok(starrocks_data_type.contains("bigint"))
             }
             risingwave_common::types::DataType::Int256 => Err(SinkError::Starrocks(
-                "INT256 is not supported for Starrocks sink.".to_string(),
+                "INT256 is not supported for Starrocks sink.".to_owned(),
             )),
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
-                "MAP is not supported for Starrocks sink.".to_string(),
+                "MAP is not supported for Starrocks sink.".to_owned(),
             )),
         }
     }
@@ -446,9 +446,7 @@ impl StarrocksSinkWriter {
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
             self.client
                 .as_mut()
-                .ok_or_else(|| {
-                    SinkError::Starrocks("Can't find starrocks sink insert".to_string())
-                })?
+                .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
                 .write(row_json_string.into())
                 .await?;
         }
@@ -461,8 +459,8 @@ impl StarrocksSinkWriter {
                 Op::Insert => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("0".to_string()),
+                        STARROCKS_DELETE_SIGN.to_owned(),
+                        Value::String("0".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -470,7 +468,7 @@ impl StarrocksSinkWriter {
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -478,8 +476,8 @@ impl StarrocksSinkWriter {
                 Op::Delete => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("1".to_string()),
+                        STARROCKS_DELETE_SIGN.to_owned(),
+                        Value::String("1".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -487,7 +485,7 @@ impl StarrocksSinkWriter {
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -496,8 +494,8 @@ impl StarrocksSinkWriter {
                 Op::UpdateInsert => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
                     row_json_value.insert(
-                        STARROCKS_DELETE_SIGN.to_string(),
-                        Value::String("0".to_string()),
+                        STARROCKS_DELETE_SIGN.to_owned(),
+                        Value::String("0".to_owned()),
                     );
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
@@ -505,7 +503,7 @@ impl StarrocksSinkWriter {
                     self.client
                         .as_mut()
                         .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_string())
+                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
                         })?
                         .write(row_json_string.into())
                         .await?;
@@ -590,7 +588,7 @@ impl SinkWriter for StarrocksSinkWriter {
             let client = self
                 .client
                 .take()
-                .ok_or_else(|| SinkError::Starrocks("Can't find starrocks inserter".to_string()))?;
+                .ok_or_else(|| SinkError::Starrocks("Can't find starrocks inserter".to_owned()))?;
             client.finish().await?;
         }
 

@@ -96,13 +96,13 @@ impl Sink for OpenSearchSink {
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Default
                     | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }

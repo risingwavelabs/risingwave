@@ -880,7 +880,7 @@ pub async fn build_remote_object_store(
                 tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
                     OpendalObjectStore::new_s3_engine(
-                        bucket.to_string(),
+                        bucket.to_owned(),
                         config.clone(),
                         metrics.clone(),
                     )
@@ -890,7 +890,7 @@ pub async fn build_remote_object_store(
             } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(
-                        s3.strip_prefix("s3://").unwrap().to_string(),
+                        s3.strip_prefix("s3://").unwrap().to_owned(),
                         metrics.clone(),
                         config.clone(),
                     )
@@ -919,8 +919,8 @@ pub async fn build_remote_object_store(
             let (bucket, root) = gcs.split_once('@').unwrap_or((gcs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_gcs_engine(
-                    bucket.to_string(),
-                    root.to_string(),
+                    bucket.to_owned(),
+                    root.to_owned(),
                     config.clone(),
                     metrics.clone(),
                 )
@@ -933,8 +933,8 @@ pub async fn build_remote_object_store(
             let (bucket, root) = obs.split_once('@').unwrap_or((obs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_obs_engine(
-                    bucket.to_string(),
-                    root.to_string(),
+                    bucket.to_owned(),
+                    root.to_owned(),
                     config.clone(),
                     metrics.clone(),
                 )
@@ -948,8 +948,8 @@ pub async fn build_remote_object_store(
             let (bucket, root) = oss.split_once('@').unwrap_or((oss, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_oss_engine(
-                    bucket.to_string(),
-                    root.to_string(),
+                    bucket.to_owned(),
+                    root.to_owned(),
                     config.clone(),
                     metrics.clone(),
                 )
@@ -962,8 +962,8 @@ pub async fn build_remote_object_store(
             let (namenode, root) = webhdfs.split_once('@').unwrap_or((webhdfs, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_webhdfs_engine(
-                    namenode.to_string(),
-                    root.to_string(),
+                    namenode.to_owned(),
+                    root.to_owned(),
                     config.clone(),
                     metrics.clone(),
                 )
@@ -976,8 +976,8 @@ pub async fn build_remote_object_store(
             let (container_name, root) = azblob.split_once('@').unwrap_or((azblob, ""));
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(
-                    container_name.to_string(),
-                    root.to_string(),
+                    container_name.to_owned(),
+                    root.to_owned(),
                     config.clone(),
                     metrics.clone(),
                 )
@@ -988,7 +988,7 @@ pub async fn build_remote_object_store(
         fs if fs.starts_with("fs://") => {
             let fs = fs.strip_prefix("fs://").unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_fs_engine(fs.to_string(), config.clone(), metrics.clone())
+                OpendalObjectStore::new_fs_engine(fs.to_owned(), config.clone(), metrics.clone())
                     .unwrap()
                     .monitored(metrics, config),
             )

@@ -1193,7 +1193,7 @@ mod tests {
         let info = ExecutorInfo {
             schema,
             pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_string(),
+            identity: "HashJoinExecutor".to_owned(),
         };
 
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
@@ -1286,7 +1286,7 @@ mod tests {
         let info = ExecutorInfo {
             schema,
             pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_string(),
+            identity: "HashJoinExecutor".to_owned(),
         };
 
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(

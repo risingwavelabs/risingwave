@@ -376,7 +376,7 @@ impl Access for AvroAccess<'_> {
         while i < path.len() {
             let key = path[i];
             let create_error = || AccessError::Undefined {
-                name: key.to_string(),
+                name: key.to_owned(),
                 path: path.iter().take(i).join("."),
             };
             match value {
@@ -1052,8 +1052,8 @@ mod tests {
         )
         .unwrap();
         let value = Value::Record(vec![
-            ("scale".to_string(), Value::Int(0)),
-            ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
+            ("scale".to_owned(), Value::Int(0)),
+            ("value".to_owned(), Value::Bytes(vec![0x01, 0x02, 0x03])),
         ]);
 
         let options = AvroParseOptions::create(&schema);

@@ -2626,7 +2626,7 @@ mod tests {
                 vec![0],
                 vec![null_safe],
                 cond,
-                "HashJoinExecutor".to_string(),
+                "HashJoinExecutor".to_owned(),
                 chunk_size,
                 if test_spill {
                     Some(SpillBackend::Memory)

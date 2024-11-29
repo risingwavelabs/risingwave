@@ -255,7 +255,7 @@ pub fn default_parallelism() -> usize {
 }
 
 pub fn default_node_label() -> String {
-    DEFAULT_COMPUTE_NODE_LABEL.to_string()
+    DEFAULT_COMPUTE_NODE_LABEL.to_owned()
 }
 
 pub fn default_role() -> Role {
