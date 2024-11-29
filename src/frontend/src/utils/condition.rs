@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
 use std::rc::Rc;
@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{AndScanRange, ScanRange, StructScanRange};
+use risingwave_common::util::scan_range::{PrefixScanRange, RowScanRange, ScanRange};
 
 use crate::error::Result;
 use crate::expr::{
@@ -333,13 +333,13 @@ impl Condition {
                 .flat_map(|(scan_ranges, _)| scan_ranges)
                 // sort, large one first
                 .map(|scan_range| match scan_range {
-                    ScanRange::AndScanRange(a) => a,
-                    ScanRange::StructScanRange(_) => panic!("unexpected struct scan range"),
+                    ScanRange::PrefixScanRange(a) => a,
+                    ScanRange::RowScanRange(_) => panic!("unexpected row scan range"),
                 })
                 .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
                 .collect_vec();
             // Make sure each range never overlaps with others, that's what scan range mean.
-            let mut non_overlap_scan_ranges: Vec<AndScanRange> = vec![];
+            let mut non_overlap_scan_ranges: Vec<PrefixScanRange> = vec![];
             for s1 in &scan_ranges {
                 let overlap = non_overlap_scan_ranges.iter().any(|s2| {
                     #[allow(clippy::disallowed_methods)]
@@ -358,7 +358,7 @@ impl Condition {
 
             let non_overlap_scan_ranges = non_overlap_scan_ranges
                 .into_iter()
-                .map(ScanRange::AndScanRange)
+                .map(ScanRange::PrefixScanRange)
                 .collect();
             Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
         } else {
@@ -366,37 +366,18 @@ impl Condition {
         }
     }
 
-    /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
-    pub fn split_to_scan_ranges(
-        self,
+    fn split_struct_to_scan_ranges(
+        &self,
         table_desc: Rc<TableDesc>,
-        max_split_range_gap: u64,
-    ) -> Result<(Vec<ScanRange>, Self)> {
-        fn false_cond() -> (Vec<ScanRange>, Condition) {
-            (vec![], Condition::false_cond())
-        }
-
-        // It's an OR.
-        if self.conjunctions.len() == 1 {
-            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
-                    table_desc,
-                    max_split_range_gap,
-                    disjunctions,
-                )? {
-                    return Ok((scan_ranges, other_condition));
-                } else {
-                    return Ok((vec![], self));
-                }
-            }
-        }
-
+    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
         let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
             self.conjunctions.clone().into_iter().partition(|expr| {
                 if let Some(f) = expr.as_function_call() {
-                    if let Some(f_input) = f.inputs().get(0)
-                        && let Some(f_input) = f_input.as_function_call()
-                        && matches!(f_input.func_type(), ExprType::Row)
+                    if let Some(left_input) = f.inputs().get(0)
+                        && let Some(left_input) = left_input.as_function_call()
+                        && matches!(left_input.func_type(), ExprType::Row)
+                        && let Some(right_input) = f.inputs().get(1)
+                        && right_input.is_literal()
                     {
                         true
                     } else {
@@ -430,62 +411,86 @@ impl Condition {
                 .unwrap()
                 .as_literal()
                 .unwrap();
+            if !matches!(row_right_literal.get_data(), Some(ScalarImpl::Struct(_))) {
+                return Ok(None);
+            }
             let row_right_literal_data = row_right_literal.get_data().clone().unwrap();
-            let row_right_literal_type = row_right_literal.get_data_type().clone().unwrap();
-            let right_iter = row_right_literal_data
-                .as_struct()
-                .fields()
-                .iter()
-                .zip_eq_fast(row_right_literal_type.as_struct().types());
+            let right_iter = row_right_literal_data.as_struct().fields();
             let func_type = row_conjunction.as_function_call().unwrap().func_type();
             if row_left_inputs.len() > 1
                 && (matches!(func_type, ExprType::LessThan)
                     || matches!(func_type, ExprType::GreaterThan))
             {
-                let mut row_inner_element_map = row_left_inputs
-                    .iter()
-                    .zip_eq_fast(right_iter)
-                    .map(|(left_expr, right_expr)| {
-                        (
-                            left_expr.as_input_ref().unwrap().index,
-                            (left_expr, right_expr),
-                        )
-                    })
-                    .collect::<HashMap<_, _>>();
                 let mut pk_struct = vec![];
-                for i in table_desc.order_column_indices() {
-                    if let Some((_, (data, _))) = row_inner_element_map.remove(&i) {
-                        pk_struct.push(data.clone());
-                    } else {
-                        break;
+                let mut all_added = true;
+                let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
+                for i in 0..table_desc.order_column_indices().len() {
+                    if let Some((left_expr, right_expr)) = iter.next() {
+                        if left_expr.as_input_ref().unwrap().index != i {
+                            all_added = false;
+                            break;
+                        }
+                        pk_struct.push(right_expr.clone());
                     }
                 }
 
                 if !pk_struct.is_empty() {
-                    let scan_range = ScanRange::StructScanRange(StructScanRange {
+                    let scan_range = ScanRange::RowScanRange(RowScanRange {
                         range: match func_type {
                             ExprType::GreaterThan => (Bound::Excluded(pk_struct), Bound::Unbounded),
                             ExprType::LessThan => (Bound::Unbounded, Bound::Excluded(pk_struct)),
                             _ => unreachable!(),
                         },
                     });
-                    if !row_inner_element_map.is_empty() {
-                        return Ok((
+                    if !all_added {
+                        return Ok(Some((
                             vec![scan_range],
                             Condition {
-                                conjunctions: self.conjunctions,
+                                conjunctions: self.conjunctions.clone(),
                             },
-                        ));
+                        )));
                     } else {
-                        return Ok((
+                        return Ok(Some((
                             vec![scan_range],
                             Condition {
                                 conjunctions: row_conjunctions_without_struct,
                             },
-                        ));
+                        )));
                     }
                 }
             }
+        }
+        Ok(None)
+    }
+
+    /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
+    pub fn split_to_scan_ranges(
+        self,
+        table_desc: Rc<TableDesc>,
+        max_split_range_gap: u64,
+    ) -> Result<(Vec<ScanRange>, Self)> {
+        fn false_cond() -> (Vec<ScanRange>, Condition) {
+            (vec![], Condition::false_cond())
+        }
+
+        // It's an OR.
+        if self.conjunctions.len() == 1 {
+            if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
+                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
+                    table_desc,
+                    max_split_range_gap,
+                    disjunctions,
+                )? {
+                    return Ok((scan_ranges, other_condition));
+                } else {
+                    return Ok((vec![], self));
+                }
+            }
+        }
+        if let Some((scan_ranges, other_condition)) =
+            self.split_struct_to_scan_ranges(table_desc.clone())?
+        {
+            return Ok((scan_ranges, other_condition));
         }
 
         let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);

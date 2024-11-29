@@ -353,10 +353,10 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             scan_range.extend_eq_conds(vec![datum]);
         }
 
-        let pk_prefix = if let ScanRange::AndScanRange(and_scan_range) = scan_range {
+        let pk_prefix = if let ScanRange::PrefixScanRange(and_scan_range) = scan_range {
             OwnedRow::new(and_scan_range.eq_conds)
         } else {
-            panic!("scan_range should be AndScanRange");
+            panic!("scan_range should be PrefixScanRange");
         };
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {

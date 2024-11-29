@@ -106,7 +106,7 @@ impl ScanRange {
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
         match scan_range.scan_range.unwrap() {
-            scan_range::ScanRange::AndScanRange(and_scan_range) => {
+            scan_range::ScanRange::PrefixScanRange(and_scan_range) => {
                 let pk_prefix = OwnedRow::new(
                     and_scan_range
                         .eq_conds
@@ -125,14 +125,15 @@ impl ScanRange {
                 }
 
                 let bound_ty = pk_types.next().unwrap();
-                let build_bound = |bound: &scan_range::and_scan_range::Bound| -> Bound<OwnedRow> {
-                    let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
-                    if bound.inclusive {
-                        Bound::Included(OwnedRow::new(vec![datum]))
-                    } else {
-                        Bound::Excluded(OwnedRow::new(vec![datum]))
-                    }
-                };
+                let build_bound =
+                    |bound: &scan_range::prefix_scan_range::Bound| -> Bound<OwnedRow> {
+                        let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
+                        if bound.inclusive {
+                            Bound::Included(OwnedRow::new(vec![datum]))
+                        } else {
+                            Bound::Excluded(OwnedRow::new(vec![datum]))
+                        }
+                    };
 
                 let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
                     and_scan_range.lower_bound.as_ref(),
@@ -148,11 +149,11 @@ impl ScanRange {
                     next_col_bounds,
                 })
             }
-            scan_range::ScanRange::StructScanRange(struct_scan_range) => {
+            scan_range::ScanRange::RowScanRange(row_scan_range) => {
                 let pk_prefix = OwnedRow::new(vec![]);
 
                 let mut build_bound =
-                    |bound: &scan_range::struct_scan_range::Bound| -> Result<Bound<OwnedRow>> {
+                    |bound: &scan_range::row_scan_range::Bound| -> Result<Bound<OwnedRow>> {
                         let next_col_bounds = OwnedRow::new(
                             bound
                                 .value
@@ -171,8 +172,8 @@ impl ScanRange {
                     };
 
                 let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
-                    struct_scan_range.lower_bound.as_ref(),
-                    struct_scan_range.upper_bound.as_ref(),
+                    row_scan_range.lower_bound.as_ref(),
+                    row_scan_range.upper_bound.as_ref(),
                 ) {
                     (Some(lb), Some(ub)) => (build_bound(lb)?, build_bound(ub)?),
                     (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)?),

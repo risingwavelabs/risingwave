@@ -473,7 +473,7 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
     for scan_range in scan_ranges.iter().take(explain_max_range) {
         #[expect(clippy::disallowed_methods)]
         match scan_range {
-            ScanRange::AndScanRange(scan_range) => {
+            ScanRange::PrefixScanRange(scan_range) => {
                 let mut range_str = scan_range
                     .eq_conds
                     .iter()
@@ -489,7 +489,7 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
                 }
                 range_strs.push(range_str.join(" AND "));
             }
-            ScanRange::StructScanRange(scan_range) => {
+            ScanRange::RowScanRange(scan_range) => {
                 let range_str = match (&scan_range.range.0, &scan_range.range.1) {
                     (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
                     (Bound::Unbounded, ub) => ub_struct_to_string(&order_names, ub),

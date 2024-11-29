@@ -15,9 +15,9 @@
 use std::ops::{Bound, RangeBounds};
 
 use paste::paste;
-use risingwave_pb::batch_plan::scan_range::and_scan_range::Bound as PbAndBound;
-use risingwave_pb::batch_plan::scan_range::struct_scan_range::Bound as PbStructBound;
-use risingwave_pb::batch_plan::scan_range::{PbAndScanRange, PbStructScanRange};
+use risingwave_pb::batch_plan::scan_range::prefix_scan_range::Bound as PbAndBound;
+use risingwave_pb::batch_plan::scan_range::row_scan_range::Bound as PbStructBound;
+use risingwave_pb::batch_plan::scan_range::{PbPrefixScanRange, PbRowScanRange};
 use risingwave_pb::batch_plan::ScanRange as PbScanRange;
 
 use super::value_encoding::serialize_datum;
@@ -28,18 +28,18 @@ use crate::util::value_encoding::serialize_datum_into;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ScanRange {
-    AndScanRange(AndScanRange),
-    StructScanRange(StructScanRange),
+    PrefixScanRange(PrefixScanRange),
+    RowScanRange(RowScanRange),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StructScanRange {
+pub struct RowScanRange {
     pub range: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
 }
 
-impl StructScanRange {
-    pub fn to_protobuf(&self) -> PbStructScanRange {
-        PbStructScanRange {
+impl RowScanRange {
+    pub fn to_protobuf(&self) -> PbRowScanRange {
+        PbRowScanRange {
             lower_bound: bound_vec_datum_to_proto(&self.range.0),
             upper_bound: bound_vec_datum_to_proto(&self.range.1),
         }
@@ -94,14 +94,14 @@ fn bound_vec_datum_to_proto(bound: &Bound<Vec<Datum>>) -> Option<PbStructBound> 
 }
 /// See also [`PbScanRange`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AndScanRange {
+pub struct PrefixScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
 }
 
-impl AndScanRange {
-    pub fn to_protobuf(&self) -> PbAndScanRange {
-        PbAndScanRange {
+impl PrefixScanRange {
+    pub fn to_protobuf(&self) -> PbPrefixScanRange {
+        PbPrefixScanRange {
             eq_conds: self
                 .eq_conds
                 .iter()
@@ -152,16 +152,16 @@ fn bound_scalar_to_proto(bound: &Bound<ScalarImpl>) -> Option<PbAndBound> {
 impl ScanRange {
     pub fn to_protobuf(&self) -> PbScanRange {
         match self {
-            ScanRange::AndScanRange(scan_range) => PbScanRange {
+            ScanRange::PrefixScanRange(scan_range) => PbScanRange {
                 scan_range: Some(
-                    risingwave_pb::batch_plan::scan_range::ScanRange::AndScanRange(
+                    risingwave_pb::batch_plan::scan_range::ScanRange::PrefixScanRange(
                         scan_range.to_protobuf(),
                     ),
                 ),
             },
-            ScanRange::StructScanRange(scan_range) => PbScanRange {
+            ScanRange::RowScanRange(scan_range) => PbScanRange {
                 scan_range: Some(
-                    risingwave_pb::batch_plan::scan_range::ScanRange::StructScanRange(
+                    risingwave_pb::batch_plan::scan_range::ScanRange::RowScanRange(
                         scan_range.to_protobuf(),
                     ),
                 ),
@@ -171,63 +171,63 @@ impl ScanRange {
 
     pub fn is_full_table_scan(&self) -> bool {
         match self {
-            ScanRange::AndScanRange(scan_range) => scan_range.is_full_table_scan(),
-            ScanRange::StructScanRange(scan_range) => scan_range.is_full_table_scan(),
+            ScanRange::PrefixScanRange(scan_range) => scan_range.is_full_table_scan(),
+            ScanRange::RowScanRange(scan_range) => scan_range.is_full_table_scan(),
         }
     }
 
     pub fn is_and_scan_range(&self) -> bool {
-        matches!(self, ScanRange::AndScanRange(_))
+        matches!(self, ScanRange::PrefixScanRange(_))
     }
 
     pub fn has_eq_conds(&self) -> bool {
         match self {
-            ScanRange::AndScanRange(scan_range) => scan_range.has_eq_conds(),
-            ScanRange::StructScanRange(scan_range) => scan_range.has_eq_conds(),
+            ScanRange::PrefixScanRange(scan_range) => scan_range.has_eq_conds(),
+            ScanRange::RowScanRange(scan_range) => scan_range.has_eq_conds(),
         }
     }
 
     pub fn two_side_bound(&self) -> bool {
         match self {
-            ScanRange::AndScanRange(scan_range) => scan_range.two_side_bound(),
-            ScanRange::StructScanRange(scan_range) => scan_range.two_side_bound(),
+            ScanRange::PrefixScanRange(scan_range) => scan_range.two_side_bound(),
+            ScanRange::RowScanRange(scan_range) => scan_range.two_side_bound(),
         }
     }
 
     pub fn try_compute_vnode(&self, table_distribution: &TableDistribution) -> Option<VirtualNode> {
         match self {
-            ScanRange::AndScanRange(scan_range) => scan_range.try_compute_vnode(table_distribution),
-            ScanRange::StructScanRange(scan_range) => {
+            ScanRange::PrefixScanRange(scan_range) => {
                 scan_range.try_compute_vnode(table_distribution)
             }
+            ScanRange::RowScanRange(scan_range) => scan_range.try_compute_vnode(table_distribution),
         }
     }
 
     pub const fn full_and_table_scan() -> Self {
-        Self::AndScanRange(AndScanRange {
+        Self::PrefixScanRange(PrefixScanRange {
             eq_conds: vec![],
             range: full_range(),
         })
     }
 
     pub const fn full_struct_table_scan() -> Self {
-        Self::StructScanRange(StructScanRange {
+        Self::RowScanRange(RowScanRange {
             range: full_range(),
         })
     }
 
     pub fn extend_eq_conds(&mut self, eq_conds: impl IntoIterator<Item = Datum>) {
         match self {
-            ScanRange::AndScanRange(and_scan_range) => and_scan_range.eq_conds.extend(eq_conds),
-            ScanRange::StructScanRange(_) => panic!("extend_eq_conds to StructScanRange"),
+            ScanRange::PrefixScanRange(and_scan_range) => and_scan_range.eq_conds.extend(eq_conds),
+            ScanRange::RowScanRange(_) => panic!("extend_eq_conds to RowScanRange"),
         }
     }
 
     pub fn set_and_scan_range(&mut self, range: (Bound<ScalarImpl>, Bound<ScalarImpl>)) {
         match self {
-            ScanRange::AndScanRange(and_scan_range) => and_scan_range.range = range,
-            ScanRange::StructScanRange(_) => {
-                panic!("set_and_scan_range to StructScanRange")
+            ScanRange::PrefixScanRange(and_scan_range) => and_scan_range.range = range,
+            ScanRange::RowScanRange(_) => {
+                panic!("set_and_scan_range to RowScanRange")
             }
         }
     }
@@ -259,7 +259,7 @@ macro_rules! impl_split_small_range {
                 /// `Precondition`: make sure the first order key is int type if you call this method.
                 /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).s
                 pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
-                    if let ScanRange::AndScanRange(and_scan_range) = self {
+                    if let ScanRange::PrefixScanRange(and_scan_range) = self {
                         if and_scan_range.eq_conds.is_empty() {
                             match and_scan_range.range {
                                 $(
@@ -271,7 +271,7 @@ macro_rules! impl_split_small_range {
                                             return Some(
                                                 (*left..=*right)
                                                     .into_iter()
-                                                    .map(|i| ScanRange::AndScanRange(AndScanRange {
+                                                    .map(|i| ScanRange::PrefixScanRange(PrefixScanRange {
                                                         eq_conds: vec![Some(ScalarImpl::$type_name(i))],
                                                         range: full_range(),
                                                     }))

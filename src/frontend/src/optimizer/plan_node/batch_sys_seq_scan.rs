@@ -49,8 +49,8 @@ impl BatchSysSeqScan {
             scan_ranges
                 .iter()
                 .filter_map(|scan_range| match scan_range {
-                    ScanRange::AndScanRange(a) => Some(a),
-                    ScanRange::StructScanRange(_) => None,
+                    ScanRange::PrefixScanRange(a) => Some(a),
+                    ScanRange::RowScanRange(_) => None,
                 })
                 .for_each(|scan_range| {
                     assert!(!scan_range.is_full_table_scan());
