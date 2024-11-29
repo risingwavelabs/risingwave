@@ -163,7 +163,7 @@ impl LegacyRowFormat {
                         value: "message".into(),
                         quote_style: None,
                     }]),
-                    value: Value::SingleQuotedString(schema.message_name.0),
+                    value: Value::SingleQuotedString(schema.message_name.0).into(),
                 }];
                 if schema.use_schema_registry {
                     options.push(SqlOption {
@@ -171,7 +171,7 @@ impl LegacyRowFormat {
                             value: "schema.registry".into(),
                             quote_style: None,
                         }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                     });
                 } else {
                     options.push(SqlOption {
@@ -179,7 +179,7 @@ impl LegacyRowFormat {
                             value: "schema.location".into(),
                             quote_style: None,
                         }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                     })
                 }
                 options
@@ -191,7 +191,7 @@ impl LegacyRowFormat {
                             value: "schema.registry".into(),
                             quote_style: None,
                         }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                     }]
                 } else {
                     vec![SqlOption {
@@ -199,7 +199,7 @@ impl LegacyRowFormat {
                             value: "schema.location".into(),
                             quote_style: None,
                         }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0),
+                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                     }]
                 }
             }
@@ -209,7 +209,7 @@ impl LegacyRowFormat {
                         value: "schema.registry".into(),
                         quote_style: None,
                     }]),
-                    value: Value::SingleQuotedString(schema.row_schema_location.0),
+                    value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                 }]
             }
             LegacyRowFormat::Csv(schema) => {
@@ -221,7 +221,8 @@ impl LegacyRowFormat {
                         }]),
                         value: Value::SingleQuotedString(
                             String::from_utf8_lossy(&[schema.delimiter]).into(),
-                        ),
+                        )
+                        .into(),
                     },
                     SqlOption {
                         name: ObjectName(vec![Ident {
@@ -232,7 +233,8 @@ impl LegacyRowFormat {
                             "false".into()
                         } else {
                             "true".into()
-                        }),
+                        })
+                        .into(),
                     },
                 ]
             }

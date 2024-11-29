@@ -32,6 +32,7 @@ use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
@@ -50,8 +51,9 @@ use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str, WithOptionsSecResolved,
+    dispatch_source_prop, dispatch_split_impl, for_all_connections, for_all_sources,
+    impl_connection, impl_connector_properties, impl_split, match_source_name_str,
+    WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
@@ -478,6 +480,7 @@ impl ConnectorProperties {
 }
 
 for_all_sources!(impl_split);
+for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {

@@ -26,7 +26,10 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, QuerySelect};
 use strum::{EnumDiscriminants, EnumIs};
 
-use super::{get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source};
+use super::{
+    get_referred_connection_ids_from_sink, get_referred_connection_ids_from_source,
+    get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source,
+};
 use crate::model::FragmentId;
 use crate::{MetaError, MetaResult};
 
@@ -331,6 +334,21 @@ impl StreamingJob {
                 vec![]
             }
             StreamingJob::Source(_) => vec![],
+        }
+    }
+
+    pub fn dependent_connection_ids(&self) -> MetaResult<HashSet<u32>> {
+        match self {
+            StreamingJob::Source(source) => Ok(get_referred_connection_ids_from_source(source)),
+            StreamingJob::Table(source, _, _) => {
+                if let Some(source) = source {
+                    Ok(get_referred_connection_ids_from_source(source))
+                } else {
+                    Ok(HashSet::new())
+                }
+            }
+            StreamingJob::Sink(sink, _) => Ok(get_referred_connection_ids_from_sink(sink)),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
         }
     }
 

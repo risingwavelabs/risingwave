@@ -11339,7 +11339,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "prost 0.13.1",
- "quick-xml 0.35.0",
+ "quick-xml 0.36.1",
  "rand",
  "risingwave_batch",
  "risingwave_common",

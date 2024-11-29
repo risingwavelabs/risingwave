@@ -35,6 +35,7 @@ use super::{fields_to_descriptors, RwPgResponse, RwPgResponseBuilderExt};
 use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::error::Result;
+use crate::handler::create_connection::print_connection_params;
 use crate::handler::HandlerArgs;
 use crate::session::cursor_manager::SubscriptionCursor;
 use crate::session::SessionImpl;
@@ -413,6 +414,9 @@ pub async fn handle_show_object(
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_string()
                         },
+                        connection::Info::ConnectionParams(params) => {
+                            params.get_connection_type().unwrap().as_str_name().to_string()
+                        }
                     };
                     let source_names = schema
                         .get_source_ids_by_connection(c.id)
@@ -437,6 +441,10 @@ pub async fn handle_show_object(
                                 serde_json::to_string(&source_names).unwrap(),
                                 serde_json::to_string(&sink_names).unwrap(),
                             )
+                        }
+                        connection::Info::ConnectionParams(params) => {
+                            // todo: show dep relations
+                            print_connection_params(params, schema)
                         }
                     };
                     ShowConnectionRow {

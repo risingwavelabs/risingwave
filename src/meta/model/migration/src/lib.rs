@@ -29,6 +29,7 @@ mod m20241022_072553_node_label;
 mod m20241025_062548_singleton_vnode_count;
 mod m20241115_085007_remove_function_type;
 mod m20241120_182555_hummock_add_time_travel_sst_index;
+mod m20241125_043732_connection_params;
 mod utils;
 
 pub struct Migrator;
@@ -95,6 +96,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241120_182555_hummock_add_time_travel_sst_index::Migration),
             Box::new(m20241022_072553_node_label::Migration),
             Box::new(m20241001_013810_webhook_source::Migration),
+            Box::new(m20241125_043732_connection_params::Migration),
         ]
     }
 }

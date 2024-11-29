@@ -726,6 +726,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey, FullKeyTracker};
     use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -1198,15 +1199,27 @@ mod tests {
         .await;
 
         let split_key = test_key_of(5000).encode();
-
-        let mut sst_1 = table_info.clone();
-        sst_1.key_range.right = split_key.clone().into();
-        sst_1.key_range.right_exclusive = true;
+        let sst_1: SstableInfo = SstableInfoInner {
+            key_range: KeyRange {
+                left: table_info.key_range.left.clone(),
+                right: split_key.clone().into(),
+                right_exclusive: true,
+            },
+            ..table_info.get_inner()
+        }
+        .into();
 
         let total_key_count = sst_1.total_key_count;
-        let mut sst_2 = table_info.clone();
-        sst_2.sst_id = sst_1.sst_id + 1;
-        sst_2.key_range.left = split_key.clone().into();
+        let sst_2: SstableInfo = SstableInfoInner {
+            sst_id: sst_1.sst_id + 1,
+            key_range: KeyRange {
+                left: split_key.clone().into(),
+                right: table_info.key_range.right.clone(),
+                right_exclusive: table_info.key_range.right_exclusive,
+            },
+            ..table_info.get_inner()
+        }
+        .into();
 
         {
             // test concate

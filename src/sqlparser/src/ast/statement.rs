@@ -850,7 +850,7 @@ impl ParseTo for CreateSecretStatement {
         impl_parse_to!(with_properties: WithProperties, parser);
         let mut credential = Value::Null;
         if parser.parse_keyword(Keyword::AS) {
-            credential = parser.parse_value()?;
+            credential = parser.ensure_parse_value()?;
         }
         Ok(Self {
             if_not_exists,

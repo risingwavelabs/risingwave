@@ -203,6 +203,7 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_hummock_sdk::level::Level;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
@@ -349,7 +350,14 @@ mod test {
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
             assert_eq!(10, sst_10.sst_id);
-            sst_10.key_range.right_exclusive = true;
+            *sst_10 = SstableInfoInner {
+                key_range: KeyRange {
+                    right_exclusive: true,
+                    ..sst_10.key_range.clone()
+                },
+                ..sst_10.get_inner()
+            }
+            .into();
         }
 
         assert_eq!(levels.len(), 4);

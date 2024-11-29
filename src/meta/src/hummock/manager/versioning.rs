@@ -333,7 +333,7 @@ mod tests {
 
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, Levels};
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_estimate_table_stats() {
-        let sst = SstableInfo {
+        let sst = SstableInfoInner {
             key_range: KeyRange {
                 left: vec![1; 10].into(),
                 right: vec![1; 20].into(),
@@ -468,7 +468,8 @@ mod tests {
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
             ..Default::default()
-        };
+        }
+        .into();
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for stats in changes.values() {
@@ -519,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_estimate_table_stats_large_key_range() {
-        let sst = SstableInfo {
+        let sst = SstableInfoInner {
             key_range: KeyRange {
                 left: vec![1; 1000].into(),
                 right: vec![1; 2000].into(),
@@ -529,7 +530,8 @@ mod tests {
             total_key_count: 6000,
             uncompressed_file_size: 60_000,
             ..Default::default()
-        };
+        }
+        .into();
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for t in &sst.table_ids {

@@ -321,6 +321,13 @@ impl CatalogController {
                 .into_iter()
                 .map(|secret_id| secret_id as ObjectId),
         );
+        // collect dependent connection
+        dependencies.extend(
+            streaming_job
+                .dependent_connection_ids()?
+                .into_iter()
+                .map(|conn_id| conn_id as ObjectId),
+        );
 
         // record object dependency.
         if !dependencies.is_empty() {

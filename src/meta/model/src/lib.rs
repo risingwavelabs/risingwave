@@ -401,6 +401,7 @@ derive_from_blob!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
+derive_from_blob!(ConnectionParams, risingwave_pb::catalog::ConnectionParams);
 derive_from_blob!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
 derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
