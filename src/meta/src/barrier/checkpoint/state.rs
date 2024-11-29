@@ -21,7 +21,6 @@ use risingwave_pb::meta::PausedReason;
 
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo, InflightSubscriptionInfo};
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
-use crate::controller::fragment::InflightFragmentInfo;
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(crate) struct BarrierWorkerState {
@@ -152,19 +151,16 @@ impl BarrierWorkerState {
 
         let info = self.inflight_graph_info.clone();
         let subscription_info = self.inflight_subscription_info.clone();
+        let table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
 
         if let Some(fragment_changes) = fragment_changes {
             self.inflight_graph_info.post_apply(&fragment_changes);
         }
 
-        let mut table_ids_to_commit: HashSet<_> = info.existing_table_ids().collect();
         let mut jobs_to_wait = HashSet::new();
         if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
             for (table_id, (_, graph_info)) in jobs_to_merge {
                 jobs_to_wait.insert(*table_id);
-                table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
-                    graph_info.fragment_infos(),
-                ));
                 self.inflight_graph_info.extend(graph_info.clone());
             }
         }

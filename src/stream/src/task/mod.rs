@@ -40,7 +40,7 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-struct PartialGraphId(u64);
+pub struct PartialGraphId(u64);
 
 impl PartialGraphId {
     fn new(id: u64) -> Self {

@@ -17,6 +17,7 @@ use std::mem::replace;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use itertools::Itertools;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -27,6 +28,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, Recovery};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
+use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -38,7 +40,7 @@ use tracing::{debug, error, info, warn, Instrument};
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CheckpointControl, DatabaseCheckpointControl,
 };
-use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
+use crate::barrier::complete_task::{CommittingTask, CompletingTasks};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -86,8 +88,11 @@ pub(super) struct GlobalBarrierWorker<C> {
     checkpoint_control: CheckpointControl,
 
     /// Command that has been collected but is still completing.
-    /// The join handle of the completing future is stored.
-    completing_task: CompletingTask,
+    completing_tasks: CompletingTasks,
+
+    /// Command that has been completed but is still committing.
+    /// The join handle of the committing future is stored.
+    committing_task: CommittingTask,
 
     request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
 
@@ -146,7 +151,8 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             context,
             env,
             checkpoint_control: CheckpointControl::default(),
-            completing_task: CompletingTask::None,
+            completing_tasks: CompletingTasks::new(),
+            committing_task: CommittingTask::None,
             request_rx,
             active_streaming_nodes,
             sink_manager,
@@ -245,6 +251,17 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         // Start the event loop.
         loop {
+            if let Some(next_complete_barrier_task) = self
+                .checkpoint_control
+                .next_complete_barrier_task(&mut self.periodic_barriers)
+            {
+                if let Err(e) = self
+                    .completing_tasks
+                    .push(next_complete_barrier_task, &mut self.control_stream_manager)
+                {
+                    self.failure_recovery(e).await;
+                }
+            }
             tokio::select! {
                 biased;
 
@@ -300,28 +317,39 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                     }
                 }
                 complete_result = self
-                    .completing_task
-                    .next_completed_barrier(
-                        &mut self.periodic_barriers,
-                        &mut self.checkpoint_control,
-                        &mut self.control_stream_manager,
+                    .committing_task
+                    .next_committed_barrier(
+                        &mut self.completing_tasks,
                         &self.context,
                         &self.env,
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(output);
+                            self.checkpoint_control.ack_completed(output, &mut self.control_stream_manager);
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
                         }
                     }
                 },
-                (worker_id, resp_result) = self.control_stream_manager.next_collect_barrier_response() => {
-                    if let Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
+                (worker_id, resp_result) = self.control_stream_manager.next_response() => {
+                    if let Err(e) = resp_result.and_then(|resp| {
+                        match resp {
+                            Response::CompleteBarrier(resp) => {
+                                self.completing_tasks.on_barrier_complete_resp(worker_id, resp);
+                                Ok(())
+                            },
+                            Response::CollectBarrier(resp) => {
+                                self.checkpoint_control.barrier_collected(worker_id, resp, &mut self.control_stream_manager)
+                            },
+                            other => {
+                                Err(anyhow!("get expected response: {:?}", other).into())
+                            }
+                        }
+                    }) {
                         {
 
-                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
+                            if self.checkpoint_control.is_failed_at_worker_err(worker_id) || self.completing_tasks.is_failed_at_worker_err(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
                                 self.report_collect_failure(&err);
@@ -346,17 +374,18 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     }
 }
 
-impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
-    /// We need to make sure there are no changes when doing recovery
-    pub async fn clear_on_err(&mut self, err: &MetaError) {
+// TODO: move this method to `complete_task.rs` and mark some structs and fields as private before merge
+impl CommittingTask {
+    pub(super) async fn clear_on_err(
+        &mut self,
+        completing_tasks: &mut CompletingTasks,
+        context: &impl GlobalBarrierWorkerContext,
+        env: &MetaSrvEnv,
+    ) {
         // join spawned completing command to finish no matter it succeeds or not.
-        let is_err = match replace(&mut self.completing_task, CompletingTask::None) {
-            CompletingTask::None => false,
-            CompletingTask::Completing {
-                epochs_to_ack,
-                join_handle,
-                ..
-            } => {
+        let is_err = match replace(self, CommittingTask::None) {
+            CommittingTask::None => false,
+            CommittingTask::Committing { join_handle, .. } => {
                 info!("waiting for completing command to finish in recovery");
                 match join_handle.await {
                     Err(e) => {
@@ -367,48 +396,38 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         warn!(err = ?e.as_report(), "failed to complete barrier during clear");
                         true
                     }
-                    Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
-                                epochs_to_ack,
-                                hummock_version_stats,
-                            });
-                        false
-                    }
+                    Ok(Ok(_)) => false,
                 }
             }
-            CompletingTask::Err(_) => true,
+            CommittingTask::Err(_) => true,
         };
         if !is_err {
             // continue to finish the pending collected barrier.
-            while let Some(task) = self.checkpoint_control.next_complete_barrier_task(None) {
-                let epochs_to_ack = task.epochs_to_ack();
-                match task
-                    .complete_barrier(&*self.context, self.env.clone())
-                    .await
+            while let Some((commit_info, task)) = completing_tasks.next_completed_task() {
+                if let Err(e) =
+                    CommittingTask::commit_barrier(task, commit_info, context, env.clone()).await
                 {
-                    Ok(hummock_version_stats) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
-                                epochs_to_ack,
-                                hummock_version_stats,
-                            });
-                    }
-                    Err(e) => {
-                        error!(
-                            err = ?e.as_report(),
-                            "failed to complete barrier during recovery"
-                        );
-                        break;
-                    }
+                    error!(
+                        err = ?e.as_report(),
+                        "failed to complete barrier during recovery"
+                    );
+                    break;
                 }
             }
         }
-        self.checkpoint_control.clear_on_err(err);
     }
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    /// We need to make sure there are no changes when doing recovery
+    pub async fn clear_on_err(&mut self, err: &MetaError) {
+        self.committing_task
+            .clear_on_err(&mut self.completing_tasks, &*self.context, &self.env)
+            .await;
+        self.completing_tasks = CompletingTasks::new();
+        self.checkpoint_control.clear_on_err(err);
+    }
+
     /// Set barrier manager status.
     async fn failure_recovery(&mut self, err: MetaError) {
         self.clear_on_err(&err).await;
@@ -645,9 +664,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         debug!(?node_to_collect, "inject initial barrier");
                         while !node_to_collect.is_empty() {
                             let (worker_id, result) =
-                                control_stream_manager.next_collect_barrier_response().await;
+                                control_stream_manager.next_response().await;
                             let resp = result?;
-                            assert_eq!(resp.epoch, barrier_info.prev_epoch());
+                            match resp {
+                                Response::CollectBarrier(resp) => {
+                                    assert_eq!(resp.epoch, barrier_info.prev_epoch());
+                                }
+                                other => {
+                                    return Err(anyhow!("expect Response::CollectBarrier but get {:?}", other).into());
+                                }
+                            }
                             assert!(node_to_collect.remove(&worker_id));
                         }
                         debug!("collected initial barrier");

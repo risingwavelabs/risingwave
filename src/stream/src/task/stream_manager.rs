@@ -75,14 +75,16 @@ pub type ActorHandle = JoinHandle<()>;
 pub type AtomicU64Ref = Arc<AtomicU64>;
 
 pub mod await_tree_key {
+    use crate::task::PartialGraphId;
+
     /// Await-tree key type for actors.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct Actor(pub crate::task::ActorId);
 
     /// Await-tree key type for barriers.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub struct BarrierAwait {
-        pub prev_epoch: u64,
+        pub sync_graph_epochs: Vec<(PartialGraphId, u64)>,
     }
 }
 

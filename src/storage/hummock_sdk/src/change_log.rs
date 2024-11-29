@@ -149,7 +149,7 @@ where
 }
 
 pub fn build_table_change_log_delta<'a>(
-    old_value_ssts: impl Iterator<Item = SstableInfo>,
+    old_value_ssts: impl Iterator<Item = &'a SstableInfo>,
     new_value_ssts: impl Iterator<Item = &'a SstableInfo>,
     epochs: &Vec<u64>,
     log_store_table_ids: impl Iterator<Item = (u32, u64)>,

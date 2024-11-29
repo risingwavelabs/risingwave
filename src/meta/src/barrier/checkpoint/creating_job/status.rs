@@ -22,9 +22,7 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::StreamActor;
-use risingwave_pb::stream_service::barrier_complete_response::{
-    CreateMviewProgress, PbCreateMviewProgress,
-};
+use risingwave_pb::stream_service::barrier_collect_response::PbCreateMviewProgress;
 use tracing::warn;
 
 use crate::barrier::progress::CreateMviewProgressTracker;
@@ -133,7 +131,7 @@ pub(super) struct CreatingJobInjectBarrierInfo {
 impl CreatingStreamingJobStatus {
     pub(super) fn update_progress(
         &mut self,
-        create_mview_progress: impl IntoIterator<Item = &CreateMviewProgress>,
+        create_mview_progress: impl IntoIterator<Item = &PbCreateMviewProgress>,
     ) -> Option<Vec<CreatingJobInjectBarrierInfo>> {
         match self {
             Self::ConsumingSnapshot {

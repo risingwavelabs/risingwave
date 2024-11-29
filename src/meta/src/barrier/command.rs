@@ -23,7 +23,9 @@ use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
-use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::change_log::{build_table_change_log_delta, ChangeLogDelta};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::common::PbWorkerNode;
@@ -39,15 +41,13 @@ use risingwave_pb::stream_plan::{
     DropSubscriptionsMutation, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
     StopMutation, StreamActor, SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
-use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::{CommandFragmentChanges, InflightStreamingJobInfo};
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{DdlType, StreamingJob};
 use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
@@ -505,16 +505,16 @@ impl CommandContext {
         Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
 
-    pub(super) fn collect_commit_epoch_info(
+    pub(super) fn collect_extra_commit_epoch_info(
         &self,
-        info: &mut CommitEpochInfo,
-        resps: Vec<BarrierCompleteResponse>,
+        synced_ssts: &Vec<LocalSstableInfo>,
+        old_value_ssts: &Vec<SstableInfo>,
         backfill_pinned_log_epoch: HashMap<TableId, (u64, HashSet<TableId>)>,
+        tables_to_commit: &mut HashMap<TableId, u64>,
+        new_table_fragment_infos: &mut Vec<NewTableFragmentInfo>,
+        change_log_delta: &mut HashMap<TableId, ChangeLogDelta>,
     ) {
-        let (sst_to_context, synced_ssts, new_table_watermarks, old_value_ssts) =
-            collect_resp_info(resps);
-
-        let new_table_fragment_infos = if let Some(Command::CreateStreamingJob { info, job_type }) =
+        let new_table_fragment_info = if let Some(Command::CreateStreamingJob { info, job_type }) =
             &self.command
             && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
         {
@@ -528,9 +528,9 @@ impl CommandContext {
                 table_ids.insert(TableId::new(mv_table_id));
             }
 
-            vec![NewTableFragmentInfo { table_ids }]
+            Some(NewTableFragmentInfo { table_ids })
         } else {
-            vec![]
+            None
         };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
@@ -564,7 +564,7 @@ impl CommandContext {
         }
 
         let table_new_change_log = build_table_change_log_delta(
-            old_value_ssts.into_iter(),
+            old_value_ssts.iter(),
             synced_ssts.iter().map(|sst| &sst.sst_info),
             must_match!(&self.barrier_info.kind, BarrierKind::Checkpoint(epochs) => epochs),
             mv_log_store_truncate_epoch.into_iter(),
@@ -572,17 +572,13 @@ impl CommandContext {
 
         let epoch = self.barrier_info.prev_epoch();
         for table_id in &self.table_ids_to_commit {
-            info.tables_to_commit
+            tables_to_commit
                 .try_insert(*table_id, epoch)
                 .expect("non duplicate");
         }
 
-        info.sstables.extend(synced_ssts);
-        info.new_table_watermarks.extend(new_table_watermarks);
-        info.sst_to_context.extend(sst_to_context);
-        info.new_table_fragment_infos
-            .extend(new_table_fragment_infos);
-        info.change_log_delta.extend(table_new_change_log);
+        new_table_fragment_infos.extend(new_table_fragment_info);
+        change_log_delta.extend(table_new_change_log);
     }
 }
 
