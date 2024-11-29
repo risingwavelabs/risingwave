@@ -318,6 +318,10 @@ impl DatabaseCheckpointControl {
         }
     }
 
+    pub(crate) fn in_flight_prev_epoch(&self) -> u64 {
+        self.state.in_flight_prev_epoch().value().0
+    }
+
     pub(crate) fn recovery(
         database_id: DatabaseId,
         create_mview_tracker: CreateMviewProgressTracker,
