@@ -335,6 +335,7 @@ services:
   nats:
     image: nats:latest
     command: [ "-js" ]
+    container_name: nats-server
     ports:
       - "4222:4222"
       - "8222:8222"
