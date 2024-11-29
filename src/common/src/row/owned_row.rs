@@ -76,7 +76,7 @@ impl OwnedRow {
                     DataType::Int64 => x.parse::<i64>().unwrap().into(),
                     DataType::Float32 => x.parse::<f32>().unwrap().into(),
                     DataType::Float64 => x.parse::<f64>().unwrap().into(),
-                    DataType::Varchar => x.to_string().into(),
+                    DataType::Varchar => x.to_owned().into(),
                     DataType::Boolean => x.parse::<bool>().unwrap().into(),
                     DataType::Date => x.parse::<Date>().unwrap().into(),
                     DataType::Time => x.parse::<Time>().unwrap().into(),

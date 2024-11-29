@@ -197,7 +197,7 @@ mod tests {
         );
         assert_eq!(
             row.datum_at(5).to_owned_datum(),
-            Some(ScalarImpl::Utf8(Box::from("Kathleen".to_string())))
+            Some(ScalarImpl::Utf8(Box::from("Kathleen".to_owned())))
         );
         assert_eq!(
             row.datum_at(6).to_owned_datum(),
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(
             row.datum_at(7).to_owned_datum(),
             Some(ScalarImpl::Jsonb(JsonbVal::from(Value::from(
-                "{\"a\": 1, \"b\": 2}".to_string()
+                "{\"a\": 1, \"b\": 2}".to_owned()
             ))))
         );
     }

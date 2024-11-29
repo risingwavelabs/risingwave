@@ -942,7 +942,7 @@ mod tests {
             latest_split_info: HashMap::new(),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
-            source_name: MOCK_SOURCE_NAME.to_string(),
+            source_name: MOCK_SOURCE_NAME.to_owned(),
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();
@@ -1032,7 +1032,7 @@ mod tests {
             latest_split_info: HashMap::new(),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
-            source_name: MOCK_SOURCE_NAME.to_string(),
+            source_name: MOCK_SOURCE_NAME.to_owned(),
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();

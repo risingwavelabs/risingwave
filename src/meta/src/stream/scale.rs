@@ -604,7 +604,7 @@ impl ScaleController {
                         upstream_actor_id,
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
                         // todo, we need to fill this part
-                        mview_definition: "".to_string(),
+                        mview_definition: "".to_owned(),
                         expr_context: expr_contexts
                             .get(&actor_id)
                             .cloned()

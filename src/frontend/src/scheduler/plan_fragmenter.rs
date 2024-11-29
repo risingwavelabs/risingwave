@@ -860,7 +860,7 @@ impl StageGraph {
                 for &child_id in children {
                     if let Some(&child_index) = node_indices.get(&child_id) {
                         // Add an edge from parent to child
-                        graph.add_edge(parent_index, child_index, "".to_string());
+                        graph.add_edge(parent_index, child_index, "".to_owned());
                     }
                 }
             }

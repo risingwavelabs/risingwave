@@ -39,7 +39,7 @@ impl MockExternalTableReader {
     }
 
     pub fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
-        "`mock_table`".to_string()
+        "`mock_table`".to_owned()
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -106,7 +106,7 @@ impl ExternalTableReader for MockExternalTableReader {
             Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
         } else {
             Ok(CdcOffset::MySql(MySqlOffset {
-                filename: "1.binlog".to_string(),
+                filename: "1.binlog".to_owned(),
                 position: u64::MAX,
             }))
         }

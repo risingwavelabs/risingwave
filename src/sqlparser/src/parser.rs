@@ -3620,11 +3620,11 @@ impl Parser<'_> {
         while let Some(t) = self.next_token_no_skip() {
             match t.token {
                 Token::Whitespace(Whitespace::Tab) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Whitespace(Whitespace::Newline) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Backslash => {
@@ -4414,7 +4414,7 @@ impl Parser<'_> {
                                 }
                                 Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
                                     '\'',
-                                    "UTC".to_string(),
+                                    "UTC".to_owned(),
                                 )))
                             }
                             _ => Err(StrError("expect Value::Interval".into())),
@@ -5506,7 +5506,7 @@ mod tests {
         run_parser_method(min_bigint, |parser| {
             assert_eq!(
                 parser.parse_expr().unwrap(),
-                Expr::Value(Value::Number("-9223372036854775808".to_string()))
+                Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
         });
     }

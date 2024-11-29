@@ -625,7 +625,7 @@ mod tests {
         }
         let s = S {
             foo: 15,
-            bar: "foobar".to_string(),
+            bar: "foobar".to_owned(),
         };
         let kvs: HashMap<String, String> = fields_to_kvs!(s, foo, bar);
         assert_eq!(kvs.len(), 2);

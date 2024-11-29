@@ -31,7 +31,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
     fn from(tagged_message: TaggedReceivedMessage) -> Self {
         let TaggedReceivedMessage(split_id, message) = tagged_message;
 
-        let ack_id = message.ack_id().to_string();
+        let ack_id = message.ack_id().to_owned();
         let timestamp = message
             .message
             .publish_time

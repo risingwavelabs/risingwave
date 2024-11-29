@@ -291,16 +291,16 @@ pub async fn handle_explain(
     }
     if options.trace && options.explain_format == ExplainFormat::Json {
         return Err(ErrorCode::NotSupported(
-            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
-            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+            "EXPLAIN (TRACE, JSON FORMAT)".to_owned(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_owned(),
         )
         .into());
     }
     if options.explain_type == ExplainType::DistSql && options.explain_format == ExplainFormat::Json
     {
         return Err(ErrorCode::NotSupported(
-            "EXPLAIN (TRACE, JSON FORMAT)".to_string(),
-            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_string(),
+            "EXPLAIN (TRACE, JSON FORMAT)".to_owned(),
+            "Only EXPLAIN (LOGICAL | PHYSICAL, JSON FORMAT) is supported.".to_owned(),
         )
         .into());
     }

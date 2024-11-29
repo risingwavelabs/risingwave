@@ -180,7 +180,7 @@ impl WithOptions {
             Ok(inner)
         } else {
             Err(RwError::from(ErrorCode::InvalidParameterValue(
-                "Secret reference is not allowed in OAuth options".to_string(),
+                "Secret reference is not allowed in OAuth options".to_owned(),
             )))
         }
     }
@@ -215,8 +215,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
                 Some(params.clone())
             } else {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(
-                    "Private Link Service has been deprecated. Please create a new connection instead."
-                        .to_string(),
+                    "Private Link Service has been deprecated. Please create a new connection instead.".to_owned(),
         )));
             }
         };
@@ -332,7 +331,7 @@ pub(crate) fn resolve_privatelink_in_with_option(
     if let Some(endpoint) = privatelink_endpoint {
         if !is_kafka {
             return Err(RwError::from(ErrorCode::ProtocolError(
-                "Privatelink is only supported in kafka connector".to_string(),
+                "Privatelink is only supported in kafka connector".to_owned(),
             )));
         }
         insert_privatelink_broker_rewrite_map(with_options.inner_mut(), None, Some(endpoint))

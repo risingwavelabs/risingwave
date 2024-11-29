@@ -30,7 +30,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
     Box::new(FilterExecutor::new(
         build_from_pretty("(equal:boolean (modulus:int8 $0:int8 2:int8) 0:int8)"),
         input,
-        "FilterBenchmark".to_string(),
+        "FilterBenchmark".to_owned(),
         CHUNK_SIZE,
     ))
 }

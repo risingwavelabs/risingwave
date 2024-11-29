@@ -120,7 +120,7 @@ impl WaitCheckpointTask {
                 let mut ack_ids: Vec<String> = vec![];
                 for arr in ack_id_arrs {
                     for ack_id in arr.as_utf8().iter().flatten() {
-                        ack_ids.push(ack_id.to_string());
+                        ack_ids.push(ack_id.to_owned());
                         if ack_ids.len() >= MAX_ACK_BATCH_SIZE {
                             ack(&subscription, std::mem::take(&mut ack_ids)).await;
                         }
@@ -152,7 +152,7 @@ impl WaitCheckpointTask {
                         arr.as_utf8()
                             .iter()
                             .flatten()
-                            .map(|s| s.to_string())
+                            .map(|s| s.to_owned())
                             .collect::<Vec<String>>()
                     })
                     .collect::<Vec<String>>();

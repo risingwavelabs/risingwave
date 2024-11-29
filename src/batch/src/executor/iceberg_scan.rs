@@ -105,7 +105,7 @@ impl IcebergScanExecutor {
             .await?;
         let data_types = self.schema.data_types();
         let executor_schema_names = self.schema.names();
-        let table_name = table.identifier().name().to_string();
+        let table_name = table.identifier().name().to_owned();
 
         let data_file_scan_tasks = mem::take(&mut self.data_file_scan_tasks);
 
@@ -290,7 +290,7 @@ impl PositionDeleteFilter {
                         continue;
                     }
                     let entry = position_delete_file_path_pos_map
-                        .entry(file_path.to_string())
+                        .entry(file_path.to_owned())
                         .or_default();
                     // Split `pos` by `batch_size`, because the data file will also be split by `batch_size`
                     let delete_vec_index = pos as usize / batch_size;
@@ -409,7 +409,7 @@ impl EqualityDeleteFilter {
                         data_file_scan_task
                             .schema
                             .name_by_field_id(*id)
-                            .map(|name| name.to_string())
+                            .map(|name| name.to_owned())
                     })
                     .collect(),
             );

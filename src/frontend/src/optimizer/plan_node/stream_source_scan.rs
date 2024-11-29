@@ -85,15 +85,15 @@ impl StreamSourceScan {
 
         let key = Field {
             data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
+            name: "partition_id".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "backfill_progress".to_string(),
+            name: "backfill_progress".to_owned(),
             sub_fields: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);

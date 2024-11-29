@@ -135,12 +135,12 @@ pub async fn handle_create_sql_function(
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
 
-    let language = "sql".to_string();
+    let language = "sql".to_owned();
 
     // Just a basic sanity check for `language`
     if !matches!(params.language, Some(lang) if lang.real_value().to_lowercase() == "sql") {
         return Err(ErrorCode::InvalidParameterValue(
-            "`language` for sql udf must be `sql`".to_string(),
+            "`language` for sql udf must be `sql`".to_owned(),
         )
         .into());
     }
@@ -151,12 +151,12 @@ pub async fn handle_create_sql_function(
         Some(FunctionDefinition::SingleQuotedDef(s)) => s.clone(),
         Some(FunctionDefinition::DoubleDollarDef(s)) => s.clone(),
         Some(FunctionDefinition::Identifier(_)) => {
-            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_string()).into())
+            return Err(ErrorCode::InvalidParameterValue("expect quoted string".to_owned()).into())
         }
         None => {
             if params.return_.is_none() {
                 return Err(ErrorCode::InvalidParameterValue(
-                    "AS or RETURN must be specified".to_string(),
+                    "AS or RETURN must be specified".to_owned(),
                 )
                 .into());
             }
@@ -170,7 +170,7 @@ pub async fn handle_create_sql_function(
     // Sanity check for link, this must be none with sql udf function
     if let Some(CreateFunctionUsing::Link(_)) = params.using {
         return Err(ErrorCode::InvalidParameterValue(
-            "USING must NOT be specified with sql udf function".to_string(),
+            "USING must NOT be specified with sql udf function".to_owned(),
         )
         .into());
     };
@@ -198,7 +198,7 @@ pub async fn handle_create_sql_function(
         }
         None => {
             return Err(ErrorCode::InvalidParameterValue(
-                "return type must be specified".to_string(),
+                "return type must be specified".to_owned(),
             )
             .into())
         }
@@ -207,7 +207,7 @@ pub async fn handle_create_sql_function(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -315,7 +315,7 @@ pub async fn handle_create_sql_function(
             return Err(ErrorCode::InvalidInputSyntax(
                 "failed to parse the input query and extract the udf expression,
                 please recheck the syntax"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }

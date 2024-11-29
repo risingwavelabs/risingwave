@@ -420,7 +420,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 )?))
                             } else {
                                 Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_string(),
+                                    message: "CDC metadata not found in the message".to_owned(),
                                 })
                             }
                         }
@@ -809,7 +809,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         // report to error metrics
                         let context = parser.source_ctx();
                         GLOBAL_ERROR_METRICS.user_source_error.report([
-                            error.variant_name().to_string(),
+                            error.variant_name().to_owned(),
                             context.source_id.to_string(),
                             context.source_name.clone(),
                             context.fragment_id.to_string(),

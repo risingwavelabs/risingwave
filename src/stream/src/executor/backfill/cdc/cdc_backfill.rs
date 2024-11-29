@@ -834,8 +834,8 @@ mod tests {
 
         let datums: Vec<Datum> = vec![
             Some(JsonbVal::from_str(payload).unwrap().into()),
-            Some("file: 1.binlog, pos: 100".to_string().into()),
-            Some("mydb.orders".to_string().into()),
+            Some("file: 1.binlog, pos: 100".to_owned().into()),
+            Some("mydb.orders".to_owned().into()),
         ];
 
         println!("datums: {:?}", datums[1]);

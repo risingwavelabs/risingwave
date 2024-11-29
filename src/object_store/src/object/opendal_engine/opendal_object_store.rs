@@ -122,7 +122,7 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
         Ok(OpendalStreamingUploader::new(
             self.op.clone(),
-            path.to_string(),
+            path.to_owned(),
             self.config.clone(),
             self.metrics.clone(),
             self.store_media_type(),
@@ -204,7 +204,7 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let opendal_metadata = self.op.stat(path).await?;
-        let key = path.to_string();
+        let key = path.to_owned();
         let last_modified = match opendal_metadata.last_modified() {
             Some(t) => t.timestamp() as f64,
             None => 0_f64,
@@ -250,7 +250,7 @@ impl ObjectStore for OpendalObjectStore {
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
-                    let key = object.path().to_string();
+                    let key = object.path().to_owned();
                     let om = object.metadata();
                     let last_modified = match om.last_modified() {
                         Some(t) => t.timestamp() as f64,
@@ -454,7 +454,7 @@ mod tests {
         store.read("/ab", 0..3).await.unwrap_err();
 
         let bytes = store.read("/abc", 4..6).await.unwrap();
-        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_owned());
 
         store.delete("/abc").await.unwrap();
 
@@ -476,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
-        let path = "/abc".to_string();
+        let path = "/abc".to_owned();
         let obj_store = OpendalObjectStore::test_new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 

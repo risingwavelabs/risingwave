@@ -321,7 +321,7 @@ impl HummockReadVersion {
                     // old data comes first
                     for imm_id in imms.iter().rev() {
                         let check_err = match self.staging.imm.pop_back() {
-                            None => Some("empty".to_string()),
+                            None => Some("empty".to_owned()),
                             Some(prev_imm_id) => {
                                 if prev_imm_id.batch_id() == *imm_id {
                                     None

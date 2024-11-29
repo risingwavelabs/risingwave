@@ -388,7 +388,7 @@ pub(super) mod handlers {
 
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
-        let result = client.heap_profile("".to_string()).await.map_err(err)?;
+        let result = client.heap_profile("".to_owned()).await.map_err(err)?;
 
         Ok(result.into())
     }

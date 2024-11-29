@@ -252,7 +252,7 @@ mod tests {
             schema,
             window_slide,
             window_size,
-            "test".to_string(),
+            "test".to_owned(),
             window_start_exprs,
             window_end_exprs,
             output_indices,

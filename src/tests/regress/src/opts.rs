@@ -111,7 +111,7 @@ impl Opts {
     }
 
     pub(crate) fn host(&self) -> String {
-        self.pg_server_host.to_string()
+        self.pg_server_host.clone()
     }
 
     pub(crate) fn port(&self) -> u16 {

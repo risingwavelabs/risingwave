@@ -246,7 +246,7 @@ impl Binder {
                     || matches!(expr, Expr::Cube(_))
             }) {
                 return Err(ErrorCode::BindError(
-                    "Only support one grouping item in group by clause".to_string(),
+                    "Only support one grouping item in group by clause".to_owned(),
                 )
                 .into());
             }
@@ -278,7 +278,7 @@ impl Binder {
             .iter()
             .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_owned());
                 Ok(Field::with_name(s.return_type(), name))
             })
             .collect::<Result<Vec<Field>>>()?;
@@ -288,7 +288,7 @@ impl Binder {
                 && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
             {
                 return Err(ErrorCode::BindError(
-                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_string()
+                    "The source table of changelog cannot have `changelog_op`, please rename it first".to_owned()
                 )
                 .into());
             }
@@ -515,7 +515,7 @@ impl Binder {
             .any(|expr| expr.has_agg_call() || expr.has_window_function())
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "should not have agg/window in the `RETURNING` list".to_string(),
+                "should not have agg/window in the `RETURNING` list".to_owned(),
             )));
         }
 
@@ -523,7 +523,7 @@ impl Binder {
             .iter()
             .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_owned());
                 Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
             })
             .try_collect()?;
@@ -674,15 +674,15 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
-        Expr::Extract { .. } => Some("extract".to_string()),
-        Expr::Case { .. } => Some("case".to_string()),
+        Expr::Extract { .. } => Some("extract".to_owned()),
+        Expr::Case { .. } => Some("case".to_owned()),
         Expr::Cast { expr, data_type } => {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
         }
         Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
-        Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
-        Expr::Row(_) => Some("row".to_string()),
-        Expr::Array(_) => Some("array".to_string()),
+        Expr::Value(Value::Interval { .. }) => Some("interval".to_owned()),
+        Expr::Row(_) => Some("row".to_owned()),
+        Expr::Array(_) => Some("array".to_owned()),
         Expr::Index { obj, index: _ } => derive_alias(&obj),
         _ => None,
     }
@@ -690,28 +690,28 @@ fn derive_alias(expr: &Expr) -> Option<String> {
 
 fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
     let alias = match data_type {
-        AstDataType::Char(_) => "bpchar".to_string(),
-        AstDataType::Varchar => "varchar".to_string(),
-        AstDataType::Uuid => "uuid".to_string(),
-        AstDataType::Decimal(_, _) => "numeric".to_string(),
-        AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_string(),
-        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => "float8".to_string(),
+        AstDataType::Char(_) => "bpchar".to_owned(),
+        AstDataType::Varchar => "varchar".to_owned(),
+        AstDataType::Uuid => "uuid".to_owned(),
+        AstDataType::Decimal(_, _) => "numeric".to_owned(),
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_owned(),
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => "float8".to_owned(),
         AstDataType::Float(Some(0 | 54..)) => unreachable!(),
-        AstDataType::SmallInt => "int2".to_string(),
-        AstDataType::Int => "int4".to_string(),
-        AstDataType::BigInt => "int8".to_string(),
-        AstDataType::Boolean => "bool".to_string(),
-        AstDataType::Date => "date".to_string(),
+        AstDataType::SmallInt => "int2".to_owned(),
+        AstDataType::Int => "int4".to_owned(),
+        AstDataType::BigInt => "int8".to_owned(),
+        AstDataType::Boolean => "bool".to_owned(),
+        AstDataType::Date => "date".to_owned(),
         AstDataType::Time(tz) => format!("time{}", if *tz { "z" } else { "" }),
         AstDataType::Timestamp(tz) => {
             format!("timestamp{}", if *tz { "tz" } else { "" })
         }
-        AstDataType::Interval => "interval".to_string(),
-        AstDataType::Regclass => "regclass".to_string(),
-        AstDataType::Regproc => "regproc".to_string(),
-        AstDataType::Text => "text".to_string(),
-        AstDataType::Bytea => "bytea".to_string(),
-        AstDataType::Jsonb => "jsonb".to_string(),
+        AstDataType::Interval => "interval".to_owned(),
+        AstDataType::Regclass => "regclass".to_owned(),
+        AstDataType::Regproc => "regproc".to_owned(),
+        AstDataType::Text => "text".to_owned(),
+        AstDataType::Bytea => "bytea".to_owned(),
+        AstDataType::Jsonb => "jsonb".to_owned(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Struct(_) | AstDataType::Map(_) => {

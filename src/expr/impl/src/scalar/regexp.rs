@@ -35,7 +35,7 @@ impl RegexpContext {
         let origin = if options.case_insensitive {
             format!("(?i:{})", pattern)
         } else {
-            pattern.to_string()
+            pattern.to_owned()
         };
 
         Ok(Self {
@@ -348,7 +348,7 @@ fn regexp_replace(
         let mut ret = if start > 1 {
             text[..start].to_string()
         } else {
-            "".to_string()
+            "".to_owned()
         };
 
         // See if there is capture group or not
@@ -389,7 +389,7 @@ fn regexp_replace(
         } else {
             // There are capture groups in the regex
             // Reset return string at the beginning
-            ret = "".to_string();
+            ret = "".to_owned();
             if let Some(n) = n {
                 // Replace only the N-th match
                 let mut count = 1;

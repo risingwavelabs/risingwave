@@ -148,7 +148,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
                 let v2 = get_hex(c)?;
                 res.push((v1 << 4) | v2);
             }
-            None => return Err("invalid hexadecimal data: odd number of digits".to_string()),
+            None => return Err("invalid hexadecimal data: odd number of digits".to_owned()),
         }
     }
 
@@ -174,12 +174,12 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
                     }
                     _ => {
                         // one backslash, not followed by another or ### valid octal
-                        return Err("invalid input syntax for type bytea".to_string());
+                        return Err("invalid input syntax for type bytea".to_owned());
                     }
                 },
                 _ => {
                     // one backslash, not followed by another or ### valid octal
-                    return Err("invalid input syntax for type bytea".to_string());
+                    return Err("invalid input syntax for type bytea".to_owned());
                 }
             }
         }

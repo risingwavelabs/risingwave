@@ -106,7 +106,7 @@ impl TracingContext {
         // See [Trace Context](https://www.w3.org/TR/trace-context/) for these header names.
         for key in ["traceparent", "tracestate"] {
             let value = headers.get(key)?.to_str().ok()?;
-            map.insert(key.to_string(), value.to_string());
+            map.insert(key.to_owned(), value.to_owned());
         }
 
         Some(Self::from_w3c(&map))

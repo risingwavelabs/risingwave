@@ -50,7 +50,7 @@ impl NatsMessage {
             reply_subject: message
                 .message
                 .reply
-                .map(|subject| subject.as_str().to_string()),
+                .map(|subject| subject.as_str().to_owned()),
         }
     }
 }

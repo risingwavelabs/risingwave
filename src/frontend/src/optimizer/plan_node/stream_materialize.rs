@@ -315,12 +315,12 @@ impl Distill for StreamMaterialize {
             .collect();
 
         let stream_key = (table.stream_key.iter())
-            .map(|&k| table.columns[k].name().to_string())
+            .map(|&k| table.columns[k].name().to_owned())
             .map(Pretty::from)
             .collect();
 
         let pk_columns = (table.pk.iter())
-            .map(|o| table.columns[o.column_index].name().to_string())
+            .map(|o| table.columns[o.column_index].name().to_owned())
             .map(Pretty::from)
             .collect();
         let mut vec = Vec::with_capacity(5);

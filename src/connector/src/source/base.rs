@@ -221,7 +221,7 @@ impl SourceContext {
             0,
             TableId::new(0),
             0,
-            "dummy".to_string(),
+            "dummy".to_owned(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
@@ -560,7 +560,7 @@ impl SplitMetaData for SplitImpl {
             .unwrap()
             .as_str()
             .unwrap()
-            .to_string();
+            .to_owned();
         let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
@@ -578,7 +578,7 @@ impl SplitMetaData for SplitImpl {
 impl SplitImpl {
     pub fn get_type(&self) -> String {
         dispatch_split_impl!(self, _ignored, PropType, {
-            PropType::SOURCE_NAME.to_string()
+            PropType::SOURCE_NAME.to_owned()
         })
     }
 
@@ -624,7 +624,7 @@ impl SourceMessage {
         Self {
             key: None,
             payload: None,
-            offset: "".to_string(),
+            offset: "".to_owned(),
             split_id: "".into(),
             meta: SourceMeta::Empty,
         }
@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_owned());
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
@@ -713,7 +713,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
@@ -774,8 +774,8 @@ mod tests {
                 .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
-                "b-1:9092".to_string() => "dns-1".to_string(),
-                "b-2:9092".to_string() => "dns-2".to_string(),
+                "b-1:9092".to_owned() => "dns-1".to_owned(),
+                "b-2:9092".to_owned() => "dns-2".to_owned(),
             };
             assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {

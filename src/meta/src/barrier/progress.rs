@@ -161,7 +161,7 @@ impl Progress {
     /// `progress` = `consumed_rows` / `upstream_total_key_count`
     fn calculate_progress(&self) -> String {
         if self.is_done() || self.states.is_empty() {
-            return "100%".to_string();
+            return "100%".to_owned();
         }
         let mut mv_count = 0;
         let mut source_count = 0;
@@ -175,7 +175,7 @@ impl Progress {
 
         let mv_progress = (mv_count > 0).then_some({
             if self.upstream_mvs_total_key_count == 0 {
-                "99.99%".to_string()
+                "99.99%".to_owned()
             } else {
                 let mut progress = self.mv_backfill_consumed_rows as f64
                     / (self.upstream_mvs_total_key_count as f64);
@@ -203,7 +203,7 @@ impl Progress {
             }
             (Some(mv_progress), None) => mv_progress,
             (None, Some(source_progress)) => source_progress,
-            (None, None) => "Unknown".to_string(),
+            (None, None) => "Unknown".to_owned(),
         }
     }
 }

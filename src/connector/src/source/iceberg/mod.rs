@@ -61,10 +61,10 @@ impl IcebergProperties {
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support java_catalog_props for iceberg source
         self.common.load_table_v2(&java_catalog_props).await
@@ -76,10 +76,10 @@ impl IcebergProperties {
     ) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common
@@ -360,7 +360,7 @@ impl IcebergSplitEnumerator {
         let delete_columns = equality_ids
             .into_iter()
             .map(|id| match schema.name_by_field_id(id) {
-                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_string()),
+                Some(name) => Ok::<std::string::String, ConnectorError>(name.to_owned()),
                 None => bail!("Delete field id {} not found in schema", id),
             })
             .collect::<ConnectorResult<Vec<_>>>()?;

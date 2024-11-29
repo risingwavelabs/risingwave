@@ -215,7 +215,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 column_id: ColumnId::placeholder(),
                 name: name.real_value(),
                 field_descs,
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
                 generated_or_default_column: None,
                 description: None,
                 additional_column: AdditionalColumn { column_type: None },
@@ -554,7 +554,7 @@ pub(crate) fn gen_create_table_plan(
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
     if !secret_refs.is_empty() || !connection_refs.is_empty() {
-        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference and Connection reference are not allowed in options when creating table without external source".to_string()).into());
+        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference and Connection reference are not allowed in options when creating table without external source".to_owned()).into());
     }
 
     gen_create_table_plan_without_source(
@@ -1035,7 +1035,7 @@ pub(super) async fn handle_create_table_plan(
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let schema_name = format_encode
                     .clone()
-                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
                     SchemaPath::Name(schema_name.as_str()),
@@ -1499,7 +1499,7 @@ fn get_source_and_resolved_table_name(
 
     let source = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema_name = format_encode.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+        let schema_name = format_encode.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
         let (source, _) = catalog_reader.get_source_by_name(
             db_name,
             SchemaPath::Name(schema_name.as_str()),

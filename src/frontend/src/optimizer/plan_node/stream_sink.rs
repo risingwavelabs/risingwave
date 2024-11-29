@@ -261,13 +261,13 @@ impl StreamSink {
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
                 }
 
                 if t.append_only && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_owned(),
                     )));
                 }
 
@@ -281,7 +281,7 @@ impl StreamSink {
                     .map(|c| {
                         target_table_mapping[c.column_index].ok_or(
                             ErrorCode::SinkError(Box::new(Error::new(ErrorKind::InvalidInput,
-                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_string()
+                                "When using non append only sink into table, the primary key of the table must be included in the sink result.".to_owned()
                         ))).into())})
                     .try_collect::<_, _, RwError>()?
                 }

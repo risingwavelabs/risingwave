@@ -33,7 +33,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         if node.table_desc.is_none() {
             // used in sharing cdc source backfill as a dummy batch plan node
             let mut info = params.info;
-            info.identity = "DummyBatchQueryExecutor".to_string();
+            info.identity = "DummyBatchQueryExecutor".to_owned();
             return Ok((info, DummyExecutor).into());
         }
 

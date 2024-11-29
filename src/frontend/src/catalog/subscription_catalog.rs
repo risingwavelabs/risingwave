@@ -81,7 +81,7 @@ impl SubscriptionId {
 impl SubscriptionCatalog {
     pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
         let retention_seconds_str = properties.get("retention").ok_or_else(|| {
-            ErrorCode::InternalError("Subscription retention time not set.".to_string())
+            ErrorCode::InternalError("Subscription retention time not set.".to_owned())
         })?;
         let retention_seconds = convert_interval_to_u64_seconds(retention_seconds_str)?;
         self.retention_seconds = retention_seconds;

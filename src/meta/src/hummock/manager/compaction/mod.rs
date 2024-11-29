@@ -1581,7 +1581,7 @@ pub enum WriteLimitType {
 impl WriteLimitType {
     pub fn as_str(&self) -> String {
         match self {
-            Self::Unlimited => "Unlimited".to_string(),
+            Self::Unlimited => "Unlimited".to_owned(),
             Self::WriteStop(l0_level_count, threshold) => {
                 format!(
                     "WriteStop(l0_level_count: {}, threshold: {}) too many L0 sub levels",

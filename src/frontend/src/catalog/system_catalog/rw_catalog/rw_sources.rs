@@ -62,7 +62,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     .with_properties
                     .get(UPSTREAM_SOURCE_KEY)
                     .cloned()
-                    .unwrap_or("".to_string())
+                    .unwrap_or("".to_owned())
                     .to_uppercase(),
                 columns: source.columns.iter().map(|c| c.name().into()).collect(),
                 format: source

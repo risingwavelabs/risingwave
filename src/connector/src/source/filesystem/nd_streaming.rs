@@ -150,7 +150,7 @@ mod tests {
                 })
                 + tail_separator;
             let text = text.into_bytes();
-            let split_id: Arc<str> = "1".to_string().into_boxed_str().into();
+            let split_id: Arc<str> = "1".to_owned().into_boxed_str().into();
             let s = text
                 .chunks(N2)
                 .enumerate()

@@ -57,7 +57,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     .properties
                     .get(UPSTREAM_SOURCE_KEY)
                     .cloned()
-                    .unwrap_or("".to_string())
+                    .unwrap_or("".to_owned())
                     .to_uppercase(),
                 sink_type: sink.sink_type.to_proto().as_str_name().into(),
                 connection_id: sink.connection_id.map(|id| id.connection_id() as i32),

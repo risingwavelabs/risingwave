@@ -78,7 +78,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
-                    let name = object.path().to_string();
+                    let name = object.path().to_owned();
                     let om = object.metadata();
 
                     let t = match om.last_modified() {

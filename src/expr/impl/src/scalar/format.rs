@@ -57,13 +57,13 @@ fn format(row: impl Row, formatter: &Formatter, writer: &mut impl Write) -> Resu
                         Some(ScalarRefImpl::Utf8(arg)) => quote_ident(arg, writer),
                         _ => {
                             return Err(ExprError::UnsupportedFunction(
-                                "unsupported data for specifier type 'I'".to_string(),
+                                "unsupported data for specifier type 'I'".to_owned(),
                             ))
                         }
                     },
                     SpecifierType::SqlLiteral => {
                         return Err(ExprError::UnsupportedFunction(
-                            "unsupported specifier type 'L'".to_string(),
+                            "unsupported specifier type 'L'".to_owned(),
                         ))
                     }
                 }

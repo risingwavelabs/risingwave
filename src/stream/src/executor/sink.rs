@@ -646,7 +646,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices,
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(
@@ -775,7 +775,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices: vec![0, 1],
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(
@@ -877,7 +877,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices,
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(

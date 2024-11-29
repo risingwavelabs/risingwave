@@ -123,12 +123,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 
     let key_range = &sstable_info.key_range;
     let left_str = if key_range.left.is_empty() {
-        "-inf".to_string()
+        "-inf".to_owned()
     } else {
         hex::encode(&key_range.left)
     };
     let right_str = if key_range.right.is_empty() {
-        "+inf".to_string()
+        "+inf".to_owned()
     } else {
         hex::encode(&key_range.right)
     };

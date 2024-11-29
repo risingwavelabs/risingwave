@@ -29,7 +29,7 @@ pub async fn handle_drop_user(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
+        return Err(ErrorCode::BindError("Drop user not support drop mode".to_owned()).into());
     }
 
     let user_name = Binder::resolve_user_name(user_name)?;

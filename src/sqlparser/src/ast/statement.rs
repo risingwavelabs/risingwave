@@ -711,7 +711,7 @@ impl fmt::Display for DeclareCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(cursor_name, v, self);
-        v.push("CURSOR FOR ".to_string());
+        v.push("CURSOR FOR ".to_owned());
         impl_fmt_display!(declare_cursor, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -751,11 +751,11 @@ impl fmt::Display for FetchCursorStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         if self.count == 1 {
-            v.push("NEXT ".to_string());
+            v.push("NEXT ".to_owned());
         } else {
             impl_fmt_display!(count, v, self);
         }
-        v.push("FROM ".to_string());
+        v.push("FROM ".to_owned());
         impl_fmt_display!(cursor_name, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -788,7 +788,7 @@ impl fmt::Display for CloseCursorStatement {
         if let Some(cursor_name) = &self.cursor_name {
             v.push(format!("{}", cursor_name));
         } else {
-            v.push("ALL".to_string());
+            v.push("ALL".to_owned());
         }
         v.iter().join(" ").fmt(f)
     }
@@ -868,7 +868,7 @@ impl fmt::Display for CreateSecretStatement {
         impl_fmt_display!(secret_name, v, self);
         impl_fmt_display!(with_properties, v, self);
         if self.credential != Value::Null {
-            v.push("AS".to_string());
+            v.push("AS".to_owned());
             impl_fmt_display!(credential, v, self);
         }
         v.iter().join(" ").fmt(f)

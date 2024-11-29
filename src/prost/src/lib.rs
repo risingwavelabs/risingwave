@@ -476,7 +476,7 @@ mod tests {
         data_type.is_nullable = true;
         let field = Field {
             data_type: Some(data_type),
-            name: "".to_string(),
+            name: "".to_owned(),
         };
         assert!(field.get_data_type().unwrap().is_nullable);
     }

@@ -211,7 +211,7 @@ pub async fn handle_grant_privilege(
         granted_by,
     } = stmt
     else {
-        return Err(ErrorCode::BindError("Invalid grant statement".to_string()).into());
+        return Err(ErrorCode::BindError("Invalid grant statement".to_owned()).into());
     };
     let mut users = vec![];
     {
@@ -221,13 +221,13 @@ pub async fn handle_grant_privilege(
             if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
-                return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
+                return Err(ErrorCode::BindError("Grantee does not exist".to_owned()).into());
             }
         }
         if let Some(granted_by) = &granted_by {
             // We remark that the user name is always case-sensitive.
             if reader.get_user_by_name(&granted_by.real_value()).is_none() {
-                return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
+                return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
             }
         }
     };
@@ -254,7 +254,7 @@ pub async fn handle_revoke_privilege(
         cascade,
     } = stmt
     else {
-        return Err(ErrorCode::BindError("Invalid revoke statement".to_string()).into());
+        return Err(ErrorCode::BindError("Invalid revoke statement".to_owned()).into());
     };
     let mut users = vec![];
     let mut granted_by_id = None;
@@ -265,14 +265,14 @@ pub async fn handle_revoke_privilege(
             if let Some(user) = reader.get_user_by_name(&grantee.real_value()) {
                 users.push(user.id);
             } else {
-                return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
+                return Err(ErrorCode::BindError("Grantee does not exist".to_owned()).into());
             }
         }
         if let Some(granted_by) = &granted_by {
             if let Some(user) = reader.get_user_by_name(&granted_by.real_value()) {
                 granted_by_id = Some(user.id);
             } else {
-                return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
+                return Err(ErrorCode::BindError("Grantor does not exist".to_owned()).into());
             }
         }
     };

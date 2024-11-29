@@ -42,7 +42,7 @@ pub async fn handle_drop_index(
         match reader.get_index_by_name(db_name, schema_path, &index_name) {
             Ok((index, _)) => {
                 if session.user_id() != index.index_table.owner {
-                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                    return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
                 }
 
                 index.id

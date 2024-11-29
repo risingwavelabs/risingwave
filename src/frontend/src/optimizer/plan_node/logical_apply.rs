@@ -369,7 +369,7 @@ impl PredicatePushdown for LogicalApply {
 impl ToBatch for LogicalApply {
     fn to_batch(&self) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
-            "LogicalApply should be unnested".to_string(),
+            "LogicalApply should be unnested".to_owned(),
         )))
     }
 }
@@ -377,7 +377,7 @@ impl ToBatch for LogicalApply {
 impl ToStream for LogicalApply {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
-            "LogicalApply should be unnested".to_string(),
+            "LogicalApply should be unnested".to_owned(),
         )))
     }
 
@@ -386,7 +386,7 @@ impl ToStream for LogicalApply {
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::InternalError(
-            "LogicalApply should be unnested".to_string(),
+            "LogicalApply should be unnested".to_owned(),
         )))
     }
 }

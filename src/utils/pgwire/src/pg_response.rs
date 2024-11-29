@@ -322,7 +322,7 @@ impl StatementType {
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
-            _ => Err("unsupported statement type".to_string()),
+            _ => Err("unsupported statement type".to_owned()),
         }
     }
 

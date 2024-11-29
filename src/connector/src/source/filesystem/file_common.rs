@@ -127,7 +127,7 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
 
     pub fn empty_split() -> Self {
         Self {
-            name: "empty_split".to_string(),
+            name: "empty_split".to_owned(),
             offset: 0,
             size: 0,
             _marker: PhantomData,

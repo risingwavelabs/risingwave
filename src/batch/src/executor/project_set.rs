@@ -275,7 +275,7 @@ mod tests {
             select_list,
             child: Box::new(mock_executor),
             schema: Schema { fields },
-            identity: "ProjectSetExecutor".to_string(),
+            identity: "ProjectSetExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
 
@@ -320,7 +320,7 @@ mod tests {
         let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
-            "ValuesExecutor".to_string(),
+            "ValuesExecutor".to_owned(),
             CHUNK_SIZE,
         ));
 
@@ -328,7 +328,7 @@ mod tests {
             select_list: vec![literal.boxed().into(), tf.into()],
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32, DataType::Int32),
-            identity: "ProjectSetExecutor2".to_string(),
+            identity: "ProjectSetExecutor2".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
         let mut stream = proj_executor.execute();

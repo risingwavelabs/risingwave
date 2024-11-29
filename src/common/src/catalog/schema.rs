@@ -44,7 +44,7 @@ impl Field {
     pub fn to_prost(&self) -> PbField {
         PbField {
             data_type: Some(self.data_type.to_protobuf()),
-            name: self.name.to_string(),
+            name: self.name.clone(),
         }
     }
 }

@@ -69,9 +69,8 @@ pub fn stream_enforce_eowc_requirement(
         let n_watermark_cols = watermark_cols.count_ones(..);
         if n_watermark_cols == 0 {
             Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
-                "Try define a watermark column in the source, or avoid aggregation without GROUP BY"
-                    .to_string(),
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
+                "Try define a watermark column in the source, or avoid aggregation without GROUP BY".to_owned(),
             )
             .into())
         } else {
