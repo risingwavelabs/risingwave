@@ -782,52 +782,6 @@ mod tests {
                 assert_eq!(1, cnt);
                 assert_eq!(last_key, k2.clone());
             }
-
-            {
-                let kv_pairs = vec![
-                    (k1.clone(), HummockValue::put(test_value_of(1))),
-                    (k2.clone(), HummockValue::put(test_value_of(2))),
-                    (k3.clone(), HummockValue::put(test_value_of(3))),
-                ];
-
-                let (sstable, sstable_info) = gen_test_sstable_with_table_ids(
-                    default_builder_opt_for_test(),
-                    10,
-                    kv_pairs.into_iter(),
-                    sstable_store.clone(),
-                    vec![1, 2, 3],
-                )
-                .await;
-
-                {
-                    let mut sstable_info_1 = sstable_info.clone();
-                    sstable_info_1.table_ids = vec![2];
-
-                    let mut sstable_iter = SstableIterator::create(
-                        sstable,
-                        sstable_store.clone(),
-                        Arc::new(SstableIteratorReadOptions::default()),
-                        (
-                            *sstable_info_1.table_ids.first().unwrap(),
-                            *sstable_info_1.table_ids.last().unwrap(),
-                        ),
-                    );
-                    sstable_iter.rewind().await.unwrap();
-                    assert!(sstable_iter.is_valid());
-                    assert!(sstable_iter.key().eq(&k2.to_ref()));
-
-                    let mut cnt = 0;
-                    let mut last_key = k1.clone();
-                    while sstable_iter.is_valid() {
-                        last_key = sstable_iter.key().to_vec();
-                        cnt += 1;
-                        sstable_iter.next().await.unwrap();
-                    }
-
-                    assert_eq!(1, cnt);
-                    assert_eq!(last_key, k2.clone());
-                }
-            }
         }
     }
 }
