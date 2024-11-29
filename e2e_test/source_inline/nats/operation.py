@@ -47,7 +47,8 @@ async def produce_message(stream_name: str, subject: str):
         await js.publish(subject, str.encode(json.dumps(payload)))
 
     await nc.close()
-    
+
+
 async def consume_message(stream_name: str, subject: str):
     nc = NATS()
     await nc.connect(servers=[NATS_SERVER])
@@ -58,7 +59,8 @@ async def consume_message(stream_name: str, subject: str):
         for msg in msgs:
             print(msg.data)
             await msg.ack()
-            
+
+
 def validate_state_table_item(table_name: str, expect_count: int):
     conn = psycopg2.connect(
         host="localhost",
@@ -89,7 +91,7 @@ if __name__ == "__main__":
             sys.exit(1)
         stream_name = sys.argv[2]
         subject = sys.argv[3]
-        
+
         if command == "create_stream":
             asyncio.run(create_stream(stream_name, subject))
         elif command == "produce_stream":

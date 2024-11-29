@@ -4,11 +4,11 @@ statement ok
 set streaming_use_shared_source to false;
 
 system ok
-python e2e_test/source_inline/nats/operation.py create_stream "teststream" "testsubject"
+python3 e2e_test/source_inline/nats/operation.py create_stream "teststream" "testsubject"
 
 # produce 100 message of format `{"i": $i}` to the stream
 system ok
-python e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
 
 statement ok
 set streaming_parallelism to 4;
@@ -34,13 +34,13 @@ select count(*) >= 100 from t_nats;
 t
 
 system ok
-python e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
 
 statement ok
 alter table t_nats set streaming_parallelism to 6;
 
 system ok
-python e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
 
 sleep 3s
 
@@ -50,13 +50,13 @@ select count(*) >= 200 from t_nats;
 t
 
 system ok
-python e2e_test/source_inline/nats/operation.py validate_state "t_nats" 6
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 6
 
 statement ok
 alter table t_nats set streaming_parallelism to 2;
 
 system ok
-python e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
 
 query T
 select count(*) >= 300 from t_nats;
@@ -64,7 +64,7 @@ select count(*) >= 300 from t_nats;
 t
 
 system ok
-python e2e_test/source_inline/nats/operation.py validate_state "t_nats" 2
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 2
 
 
 statement ok
