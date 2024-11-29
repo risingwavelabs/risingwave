@@ -92,7 +92,7 @@ fn create_rust(opts: CreateFunctionOptions<'_>) -> Result<CreateFunctionOutput> 
 
     let wasm_binary = std::thread::spawn(move || {
         let mut opts = arrow_udf_wasm::build::BuildOpts::default();
-        opts.arrow_udf_version = Some("0.5".to_string());
+        opts.arrow_udf_version = Some("0.5".to_owned());
         opts.script = script;
         // use a fixed tempdir to reuse the build cache
         opts.tempdir = Some(std::env::temp_dir().join("risingwave-rust-udf"));
@@ -123,7 +123,7 @@ fn build(opts: UdfOptions<'_>) -> Result<Box<dyn UdfImpl>> {
     let runtime = get_or_create_wasm_runtime(&wasm_binary)?;
     Ok(Box::new(WasmFunction {
         runtime,
-        identifier: opts.identifier.to_string(),
+        identifier: opts.identifier.to_owned(),
     }))
 }
 
@@ -207,7 +207,7 @@ fn find_wasm_identifier_v2(
     // output = "keyvalue(varchar, varchar) -> struct<key:varchar,value:varchar>"
     // ```
     let inline_types = |s: &str| -> String {
-        let mut inlined = s.to_string();
+        let mut inlined = s.to_owned();
         // iteratively replace `struct Xxx` with `struct<...>` until no replacement is made.
         loop {
             let replaced = inlined.clone();
@@ -255,23 +255,23 @@ fn wasm_identifier_v1(
 /// Convert a data type to string used in identifier.
 fn datatype_name(ty: &DataType) -> String {
     match ty {
-        DataType::Boolean => "boolean".to_string(),
-        DataType::Int16 => "int16".to_string(),
-        DataType::Int32 => "int32".to_string(),
-        DataType::Int64 => "int64".to_string(),
-        DataType::Float32 => "float32".to_string(),
-        DataType::Float64 => "float64".to_string(),
-        DataType::Date => "date32".to_string(),
-        DataType::Time => "time64".to_string(),
-        DataType::Timestamp => "timestamp".to_string(),
-        DataType::Timestamptz => "timestamptz".to_string(),
-        DataType::Interval => "interval".to_string(),
-        DataType::Decimal => "decimal".to_string(),
-        DataType::Jsonb => "json".to_string(),
-        DataType::Serial => "serial".to_string(),
-        DataType::Int256 => "int256".to_string(),
-        DataType::Bytea => "binary".to_string(),
-        DataType::Varchar => "string".to_string(),
+        DataType::Boolean => "boolean".to_owned(),
+        DataType::Int16 => "int16".to_owned(),
+        DataType::Int32 => "int32".to_owned(),
+        DataType::Int64 => "int64".to_owned(),
+        DataType::Float32 => "float32".to_owned(),
+        DataType::Float64 => "float64".to_owned(),
+        DataType::Date => "date32".to_owned(),
+        DataType::Time => "time64".to_owned(),
+        DataType::Timestamp => "timestamp".to_owned(),
+        DataType::Timestamptz => "timestamptz".to_owned(),
+        DataType::Interval => "interval".to_owned(),
+        DataType::Decimal => "decimal".to_owned(),
+        DataType::Jsonb => "json".to_owned(),
+        DataType::Serial => "serial".to_owned(),
+        DataType::Int256 => "int256".to_owned(),
+        DataType::Bytea => "binary".to_owned(),
+        DataType::Varchar => "string".to_owned(),
         DataType::List(inner) => format!("{}[]", datatype_name(inner)),
         DataType::Struct(s) => format!(
             "struct<{}>",

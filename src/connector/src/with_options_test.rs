@@ -145,7 +145,7 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     required = false;
                 }
 
-                let name = rename.unwrap_or_else(|| field_name.to_string()).to_string();
+                let name = rename.unwrap_or_else(|| field_name.to_string());
 
                 // Assemble the information
                 struct_info.fields.push(FieldInfo {
