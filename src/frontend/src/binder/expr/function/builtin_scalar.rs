@@ -302,6 +302,8 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
+                ("hmac", raw_call(ExprType::Hmac)),
+                ("secure_compare",raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("inet_aton", raw_call(ExprType::InetAton)),

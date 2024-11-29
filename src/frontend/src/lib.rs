@@ -71,6 +71,7 @@ pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
 mod user;
+pub mod webhook;
 
 pub mod health_service;
 mod monitor;
@@ -170,6 +171,11 @@ pub struct FrontendOpts {
     /// Total available memory for the frontend node in bytes. Used for batch computing.
     #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
     pub frontend_total_memory_bytes: usize,
+
+    /// The address that the webhook service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
+    pub webhook_listen_addr: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -204,6 +210,7 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
 
@@ -218,6 +225,9 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+
+        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
+        let _task = tokio::spawn(webhook_service.serve());
 
         pg_serve(
             &listen_addr,

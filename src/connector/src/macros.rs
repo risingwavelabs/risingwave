@@ -51,6 +51,20 @@ macro_rules! for_all_classified_sources {
 }
 
 #[macro_export]
+macro_rules! for_all_connections {
+    ($macro:path $(, $extra_args:tt)*) => {
+        $macro! {
+            {
+                { Kafka, $crate::connector_common::KafkaConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
+                { Iceberg, $crate::connector_common::IcebergConnection, risingwave_pb::catalog::connection_params::PbConnectionType },
+                { SchemaRegistry, $crate::connector_common::SchemaRegistryConnection, risingwave_pb::catalog::connection_params::PbConnectionType }
+            }
+            $(,$extra_args)*
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! for_all_sources_inner {
     (
         {$({ $cdc_source_type:ident }),* },
@@ -159,6 +173,88 @@ macro_rules! dispatch_split_impl {
         use $crate::source::SplitImpl;
         $crate::dispatch_source_enum! {SplitImpl, { $impl }, {$inner_name, $prop_type_name, IgnoreSplitType}, $body}
     }};
+}
+
+#[macro_export]
+macro_rules! dispatch_connection_impl {
+    ($impl:expr, $inner_name:ident, $body:expr) => {
+        $crate::dispatch_connection_enum! { $impl, $inner_name, $body }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_connection_enum {
+    ($impl:expr, $inner_name:ident, $body:expr) => {{
+        $crate::for_all_connections! {
+            $crate::dispatch_connection_impl_inner,
+            $impl,
+            $inner_name,
+            $body
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! dispatch_connection_impl_inner {
+    (
+        { $({$conn_variant_name:ident, $connection:ty, $pb_variant_type:ty }),* },
+        $impl:expr,
+        $inner_name:ident,
+        $body:expr
+    ) => {{
+        match $impl {
+            $(
+                ConnectionImpl::$conn_variant_name($inner_name) => {
+                    $body
+                }
+            ),*
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! impl_connection {
+    ({$({ $variant_name:ident, $connection:ty, $pb_connection_path:path }),*}) => {
+        #[derive(Debug, Clone, EnumAsInner, PartialEq)]
+        pub enum ConnectionImpl {
+            $(
+                $variant_name(Box<$connection>),
+            )*
+        }
+
+        $(
+            impl TryFrom<ConnectionImpl> for $connection {
+                type Error = $crate::error::ConnectorError;
+
+                fn try_from(connection: ConnectionImpl) -> std::result::Result<Self, Self::Error> {
+                    match connection {
+                        ConnectionImpl::$variant_name(inner) => Ok(Box::into_inner(inner)),
+                        other => risingwave_common::bail!("expect {} but get {:?}", stringify!($connection), other),
+                    }
+                }
+            }
+
+            impl From<$connection> for ConnectionImpl {
+                fn from(connection: $connection) -> ConnectionImpl {
+                    ConnectionImpl::$variant_name(Box::new(connection))
+                }
+            }
+
+        )*
+
+        impl ConnectionImpl {
+            pub fn from_proto(pb_connection_type: risingwave_pb::catalog::connection_params::PbConnectionType, value_secret_filled: std::collections::BTreeMap<String, String>) -> $crate::error::ConnectorResult<Self> {
+                match pb_connection_type {
+                    $(
+                        <$pb_connection_path>::$variant_name => {
+                            Ok(serde_json::from_value(json!(value_secret_filled)).map(ConnectionImpl::$variant_name).map_err($crate::error::ConnectorError::from)?)
+                        },
+                    )*
+                    risingwave_pb::catalog::connection_params::PbConnectionType::Unspecified => unreachable!(),
+                }
+            }
+        }
+    }
 }
 
 #[macro_export]

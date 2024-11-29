@@ -412,6 +412,7 @@ mod test {
             options: BTreeMap::default(),
             secret_refs: BTreeMap::default(),
             key_encode: None,
+            connection_id: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
@@ -490,6 +491,7 @@ mod test {
             options: btree_map,
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)

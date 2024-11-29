@@ -442,7 +442,8 @@ message CreateConnectionRequest {
   uint32 database_id = 2;
   uint32 schema_id = 3;
   oneof payload {
-    PrivateLink private_link = 4;
+    PrivateLink private_link = 4 [deprecated = true];
+    catalog.ConnectionParams connection_params = 6;
   }
   uint32 owner_id = 5;
 }

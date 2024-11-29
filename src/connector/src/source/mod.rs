@@ -29,7 +29,7 @@ mod util;
 
 use std::future::IntoFuture;
 
-pub use base::{UPSTREAM_SOURCE_KEY, *};
+pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub(crate) use common::*;
 use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
