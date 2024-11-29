@@ -15,6 +15,7 @@
 use std::future::IntoFuture;
 use std::pin::Pin;
 
+use arrow_schema_iceberg::{DataType as ArrowDateType, IntervalUnit};
 use async_compression::tokio::bufread::GzipDecoder;
 use async_trait::async_trait;
 use futures::TryStreamExt;
@@ -24,8 +25,8 @@ use opendal::Operator;
 use parquet::arrow::async_reader::AsyncFileReader;
 use parquet::arrow::{parquet_to_arrow_schema, ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::file::metadata::FileMetaData;
-use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
 use tokio::io::{AsyncRead, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
@@ -269,10 +270,13 @@ pub fn extract_valid_column_indices(
                         .iter()
                         .position(|&name| name == column.name)
                         .and_then(|pos| {
-                            let arrow_field = IcebergArrowConvert
-                                .to_arrow_field(&column.name, &column.data_type)
-                                .ok()?;
-                            if &arrow_field == converted_arrow_schema.field(pos) {
+                            let arrow_data_type: &arrow_schema_iceberg::DataType =
+                                converted_arrow_schema.field(pos).data_type();
+                            let rw_data_type: &risingwave_common::types::DataType =
+                                &column.data_type;
+
+                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type)
+                            {
                                 Some(pos)
                             } else {
                                 None
@@ -284,4 +288,71 @@ pub fn extract_valid_column_indices(
         }
         None => Ok(vec![]),
     }
+}
+
+/// This function checks whether the schema of a Parquet file matches the user defined schema.
+/// It handles the following special cases:
+/// - Arrow's `timestamp(_, None)` types (all four time units) match with RisingWave's `TimeStamp` type.
+/// - Arrow's `timestamp(_, Some)` matches with RisingWave's `TimeStamptz` type.
+/// - Since RisingWave does not have an `UInt` type:
+///   - Arrow's `UInt8` matches with RisingWave's `Int16`.
+///   - Arrow's `UInt16` matches with RisingWave's `Int32`.
+///   - Arrow's `UInt32` matches with RisingWave's `Int64`.
+///   - Arrow's `UInt64` matches with RisingWave's `Decimal`.
+/// - Arrow's `Float16` matches with RisingWave's `Float32`.
+fn is_parquet_schema_match_source_schema(
+    arrow_data_type: &ArrowDateType,
+    rw_data_type: &RwDataType,
+) -> bool {
+    matches!(
+        (arrow_data_type, rw_data_type),
+        (ArrowDateType::Boolean, RwDataType::Boolean)
+            | (
+                ArrowDateType::Int8 | ArrowDateType::Int16 | ArrowDateType::UInt8,
+                RwDataType::Int16
+            )
+            | (
+                ArrowDateType::Int32 | ArrowDateType::UInt16,
+                RwDataType::Int32
+            )
+            | (
+                ArrowDateType::Int64 | ArrowDateType::UInt32,
+                RwDataType::Int64
+            )
+            | (
+                ArrowDateType::UInt64 | ArrowDateType::Decimal128(_, _),
+                RwDataType::Decimal
+            )
+            | (ArrowDateType::Decimal256(_, _), RwDataType::Int256)
+            | (
+                ArrowDateType::Float16 | ArrowDateType::Float32,
+                RwDataType::Float32
+            )
+            | (ArrowDateType::Float64, RwDataType::Float64)
+            | (ArrowDateType::Timestamp(_, None), RwDataType::Timestamp)
+            | (
+                ArrowDateType::Timestamp(_, Some(_)),
+                RwDataType::Timestamptz
+            )
+            | (ArrowDateType::Date32, RwDataType::Date)
+            | (
+                ArrowDateType::Time32(_) | ArrowDateType::Time64(_),
+                RwDataType::Time
+            )
+            | (
+                ArrowDateType::Interval(IntervalUnit::MonthDayNano),
+                RwDataType::Interval
+            )
+            | (
+                ArrowDateType::Utf8 | ArrowDateType::LargeUtf8,
+                RwDataType::Varchar
+            )
+            | (
+                ArrowDateType::Binary | ArrowDateType::LargeBinary,
+                RwDataType::Bytea
+            )
+            | (ArrowDateType::List(_), RwDataType::List(_))
+            | (ArrowDateType::Struct(_), RwDataType::Struct(_))
+            | (ArrowDateType::Map(_, _), RwDataType::Map(_))
+    )
 }

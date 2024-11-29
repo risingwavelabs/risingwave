@@ -44,8 +44,8 @@ use std::fmt::Write;
 
 use arrow_array::cast::AsArray;
 use arrow_array_iceberg::array;
-use arrow_schema_iceberg::TimeUnit;
 use arrow_buffer::OffsetBuffer;
+use arrow_schema_iceberg::TimeUnit;
 use chrono::{DateTime, NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
@@ -504,6 +504,12 @@ pub trait FromArrow {
             Boolean => DataType::Boolean,
             Int16 => DataType::Int16,
             Int32 => DataType::Int32,
+            Int8 => DataType::Int16,
+            UInt8 => DataType::Int16,
+            UInt16 => DataType::Int32,
+            UInt32 => DataType::Int64,
+            UInt64 => DataType::Decimal,
+            Float16 => DataType::Float32,
             Int64 => DataType::Int64,
             Float32 => DataType::Float32,
             Float64 => DataType::Float64,
@@ -584,8 +590,14 @@ pub trait FromArrow {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
             Int16 => self.from_int16_array(array.as_any().downcast_ref().unwrap()),
             Int32 => self.from_int32_array(array.as_any().downcast_ref().unwrap()),
+            Int8 => self.from_int8_array(array.as_any().downcast_ref().unwrap()),
             Int64 => self.from_int64_array(array.as_any().downcast_ref().unwrap()),
             Decimal128(_, _) => self.from_decimal128_array(array.as_any().downcast_ref().unwrap()),
+            UInt8 => self.from_uint8_array(array.as_any().downcast_ref().unwrap()),
+            UInt16 => self.from_uint16_array(array.as_any().downcast_ref().unwrap()),
+            UInt32 => self.from_uint32_array(array.as_any().downcast_ref().unwrap()),
+            Float16 => self.from_float16_array(array.as_any().downcast_ref().unwrap()),
+            UInt64 => self.from_uint64_array(array.as_any().downcast_ref().unwrap()),
             Decimal256(_, _) => self.from_int256_array(array.as_any().downcast_ref().unwrap()),
             Float32 => self.from_float32_array(array.as_any().downcast_ref().unwrap()),
             Float64 => self.from_float64_array(array.as_any().downcast_ref().unwrap()),
@@ -674,10 +686,36 @@ pub trait FromArrow {
         Ok(ArrayImpl::Int32(array.into()))
     }
 
+    fn from_int8_array(&self, array: &arrow_array::Int8Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int16(array.into()))
+    }
+
+    fn from_uint8_array(&self, array: &arrow_array::UInt8Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int16(array.into()))
+    }
+
+    fn from_uint16_array(&self, array: &arrow_array::UInt16Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int32(array.into()))
+    }
+
+    fn from_uint32_array(&self, array: &arrow_array::UInt32Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Int64(array.into()))
+    }
+
     fn from_int64_array(&self, array: &arrow_array::Int64Array) -> Result<ArrayImpl, ArrayError> {
         Ok(ArrayImpl::Int64(array.into()))
     }
 
+    fn from_uint64_array(&self, array: &arrow_array::UInt64Array) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Decimal(array.try_into()?))
+    }
+
+    fn from_float16_array(
+        &self,
+        array: &arrow_array::Float16Array,
+    ) -> Result<ArrayImpl, ArrayError> {
+        Ok(ArrayImpl::Float32(array.try_into()?))
+    }
     fn from_int256_array(
         &self,
         array: &arrow_array::Decimal256Array,
@@ -908,7 +946,6 @@ macro_rules! converts {
     };
 }
 
-
 macro_rules! converts_with_timeunit {
     ($ArrayType:ty, $ArrowType:ty, $time_unit:expr, @map) => {
 
@@ -946,6 +983,36 @@ macro_rules! converts_with_timeunit {
     };
 }
 
+/// Used to convert different types.
+macro_rules! converts_with_type {
+    ($ArrayType:ty, $ArrowType:ty, $FromType:ty, $ToType:ty) => {
+        impl From<&$ArrayType> for $ArrowType {
+            fn from(array: &$ArrayType) -> Self {
+                let values: Vec<Option<$ToType>> =
+                    array.iter().map(|x| x.map(|v| v as $ToType)).collect();
+                <$ArrowType>::from_iter(values)
+            }
+        }
+
+        impl From<&$ArrowType> for $ArrayType {
+            fn from(array: &$ArrowType) -> Self {
+                let values: Vec<Option<$FromType>> =
+                    array.iter().map(|x| x.map(|v| v as $FromType)).collect();
+                <$ArrayType>::from_iter(values)
+            }
+        }
+
+        impl From<&[$ArrowType]> for $ArrayType {
+            fn from(arrays: &[$ArrowType]) -> Self {
+                let values: Vec<Option<$FromType>> = arrays
+                    .iter()
+                    .flat_map(|a| a.iter().map(|x| x.map(|v| v as $FromType)))
+                    .collect();
+                <$ArrayType>::from_iter(values)
+            }
+        }
+    };
+}
 
 converts!(BoolArray, arrow_array::BooleanArray);
 converts!(I16Array, arrow_array::Int16Array);
@@ -970,6 +1037,11 @@ converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampMicrosecondArray
 converts_with_timeunit!(TimestamptzArray, arrow_array::TimestampNanosecondArray, TimeUnit::Nanosecond, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 converts!(SerialArray, arrow_array::Int64Array, @map);
+
+converts_with_type!(I16Array, arrow_array::Int8Array, i16, i8);
+converts_with_type!(I16Array, arrow_array::UInt8Array, i16, u8);
+converts_with_type!(I32Array, arrow_array::UInt16Array, i32, u16);
+converts_with_type!(I64Array, arrow_array::UInt32Array, i64, u32);
 
 /// Converts RisingWave value from and into Arrow value.
 trait FromIntoArrow {
@@ -1000,7 +1072,6 @@ trait FromIntoArrowWithUnit {
     fn from_arrow_with_unit(value: Self::ArrowType, time_unit: Self::TimestampType) -> Self;
     fn into_arrow_with_unit(self, time_unit: Self::TimestampType) -> Self::ArrowType;
 }
-
 
 impl FromIntoArrow for F32 {
     type ArrowType = f32;
@@ -1166,6 +1237,38 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
             };
             Ok(res)
         };
+        array
+            .iter()
+            .map(|o| o.map(from_arrow).transpose())
+            .collect::<Result<Self, Self::Error>>()
+    }
+}
+
+// Since RisingWave does not support UInt type, convert UInt64Array to Decimal.
+impl TryFrom<&arrow_array::UInt64Array> for DecimalArray {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::UInt64Array) -> Result<Self, Self::Error> {
+        let from_arrow = |value| {
+            // Convert the value to a Decimal with scale 0
+            let res = Decimal::from(value);
+            Ok(res)
+        };
+
+        // Map over the array and convert each value
+        array
+            .iter()
+            .map(|o| o.map(from_arrow).transpose())
+            .collect::<Result<Self, Self::Error>>()
+    }
+}
+
+impl TryFrom<&arrow_array::Float16Array> for F32Array {
+    type Error = ArrayError;
+
+    fn try_from(array: &arrow_array::Float16Array) -> Result<Self, Self::Error> {
+        let from_arrow = |value| Ok(f32::from(value));
+
         array
             .iter()
             .map(|o| o.map(from_arrow).transpose())
