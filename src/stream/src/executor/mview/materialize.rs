@@ -299,7 +299,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     }
 
                     self.metrics
-                        .materialize_commit_epoch
+                        .materialize_current_epoch
                         .set(b.epoch.curr as i64);
 
                     Message::Barrier(b)
