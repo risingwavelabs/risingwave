@@ -19,9 +19,13 @@ pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
 mod common;
 pub use common::{
-    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnection, KafkaPrivateLinkCommon,
+    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaConnectionProps, KafkaPrivateLinkCommon,
     KinesisCommon, MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon,
     RdKafkaPropertiesCommon, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+};
+mod connection;
+pub use connection::{
+    validate_connection, Connection, IcebergConnection, KafkaConnection, SchemaRegistryConnection,
 };
 
 mod iceberg;

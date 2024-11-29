@@ -18,12 +18,14 @@ use std::sync::{Arc, LazyLock};
 use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, ObjectId, Schema, SchemaId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
+};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
@@ -32,6 +34,8 @@ use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
+use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
@@ -54,7 +58,9 @@ use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
-use crate::handler::util::SourceSchemaCompatExt;
+use crate::handler::util::{
+    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{
     generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
@@ -63,8 +69,24 @@ use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
+
+static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
+    hashset! {
+        PbConnectionType::Unspecified,
+        PbConnectionType::Kafka,
+        PbConnectionType::Iceberg,
+    }
+});
+
+static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+    LazyLock::new(|| {
+        hashset! {
+            PbConnectionType::Unspecified,
+            PbConnectionType::SchemaRegistry,
+        }
+    });
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -90,7 +112,15 @@ pub async fn gen_sink_plan(
     let mut with_options = handler_args.with_options.clone();
 
     resolve_privatelink_in_with_option(&mut with_options)?;
-    let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
+    let (mut resolved_with_options, connection_type, connector_conn_ref) =
+        resolve_connection_ref_and_secret_ref(with_options, session)?;
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+
+    // if not using connection, we don't need to check connector match connection type
+    if !matches!(connection_type, PbConnectionType::Unspecified) {
+        let connector = resolved_with_options.get_connector().unwrap();
+        check_connector_match_connection_type(connector.as_str(), &connection_type)?;
+    }
 
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
 
@@ -271,7 +301,7 @@ pub async fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        None, // deprecated: private link connection id
+        connector_conn_ref.map(ConnectionId::from),
     );
 
     if let Some(table_catalog) = &target_table_catalog {
@@ -754,11 +784,13 @@ fn bind_sink_format_desc(
         }
     }
 
-    let (mut options, secret_refs) = resolve_secret_ref_in_with_options(
-        WithOptions::try_from(value.row_options.as_slice())?,
-        session,
-    )?
-    .into_parts();
+    let (props, connection_type_flag, schema_registry_conn_ref) =
+        resolve_connection_ref_and_secret_ref(
+            WithOptions::try_from(value.row_options.as_slice())?,
+            session,
+        )?;
+    ensure_connection_type_allowed(connection_type_flag, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    let (mut options, secret_refs) = props.into_parts();
 
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
@@ -770,6 +802,7 @@ fn bind_sink_format_desc(
         options,
         secret_refs,
         key_encode,
+        connection_id: schema_registry_conn_ref,
     })
 }
 

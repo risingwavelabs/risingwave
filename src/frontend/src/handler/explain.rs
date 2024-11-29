@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use petgraph::dot::Dot;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
@@ -35,7 +36,7 @@ use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::explain_stream_graph;
+use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
 use crate::OptimizerContextRef;
 
 async fn do_handle_explain(
@@ -46,6 +47,8 @@ async fn do_handle_explain(
 ) -> Result<()> {
     // Workaround to avoid `Rc` across `await` point.
     let mut batch_plan_fragmenter = None;
+    let mut batch_plan_fragmenter_fmt = ExplainFormat::Json;
+
     let session = handler_args.session.clone();
 
     {
@@ -219,10 +222,19 @@ async fn do_handle_explain(
                                 session.config().batch_parallelism().0,
                                 plan.clone(),
                             )?);
+                            batch_plan_fragmenter_fmt = if explain_format == ExplainFormat::Dot {
+                                ExplainFormat::Dot
+                            } else {
+                                ExplainFormat::Json
+                            }
                         }
                         Convention::Stream => {
                             let graph = build_graph(plan.clone())?;
-                            blocks.push(explain_stream_graph(&graph, explain_verbose));
+                            if explain_format == ExplainFormat::Dot {
+                                blocks.push(explain_stream_graph_as_dot(&graph, explain_verbose))
+                            } else {
+                                blocks.push(explain_stream_graph(&graph, explain_verbose));
+                            }
                         }
                     }
                 }
@@ -256,8 +268,14 @@ async fn do_handle_explain(
 
     if let Some(fragmenter) = batch_plan_fragmenter {
         let query = fragmenter.generate_complete_query().await?;
-        let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
-        blocks.push(stage_graph_json);
+        let stage_graph = if batch_plan_fragmenter_fmt == ExplainFormat::Dot {
+            let graph = query.stage_graph.to_petgraph();
+            let dot = Dot::new(&graph);
+            dot.to_string()
+        } else {
+            serde_json::to_string_pretty(&query.stage_graph).unwrap()
+        };
+        blocks.push(stage_graph);
     }
 
     Ok(())
