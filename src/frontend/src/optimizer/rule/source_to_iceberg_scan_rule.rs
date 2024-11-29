@@ -34,10 +34,12 @@ impl FallibleRule for SourceToIcebergScanRule {
             None => return ApplyResult::NotApplicable,
         };
         #[cfg(madsim)]
-        return ApplyResult::Err(crate::error::ErrorCode::BindError(
-            "iceberg_scan can't be used in the madsim mode".to_string(),
-        )
-        .into());
+        return ApplyResult::Err(
+            crate::error::ErrorCode::BindError(
+                "iceberg_scan can't be used in the madsim mode".to_string(),
+            )
+            .into(),
+        );
         #[cfg(not(madsim))]
         {
             if source.core.is_iceberg_connector() {
