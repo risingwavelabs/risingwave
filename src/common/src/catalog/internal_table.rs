@@ -14,11 +14,9 @@
 
 use std::any::type_name;
 use std::fmt::Debug;
-use std::sync::LazyLock;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use regex::Regex;
 
 pub const RW_INTERNAL_TABLE_FUNCTION_NAME: &str = "rw_table";
 

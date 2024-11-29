@@ -17,9 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    is_not_internal_table, FunctionId, IndexId, StreamJobStatus, TableId,
-};
+use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
