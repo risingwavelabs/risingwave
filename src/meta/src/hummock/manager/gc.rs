@@ -535,7 +535,7 @@ impl HummockManager {
                 break;
             }
             let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
-            tracing::debug!(?objects_to_delete, "Attempt to delete objects.");
+            tracing::debug!(?delete_batch, "Attempt to delete objects.");
             let deleted_object_ids = delete_batch.clone();
             self.gc_manager
                 .delete_objects(delete_batch.into_iter())
