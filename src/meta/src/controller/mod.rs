@@ -64,14 +64,26 @@ pub struct SqlMetaStore {
     pub endpoint: String,
 }
 
-pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
-
 impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
     pub async fn connect(backend: MetaStoreBackend) -> Result<Self, sea_orm::DbErr> {
         Ok(match backend {
             MetaStoreBackend::Mem => {
-                let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await?;
+                const IN_MEMORY_STORE: &str = "sqlite::memory:";
+
+                let mut options = sea_orm::ConnectOptions::new(IN_MEMORY_STORE);
+
+                options
+                    .max_connections(1)
+                    .min_connections(1)
+                    // Releasing the connection to in-memory SQLite database is unacceptable
+                    // because it will clear the database. Set a large enough timeout to prevent it.
+                    // `sqlx` actually supports disabling these timeouts by passing a `None`, but
+                    // `sea-orm` does not expose this option.
+                    .idle_timeout(Duration::MAX / 4)
+                    .max_lifetime(Duration::MAX / 4);
+
+                let conn = sea_orm::Database::connect(options).await?;
                 Self {
                     conn,
                     endpoint: IN_MEMORY_STORE.to_owned(),
