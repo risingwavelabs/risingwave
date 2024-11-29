@@ -30,6 +30,7 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, hash, must_match};
+use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -504,6 +505,7 @@ impl DdlController {
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        validate_connection(&connection).await?;
         self.metadata_manager
             .catalog_controller
             .create_connection(connection)

@@ -58,6 +58,9 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 
+/// Default to bypass cluster limits iff in debug mode.
+const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
+
 #[serde_as]
 /// This is the Session Config of RisingWave.
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
@@ -306,7 +309,7 @@ pub struct SessionConfig {
     /// Bypass checks on cluster limits
     ///
     /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
-    #[parameter(default = false)]
+    #[parameter(default = BYPASS_CLUSTER_LIMITS)]
     bypass_cluster_limits: bool,
 
     /// The maximum number of parallelism a streaming query can use. Defaults to 256.

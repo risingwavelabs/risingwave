@@ -36,6 +36,7 @@ use risingwave_meta_model::{
     SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
     ViewId,
 };
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -78,8 +79,8 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{
-    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
-    IGNORED_NOTIFICATION_VERSION,
+    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
+    NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -1237,6 +1238,7 @@ impl CatalogController {
 
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+        let connection_ids = get_referred_connection_ids_from_source(&pb_source);
 
         let source_obj = Self::create_object(
             &txn,
@@ -1252,8 +1254,9 @@ impl CatalogController {
         Source::insert(source).exec(&txn).await?;
 
         // add secret dependency
-        if !secret_ids.is_empty() {
-            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
+        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),
                     used_by: Set(source_id as _),
@@ -1501,6 +1504,16 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_connection.schema_id as _, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
+        let mut dep_secrets = HashSet::new();
+        if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
+            dep_secrets.extend(
+                params
+                    .secret_refs
+                    .values()
+                    .map(|secret_ref| secret_ref.secret_id),
+            );
+        }
+
         let conn_obj = Self::create_object(
             &txn,
             ObjectType::Connection,
@@ -1512,6 +1525,16 @@ impl CatalogController {
         pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
+
+        for secret_id in dep_secrets {
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(secret_id as _),
+                used_by: Set(conn_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
