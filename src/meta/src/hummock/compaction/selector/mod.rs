@@ -129,7 +129,7 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, OverlappingLevel};
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_pb::hummock::LevelType;
 
     use super::*;
@@ -179,8 +179,18 @@ pub mod tests {
         right: usize,
         epoch: u64,
     ) -> SstableInfo {
+        generate_table_impl(id, table_prefix, left, right, epoch).into()
+    }
+
+    pub fn generate_table_impl(
+        id: u64,
+        table_prefix: u64,
+        left: usize,
+        right: usize,
+        epoch: u64,
+    ) -> SstableInfoInner {
         let object_size = (right - left + 1) as u64;
-        SstableInfo {
+        SstableInfoInner {
             object_id: id,
             sst_id: id,
             key_range: KeyRange {
@@ -209,7 +219,7 @@ pub mod tests {
         max_epoch: u64,
     ) -> SstableInfo {
         let object_size = (right - left + 1) as u64;
-        SstableInfo {
+        SstableInfoInner {
             object_id: id,
             sst_id: id,
             key_range: KeyRange {
@@ -225,6 +235,7 @@ pub mod tests {
             sst_size: object_size,
             ..Default::default()
         }
+        .into()
     }
 
     pub fn generate_tables(
@@ -237,10 +248,10 @@ pub mod tests {
         let mut start = keys.start;
         let mut tables = vec![];
         for id in ids {
-            let mut table = generate_table(id, 1, start, start + step - 1, epoch);
+            let mut table = generate_table_impl(id, 1, start, start + step - 1, epoch);
             table.file_size = file_size;
             table.sst_size = file_size;
-            tables.push(table);
+            tables.push(table.into());
             start += step;
         }
         tables

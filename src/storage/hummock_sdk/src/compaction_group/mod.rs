@@ -135,12 +135,13 @@ pub mod group_split {
     ///    `sst_size`: `right_size`,
     /// }
     pub fn split_sst(
-        mut origin_sst_info: SstableInfo,
+        origin_sst_info: SstableInfo,
         new_sst_id: &mut u64,
         split_key: Bytes,
         left_size: u64,
         right_size: u64,
     ) -> (Option<SstableInfo>, Option<SstableInfo>) {
+        let mut origin_sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         *new_sst_id += 1;
@@ -183,9 +184,9 @@ pub mod group_split {
 
         // This function does not make any assumptions about the incoming sst, so add some judgement to ensure that the generated sst meets the restrictions.
         if origin_sst_info.table_ids.is_empty() {
-            (None, Some(branch_table_info))
+            (None, Some(branch_table_info.into()))
         } else if branch_table_info.table_ids.is_empty() {
-            (Some(origin_sst_info), None)
+            (Some(origin_sst_info.into()), None)
         } else if KeyComparator::compare_encoded_full_key(
             &origin_sst_info.key_range.left,
             &origin_sst_info.key_range.right,
@@ -193,9 +194,9 @@ pub mod group_split {
         .is_eq()
         {
             // avoid empty key_range of origin_sst
-            (None, Some(branch_table_info))
+            (None, Some(branch_table_info.into()))
         } else {
-            (Some(origin_sst_info), Some(branch_table_info))
+            (Some(origin_sst_info.into()), Some(branch_table_info.into()))
         }
     }
 
@@ -203,12 +204,13 @@ pub mod group_split {
     /// This function is used to split the sst into two parts based on the `table_ids`.
     /// In contrast to `split_sst`, this function does not modify the `key_range` and does not guarantee that the split ssts can be merged, which needs to be guaranteed by the caller.
     pub fn split_sst_with_table_ids(
-        sst_info: &mut SstableInfo,
+        origin_sst_info: &SstableInfo,
         new_sst_id: &mut u64,
         old_sst_size: u64,
         new_sst_size: u64,
         new_table_ids: Vec<u32>,
-    ) -> SstableInfo {
+    ) -> (SstableInfo, SstableInfo) {
+        let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         branch_table_info.sst_size = new_sst_size;
@@ -235,7 +237,7 @@ pub mod group_split {
                 .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
         }
 
-        branch_table_info
+        (sst_info.into(), branch_table_info.into())
     }
 
     // Should avoid split same table_id into two groups
