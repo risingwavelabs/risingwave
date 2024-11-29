@@ -158,8 +158,8 @@ pub struct RescheduleContext {
     upstream_dispatchers: HashMap<ActorId, Vec<(FragmentId, DispatcherId, DispatcherType)>>,
     /// Fragments with `StreamSource`
     stream_source_fragment_ids: HashSet<FragmentId>,
-    /// Fragments with `StreamSourceBackfill`
-    stream_source_backfill_fragment_ids: HashSet<FragmentId>,
+    /// Fragments with `StreamSourceBackfill` and the corresponding upstream source fragment
+    stream_source_backfill_fragment_ids: HashMap<FragmentId, FragmentId>,
     /// Target fragments in `NoShuffle` relation
     no_shuffle_target_fragment_ids: HashSet<FragmentId>,
     /// Source fragments in `NoShuffle` relation
@@ -696,7 +696,7 @@ impl ScaleController {
         }
 
         let mut stream_source_fragment_ids = HashSet::new();
-        let mut stream_source_backfill_fragment_ids = HashSet::new();
+        let mut stream_source_backfill_fragment_ids = HashMap::new();
         let mut no_shuffle_reschedule = HashMap::new();
         for (fragment_id, WorkerReschedule { worker_actor_diff }) in &*reschedule {
             let fragment = fragment_map
@@ -821,8 +821,11 @@ impl ScaleController {
                 // SourceScan is always a NoShuffle downstream, rescheduled together with the upstream Source.
                 if (fragment.get_fragment_type_mask() & FragmentTypeFlag::SourceScan as u32) != 0 {
                     let stream_node = fragment.actor_template.nodes.as_ref().unwrap();
-                    if stream_node.find_source_backfill().is_some() {
-                        stream_source_backfill_fragment_ids.insert(fragment.fragment_id);
+                    if let Some((_source_id, upstream_source_fragment_id)) =
+                        stream_node.find_source_backfill()
+                    {
+                        stream_source_backfill_fragment_ids
+                            .insert(fragment.fragment_id, upstream_source_fragment_id);
                     }
                 }
             }
@@ -1257,17 +1260,14 @@ impl ScaleController {
             for fragment_id in reschedules.keys() {
                 let actors_after_reschedule = &fragment_actors_after_reschedule[fragment_id];
 
-                if ctx
-                    .stream_source_backfill_fragment_ids
-                    .contains(fragment_id)
+                if let Some(upstream_source_fragment_id) =
+                    ctx.stream_source_backfill_fragment_ids.get(fragment_id)
                 {
-                    let fragment = &ctx.fragment_map[fragment_id];
-
                     let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
 
                     let actor_splits = self.source_manager.migrate_splits_for_backfill_actors(
                         *fragment_id,
-                        &fragment.upstream_fragment_ids,
+                        *upstream_source_fragment_id,
                         &curr_actor_ids,
                         &fragment_actor_splits,
                         &no_shuffle_upstream_actor_map,

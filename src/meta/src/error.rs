@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{BoxedError, NotImplemented};
+use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -135,6 +136,13 @@ pub enum MetaErrorInner {
 
     #[error(transparent)]
     NotImplemented(#[from] NotImplemented),
+
+    #[error("Secret error: {0}")]
+    SecretError(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
 }
 
 impl MetaError {

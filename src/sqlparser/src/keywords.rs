@@ -553,6 +553,7 @@ define_keywords!(
     USER,
     USING,
     UUID,
+    VALIDATE,
     VALUE,
     VALUES,
     VALUE_OF,

@@ -24,6 +24,7 @@ use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use iceberg::expr::Predicate as IcebergPredicate;
 use itertools::Itertools;
+use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
@@ -846,6 +847,34 @@ impl StageGraph {
         }
 
         Ok(())
+    }
+
+    /// Converts the `StageGraph` into a `petgraph::graph::Graph<String, String>`.
+    pub fn to_petgraph(&self) -> Graph<String, String, Directed> {
+        let mut graph = Graph::<String, String, Directed>::new();
+
+        let mut node_indices = HashMap::new();
+
+        // Add all stages as nodes
+        for (&stage_id, stage_ref) in self.stages.iter().sorted_by_key(|(id, _)| **id) {
+            let node_label = format!("Stage {}: {:?}", stage_id, stage_ref);
+            let node_index = graph.add_node(node_label);
+            node_indices.insert(stage_id, node_index);
+        }
+
+        // Add edges between stages based on child_edges
+        for (&parent_id, children) in &self.child_edges {
+            if let Some(&parent_index) = node_indices.get(&parent_id) {
+                for &child_id in children {
+                    if let Some(&child_index) = node_indices.get(&child_id) {
+                        // Add an edge from parent to child
+                        graph.add_edge(parent_index, child_index, "".to_string());
+                    }
+                }
+            }
+        }
+
+        graph
     }
 }
 
