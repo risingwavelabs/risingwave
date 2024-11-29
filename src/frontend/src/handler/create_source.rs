@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
 use anyhow::{anyhow, Context};
 use either::Either;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use rand::Rng;
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
@@ -31,8 +31,10 @@ use risingwave_common::catalog::{
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::additional_columns::{
     build_additional_column_desc, get_supported_additional_columns,
+    source_add_partition_offset_cols,
 };
 use risingwave_connector::parser::{
     fetch_json_schema_and_map_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
@@ -52,13 +54,14 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
-pub use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::{
     ConnectorProperties, AZBLOB_CONNECTOR, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, OPENDAL_S3_CONNECTOR,
     POSIX_FS_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
 };
+pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -80,13 +83,16 @@ use crate::handler::create_table::{
     bind_pk_and_row_id_on_relation, bind_sql_column_constraints, bind_sql_columns,
     bind_sql_pk_names, bind_table_constraints, ColumnIdGenerator,
 };
-use crate::handler::util::SourceSchemaCompatExt;
+use crate::handler::util::{
+    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::{
-    resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options, OverwriteOptions,
+    resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option,
+    resolve_secret_ref_in_with_options, OverwriteOptions,
 };
 use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions, WithOptionsSecResolved};
 
@@ -308,16 +314,32 @@ pub(crate) async fn bind_columns_from_source(
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
     let options_with_secret = match with_properties {
-        Either::Left(options) => resolve_secret_ref_in_with_options(options.clone(), session)?,
+        Either::Left(options) => {
+            let (sec_resolve_props, connection_type, _) =
+                resolve_connection_ref_and_secret_ref(options.clone(), session)?;
+            if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+                return Err(RwError::from(ProtocolError(format!(
+                    "connection type {:?} is not allowed, allowed types: {:?}",
+                    connection_type, ALLOWED_CONNECTION_CONNECTOR
+                ))));
+            }
+
+            sec_resolve_props
+        }
         Either::Right(options_with_secret) => options_with_secret.clone(),
     };
 
     let is_kafka: bool = options_with_secret.is_kafka_connector();
-    let (format_encode_options, format_encode_secret_refs) = resolve_secret_ref_in_with_options(
-        WithOptions::try_from(format_encode.row_options())?,
-        session,
-    )?
-    .into_parts();
+
+    // todo: need to resolve connection ref for schema registry
+    let (sec_resolve_props, connection_type, schema_registry_conn_ref) =
+        resolve_connection_ref_and_secret_ref(
+            WithOptions::try_from(format_encode.row_options())?,
+            session,
+        )?;
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+
+    let (format_encode_options, format_encode_secret_refs) = sec_resolve_props.into_parts();
     // Need real secret to access the schema registry
     let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
         format_encode_options.clone(),
@@ -350,6 +372,7 @@ pub(crate) async fn bind_columns_from_source(
         row_encode: row_encode_to_prost(&format_encode.row_encode) as i32,
         format_encode_options,
         format_encode_secret_refs,
+        connection_id: schema_registry_conn_ref,
         ..Default::default()
     };
 
@@ -542,11 +565,15 @@ fn bind_columns_from_source_for_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
-    let (format_encode_options, format_encode_secret_refs) = resolve_secret_ref_in_with_options(
-        WithOptions::try_from(format_encode.row_options())?,
-        session,
-    )?
-    .into_parts();
+    let with_options = WithOptions::try_from(format_encode.row_options())?;
+    if !with_options.connection_ref().is_empty() {
+        return Err(RwError::from(NotSupported(
+            "CDC connector does not support connection ref yet".to_string(),
+            "Explicitly specify the connection in WITH clause".to_string(),
+        )));
+    }
+    let (format_encode_options, format_encode_secret_refs) =
+        resolve_secret_ref_in_with_options(with_options, session)?.into_parts();
 
     // Need real secret to access the schema registry
     let mut format_encode_options_to_consume = LocalSecretManager::global().fill_secrets(
@@ -1049,6 +1076,22 @@ pub(super) fn bind_source_watermark(
     Ok(watermark_descs)
 }
 
+static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
+    hashset! {
+        PbConnectionType::Unspecified,
+        PbConnectionType::Kafka,
+        PbConnectionType::Iceberg,
+    }
+});
+
+static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+    LazyLock::new(|| {
+        hashset! {
+            PbConnectionType::Unspecified,
+            PbConnectionType::SchemaRegistry,
+        }
+    });
+
 // TODO: Better design if we want to support ENCODE KEY where we will have 4 dimensional array
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
@@ -1493,6 +1536,7 @@ pub async fn bind_create_source_or_table_with_connector(
     col_id_gen: &mut ColumnIdGenerator,
     // `true` for "create source", `false` for "create table with connector"
     is_create_source: bool,
+    is_shared_non_cdc: bool,
     source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
@@ -1554,13 +1598,36 @@ pub async fn bind_create_source_or_table_with_connector(
     if is_create_source {
         // must behind `handle_addition_columns`
         check_and_add_timestamp_column(&with_properties, &mut columns);
+
+        // For shared sources, we will include partition and offset cols in the SourceExecutor's *output*, to be used by the SourceBackfillExecutor.
+        // For shared CDC source, the schema is different. See debezium_cdc_source_schema, CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS
+        if is_shared_non_cdc {
+            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
+                &columns,
+                &with_properties.get_connector().unwrap(),
+                true, // col_id filled below at col_id_gen.generate
+            );
+            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
+                if !existed {
+                    columns.push(ColumnCatalog::hidden(c));
+                }
+            }
+        }
     }
 
     // resolve privatelink connection for Kafka
     let mut with_properties = with_properties;
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
-    let with_properties = resolve_secret_ref_in_with_options(with_properties, session)?;
+    let (with_properties, connection_type, connector_conn_ref) =
+        resolve_connection_ref_and_secret_ref(with_properties, session)?;
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+
+    // if not using connection, we don't need to check connector match connection type
+    if !matches!(connection_type, PbConnectionType::Unspecified) {
+        let connector = with_properties.get_connector().unwrap();
+        check_connector_match_connection_type(connector.as_str(), &connection_type)?;
+    }
 
     let pk_names = bind_source_pk(
         &format_encode,
@@ -1634,7 +1701,7 @@ pub async fn bind_create_source_or_table_with_connector(
         watermark_descs,
         associated_table_id,
         definition,
-        connection_id: None, // deprecated: private link connection id
+        connection_id: connector_conn_ref,
         created_at_epoch: None,
         initialized_at_epoch: None,
         version: INITIAL_SOURCE_VERSION_ID,
@@ -1670,14 +1737,14 @@ pub async fn handle_create_source(
     let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
-    let is_shared = create_cdc_source_job
-        || (with_properties.is_shareable_non_cdc_connector()
-            && session
-                .env()
-                .streaming_config()
-                .developer
-                .enable_shared_source
-            && session.config().streaming_use_shared_source());
+    let is_shared_non_cdc = with_properties.is_shareable_non_cdc_connector()
+        && session
+            .env()
+            .streaming_config()
+            .developer
+            .enable_shared_source
+        && session.config().streaming_use_shared_source();
+    let is_shared = create_cdc_source_job || is_shared_non_cdc;
 
     let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
         bind_columns_from_source_for_cdc(&session, &format_encode)?
@@ -1705,6 +1772,7 @@ pub async fn handle_create_source(
         stmt.include_column_options,
         &mut col_id_gen,
         true,
+        is_shared_non_cdc,
         overwrite_options.source_rate_limit,
     )
     .await?;
@@ -1777,8 +1845,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use risingwave_common::catalog::{
-        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
-        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
     };
     use risingwave_common::types::{DataType, StructType};
 
@@ -1932,15 +1999,29 @@ pub mod tests {
             .columns
             .iter()
             .map(|col| (col.name(), col.data_type().clone()))
-            .collect::<HashMap<&str, DataType>>();
+            .collect::<Vec<(&str, DataType)>>();
 
-        let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
-            "payload" => DataType::Jsonb,
-            OFFSET_COLUMN_NAME => DataType::Varchar,
-            TABLE_NAME_COLUMN_NAME => DataType::Varchar,
-        };
-        assert_eq!(columns, expected_columns);
+        expect_test::expect![[r#"
+            [
+                (
+                    "payload",
+                    Jsonb,
+                ),
+                (
+                    "_rw_offset",
+                    Varchar,
+                ),
+                (
+                    "_rw_table_name",
+                    Varchar,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
     }
 
     #[tokio::test]
@@ -1969,16 +2050,41 @@ pub mod tests {
             .unwrap();
         assert_eq!(source.name, "s");
 
-        let columns = GET_COLUMN_FROM_CATALOG(source);
-        let expect_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
-            "v1" => DataType::Int32,
-            "_rw_kafka_key" => DataType::Bytea,
-            // todo: kafka connector will automatically derive the column
-            // will change to a required field in the include clause
-            "_rw_kafka_timestamp" => DataType::Timestamptz,
-        };
-        assert_eq!(columns, expect_columns);
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "_rw_kafka_key",
+                    Bytea,
+                ),
+                (
+                    "_rw_kafka_timestamp",
+                    Timestamptz,
+                ),
+                (
+                    "_rw_kafka_partition",
+                    Varchar,
+                ),
+                (
+                    "_rw_kafka_offset",
+                    Varchar,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
 
         let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"

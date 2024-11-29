@@ -15,45 +15,73 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
+use risingwave_pb::catalog::connection_params::ConnectionType;
+use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::secret::SecretRef;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::SecretId;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::WithOptions;
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: &mut BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
-    with_properties
-        .get(property)
-        .map(|s| s.to_lowercase())
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "Required property \"{property}\" is not provided"
-            )))
-        })
+    with_properties.remove(property).ok_or_else(|| {
+        RwError::from(ProtocolError(format!(
+            "Required property \"{property}\" is not provided"
+        )))
+    })
 }
 fn resolve_create_connection_payload(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: WithOptions,
+    session: &SessionImpl,
 ) -> Result<create_connection_request::Payload> {
-    let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
-    match connection_type.as_str() {
-        PRIVATELINK_CONNECTION => Err(RwError::from(ErrorCode::Deprecated(
+    if !with_properties.connection_ref().is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "Connection reference is not allowed in options in CREATE CONNECTION".to_string(),
+        )));
+    }
+
+    let (mut props, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties, session)?.into_parts();
+    let connection_type = get_connection_property_required(&mut props, CONNECTION_TYPE_PROP)?;
+    let connection_type = match connection_type.as_str() {
+        PRIVATELINK_CONNECTION => {
+            return Err(RwError::from(ErrorCode::Deprecated(
             "CREATE CONNECTION to Private Link".to_string(),
             "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
-        ))),
-        _ => Err(RwError::from(ProtocolError(format!(
-            "Connection type \"{connection_type}\" is not supported"
-        )))),
-    }
+        )));
+        }
+        KAFKA_CONNECTOR => ConnectionType::Kafka,
+        ICEBERG_CONNECTOR => ConnectionType::Iceberg,
+        _ => {
+            return Err(RwError::from(ProtocolError(format!(
+                "Connection type \"{connection_type}\" is not supported"
+            ))));
+        }
+    };
+    Ok(create_connection_request::Payload::ConnectionParams(
+        ConnectionParams {
+            connection_type: connection_type as i32,
+            properties: props.into_iter().collect(),
+            secret_refs: secret_refs.into_iter().collect(),
+        },
+    ))
 }
 
 pub async fn handle_create_connection(
@@ -78,9 +106,9 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args.with_options.clone().into_connector_props();
-
-    let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    resolve_privatelink_in_with_option(&mut with_properties)?;
+    let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
@@ -94,4 +122,25 @@ pub async fn handle_create_connection(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
+}
+
+pub fn print_connection_params(params: &PbConnectionParams, schema: &SchemaCatalog) -> String {
+    let print_secret_ref = |secret_ref: &SecretRef| -> String {
+        let secret_name = schema
+            .get_secret_by_id(&SecretId::from(secret_ref.secret_id))
+            .map(|s| s.name.as_str())
+            .unwrap();
+        format!(
+            "SECRET {} AS {}",
+            secret_name,
+            secret_ref.get_ref_as().unwrap().as_str_name()
+        )
+    };
+    let deref_secrets = params
+        .get_secret_refs()
+        .iter()
+        .map(|(k, v)| (k.clone(), print_secret_ref(v)));
+    let mut props = params.get_properties().clone();
+    props.extend(deref_secrets);
+    serde_json::to_string(&props).unwrap()
 }

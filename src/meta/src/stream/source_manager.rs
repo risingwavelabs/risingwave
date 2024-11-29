@@ -424,7 +424,7 @@ impl SourceManagerCore {
                     };
                     let actors = match self
                         .metadata_manager
-                        .get_running_actors_and_upstream_actors_of_fragment(*fragment_id)
+                        .get_running_actors_for_source_backfill(*fragment_id)
                         .await
                     {
                         Ok(actors) => {
@@ -689,19 +689,16 @@ where
 }
 
 fn align_backfill_splits(
-    backfill_actors: impl IntoIterator<Item = (ActorId, Vec<ActorId>)>,
+    backfill_actors: impl IntoIterator<Item = (ActorId, ActorId)>,
     upstream_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
     fragment_id: FragmentId,
-    upstream_fragment_id: FragmentId,
+    upstream_source_fragment_id: FragmentId,
 ) -> anyhow::Result<HashMap<ActorId, Vec<SplitImpl>>> {
     backfill_actors
         .into_iter()
         .map(|(actor_id, upstream_actor_id)| {
-            let err = || anyhow::anyhow!("source backfill actor should have one upstream actor, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_fragment_id}, actor_id: {actor_id}, upstream_assignment: {upstream_assignment:?}, upstream_actor_id: {upstream_actor_id:?}");
-            if upstream_actor_id.len() != 1 {
-                return Err(err());
-            }
-            let Some(splits) = upstream_assignment.get(&upstream_actor_id[0]) else {
+            let err = || anyhow::anyhow!("source backfill actor should have one upstream source actor, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, actor_id: {actor_id}, upstream_assignment: {upstream_assignment:?}, upstream_actor_id: {upstream_actor_id:?}");
+            let Some(splits) = upstream_assignment.get(&upstream_actor_id) else {
                 return Err(err());
             };
             Ok((
@@ -880,28 +877,29 @@ impl SourceManager {
     pub fn migrate_splits_for_backfill_actors(
         &self,
         fragment_id: FragmentId,
-        upstream_fragment_ids: &Vec<FragmentId>,
+        upstream_source_fragment_id: FragmentId,
         curr_actor_ids: &[ActorId],
         fragment_actor_splits: &HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>,
         no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         // align splits for backfill fragments with its upstream source fragment
-        debug_assert!(upstream_fragment_ids.len() == 1);
-        let upstream_fragment_id = upstream_fragment_ids[0];
         let actors = no_shuffle_upstream_actor_map
             .iter()
             .filter(|(id, _)| curr_actor_ids.contains(id))
             .map(|(id, upstream_fragment_actors)| {
-                debug_assert!(upstream_fragment_actors.len() == 1);
                 (
                     *id,
-                    vec![*upstream_fragment_actors.get(&upstream_fragment_id).unwrap()],
+                    *upstream_fragment_actors
+                        .get(&upstream_source_fragment_id)
+                        .unwrap(),
                 )
             });
-        let upstream_assignment = fragment_actor_splits.get(&upstream_fragment_id).unwrap();
+        let upstream_assignment = fragment_actor_splits
+            .get(&upstream_source_fragment_id)
+            .unwrap();
         tracing::info!(
             fragment_id,
-            upstream_fragment_id,
+            upstream_source_fragment_id,
             ?upstream_assignment,
             "migrate_splits_for_backfill_actors"
         );
@@ -909,7 +907,7 @@ impl SourceManager {
             actors,
             upstream_assignment,
             fragment_id,
-            upstream_fragment_id,
+            upstream_source_fragment_id,
         )?)
     }
 
@@ -995,19 +993,19 @@ impl SourceManager {
         let mut assigned = HashMap::new();
 
         for (_source_id, fragments) in source_backfill_fragments {
-            for (fragment_id, upstream_fragment_id) in fragments {
+            for (fragment_id, upstream_source_fragment_id) in fragments {
                 let upstream_actors = core
                     .metadata_manager
-                    .get_running_actors_of_fragment(upstream_fragment_id)
+                    .get_running_actors_of_fragment(upstream_source_fragment_id)
                     .await?;
                 let mut backfill_actors = vec![];
                 for upstream_actor in upstream_actors {
                     if let Some(dispatchers) = dispatchers.get(&upstream_actor) {
                         let err = || {
                             anyhow::anyhow!(
-                            "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
+                            "source backfill fragment's upstream fragment should have one dispatcher, fragment_id: {fragment_id}, upstream_fragment_id: {upstream_source_fragment_id}, upstream_actor: {upstream_actor}, dispatchers: {dispatchers:?}",
                             fragment_id = fragment_id,
-                            upstream_fragment_id = upstream_fragment_id,
+                            upstream_source_fragment_id = upstream_source_fragment_id,
                             upstream_actor = upstream_actor,
                             dispatchers = dispatchers
                         )
@@ -1017,7 +1015,7 @@ impl SourceManager {
                         }
 
                         backfill_actors
-                            .push((dispatchers[0].downstream_actor_id[0], vec![upstream_actor]));
+                            .push((dispatchers[0].downstream_actor_id[0], upstream_actor));
                     }
                 }
                 assigned.insert(
@@ -1026,7 +1024,7 @@ impl SourceManager {
                         backfill_actors,
                         upstream_assignment,
                         fragment_id,
-                        upstream_fragment_id,
+                        upstream_source_fragment_id,
                     )?,
                 );
             }

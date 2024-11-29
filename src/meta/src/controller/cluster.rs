@@ -379,6 +379,10 @@ impl ClusterController {
     pub fn cluster_id(&self) -> &ClusterId {
         self.env.cluster_id()
     }
+
+    pub fn meta_store_endpoint(&self) -> String {
+        self.env.meta_store_ref().endpoint.clone()
+    }
 }
 
 /// The cluster info used for scheduling a streaming job.

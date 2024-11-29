@@ -345,6 +345,7 @@ pub async fn handle(
             with_version_column,
             cdc_table_info,
             include_column_options,
+            webhook_info,
         } => {
             if or_replace {
                 bail_not_implemented!("CREATE OR REPLACE TABLE");
@@ -380,6 +381,7 @@ pub async fn handle(
                 with_version_column,
                 cdc_table_info,
                 include_column_options,
+                webhook_info,
             )
             .await
         }

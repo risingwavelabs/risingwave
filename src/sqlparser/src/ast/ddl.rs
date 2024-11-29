@@ -20,9 +20,10 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{FormatEncodeOptions, Value};
+use super::FormatEncodeOptions;
 use crate::ast::{
-    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SecretRefValue,
+    SetVariableValue, Value,
 };
 use crate::tokenizer::Token;
 
@@ -817,4 +818,12 @@ impl fmt::Display for ReferentialAction {
             ReferentialAction::SetDefault => "SET DEFAULT",
         })
     }
+}
+
+/// secure secret definition for webhook source
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WebhookSourceInfo {
+    pub secret_ref: SecretRefValue,
+    pub signature_expr: Expr,
 }

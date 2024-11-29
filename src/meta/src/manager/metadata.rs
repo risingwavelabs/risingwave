@@ -571,26 +571,17 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
-    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+    pub async fn get_running_actors_for_source_backfill(
         &self,
         id: FragmentId,
-    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+    ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_and_upstream_of_fragment(id as _)
+            .get_running_actors_for_source_backfill(id as _)
             .await?;
         Ok(actor_ids
             .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as ActorId,
-                    actors
-                        .into_inner()
-                        .into_iter()
-                        .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
-                        .collect(),
-                )
-            })
+            .map(|(id, upstream)| (id as ActorId, upstream as ActorId))
             .collect())
     }
 
