@@ -111,25 +111,10 @@ impl ParquetParser {
                             {
                                 let arrow_field = IcebergArrowConvert
                                     .to_arrow_field(rw_column_name, rw_data_type)?;
-                                let converted_arrow_data_type: &arrow_schema_iceberg::DataType =
-                                    arrow_field.data_type();
-                                if converted_arrow_data_type == parquet_column.data_type() {
-                                    let array_impl = IcebergArrowConvert
-                                        .array_from_arrow_array(&arrow_field, parquet_column)?;
-                                    let column = Arc::new(array_impl);
-                                    chunk_columns.push(column);
-                                } else {
-                                    // data type mismatch, this column is set to null.
-                                    let mut array_builder = ArrayBuilderImpl::with_type(
-                                        column_size,
-                                        rw_data_type.clone(),
-                                    );
-
-                                    array_builder.append_n_null(record_batch.num_rows());
-                                    let res = array_builder.finish();
-                                    let column = Arc::new(res);
-                                    chunk_columns.push(column);
-                                }
+                                let array_impl = IcebergArrowConvert
+                                    .array_from_arrow_array(&arrow_field, parquet_column)?;
+                                let column = Arc::new(array_impl);
+                                chunk_columns.push(column);
                             } else {
                                 // For columns defined in the source schema but not present in the Parquet file, null values are filled in.
                                 let mut array_builder =
