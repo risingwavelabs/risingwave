@@ -63,6 +63,7 @@ pub struct StreamingMetrics {
     pub actor_count: LabelGuardedIntGaugeVec<1>,
     actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
+    pub actor_current_epoch: RelabeledGuardedIntGaugeVec<2>,
 
     // Source
     pub source_output_row_count: LabelGuardedIntCounterVec<4>,
@@ -387,6 +388,15 @@ impl StreamingMetrics {
         let actor_out_record_cnt = register_guarded_int_counter_vec_with_registry!(
             "stream_actor_out_record_cnt",
             "Total number of rows actor sent",
+            &["actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let actor_current_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "stream_actor_current_epoch",
+            "Current epoch of actor",
             &["actor_id", "fragment_id"],
             registry
         )
@@ -1040,6 +1050,7 @@ impl StreamingMetrics {
             actor_count,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
             source_backfill_row_count,
