@@ -110,7 +110,7 @@ fn read_rw_columns_in_schema(schema: &SchemaCatalog) -> Vec<RwColumn> {
             })
     });
 
-    let table_rows = schema.iter_valid_table().flat_map(|table| {
+    let table_rows = schema.iter_table_mv_indices().flat_map(|table| {
         let schema = table.column_schema();
         table
             .columns
