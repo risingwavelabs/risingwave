@@ -93,11 +93,11 @@ def do_test(config, file_num, item_num_per_file, prefix):
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
@@ -144,7 +144,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         return 's3_test_parquet'
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE sink test_file_sink as select
+    cur.execute(f'''CREATE sink test_file_sink_parquet as select
         id,
         name,
         sex,
@@ -173,18 +173,17 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}',
-        s3.path = '',
-        s3.file_type = 'parquet',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+        s3.path = 'test_parquet_sink/',
         type = 'append-only',
         force_append_only='true'
     ) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');''')
 
-    print('Sink into s3...')
+    print('Sink into s3 in parquet encode...')
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE test_parquet_sink_table(
         id bigint primary key,\
@@ -214,18 +213,18 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
-        match_pattern = '*.parquet',
-        s3.region_name = '{config['S3_REGION']}',
-        s3.bucket_name = '{config['S3_BUCKET']}',
-        s3.credentials.access = '{config['S3_ACCESS_KEY']}',
-        s3.credentials.secret = '{config['S3_SECRET_KEY']}',
-        s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
+        match_pattern = 'test_parquet_sink/*.parquet',
+        s3.region_name = 'custom',
+        s3.bucket_name = 'hummock001',
+        s3.credentials.access = 'hummockadmin',
+        s3.credentials.secret = 'hummockadmin',
+        s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
     total_rows = file_num * item_num_per_file
     MAX_RETRIES = 40
     for retry_no in range(MAX_RETRIES):
-        cur.execute(f'select count(*) from test_sink_table')
+        cur.execute(f'select count(*) from test_parquet_sink_table')
         result = cur.fetchone()
         if result[0] == total_rows:
             break
@@ -338,13 +337,11 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     _assert_eq('sum(id)', result[1], (total_rows - 1) * total_rows / 2)
 
     print('File sink test pass!')
-    cur.execute(f'drop sink test_file_sink')
-    cur.execute(f'drop table test_sink_table')
+    cur.execute(f'drop sink test_file_sink_parquet')
     cur.execute(f'drop table test_parquet_sink_table')
     cur.execute(f'drop sink test_file_sink_json')
     cur.execute(f'drop table test_json_sink_table')
     cur.execute(f'drop table s3_test_parquet')
-
     cur.close()
     conn.close()
 
@@ -373,7 +370,6 @@ def test_file_sink_batching():
         s3.credentials.secret = 'hummockadmin',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_file_sink_batching/',
-        s3.file_type = 'parquet',
         type = 'append-only',
         rollover_seconds = 5,
         max_row_count = 5,
@@ -476,10 +472,10 @@ if __name__ == "__main__":
 
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
-        config["S3_ENDPOINT"],
-        access_key=config["S3_ACCESS_KEY"],
-        secret_key=config["S3_SECRET_KEY"],
-        secure=True,
+        "127.0.0.1:9301",
+        "hummockadmin",
+        "hummockadmin",
+        secure=False,
     )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.parquet'
@@ -491,7 +487,7 @@ if __name__ == "__main__":
         pq.write_table(table, _local(idx))
 
         client.fput_object(
-            config["S3_BUCKET"],
+            "hummock001",
             _s3(idx),
             _local(idx)
         )
@@ -501,13 +497,13 @@ if __name__ == "__main__":
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object(config["S3_BUCKET"], _s3(idx))
+       client.remove_object("hummock001", _s3(idx))
 
     do_sink(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id)
 
     # clean up s3 files
     for idx, _ in enumerate(data):
-       client.remove_object(config["S3_BUCKET"], _s3(idx))
+       client.remove_object("hummock001", _s3(idx))
 
     # test file sink batching
     test_file_sink_batching()

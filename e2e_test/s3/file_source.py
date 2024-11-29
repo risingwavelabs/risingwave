@@ -65,13 +65,21 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
         else:
             return f"CSV (delimiter = ',', without_header = {str('without' in fmt).lower()})"
 
+    def _include_clause():
+        if fmt == 'json':
+            return 'INCLUDE payload as rw_payload'
+        else:
+            return ''
+
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE {_table()}(
         id int,
         name TEXT,
         sex int,
         mark int,
-    ) WITH (
+    )
+    {_include_clause()}
+    WITH (
         connector = 's3',
         match_pattern = '{prefix}*.{fmt}',
         s3.region_name = '{config['S3_REGION']}',
@@ -107,7 +115,21 @@ def do_test(config, file_num, item_num_per_file, prefix, fmt, need_drop_table=Tr
     _assert_eq('sum(sex)', result[2], total_rows / 2)
     _assert_eq('sum(mark)', result[3], 0)
 
-    print('Test pass')
+    # only do payload check for json format, which enables INCLUDE CLAUSE
+    if fmt == 'json':
+        # check rw_payload
+        print('Check rw_payload')
+        stmt = f"select id, name, sex, mark, rw_payload from {_table()} limit 1;"
+        cur.execute(stmt)
+        result = cur.fetchone()
+        print("Got one line with rw_payload: ", result)
+        payload = result[4]
+        _assert_eq('id', payload['id'], result[0])
+        _assert_eq('name', payload['name'], result[1])
+        _assert_eq('sex', payload['sex'], result[2])
+        _assert_eq('mark', payload['mark'], result[3])
+
+        print('Test pass')
 
     if need_drop_table:
         cur.execute(f'drop table {_table()}')
