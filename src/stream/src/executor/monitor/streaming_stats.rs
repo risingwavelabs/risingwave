@@ -61,8 +61,6 @@ pub struct StreamingMetrics {
 
     // Streaming actor
     pub actor_count: LabelGuardedIntGaugeVec<1>,
-    #[expect(dead_code)]
-    actor_memory_usage: LabelGuardedIntGaugeVec<2>,
     actor_in_record_cnt: RelabeledGuardedIntCounterVec<3>,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec<2>,
 
@@ -400,15 +398,6 @@ impl StreamingMetrics {
             "Total number of actors (parallelism)",
             &["fragment_id"],
             registry
-        )
-        .unwrap();
-
-        // dead code
-        let actor_memory_usage = register_guarded_int_gauge_vec_with_registry!(
-            "actor_memory_usage",
-            "Memory usage (bytes)",
-            &["actor_id", "fragment_id"],
-            registry,
         )
         .unwrap();
 
@@ -1049,7 +1038,6 @@ impl StreamingMetrics {
             actor_idle_duration,
             actor_idle_cnt,
             actor_count,
-            actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
             source_output_row_count,
