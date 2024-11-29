@@ -105,11 +105,13 @@
     create table t (a int, b int, c int);
     select distinct on (4) * from t;
   binder_error: 'Invalid input syntax: Invalid ordinal number in DISTINCT ON: 4'
-- sql: "WITH source AS (\n    SELECT DISTINCT ON (COALESCE(id, -1)) \n        TRUE AS _exists,\n        id,\n        name,\n        updated_at\n    FROM (\n        SELECT \n            CAST(id AS INT) AS id,\n            CAST(name AS TEXT) AS name,\n            CAST(updated_at AS TIMESTAMP) AS updated_at\n        FROM (\n            VALUES \n                (1, 'a', CAST('2022-01-01 00:00:00' AS TIMESTAMP)),\n                (2, 'b', CAST('2022-01-02 00:00:00' AS TIMESTAMP)),\n                (3, 'c', CAST('2022-01-03 00:00:00' AS TIMESTAMP))\n        ) AS t(id, name, updated_at)\n    ) AS raw_source\n)\nSELECT id, name, updated_at from source;\n"
+- sql: |
+    create table t (a int, b int, c int);
+    WITH s AS (SELECT DISTINCT ON (a+1) true as id, * FROM t) SELECT a,b,c from s;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_2] }
+    └─BatchProject { exprs: [t.a, t.b, t.c] }
       └─BatchGroupTopN { order: [], limit: 1, offset: 0, group_key: [$expr1] }
         └─BatchExchange { order: [], dist: HashShard($expr1) }
-          └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_2, Coalesce(*VALUES*_0.column_0, -1:Int32) as $expr1] }
-            └─BatchValues { rows: [[1:Int32, 'a':Varchar, '2022-01-01 00:00:00':Timestamp], [2:Int32, 'b':Varchar, '2022-01-02 00:00:00':Timestamp], [3:Int32, 'c':Varchar, '2022-01-03 00:00:00':Timestamp]] }
+          └─BatchProject { exprs: [t.a, t.b, t.c, (t.a + 1:Int32) as $expr1] }
+            └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }

@@ -52,25 +52,7 @@
     - binder_error
 # Issue #19608
 - sql: |
-    WITH source AS (
-        SELECT DISTINCT ON (COALESCE(id, -1)) 
-            TRUE AS _exists,
-            id,
-            name,
-            updated_at
-        FROM (
-            SELECT 
-                CAST(id AS INT) AS id,
-                CAST(name AS TEXT) AS name,
-                CAST(updated_at AS TIMESTAMP) AS updated_at
-            FROM (
-                VALUES 
-                    (1, 'a', CAST('2022-01-01 00:00:00' AS TIMESTAMP)),
-                    (2, 'b', CAST('2022-01-02 00:00:00' AS TIMESTAMP)),
-                    (3, 'c', CAST('2022-01-03 00:00:00' AS TIMESTAMP))
-            ) AS t(id, name, updated_at)
-        ) AS raw_source
-    )
-    SELECT id, name, updated_at from source;
+    create table t (a int, b int, c int);
+    WITH s AS (SELECT DISTINCT ON (a+1) true as id, * FROM t) SELECT a,b,c from s;
   expected_outputs:
     - batch_plan
