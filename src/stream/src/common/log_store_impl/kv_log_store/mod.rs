@@ -350,8 +350,6 @@ mod v2 {
 pub struct KvLogStoreFactory<S: StateStore> {
     state_store: S,
 
-    local_state_store: S::Local,
-
     table_catalog: Table,
 
     vnodes: Option<Arc<Bitmap>>,
@@ -366,7 +364,7 @@ pub struct KvLogStoreFactory<S: StateStore> {
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
-    pub(crate) async fn new(
+    pub(crate) fn new(
         state_store: S,
         table_catalog: Table,
         vnodes: Option<Arc<Bitmap>>,
@@ -375,24 +373,8 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         identity: impl Into<String>,
         pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
-        let serde = LogStoreRowSerde::new(&table_catalog, vnodes.clone(), pk_info);
-        let local_state_store = state_store
-            .new_local(NewLocalOptions {
-                table_id: TableId {
-                    table_id: table_catalog.id,
-                },
-                op_consistency_level: OpConsistencyLevel::Inconsistent,
-                table_option: TableOption {
-                    retention_seconds: None,
-                },
-                is_replicated: false,
-                vnodes: serde.vnodes().clone(),
-            })
-            .await;
-
         Self {
             state_store,
-            local_state_store,
             table_catalog,
             vnodes,
             max_row_count,
@@ -411,6 +393,20 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
         let table_id = TableId::new(self.table_catalog.id);
         let (pause_tx, pause_rx) = watch::channel(false);
         let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes, self.pk_info);
+        let local_state_store = self
+            .state_store
+            .new_local(NewLocalOptions {
+                table_id: TableId {
+                    table_id: self.table_catalog.id,
+                },
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: TableOption {
+                    retention_seconds: None,
+                },
+                is_replicated: false,
+                vnodes: serde.vnodes().clone(),
+            })
+            .await;
 
         let (tx, rx) = new_log_store_buffer(self.max_row_count, self.metrics.clone());
 
@@ -426,7 +422,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
         let writer = KvLogStoreWriter::new(
             table_id,
-            self.local_state_store,
+            local_state_store,
             serde,
             tx,
             self.metrics,
@@ -505,8 +501,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -616,8 +611,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -713,8 +707,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
@@ -808,8 +801,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -931,8 +923,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         test_env
@@ -1029,8 +1020,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
             table.clone(),
@@ -1039,8 +1029,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
 
@@ -1171,8 +1160,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
@@ -1237,8 +1225,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -1378,8 +1365,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -1493,8 +1479,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch4 = epoch3.next_epoch();
@@ -1559,8 +1544,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         writer
@@ -1721,8 +1705,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
 
         let epoch1 = test_env
@@ -1798,8 +1781,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
@@ -1863,8 +1845,7 @@ mod tests {
             KvLogStoreMetrics::for_test(),
             "test",
             pk_info,
-        )
-        .await;
+        );
         let (mut reader, mut writer) = factory.build().await;
         test_env
             .storage
