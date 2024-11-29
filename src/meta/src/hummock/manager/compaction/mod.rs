@@ -69,6 +69,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::{Receiver as OneShotReceiver, Sender};
+use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
@@ -1099,6 +1100,14 @@ impl HummockManager {
         Ok(rets[0])
     }
 
+    pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
+        let compaction_guard = self.compaction.write().await;
+        let versioning_guard = self.versioning.write().await;
+
+        self.report_compact_tasks_impl(report_tasks, compaction_guard, versioning_guard)
+            .await
+    }
+
     /// Finishes or cancels a compaction task, according to `task_status`.
     ///
     /// If `context_id` is not None, its validity will be checked when writing meta store.
@@ -1106,10 +1115,15 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
-    pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
-        let mut guard = self.compaction.write().await;
+    pub async fn report_compact_tasks_impl(
+        &self,
+        report_tasks: Vec<ReportTask>,
+        mut compaction_guard: RwLockWriteGuard<'_, Compaction>,
+        mut versioning_guard: RwLockWriteGuard<'_, Versioning>,
+    ) -> Result<Vec<bool>> {
+        // let mut guard = self.compaction.write().await;
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
-        let compaction: &mut Compaction = &mut guard;
+        let compaction: &mut Compaction = &mut compaction_guard;
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
@@ -1117,7 +1131,7 @@ impl HummockManager {
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
-        let mut versioning_guard = self.versioning.write().await;
+        // let mut versioning_guard = self.versioning.write().await;
         let versioning: &mut Versioning = &mut versioning_guard;
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
