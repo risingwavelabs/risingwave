@@ -443,7 +443,7 @@ impl HummockManager {
         }
         let now = self.now().await?;
         let dt = DateTime::from_timestamp(now.try_into().unwrap(), 0).unwrap();
-        let models = object_ids.map(|o| hummock_gc_history::ActiveModel {
+        let mut models = object_ids.map(|o| hummock_gc_history::ActiveModel {
             object_id: Set(o.try_into().unwrap()),
             mark_delete_at: Set(dt.naive_utc()),
         });
@@ -459,10 +459,27 @@ impl HummockManager {
             .filter(hummock_gc_history::Column::MarkDeleteAt.lt(gc_history_low_watermark))
             .exec(db)
             .await?;
-        hummock_gc_history::Entity::insert_many(models)
-            .on_conflict_do_nothing()
-            .exec(db)
-            .await?;
+        const BATCH_SIZE: usize = 1000;
+        let mut is_finished = false;
+        while !is_finished {
+            let mut batch = vec![];
+            let mut count: usize = BATCH_SIZE;
+            while count > 0 {
+                let Some(m) = models.next() else {
+                    is_finished = true;
+                    break;
+                };
+                count -= 1;
+                batch.push(m);
+            }
+            if batch.is_empty() {
+                break;
+            }
+            hummock_gc_history::Entity::insert_many(batch)
+                .on_conflict_do_nothing()
+                .exec(db)
+                .await?;
+        }
         Ok(())
     }
 
