@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use itertools::Itertools;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -34,7 +35,7 @@ use tracing::{debug, error, info, warn, Instrument};
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::rpc::{from_partial_graph_id, merge_node_rpc_errors, ControlStreamManager};
+use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::barrier::{
     schedule, BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot,
@@ -589,7 +590,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let (worker_id, result) =
                         control_stream_manager.next_collect_barrier_response().await;
                     let resp = result?;
-                    let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
+                    let database_id = DatabaseId::new(resp.database_id);
                     let (node_to_collect, database) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, database.in_flight_prev_epoch());
                     assert!(node_to_collect.remove(&worker_id));
