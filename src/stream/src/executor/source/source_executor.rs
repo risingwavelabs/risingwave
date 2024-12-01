@@ -439,7 +439,7 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_with_stream_source(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver
+        let first_barrier = barrier_receiver
             .recv()
             .instrument_await("source_recv_first_barrier")
             .await
@@ -450,17 +450,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
-        let first_epoch = barrier.epoch;
+        let first_epoch = first_barrier.epoch;
         let mut boot_state =
-            if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 tracing::debug!(?splits, "boot with splits");
                 splits.to_vec()
             } else {
                 Vec::default()
             };
-        let is_pause_on_startup = barrier.is_pause_on_startup();
+        let is_pause_on_startup = first_barrier.is_pause_on_startup();
 
-        yield Message::Barrier(barrier);
+        yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -535,6 +535,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .expect("Retry build source stream until success.")
         });
 
+        let mut need_resume_after_build = false;
         // loop to create source stream until success
         loop {
             if let Some(barrier) = build_source_stream_and_poll_barrier(
@@ -545,12 +546,15 @@ impl<S: StateStore> SourceExecutor<S> {
             .await?
             {
                 if let Message::Barrier(barrier) = barrier {
-                    tracing::info!(
-                        "[debug] received barrier while building source stream: {:?}",
-                        barrier
-                    );
-                    // bump state store epoch
-                    let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
+                    // We record the Resume mutation here and postpone the resume of the source stream
+                    // after we have successfully built the source stream.
+                    if let Some(Mutation::Resume) = barrier.mutation.as_deref() {
+                        need_resume_after_build = true;
+                    }
+                    if barrier.kind.is_checkpoint() {
+                        // bump state store epoch
+                        let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
+                    }
                     yield Message::Barrier(barrier);
                 } else {
                     unreachable!("Only barrier message is expected when building source stream.");
@@ -580,8 +584,8 @@ impl<S: StateStore> SourceExecutor<S> {
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
         let mut command_paused = false;
 
-        // - If the first barrier requires us to pause on startup, pause the stream.
-        if is_pause_on_startup {
+        // - If the first barrier requires us to pause on startup and we haven't received a Resume mutation, pause the stream.
+        if is_pause_on_startup && !need_resume_after_build {
             tracing::info!("source paused on startup");
             stream.pause_stream();
             command_paused = true;
