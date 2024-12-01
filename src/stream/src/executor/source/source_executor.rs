@@ -551,10 +551,8 @@ impl<S: StateStore> SourceExecutor<S> {
                     if let Some(Mutation::Resume) = barrier.mutation.as_deref() {
                         need_resume_after_build = true;
                     }
-                    if barrier.kind.is_checkpoint() {
-                        // bump state store epoch
-                        let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
-                    }
+                    // bump state store epoch
+                    let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
                 } else {
                     unreachable!("Only barrier message is expected when building source stream.");
