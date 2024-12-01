@@ -436,7 +436,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// 1. Barrier messages
     /// 2. Data from external source
     /// and acts accordingly.
-    // #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_with_stream_source(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
