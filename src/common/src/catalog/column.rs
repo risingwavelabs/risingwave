@@ -463,6 +463,10 @@ impl ColumnCatalog {
         }
     }
 
+    pub fn is_rw_sys_column(&self) -> bool {
+        self.column_desc.system_column.is_some()
+    }
+
     pub fn rw_timestamp_column() -> Self {
         Self {
             column_desc: rw_timestamp_column_desc(),
