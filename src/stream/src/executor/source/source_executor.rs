@@ -546,6 +546,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .await?
             {
                 if let Message::Barrier(barrier) = barrier {
+                    tracing::info!(
+                        "=== [debug] received a barrier when building source stream: {:?}",
+                        barrier
+                    );
+
                     // We record the Resume mutation here and postpone the resume of the source stream
                     // after we have successfully built the source stream.
                     if let Some(Mutation::Resume) = barrier.mutation.as_deref() {
