@@ -201,7 +201,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// The degree of each row will tell us if we need to emit `NULL` for the row.
     /// For instance, given `lhs LEFT JOIN rhs`,
     /// If the degree of a row in `lhs` is 0, it means the row does not have a match in `rhs`.
-    /// If the degree of a row in `lhs` is 2, it means the row has two match in `rhs`.
+    /// If the degree of a row in `lhs` is 2, it means the row has two matches in `rhs`.
     /// Now, when emitting the result of the join, we need to emit `NULL` for the row in `lhs` if
     /// the degree is 0.
     ///
