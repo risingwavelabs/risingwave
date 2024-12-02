@@ -569,6 +569,7 @@ mod tests {
             cdc_table_id: None,
             maybe_vnode_count: None,
             webhook_info: None,
+            job_id: None,
         }
     }
 
