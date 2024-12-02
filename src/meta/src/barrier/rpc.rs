@@ -24,12 +24,17 @@ use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{
+    AddMutation, Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo,
+};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbDatabaseInitialPartialGraph, PbInitRequest, PbInitialPartialGraph,
     RemovePartialGraphRequest,
@@ -43,14 +48,18 @@ use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::time::{sleep, timeout};
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{Command, InflightSubscriptionInfo};
+use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
+use crate::model::{ActorId, StreamJobFragments};
+use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
@@ -283,6 +292,108 @@ impl ControlStreamManager {
 }
 
 impl ControlStreamManager {
+    /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
+    ///
+    /// Return:
+    ///  - the worker nodes that need to wait for initial barrier collection
+    ///  - the extracted database information
+    ///  - the `prev_epoch` of the initial barrier
+    pub(super) fn inject_database_initial_barrier(
+        &mut self,
+        database_id: DatabaseId,
+        info: InflightDatabaseInfo,
+        state_table_committed_epochs: &mut HashMap<TableId, u64>,
+        stream_actors: &mut HashMap<ActorId, StreamActor>,
+        source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
+        background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
+        subscription_info: InflightSubscriptionInfo,
+        paused_reason: Option<PausedReason>,
+        hummock_version_stats: &HummockVersionStats,
+    ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
+        let source_split_assignments = info
+            .fragment_infos()
+            .flat_map(|info| info.actors.keys())
+            .filter_map(|actor_id| {
+                let actor_id = *actor_id as ActorId;
+                source_splits
+                    .remove(&actor_id)
+                    .map(|splits| (actor_id, splits))
+            })
+            .collect();
+        let mutation = Mutation::Add(AddMutation {
+            // Actors built during recovery is not treated as newly added actors.
+            actor_dispatchers: Default::default(),
+            added_actors: Default::default(),
+            actor_splits: build_actor_connector_splits(&source_split_assignments),
+            pause: paused_reason.is_some(),
+            subscriptions_to_add: Default::default(),
+        });
+
+        let mut epochs = info.existing_table_ids().map(|table_id| {
+            (
+                table_id,
+                state_table_committed_epochs
+                    .remove(&table_id)
+                    .expect("should exist"),
+            )
+        });
+        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
+        for (table_id, epoch) in epochs {
+            assert_eq!(
+                prev_epoch, epoch,
+                "{} has different committed epoch to {}",
+                first_table_id, table_id
+            );
+        }
+        let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
+        // Use a different `curr_epoch` for each recovery attempt.
+        let curr_epoch = prev_epoch.next();
+        let barrier_info = BarrierInfo {
+            prev_epoch,
+            curr_epoch,
+            kind: BarrierKind::Initial,
+        };
+
+        let mut node_actors: HashMap<_, Vec<_>> = HashMap::new();
+        for (actor_id, worker_id) in info.fragment_infos().flat_map(|info| info.actors.iter()) {
+            let worker_id = *worker_id as WorkerId;
+            let actor_id = *actor_id as ActorId;
+            let stream_actor = stream_actors.remove(&actor_id).expect("should exist");
+            node_actors.entry(worker_id).or_default().push(stream_actor);
+        }
+
+        let background_mviews = info
+            .job_ids()
+            .filter_map(|job_id| background_jobs.remove(&job_id).map(|mview| (job_id, mview)))
+            .collect();
+        let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
+
+        let node_to_collect = self.inject_barrier(
+            database_id,
+            None,
+            Some(mutation),
+            &barrier_info,
+            info.fragment_infos(),
+            info.fragment_infos(),
+            Some(node_actors),
+            vec![],
+            vec![],
+        )?;
+        debug!(
+            ?node_to_collect,
+            database_id = database_id.database_id,
+            "inject initial barrier"
+        );
+
+        let new_epoch = barrier_info.curr_epoch;
+        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, paused_reason);
+        Ok((
+            node_to_collect,
+            DatabaseCheckpointControl::recovery(database_id, tracker, state),
+            barrier_info.prev_epoch.value().0,
+        ))
+    }
+
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
         database_id: DatabaseId,
