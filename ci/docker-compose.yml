@@ -332,10 +332,9 @@ services:
       interval: 10s
       timeout: 10s
       retries: 6
-  nats:
+  nats-server:
     image: nats:latest
     command: [ "-js" ]
-    container_name: nats-server
     ports:
       - "4222:4222"
       - "8222:8222"
