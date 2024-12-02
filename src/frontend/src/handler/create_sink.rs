@@ -40,6 +40,7 @@ use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
@@ -113,7 +114,11 @@ pub async fn gen_sink_plan(
 
     resolve_privatelink_in_with_option(&mut with_options)?;
     let (mut resolved_with_options, connection_type, connector_conn_ref) =
-        resolve_connection_ref_and_secret_ref(with_options, session)?;
+        resolve_connection_ref_and_secret_ref(
+            with_options,
+            session,
+            TelemetryDatabaseObject::Sink,
+        )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -781,6 +786,7 @@ fn bind_sink_format_desc(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(value.row_options.as_slice())?,
             session,
+            TelemetryDatabaseObject::Sink,
         )?;
     ensure_connection_type_allowed(connection_type_flag, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
     let (mut options, secret_refs) = props.into_parts();

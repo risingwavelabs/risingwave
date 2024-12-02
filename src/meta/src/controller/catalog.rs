@@ -52,6 +52,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -83,7 +84,7 @@ use crate::manager::{
     NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::rpc::ddl_controller::DropMode;
-use crate::telemetry::MetaTelemetryJobDesc;
+use crate::telemetry::{report_event, MetaTelemetryJobDesc};
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -1537,6 +1538,25 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        {
+            // call meta telemetry here to report the connection creation
+            report_event(
+                PbTelemetryEventStage::Unspecified,
+                "connection_create",
+                pb_connection.get_id() as _,
+                {
+                    pb_connection.info.as_ref().and_then(|info| match info {
+                        ConnectionInfo::ConnectionParams(params) => {
+                            Some(params.connection_type().as_str_name().to_string())
+                        }
+                        _ => None,
+                    })
+                },
+                None,
+                None,
+            );
+        }
 
         let version = self
             .notify_frontend(
