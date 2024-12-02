@@ -91,7 +91,6 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_rx = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         Ok(Self::new_input(

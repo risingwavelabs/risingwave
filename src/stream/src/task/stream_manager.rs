@@ -21,11 +21,12 @@ use std::time::Instant;
 
 use async_recursion::async_recursion;
 use await_tree::InstrumentAwait;
+use futures::future::join_all;
 use futures::stream::BoxStream;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, DatabaseId, Field, Schema, TableId};
 use risingwave_common::config::MetricLevel;
 use risingwave_common::{bail, must_match};
 use risingwave_pb::common::ActorInfo;
@@ -34,7 +35,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, InitialPartialGraph,
+    DatabaseInitialPartialGraph, InitRequest,
 };
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -217,9 +218,14 @@ impl LocalStreamManager {
             })
     }
 
-    pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
+    pub async fn take_receiver(
+        &self,
+        database_id: DatabaseId,
+        ids: UpDownActorIds,
+    ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
+                database_id,
                 ids,
                 result_sender,
             })
@@ -250,8 +256,14 @@ impl LocalStreamManager {
 
 impl LocalBarrierWorker {
     /// Force stop all actors on this worker, and then drop their resources.
-    pub(super) async fn reset(&mut self, initial_partial_graphs: Vec<InitialPartialGraph>) {
-        self.state.abort_actors().await;
+    pub(super) async fn reset(&mut self, initial_partial_graphs: Vec<DatabaseInitialPartialGraph>) {
+        join_all(
+            self.state
+                .databases
+                .values_mut()
+                .map(|database| database.abort_actors()),
+        )
+        .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
             m.clear();
         }
@@ -352,6 +364,7 @@ impl StreamActorManager {
         vnode_bitmap: Option<Bitmap>,
         shared_context: &Arc<SharedContext>,
         env: StreamEnvironment,
+        local_barrier_manager: &LocalBarrierManager,
         state_store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
@@ -377,14 +390,10 @@ impl StreamActorManager {
             .map(ColumnId::from)
             .collect_vec();
 
-        let progress = shared_context
-            .local_barrier_manager
-            .register_create_mview_progress(actor_context.id);
+        let progress = local_barrier_manager.register_create_mview_progress(actor_context.id);
 
         let vnodes = vnode_bitmap.map(Arc::new);
-        let barrier_rx = shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_context.id);
+        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_context.id);
 
         let upstream_table =
             StorageTable::new_partial(state_store.clone(), column_ids, vnodes, table_desc);
@@ -434,6 +443,7 @@ impl StreamActorManager {
         has_stateful: bool,
         subtasks: &mut Vec<SubtaskHandle>,
         shared_context: &Arc<SharedContext>,
+        local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<Executor> {
         if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
             && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
@@ -446,6 +456,7 @@ impl StreamActorManager {
                     vnode_bitmap,
                     shared_context,
                     env,
+                    local_barrier_manager,
                     store,
                 )
             });
@@ -483,6 +494,7 @@ impl StreamActorManager {
                     has_stateful || is_stateful,
                     subtasks,
                     shared_context,
+                    local_barrier_manager,
                 )
                 .await?,
             );
@@ -518,7 +530,7 @@ impl StreamActorManager {
             eval_error_report,
             watermark_epoch: self.watermark_epoch.clone(),
             shared_context: shared_context.clone(),
-            local_barrier_manager: shared_context.local_barrier_manager.clone(),
+            local_barrier_manager: local_barrier_manager.clone(),
         };
 
         let executor = create_executor(executor_params, node, store).await?;
@@ -548,6 +560,7 @@ impl StreamActorManager {
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
+    #[expect(clippy::too_many_arguments)]
     async fn create_nodes(
         &self,
         fragment_id: FragmentId,
@@ -556,6 +569,7 @@ impl StreamActorManager {
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
         shared_context: &Arc<SharedContext>,
+        local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<(Executor, Vec<SubtaskHandle>)> {
         let mut subtasks = vec![];
 
@@ -570,6 +584,7 @@ impl StreamActorManager {
                 false,
                 &mut subtasks,
                 shared_context,
+                local_barrier_manager,
             )
             .await
         })?;
@@ -582,6 +597,7 @@ impl StreamActorManager {
         actor: StreamActor,
         shared_context: Arc<SharedContext>,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
+        local_barrier_manager: LocalBarrierManager,
     ) -> StreamResult<Actor<DispatchExecutor>> {
         {
             let actor_id = actor.actor_id;
@@ -606,9 +622,8 @@ impl StreamActorManager {
                     &actor_context,
                     vnode_bitmap,
                     &shared_context,
+                    &local_barrier_manager,
                 )
-                // If hummock tracing is not enabled, it directly returns wrapped future.
-                .may_trace_hummock()
                 .await?;
 
             let dispatcher = self.create_dispatcher(
@@ -625,7 +640,7 @@ impl StreamActorManager {
                 self.streaming_metrics.clone(),
                 actor_context.clone(),
                 expr_context,
-                shared_context.local_barrier_manager.clone(),
+                local_barrier_manager,
             );
             Ok(actor)
         }
@@ -638,6 +653,7 @@ impl StreamActorManager {
         actor: StreamActor,
         related_subscriptions: Arc<HashMap<TableId, HashSet<u32>>>,
         current_shared_context: Arc<SharedContext>,
+        local_barrier_manager: LocalBarrierManager,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
         {
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -646,9 +662,9 @@ impl StreamActorManager {
             let handle = {
                 let trace_span =
                     format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
-                let barrier_manager = current_shared_context.local_barrier_manager.clone();
+                let barrier_manager = local_barrier_manager.clone();
                 // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-                let actor = self.clone().create_actor(actor, current_shared_context, related_subscriptions).boxed().and_then(|actor| actor.run()).map(move |result| {
+                let actor = self.clone().create_actor(actor, current_shared_context, related_subscriptions, barrier_manager.clone()).boxed().and_then(|actor| actor.run()).map(move |result| {
                     if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
@@ -665,8 +681,10 @@ impl StreamActorManager {
                 };
                 let instrumented = monitor.instrument(traced);
                 let with_config = crate::CONFIG.scope(self.env.config().clone(), instrumented);
+                // If hummock tracing is not enabled, it directly returns wrapped future.
+                let may_track_hummock = with_config.may_trace_hummock();
 
-                self.runtime.spawn(with_config)
+                self.runtime.spawn(may_track_hummock)
             };
 
             let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
@@ -727,10 +745,17 @@ impl LocalBarrierWorker {
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
     pub fn update_actor_info(
-        &self,
+        &mut self,
+        database_id: DatabaseId,
         new_actor_infos: impl Iterator<Item = ActorInfo>,
     ) -> StreamResult<()> {
-        let mut actor_infos = self.current_shared_context.actor_infos.write();
+        let mut actor_infos = Self::get_or_insert_database_shared_context(
+            &mut self.state.current_shared_context,
+            database_id,
+            &self.actor_manager,
+        )
+        .actor_infos
+        .write();
         for actor in new_actor_infos {
             if let Some(prev_actor) = actor_infos.get(&actor.get_actor_id())
                 && &actor != prev_actor

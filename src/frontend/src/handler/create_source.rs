@@ -26,7 +26,7 @@ use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
+    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -1394,7 +1394,7 @@ pub async fn extract_iceberg_columns(
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
-        let columns = iceberg_schema
+        let mut columns: Vec<ColumnCatalog> = iceberg_schema
             .fields()
             .iter()
             .enumerate()
@@ -1412,6 +1412,7 @@ pub async fn extract_iceberg_columns(
                 }
             })
             .collect();
+        columns.push(ColumnCatalog::iceberg_sequence_num_column());
 
         Ok(columns)
     } else {
@@ -1437,6 +1438,7 @@ pub async fn check_iceberg_source(
     let schema = Schema {
         fields: columns
             .iter()
+            .filter(|&c| c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
             .cloned()
             .map(|c| c.column_desc.into())
             .collect(),

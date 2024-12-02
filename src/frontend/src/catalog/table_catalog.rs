@@ -306,7 +306,7 @@ impl TableCatalog {
         }
     }
 
-    pub fn is_table(&self) -> bool {
+    pub fn is_user_table(&self) -> bool {
         self.table_type == TableType::Table
     }
 
