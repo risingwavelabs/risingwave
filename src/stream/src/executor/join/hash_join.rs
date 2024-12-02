@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::alloc::Global;
 use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut};
@@ -43,6 +42,7 @@ use crate::consistency::{consistency_error, consistency_panic, enable_strict_con
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::StreamExecutorError;
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
@@ -322,6 +322,28 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// returned.
     ///
     /// Note: This will NOT remove anything from remote storage.
+    pub fn take_state_opt(&mut self, key: &K) -> Option<HashValueType> {
+        self.metrics.total_lookup_count += 1;
+        if self.inner.contains(key) {
+            tracing::info!("hit cache for join key: {:?}", key);
+            // Do not update the LRU statistics here with `peek_mut` since we will put the state
+            // back.
+            let mut state = self.inner.peek_mut(key).unwrap();
+            Some(state.take())
+        } else {
+            tracing::info!("miss cache for join key: {:?}", key);
+            None
+        }
+    }
+
+    /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
+    /// `update_state` after some operations to put the state back.
+    ///
+    /// If the state does not exist in the cache, fetch the remote storage and return. If it still
+    /// does not exist in the remote storage, a [`JoinEntryState`] with empty cache will be
+    /// returned.
+    ///
+    /// Note: This will NOT remove anything from remote storage.
     pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
         self.metrics.total_lookup_count += 1;
         let state = if self.inner.contains(key) {
@@ -334,6 +356,33 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             self.fetch_cached_state(key).await?.into()
         };
         Ok(state)
+    }
+
+    #[try_stream(ok = (Vec<u8>, JoinRow<OwnedRow>), error = StreamExecutorError)]
+    pub async fn fetch_matched_rows<'a>(&'a self, key: &'a K) {
+        tracing::debug!("fetching matched rows for join key: {:?}", key);
+        let key = key.deserialize(&self.join_key_data_types)?;
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+        let table_iter = self
+            .state
+            .table
+            .iter_with_prefix(&key, sub_range, PrefetchOptions::default())
+            .await?;
+
+        #[for_await]
+        for entry in table_iter {
+            let row = entry?;
+            let pk = row
+                .as_ref()
+                .project(&self.state.pk_indices)
+                .memcmp_serialize(&self.pk_serializer);
+            tracing::debug!(
+                "found matching rows for join key: {:?}, row: {:?}",
+                key,
+                row
+            );
+            yield (pk, JoinRow::new(row.into_owned_row(), 0));
+        }
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
@@ -493,6 +542,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         };
 
         Ok(entry_state)
+    }
+
+    pub fn error_context(&self, row: &impl Row) -> String {
+        self.state.error_context(row)
     }
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -682,10 +735,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
+use risingwave_common::array::{Op, RowRef};
 use risingwave_common_estimate_size::KvSize;
+use risingwave_expr::expr::NonStrictExpression;
 use thiserror::Error;
 
 use super::*;
+use crate::executor::join::builder::JoinChunkBuilder;
+use crate::executor::prelude::try_stream;
+use crate::executor::Watermark;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
