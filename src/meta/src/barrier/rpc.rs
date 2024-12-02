@@ -292,6 +292,12 @@ impl ControlStreamManager {
 }
 
 impl ControlStreamManager {
+    /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
+    ///
+    /// Return:
+    ///  - the worker nodes that need to wait for initial barrier collection
+    ///  - the extracted database information
+    ///  - the `prev_epoch` of the initial barrier
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
@@ -303,7 +309,7 @@ impl ControlStreamManager {
         subscription_info: InflightSubscriptionInfo,
         paused_reason: Option<PausedReason>,
         hummock_version_stats: &HummockVersionStats,
-    ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl)> {
+    ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
         let source_split_assignments = info
             .fragment_infos()
             .flat_map(|info| info.actors.keys())
@@ -384,6 +390,7 @@ impl ControlStreamManager {
         Ok((
             node_to_collect,
             DatabaseCheckpointControl::recovery(database_id, tracker, state),
+            barrier_info.prev_epoch.value().0,
         ))
     }
 

@@ -569,7 +569,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 for (database_id, info) in database_fragment_infos {
-                    let (node_to_collect, database) = control_stream_manager.inject_database_initial_barrier(
+                    let (node_to_collect, database, prev_epoch) = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         info,
                         &mut state_table_committed_epochs,
@@ -581,8 +581,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &hummock_version_stats,
                     )?;
                     if !node_to_collect.is_empty() {
-                        assert!(collecting_databases.insert(database_id, (node_to_collect, database)).is_none());
+                        assert!(collecting_databases.insert(database_id, (node_to_collect, database, prev_epoch)).is_none());
                     } else {
+                        warn!(database_id = database_id.database_id, "database has no node to inject initial barrier");
                         assert!(collected_databases.insert(database_id, database).is_none());
                     }
                 }
@@ -591,11 +592,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         control_stream_manager.next_collect_barrier_response().await;
                     let resp = result?;
                     let database_id = DatabaseId::new(resp.database_id);
-                    let (node_to_collect, database) = collecting_databases.get_mut(&database_id).expect("should exist");
-                    assert_eq!(resp.epoch, database.in_flight_prev_epoch());
+                    let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
+                    assert_eq!(resp.epoch, *prev_epoch);
                     assert!(node_to_collect.remove(&worker_id));
                     if node_to_collect.is_empty() {
-                        let (_, database) = collecting_databases.remove(&database_id).expect("should exist");
+                        let (_, database, _) = collecting_databases.remove(&database_id).expect("should exist");
                         assert!(collected_databases.insert(database_id, database).is_none());
                     }
                 }
