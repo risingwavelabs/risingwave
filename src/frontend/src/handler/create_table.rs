@@ -831,7 +831,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let non_generated_column_descs = columns
         .iter()
-        .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+        .filter(|&c| (!c.is_generated()))
+        .map(|c| c.column_desc.clone())
         .collect_vec();
     let non_generated_column_num = non_generated_column_descs.len();
 
