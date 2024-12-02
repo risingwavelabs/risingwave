@@ -34,7 +34,9 @@ use crate::barrier::{
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
+use crate::manager::{
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
+};
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -74,7 +76,7 @@ pub struct CreateStreamingJobContext {
 
     pub create_type: CreateType,
 
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
     pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
@@ -334,7 +336,7 @@ impl GlobalStreamManager {
             upstream_root_actors,
             definition,
             create_type,
-            ddl_type,
+            job_type,
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
@@ -394,7 +396,7 @@ impl GlobalStreamManager {
             definition: definition.to_string(),
             streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
-            ddl_type,
+            job_type,
             create_type,
         };
 

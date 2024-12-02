@@ -42,7 +42,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::barrier::SnapshotBackfillInfo;
-use crate::manager::{DdlType, MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -714,7 +714,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -723,7 +723,7 @@ impl CompleteStreamFragmentGraph {
                 upstream_actor_location: existing_actor_location,
             }),
             None,
-            ddl_type,
+            job_type,
         )
     }
 
@@ -734,7 +734,7 @@ impl CompleteStreamFragmentGraph {
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -744,7 +744,7 @@ impl CompleteStreamFragmentGraph {
                 downstream_fragments,
                 downstream_actor_location: existing_actor_location,
             }),
-            ddl_type,
+            job_type,
         )
     }
 
@@ -756,7 +756,7 @@ impl CompleteStreamFragmentGraph {
         original_table_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         downstream_actor_location: HashMap<ActorId, WorkerId>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
@@ -769,7 +769,7 @@ impl CompleteStreamFragmentGraph {
                 downstream_fragments,
                 downstream_actor_location,
             }),
-            ddl_type,
+            job_type,
         )
     }
 
@@ -778,7 +778,7 @@ impl CompleteStreamFragmentGraph {
         mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
-        ddl_type: DdlType,
+        job_type: StreamingJobType,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
@@ -794,8 +794,8 @@ impl CompleteStreamFragmentGraph {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let (up_fragment_id, edge) = match ddl_type {
-                        DdlType::Table(TableJobType::SharedCdcSource) => {
+                    let (up_fragment_id, edge) = match job_type {
+                        StreamingJobType::Table(TableJobType::SharedCdcSource) => {
                             let source_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream source fragment not found")?;
@@ -831,7 +831,9 @@ impl CompleteStreamFragmentGraph {
 
                             (source_job_id, edge)
                         }
-                        DdlType::MaterializedView | DdlType::Sink | DdlType::Index => {
+                        StreamingJobType::MaterializedView
+                        | StreamingJobType::Sink
+                        | StreamingJobType::Index => {
                             // handle MV on MV/Source
 
                             // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
@@ -927,8 +929,8 @@ impl CompleteStreamFragmentGraph {
                                 bail!("the upstream fragment should be a MView or Source, got fragment type: {:b}", upstream_fragment.fragment_type_mask)
                             }
                         }
-                        DdlType::Source | DdlType::Table(_) => {
-                            bail!("the streaming job shouldn't have an upstream fragment, ddl_type: {:?}", ddl_type)
+                        StreamingJobType::Source | StreamingJobType::Table(_) => {
+                            bail!("the streaming job shouldn't have an upstream fragment, job_type: {:?}", job_type)
                         }
                     };
 
