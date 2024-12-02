@@ -917,10 +917,14 @@ impl DdlService for DdlServiceImpl {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
                 let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().map(|col| {
+                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
                         let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() {
+                            None
+                        } else {
+                            Some((col.column_desc.name, data_type))
+                        }
                     }));
                 let new_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table_change.columns.iter().map(|col| {
