@@ -70,13 +70,15 @@ def validate_state_table_item(table_name: str, expect_count: int):
     )
     # query for the internal table name and make sure it exists
     with conn.cursor() as cursor:
-        cursor.execute(f"select name from rw_catalog.rw_internal_tables where name ILIKE '%{table_name}%'")
+        cursor.execute(f"select name from rw_internal_table_info where job_name = '{table_name}'")
         results = cursor.fetchall()
         assert len(results) == 1, f"Expected exactly one internal table matching {table_name}, found {len(results)}"
         internal_table_name = results[0][0]
         print(f"Found internal table: {internal_table_name}")
         cursor.execute(f"SELECT * FROM {internal_table_name}")
-        assert cursor.rowcount == expect_count
+        results = cursor.fetchall()
+        print(f"Get items from state table: {results}")
+        assert len(results) == expect_count
 
 if __name__ == "__main__":
     import sys
