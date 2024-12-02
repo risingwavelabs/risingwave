@@ -741,7 +741,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// data chunk with the executor state
     fn hash_eq_match_opt(key: &K, ht: &mut JoinHashMap<K, S>) -> Option<Option<HashValueType>> {
         if !key.null_bitmap().is_subset(ht.null_matched()) {
-            tracing::info!("no match for join key: {:?}", key);
+            // tracing::info!("no match for join key: {:?}", key);
             None
         } else {
             Some(ht.take_state_opt(key))
@@ -823,7 +823,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
         match op {
             Op::Insert | Op::UpdateInsert => {
-                tracing::info!("insert row: {:?}", row);
+                // tracing::info!("insert row: {:?}", row);
                 side_update.ht.insert_row(key, row).await?;
             }
             Op::Delete | Op::UpdateDelete => {

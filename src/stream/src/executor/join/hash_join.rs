@@ -325,13 +325,13 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     pub fn take_state_opt(&mut self, key: &K) -> Option<HashValueType> {
         self.metrics.total_lookup_count += 1;
         if self.inner.contains(key) {
-            tracing::info!("hit cache for join key: {:?}", key);
+            // tracing::info!("hit cache for join key: {:?}", key);
             // Do not update the LRU statistics here with `peek_mut` since we will put the state
             // back.
             let mut state = self.inner.peek_mut(key).unwrap();
             Some(state.take())
         } else {
-            tracing::info!("miss cache for join key: {:?}", key);
+            // tracing::info!("miss cache for join key: {:?}", key);
             None
         }
     }
@@ -360,7 +360,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     #[try_stream(ok = (Vec<u8>, JoinRow<OwnedRow>), error = StreamExecutorError)]
     pub async fn fetch_matched_rows<'a>(&'a self, key: &'a K) {
-        tracing::debug!("fetching matched rows for join key: {:?}", key);
+        // tracing::debug!("fetching matched rows for join key: {:?}", key);
         let key = key.deserialize(&self.join_key_data_types)?;
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let table_iter = self
@@ -376,11 +376,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 .as_ref()
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
-            tracing::debug!(
-                "found matching rows for join key: {:?}, row: {:?}",
-                key,
-                row
-            );
+            // tracing::debug!(
+            //     "found matching rows for join key: {:?}, row: {:?}",
+            //     key,
+            //     row
+            // );
             yield (pk, JoinRow::new(row.into_owned_row(), 0));
         }
     }
