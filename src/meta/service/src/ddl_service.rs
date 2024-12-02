@@ -928,7 +928,7 @@ impl DdlService for DdlServiceImpl {
                       cdc_table_id = table_change.cdc_table_id,
                     upstraem_ddl = table_change.upstream_ddl,
                         "invalid column type from cdc table change");
-                    return Err(Status::invalid_argument(format!(
+                    Err(Status::invalid_argument(format!(
                         "invalid column type: {} from cdc table change, column: {:?}",
                         column_type, c
                     )));
