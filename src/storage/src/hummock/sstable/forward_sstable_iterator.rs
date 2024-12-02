@@ -53,13 +53,8 @@ pub struct SstableIterator {
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
-    // is_current_block_valid: bool,
-    // // The key range of the iterator
-    // key_range: KeyRange,
 
-    // // used for checking if the block is valid
-    // // it's a light weight check only when the table id changes
-    // last_table_id: StateTableId,
+    // used for checking if the block is valid, filter out the block that is not in the table-id range
     read_block_meta_range: (usize, usize),
 }
 
@@ -83,12 +78,31 @@ impl SstableIterator {
         {
             start_idx += 1;
         }
+        // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
+        assert!(
+            start_idx < block_meta_count,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.0,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
 
         while end_idx > start_idx
             && sstable.meta.block_metas[end_idx].table_id().table_id() > read_table_id_range.1
         {
             end_idx -= 1;
         }
+        assert!(
+            end_idx >= start_idx,
+            "end_idx {} < start_idx {} block_meta_count {}",
+            end_idx,
+            start_idx,
+            block_meta_count
+        );
 
         Self {
             block_iter: None,
