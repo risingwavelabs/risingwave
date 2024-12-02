@@ -223,7 +223,7 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
+pub fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
         .filter(|c| !c.is_generated())

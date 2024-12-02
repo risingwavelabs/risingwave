@@ -50,6 +50,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
+use super::create_source::non_generated_sql_columns;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
@@ -1083,7 +1084,7 @@ fn sanity_check_for_cdc_table(
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
     // wildcard cannot be used with column definitions
-    if wildcard_idx.is_some() && !column_defs.is_empty() {
+    if wildcard_idx.is_some() && !non_generated_sql_columns(column_defs).is_empty() {
         return Err(ErrorCode::NotSupported(
             "wildcard(*) and column definitions cannot be used together".to_owned(),
             "Remove the wildcard or column definitions".to_owned(),
