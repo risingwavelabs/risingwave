@@ -177,7 +177,7 @@ pub struct DatabaseId {
 }
 
 impl DatabaseId {
-    pub fn new(database_id: u32) -> Self {
+    pub const fn new(database_id: u32) -> Self {
         DatabaseId { database_id }
     }
 
