@@ -735,7 +735,7 @@ pub(crate) fn bind_all_columns(
             // TODO(yuhao): https://github.com/risingwavelabs/risingwave/issues/12209
             Err(RwError::from(ProtocolError(
                     format!("User-defined schema from SQL is not allowed with FORMAT {} ENCODE {}. \
-                    Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ for more information.", source_schema.format, source_schema.row_encode))))
+                    Please refer to https://www.risingwave.dev/docs/current/sql-create-source/ for more information.", format_encode.format, format_encode.row_encode))))
         }
     } else {
         if wildcard_idx.is_some() {
