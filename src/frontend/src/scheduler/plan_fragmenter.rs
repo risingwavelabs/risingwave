@@ -24,6 +24,7 @@ use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
 use iceberg::expr::Predicate as IcebergPredicate;
 use itertools::Itertools;
+use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
@@ -43,6 +44,7 @@ use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batc
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
@@ -271,7 +273,7 @@ impl Query {
 
 #[derive(Debug, Clone)]
 pub enum SourceFetchParameters {
-    IcebergPredicate(IcebergPredicate),
+    IcebergSpecificInfo(IcebergSpecificInfo),
     KafkaTimebound {
         lower: Option<i64>,
         upper: Option<i64>,
@@ -289,6 +291,12 @@ pub struct SourceFetchInfo {
     /// e.g. predicate pushdown for iceberg, timebound for kafka.
     pub fetch_parameters: SourceFetchParameters,
     pub as_of: Option<AsOf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IcebergSpecificInfo {
+    pub iceberg_scan_type: IcebergScanType,
+    pub predicate: IcebergPredicate,
 }
 
 #[derive(Clone, Debug)]
@@ -360,7 +368,7 @@ impl SourceScanInfo {
             }
             (
                 ConnectorProperties::Iceberg(prop),
-                SourceFetchParameters::IcebergPredicate(predicate),
+                SourceFetchParameters::IcebergSpecificInfo(iceberg_specific_info),
             ) => {
                 let iceberg_enumerator =
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
@@ -394,7 +402,8 @@ impl SourceScanInfo {
                         fetch_info.schema,
                         time_travel_info,
                         batch_parallelism,
-                        predicate,
+                        iceberg_specific_info.iceberg_scan_type,
+                        iceberg_specific_info.predicate,
                     )
                     .await?
                     .into_iter()
@@ -839,6 +848,34 @@ impl StageGraph {
 
         Ok(())
     }
+
+    /// Converts the `StageGraph` into a `petgraph::graph::Graph<String, String>`.
+    pub fn to_petgraph(&self) -> Graph<String, String, Directed> {
+        let mut graph = Graph::<String, String, Directed>::new();
+
+        let mut node_indices = HashMap::new();
+
+        // Add all stages as nodes
+        for (&stage_id, stage_ref) in self.stages.iter().sorted_by_key(|(id, _)| **id) {
+            let node_label = format!("Stage {}: {:?}", stage_id, stage_ref);
+            let node_index = graph.add_node(node_label);
+            node_indices.insert(stage_id, node_index);
+        }
+
+        // Add edges between stages based on child_edges
+        for (&parent_id, children) in &self.child_edges {
+            if let Some(&parent_index) = node_indices.get(&parent_id) {
+                for &child_id in children {
+                    if let Some(&child_index) = node_indices.get(&child_id) {
+                        // Add an edge from parent to child
+                        graph.add_edge(parent_index, child_index, "".to_string());
+                    }
+                }
+            }
+        }
+
+        graph
+    }
 }
 
 struct StageGraphBuilder {
@@ -1111,8 +1148,11 @@ impl BatchPlanFragmenter {
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
-                    fetch_parameters: SourceFetchParameters::IcebergPredicate(
-                        batch_iceberg_scan.predicate.clone(),
+                    fetch_parameters: SourceFetchParameters::IcebergSpecificInfo(
+                        IcebergSpecificInfo {
+                            predicate: batch_iceberg_scan.predicate.clone(),
+                            iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
+                        },
                     ),
                     as_of,
                 })));

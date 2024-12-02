@@ -48,8 +48,8 @@ pub async fn handle_comment(
                 )?;
 
                 let (database_id, schema_id) =
-                    session.get_database_and_schema_id_for_create(schema)?;
-                let table = binder.bind_table(None, &table, None)?;
+                    session.get_database_and_schema_id_for_create(schema.clone())?;
+                let table = binder.bind_table(schema.as_deref(), &table, None)?;
                 binder.bind_columns_to_context(col.real_value(), &table.table_catalog.columns)?;
 
                 let column = binder.bind_column(object_name.0.as_slice())?;
@@ -66,8 +66,8 @@ pub async fn handle_comment(
                 let (schema, table) =
                     Binder::resolve_schema_qualified_name(session.database(), object_name)?;
                 let (database_id, schema_id) =
-                    session.get_database_and_schema_id_for_create(schema)?;
-                let table = binder.bind_table(None, &table, None)?;
+                    session.get_database_and_schema_id_for_create(schema.clone())?;
+                let table = binder.bind_table(schema.as_deref(), &table, None)?;
 
                 PbComment {
                     table_id: table.table_id.into(),

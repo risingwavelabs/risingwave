@@ -14,7 +14,7 @@
 
 use anyhow::Context;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::DataType;
+use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
@@ -83,9 +83,9 @@ pub async fn handle_create_function(
                 // return type is a struct for multiple columns
                 let it = columns
                     .into_iter()
-                    .map(|c| bind_data_type(&c.data_type).map(|ty| (ty, c.name.real_value())));
-                let (datatypes, names) = itertools::process_results(it, |it| it.unzip())?;
-                return_type = DataType::new_struct(datatypes, names);
+                    .map(|c| bind_data_type(&c.data_type).map(|ty| (c.name.real_value(), ty)));
+                let fields = it.try_collect::<_, Vec<_>, _>()?;
+                return_type = StructType::new(fields).into();
             }
             Kind::Table(TableFunction {})
         }

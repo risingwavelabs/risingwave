@@ -7,6 +7,18 @@ explain create index i on t(v);
 statement ok
 explain create sink sink_t from t with ( connector = 'kafka', type = 'append-only' )
 
+# statement ok
+# set batch_parallelism=1;
+
+# query I
+# explain (distsql, format dot) SELECT approx_percentile(0.5) WITHIN GROUP (order by v) from t;
+# ----
+#  digraph {
+#     0 [ label = "Stage 0: QueryStage { id: 0, parallelism: Some(1), exchange_info: Some(ExchangeInfo { mode: Single, distribution: None }), has_table_scan: false }" ]
+#     1 [ label = "Stage 1: QueryStage { id: 1, parallelism: Some(4), exchange_info: Some(ExchangeInfo { mode: Single, distribution: None }), has_table_scan: true }" ]
+#     0 -> 1 [ label = "" ]
+#  }
+
 statement ok
 drop table t;
 

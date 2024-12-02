@@ -168,8 +168,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
         DataType::Struct(StructType::new(
             STRUCT_FIELD_NAMES[0..num_fields]
                 .iter()
-                .map(|s| (s.to_string(), self.gen_data_type_inner(depth)))
-                .collect(),
+                .map(|s| (s.to_string(), self.gen_data_type_inner(depth))),
         ))
     }
 

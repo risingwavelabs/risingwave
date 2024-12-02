@@ -196,6 +196,7 @@ impl TableCatalogBuilder {
             retention_seconds: None,
             cdc_table_id: None,
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            webhook_info: None,
         }
     }
 

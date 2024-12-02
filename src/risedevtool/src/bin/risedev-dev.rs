@@ -32,6 +32,8 @@ use risedev::{
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::EnvFilter;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -377,6 +379,16 @@ fn main() -> Result<()> {
     // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
     // Backtraces for RisingWave components are enabled in `Task::execute`.
     std::env::set_var("RUST_BACKTRACE", "0");
+
+    // Init logger from a customized env var.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .with_env_var("RISEDEV_RUST_LOG")
+                .from_env_lossy(),
+        )
+        .init();
 
     preflight_check()?;
 

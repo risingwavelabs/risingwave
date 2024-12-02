@@ -92,6 +92,14 @@ message StreamSourceInfo {
   // Handle the source relies on any sceret. The key is the propertity name and the value is the secret id and type.
   // For format and encode options.
   map<string, secret.SecretRef> format_encode_secret_refs = 16;
+
+  // ref connection for schema registry
+  optional uint32 connection_id = 17;
+}
+
+message WebhookSourceInfo {
+  secret.SecretRef secret_ref = 1;
+  expr.ExprNode signature_expr = 2;
 }
 
 message Source {
@@ -123,6 +131,8 @@ message Source {
     uint32 associated_table_id = 12;
   }
   string definition = 13;
+
+  // ref connection for connector
   optional uint32 connection_id = 14;
 
   optional uint64 initialized_at_epoch = 15;
@@ -156,6 +166,9 @@ message SinkFormatDesc {
   optional plan_common.EncodeType key_encode = 4;
   // Secret used for format encode options.
   map<string, secret.SecretRef> secret_refs = 5;
+
+  // ref connection for schema registry
+  optional uint32 connection_id = 6;
 }
 
 // the catalog of the sink. There are two kind of schema here. The full schema is all columns
@@ -178,6 +191,8 @@ message Sink {
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;
+
+  // ref connection for connector
   optional uint32 connection_id = 14;
   optional uint64 initialized_at_epoch = 15;
   optional uint64 created_at_epoch = 16;
@@ -226,6 +241,19 @@ message Subscription {
   SubscriptionState subscription_state = 19;
 }
 
+message ConnectionParams {
+  enum ConnectionType {
+    CONNECTION_TYPE_UNSPECIFIED = 0;
+    CONNECTION_TYPE_KAFKA = 1;
+    CONNECTION_TYPE_ICEBERG = 2;
+    CONNECTION_TYPE_SCHEMA_REGISTRY = 3;
+  }
+
+  ConnectionType connection_type = 1;
+  map<string, string> properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
+}
+
 message Connection {
   message PrivateLinkService {
     enum PrivateLinkProvider {
@@ -246,6 +274,7 @@ message Connection {
   string name = 4;
   oneof info {
     PrivateLinkService private_link_service = 5 [deprecated = true];
+    ConnectionParams connection_params = 7;
   }
   uint32 owner = 6;
 }
@@ -437,6 +466,9 @@ message Table {
   // Please note that this field is not intended to describe the expected vnode count
   // for a streaming job. Instead, refer to `stream_plan.StreamFragmentGraph.max_parallelism`.
   optional uint32 maybe_vnode_count = 40;
+
+  // The information used by webhook source to validate the incoming data.
+  optional WebhookSourceInfo webhook_info = 41;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for

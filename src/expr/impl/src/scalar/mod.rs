@@ -47,6 +47,7 @@ mod extract;
 mod field;
 mod format;
 mod format_type;
+mod hmac;
 mod in_;
 mod int256;
 mod jsonb_access;

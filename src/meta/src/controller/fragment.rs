@@ -974,16 +974,16 @@ impl CatalogController {
     /// collected
     pub async fn load_all_actors(
         &self,
-    ) -> MetaResult<
-        HashMap<
-            risingwave_common::catalog::DatabaseId,
-            HashMap<
-                risingwave_common::catalog::TableId,
-                HashMap<crate::model::FragmentId, InflightFragmentInfo>,
-            >,
-        >,
-    > {
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<FragmentId, InflightFragmentInfo>>>>
+    {
         let inner = self.inner.read().await;
+        let filter_condition = actor::Column::Status.eq(ActorStatus::Running);
+        let filter_condition = if let Some(database_id) = database_id {
+            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        } else {
+            filter_condition
+        };
         let actor_info: Vec<(
             ActorId,
             WorkerId,
@@ -1001,7 +1001,7 @@ impl CatalogController {
             .column(object::Column::Oid)
             .join(JoinType::InnerJoin, actor::Relation::Fragment.def())
             .join(JoinType::InnerJoin, fragment::Relation::Object.def())
-            .filter(actor::Column::Status.eq(ActorStatus::Running))
+            .filter(filter_condition)
             .into_tuple()
             .all(&inner.db)
             .await?;
@@ -1011,18 +1011,16 @@ impl CatalogController {
 
         for (actor_id, worker_id, fragment_id, state_table_ids, database_id, job_id) in actor_info {
             let fragment_infos = database_fragment_infos
-                .entry(risingwave_common::catalog::DatabaseId::new(
-                    database_id as _,
-                ))
+                .entry(database_id)
                 .or_default()
-                .entry(risingwave_common::catalog::TableId::new(job_id as _))
+                .entry(job_id)
                 .or_default();
             let state_table_ids = state_table_ids.into_inner();
             let state_table_ids = state_table_ids
                 .into_iter()
                 .map(|table_id| risingwave_common::catalog::TableId::new(table_id as _))
                 .collect();
-            match fragment_infos.entry(fragment_id as crate::model::FragmentId) {
+            match fragment_infos.entry(fragment_id) {
                 Entry::Occupied(mut entry) => {
                     let info: &mut InflightFragmentInfo = entry.get_mut();
                     assert_eq!(info.state_table_ids, state_table_ids);
@@ -1292,12 +1290,22 @@ impl CatalogController {
         Ok(actors)
     }
 
-    /// Get the actor ids, and each actor's upstream actor ids of the fragment with `fragment_id` with `Running` status.
-    pub async fn get_running_actors_and_upstream_of_fragment(
+    /// Get the actor ids, and each actor's upstream source actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_for_source_backfill(
         &self,
         fragment_id: FragmentId,
-    ) -> MetaResult<Vec<(ActorId, ActorUpstreamActors)>> {
+    ) -> MetaResult<Vec<(ActorId, ActorId)>> {
         let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let fragment = Fragment::find_by_id(fragment_id)
+            .one(&txn)
+            .await?
+            .context(format!("fragment {} not found", fragment_id))?;
+        let (_source_id, upstream_source_fragment_id) = fragment
+            .stream_node
+            .to_protobuf()
+            .find_source_backfill()
+            .unwrap();
         let actors: Vec<(ActorId, ActorUpstreamActors)> = Actor::find()
             .select_only()
             .column(actor::Column::ActorId)
@@ -1305,9 +1313,24 @@ impl CatalogController {
             .filter(actor::Column::FragmentId.eq(fragment_id))
             .filter(actor::Column::Status.eq(ActorStatus::Running))
             .into_tuple()
-            .all(&inner.db)
+            .all(&txn)
             .await?;
-        Ok(actors)
+        Ok(actors
+            .into_iter()
+            .map(|(actor_id, upstream_actor_ids)| {
+                let upstream_source_actors =
+                    &upstream_actor_ids.0[&(upstream_source_fragment_id as i32)];
+                assert_eq!(
+                    upstream_source_actors.len(),
+                    1,
+                    "expect only one upstream source actor, but got {:?}, actor_id: {}, fragment_id: {}",
+                    upstream_source_actors,
+                    actor_id,
+                    fragment_id
+                );
+                (actor_id, upstream_source_actors[0])
+            })
+            .collect())
     }
 
     pub async fn get_actors_by_job_ids(&self, job_ids: Vec<ObjectId>) -> MetaResult<Vec<ActorId>> {
@@ -1453,31 +1476,29 @@ impl CatalogController {
 
     pub async fn load_backfill_fragment_ids(
         &self,
-    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
+    ) -> MetaResult<HashMap<SourceId, BTreeSet<(FragmentId, u32)>>> {
         let inner = self.inner.read().await;
-        let mut fragments: Vec<(FragmentId, I32Array, i32, StreamNode)> = Fragment::find()
+        let mut fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
-                fragment::Column::UpstreamFragmentId,
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
             .into_tuple()
             .all(&inner.db)
             .await?;
-        fragments.retain(|(_, _, mask, _)| *mask & PbFragmentTypeFlag::SourceScan as i32 != 0);
+        fragments.retain(|(_, mask, _)| *mask & PbFragmentTypeFlag::SourceScan as i32 != 0);
 
         let mut source_fragment_ids = HashMap::new();
-        for (fragment_id, upstream_fragment_id, _, stream_node) in fragments {
-            if let Some(source_id) = stream_node.to_protobuf().find_source_backfill() {
-                if upstream_fragment_id.inner_ref().len() != 1 {
-                    bail!("SourceBackfill should have only one upstream fragment, found {} for fragment {}", upstream_fragment_id.inner_ref().len(), fragment_id);
-                }
+        for (fragment_id, _, stream_node) in fragments {
+            if let Some((source_id, upstream_source_fragment_id)) =
+                stream_node.to_protobuf().find_source_backfill()
+            {
                 source_fragment_ids
                     .entry(source_id as SourceId)
                     .or_insert_with(BTreeSet::new)
-                    .insert((fragment_id, upstream_fragment_id.inner_ref()[0]));
+                    .insert((fragment_id, upstream_source_fragment_id));
             }
         }
         Ok(source_fragment_ids)
@@ -1678,6 +1699,7 @@ mod tests {
                     mview_definition: "".to_string(),
                     expr_context: Some(PbExprContext {
                         time_zone: String::from("America/New_York"),
+                        strict_mode: false,
                     }),
                 }
             })
@@ -1798,6 +1820,7 @@ mod tests {
                         .map(VnodeBitmap::from),
                     expr_context: ExprContext::from(&PbExprContext {
                         time_zone: String::from("America/New_York"),
+                        strict_mode: false,
                     }),
                 }
             })

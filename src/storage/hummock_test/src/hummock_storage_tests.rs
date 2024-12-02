@@ -18,7 +18,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes};
-use foyer::CacheContext;
+use foyer::CacheHint;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt, INVALID_EPOCH};
 use risingwave_hummock_sdk::key::{
     gen_key_from_bytes, prefixed_range_with_vnode, FullKey, TableKey, UserKey, TABLE_PREFIX_LEN,
 };
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
@@ -133,7 +133,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -148,7 +148,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -165,7 +165,7 @@ async fn test_storage_basic() {
             epoch1,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -198,7 +198,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -232,7 +232,7 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -249,7 +249,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -269,7 +269,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -310,7 +310,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -328,7 +328,7 @@ async fn test_storage_basic() {
             ReadOptions {
                 table_id: TEST_TABLE_ID,
 
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -347,7 +347,7 @@ async fn test_storage_basic() {
             epoch2,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -401,7 +401,7 @@ async fn test_storage_basic() {
             epoch3,
             ReadOptions {
                 table_id: TEST_TABLE_ID,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             },
         )
@@ -597,7 +597,7 @@ async fn test_state_store_sync() {
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -643,7 +643,7 @@ async fn test_state_store_sync() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -666,7 +666,7 @@ async fn test_state_store_sync() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -686,7 +686,7 @@ async fn test_state_store_sync() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -748,7 +748,7 @@ async fn test_state_store_sync() {
                 epoch2,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -768,7 +768,7 @@ async fn test_state_store_sync() {
                 epoch2,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -925,7 +925,7 @@ async fn test_delete_get() {
             epoch2,
             ReadOptions {
                 prefix_hint: None,
-                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                 ..Default::default()
             }
         )
@@ -1034,7 +1034,7 @@ async fn test_multiple_epoch_sync() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                     )
@@ -1050,7 +1050,7 @@ async fn test_multiple_epoch_sync() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         read_committed,
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1065,7 +1065,7 @@ async fn test_multiple_epoch_sync() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             read_committed,
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                     )
@@ -1213,7 +1213,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1239,7 +1239,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1264,7 +1264,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1316,7 +1316,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         read_committed: true,
                         ..Default::default()
                     },
@@ -1343,7 +1343,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1370,7 +1370,7 @@ async fn test_iter_with_min_epoch() {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
                         prefetch_options: PrefetchOptions::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1507,7 +1507,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1542,7 +1542,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1578,7 +1578,7 @@ async fn test_hummock_version_reader() {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1650,7 +1650,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1698,7 +1698,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1734,7 +1734,7 @@ async fn test_hummock_version_reader() {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1769,7 +1769,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             prefetch_options: PrefetchOptions::default(),
-                            cache_policy: CachePolicy::Fill(CacheContext::Default),
+                            cache_policy: CachePolicy::Fill(CacheHint::Normal),
                             ..Default::default()
                         },
                         read_snapshot,
@@ -1807,7 +1807,7 @@ async fn test_hummock_version_reader() {
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                                 ..Default::default()
                             },
                             read_snapshot,
@@ -1839,7 +1839,7 @@ async fn test_hummock_version_reader() {
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
                                 prefetch_options: PrefetchOptions::default(),
-                                cache_policy: CachePolicy::Fill(CacheContext::Default),
+                                cache_policy: CachePolicy::Fill(CacheHint::Normal),
                                 ..Default::default()
                             },
                             read_snapshot,
@@ -1945,7 +1945,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1963,7 +1963,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -1981,7 +1981,7 @@ async fn test_get_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -2001,7 +2001,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: Some(0),
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         prefetch_options: Default::default(),
-                        cache_policy: CachePolicy::Fill(CacheContext::Default),
+                        cache_policy: CachePolicy::Fill(CacheHint::Normal),
                         ..Default::default()
                     },
                 )
@@ -2051,7 +2051,7 @@ async fn test_get_with_min_epoch() {
                 epoch1,
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     read_committed: true,
                     ..Default::default()
                 },
@@ -2071,7 +2071,7 @@ async fn test_get_with_min_epoch() {
                     table_id: TEST_TABLE_ID,
                     read_committed: true,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -2090,7 +2090,7 @@ async fn test_get_with_min_epoch() {
                 ReadOptions {
                     table_id: TEST_TABLE_ID,
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -2111,7 +2111,7 @@ async fn test_get_with_min_epoch() {
                     retention_seconds: Some(0),
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     ..Default::default()
                 },
             )
@@ -2663,14 +2663,15 @@ async fn test_commit_multi_epoch() {
         };
 
     let epoch1 = initial_epoch.next_epoch();
-    let sst1_epoch1 = SstableInfo {
+    let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,
@@ -2704,14 +2705,15 @@ async fn test_commit_multi_epoch() {
         assert_eq!(cg_id, info.compaction_group_id);
     }
 
-    let sst1_epoch2 = SstableInfo {
+    let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 22,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
-    };
+    }
+    .into();
 
     let epoch2 = epoch1.next_epoch();
 
@@ -2740,14 +2742,15 @@ async fn test_commit_multi_epoch() {
 
     let new_table_id = TableId::new(2);
 
-    let sst2_epoch1 = SstableInfo {
+    let sst2_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 33,
         object_id: 3,
         table_ids: vec![new_table_id.table_id],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,
@@ -2779,14 +2782,15 @@ async fn test_commit_multi_epoch() {
         new_cg_id
     };
 
-    let sst2_epoch2 = SstableInfo {
+    let sst2_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 44,
         object_id: 4,
         table_ids: vec![new_table_id.table_id],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(epoch2, sst2_epoch2.clone(), vec![], &[new_table_id]).await;
 
@@ -2810,14 +2814,15 @@ async fn test_commit_multi_epoch() {
 
     let epoch3 = epoch2.next_epoch();
 
-    let sst_epoch3 = SstableInfo {
+    let sst_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 55,
         object_id: 5,
         table_ids: vec![existing_table_id.table_id, new_table_id.table_id],
         file_size: 100,
         sst_size: 100,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch3,
@@ -2920,32 +2925,35 @@ async fn test_commit_with_large_size() {
         };
 
     let epoch1 = initial_epoch.next_epoch();
-    let sst1_epoch1 = SstableInfo {
+    let sst1_epoch1: SstableInfo = SstableInfoInner {
         sst_id: 11,
         object_id: 1,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
-    let sst1_epoch2 = SstableInfo {
+    let sst1_epoch2: SstableInfo = SstableInfoInner {
         sst_id: 12,
         object_id: 2,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
-    let sst1_epoch3 = SstableInfo {
+    let sst1_epoch3: SstableInfo = SstableInfoInner {
         sst_id: 13,
         object_id: 3,
         table_ids: vec![existing_table_id.table_id],
         file_size: 512 << 20,
         sst_size: 512 << 20,
         ..Default::default()
-    };
+    }
+    .into();
 
     commit_epoch(
         epoch1,

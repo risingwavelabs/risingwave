@@ -21,9 +21,9 @@ use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
-    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, ListAllNodesRequest,
-    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
-    UpdateWorkerNodeSchedulabilityResponse,
+    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest,
+    GetMetaStoreInfoResponse, ListAllNodesRequest, ListAllNodesResponse,
+    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -165,6 +165,18 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<GetClusterRecoveryStatusResponse>, Status> {
         Ok(Response::new(GetClusterRecoveryStatusResponse {
             status: self.barrier_manager.get_recovery_status() as _,
+        }))
+    }
+
+    async fn get_meta_store_info(
+        &self,
+        _request: Request<GetMetaStoreInfoRequest>,
+    ) -> Result<Response<GetMetaStoreInfoResponse>, Status> {
+        Ok(Response::new(GetMetaStoreInfoResponse {
+            meta_store_endpoint: self
+                .metadata_manager
+                .cluster_controller
+                .meta_store_endpoint(),
         }))
     }
 }

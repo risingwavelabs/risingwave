@@ -58,6 +58,9 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 
+/// Default to bypass cluster limits iff in debug mode.
+const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
+
 #[serde_as]
 /// This is the Session Config of RisingWave.
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
@@ -108,6 +111,12 @@ pub struct SessionConfig {
     /// No atomicity guarantee in this mode. Its goal is to gain the best ingestion performance for initial batch ingestion where users always can drop their table when failure happens.
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
+
+    /// Evaluate expression in strict mode for batch queries.
+    /// If set to false, an expression failure will not cause an error but leave a null value
+    /// on the result set.
+    #[parameter(default = true)]
+    batch_expr_strict_mode: bool,
 
     /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
@@ -300,7 +309,7 @@ pub struct SessionConfig {
     /// Bypass checks on cluster limits
     ///
     /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
-    #[parameter(default = false)]
+    #[parameter(default = BYPASS_CLUSTER_LIMITS)]
     bypass_cluster_limits: bool,
 
     /// The maximum number of parallelism a streaming query can use. Defaults to 256.

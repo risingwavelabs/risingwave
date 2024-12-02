@@ -17,7 +17,8 @@ use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
-    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, ToOwnedDatum, F32, F64,
+    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, StructType, ToOwnedDatum,
+    F32, F64,
 };
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
@@ -257,10 +258,14 @@ fn protobuf_type_mapping(
             } else {
                 let fields = m
                     .fields()
-                    .map(|f| protobuf_type_mapping(&f, parse_trace))
-                    .try_collect()?;
-                let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
-                DataType::new_struct(fields, field_names)
+                    .map(|f| {
+                        Ok((
+                            f.name().to_string(),
+                            protobuf_type_mapping(&f, parse_trace)?,
+                        ))
+                    })
+                    .try_collect::<_, Vec<_>, _>()?;
+                StructType::new(fields).into()
             }
         }
         Kind::Enum(_) => DataType::Varchar,

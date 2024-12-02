@@ -37,67 +37,28 @@ pub async fn handle_create_secret(
 
     let session = handler_args.session.clone();
     let db_name = session.database();
-    let (schema_name, connection_name) =
+    let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.secret_name.clone())?;
 
     if let Err(e) = session.check_secret_name_duplicated(stmt.secret_name.clone()) {
         return if stmt.if_not_exists {
             Ok(PgResponse::builder(StatementType::CREATE_SECRET)
-                .notice(format!("secret \"{}\" exists, skipping", connection_name))
+                .notice(format!("secret \"{}\" exists, skipping", secret_name))
                 .into())
         } else {
             Err(e)
         };
     }
+    let with_options = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
 
-    let secret = secret_to_str(&stmt.credential)?.as_bytes().to_vec();
-
-    // check if the secret backend is supported
-    let with_props = WithOptions::try_from(stmt.with_properties.0.as_ref() as &[SqlOption])?;
-    let secret_payload: Vec<u8> = {
-        if let Some(backend) = with_props.get(SECRET_BACKEND_KEY) {
-            match backend.to_lowercase().as_ref() {
-                SECRET_BACKEND_META => {
-                    let backend = risingwave_pb::secret::Secret {
-                        secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
-                            risingwave_pb::secret::SecretMetaBackend { value: secret },
-                        )),
-                    };
-                    backend.encode_to_vec()
-                }
-                SECRET_BACKEND_HASHICORP_VAULT => {
-                    if stmt.credential != Value::Null {
-                        return Err(ErrorCode::InvalidParameterValue(
-                            "credential must be null for hashicorp_vault backend".to_string(),
-                        )
-                        .into());
-                    }
-                    bail_not_implemented!("hashicorp_vault backend is not implemented yet")
-                }
-                _ => {
-                    return Err(ErrorCode::InvalidParameterValue(format!(
-                        "secret backend \"{}\" is not supported. Supported backends are: {}",
-                        backend,
-                        [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
-                    ))
-                    .into());
-                }
-            }
-        } else {
-            return Err(ErrorCode::InvalidParameterValue(format!(
-                "secret backend is not specified in with clause. Supported backends are: {}",
-                [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
-            ))
-            .into());
-        }
-    };
+    let secret_payload = get_secret_payload(stmt.credential, with_options)?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_secret(
-            stmt.secret_name.real_value(),
+            secret_name,
             database_id,
             schema_id,
             session.user_id(),
@@ -108,12 +69,50 @@ pub async fn handle_create_secret(
     Ok(PgResponse::empty_result(StatementType::CREATE_SECRET))
 }
 
-fn secret_to_str(value: &Value) -> Result<String> {
+pub fn secret_to_str(value: &Value) -> Result<String> {
     match value {
         Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.to_string()),
         _ => Err(ErrorCode::InvalidInputSyntax(
             "secret value should be quoted by ' or \" ".to_string(),
         )
         .into()),
+    }
+}
+
+pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -> Result<Vec<u8>> {
+    let secret = secret_to_str(&credential)?.as_bytes().to_vec();
+
+    if let Some(backend) = with_options.get(SECRET_BACKEND_KEY) {
+        match backend.to_lowercase().as_ref() {
+            SECRET_BACKEND_META => {
+                let backend = risingwave_pb::secret::Secret {
+                    secret_backend: Some(risingwave_pb::secret::secret::SecretBackend::Meta(
+                        risingwave_pb::secret::SecretMetaBackend { value: secret },
+                    )),
+                };
+                Ok(backend.encode_to_vec())
+            }
+            SECRET_BACKEND_HASHICORP_VAULT => {
+                if credential != Value::Null {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "credential must be null for hashicorp_vault backend".to_string(),
+                    )
+                    .into());
+                }
+                bail_not_implemented!("hashicorp_vault backend is not implemented yet")
+            }
+            _ => Err(ErrorCode::InvalidParameterValue(format!(
+                "secret backend \"{}\" is not supported. Supported backends are: {}",
+                backend,
+                [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+            ))
+            .into()),
+        }
+    } else {
+        Err(ErrorCode::InvalidParameterValue(format!(
+            "secret backend is not specified in with clause. Supported backends are: {}",
+            [SECRET_BACKEND_META, SECRET_BACKEND_HASHICORP_VAULT].join(",")
+        ))
+        .into())
     }
 }

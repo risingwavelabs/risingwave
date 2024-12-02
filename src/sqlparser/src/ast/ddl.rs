@@ -22,7 +22,8 @@ use serde::{Deserialize, Serialize};
 
 use super::FormatEncodeOptions;
 use crate::ast::{
-    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SetVariableValue,
+    display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SecretRefValue,
+    SetVariableValue, Value,
 };
 use crate::tokenizer::Token;
 
@@ -212,6 +213,12 @@ pub enum AlterFunctionOperation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AlterSecretOperation {
+    ChangeCredential { new_credential: Value },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -476,6 +483,16 @@ impl fmt::Display for AlterConnectionOperation {
         match self {
             AlterConnectionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSecretOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSecretOperation::ChangeCredential { new_credential } => {
+                write!(f, "AS {new_credential}")
             }
         }
     }
@@ -801,4 +818,12 @@ impl fmt::Display for ReferentialAction {
             ReferentialAction::SetDefault => "SET DEFAULT",
         })
     }
+}
+
+/// secure secret definition for webhook source
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct WebhookSourceInfo {
+    pub secret_ref: SecretRefValue,
+    pub signature_expr: Expr,
 }

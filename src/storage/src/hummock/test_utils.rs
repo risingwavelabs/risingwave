@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    CacheContext, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use itertools::Itertools;
@@ -27,7 +27,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -108,7 +108,7 @@ pub fn gen_dummy_sst_info(
         }
         file_size += batch.size() as u64;
     }
-    SstableInfo {
+    SstableInfoInner {
         object_id: id,
         sst_id: id,
         key_range: KeyRange {
@@ -124,6 +124,7 @@ pub fn gen_dummy_sst_info(
         sst_size: file_size,
         ..Default::default()
     }
+    .into()
 }
 
 /// Number of keys in table generated in `generate_table`.
@@ -203,7 +204,7 @@ pub async fn put_sst(
 
     meta.meta_offset = writer.data_len() as u64;
     meta.bloom_filter = bloom_filter;
-    let sst = SstableInfo {
+    let sst = SstableInfoInner {
         object_id: sst_object_id,
         sst_id: sst_object_id,
         key_range: KeyRange {
@@ -216,7 +217,8 @@ pub async fn put_sst(
         uncompressed_file_size: meta.estimated_size as u64,
         table_ids,
         ..Default::default()
-    };
+    }
+    .into();
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
     Ok(sst)
@@ -322,7 +324,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
         object_id,
         kv_iter,
         sstable_store.clone(),
-        CachePolicy::Fill(CacheContext::Default),
+        CachePolicy::Fill(CacheHint::Normal),
     )
     .await
 }

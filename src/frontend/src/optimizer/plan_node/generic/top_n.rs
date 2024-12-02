@@ -113,6 +113,13 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
 
+        debug_assert!(
+            group_key.iter().all(|&idx| idx < input.schema().len()),
+            "Invalid group keys {:?} input schema size = {}",
+            &group_key,
+            input.schema().len()
+        );
+
         Self {
             input,
             limit_attr,

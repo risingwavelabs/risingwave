@@ -41,6 +41,14 @@ pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
     Ok(Timestamptz::from_micros(micros))
 }
 
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
+pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
+    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
+    let instant_local = input.to_datetime_in_zone(time_zone);
+    let naive = instant_local.naive_local();
+    Ok(Timestamp(naive))
+}
+
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]
 pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<Timestamptz> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
@@ -94,14 +102,6 @@ pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<Timestamptz> {
             time_zone,
         )
     })
-}
-
-#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
-pub fn timestamptz_at_time_zone(input: Timestamptz, time_zone: &str) -> Result<Timestamp> {
-    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
-    let instant_local = input.to_datetime_in_zone(time_zone);
-    let naive = instant_local.naive_local();
-    Ok(Timestamp(naive))
 }
 
 /// This operation is zone agnostic.

@@ -95,6 +95,7 @@ message GetStreamRequest {
     uint32 down_actor_id = 2;
     uint32 up_fragment_id = 3;
     uint32 down_fragment_id = 4;
+    uint32 database_id = 5;
   }
 
   oneof value {
