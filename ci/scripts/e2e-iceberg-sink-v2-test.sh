@@ -49,6 +49,7 @@ poetry run python main.py -t ./test_case/iceberg_select_empty_table.toml
 poetry run python main.py -t ./test_case/iceberg_source_equality_delete.toml
 poetry run python main.py -t ./test_case/iceberg_source_position_delete.toml
 poetry run python main.py -t ./test_case/iceberg_source_all_delete.toml
+poetry run python main.py -t ./test_case/iceberg_source_explain_for_delete.toml
 poetry run python main.py -t ./test_case/iceberg_predicate_pushdown.toml
 
 

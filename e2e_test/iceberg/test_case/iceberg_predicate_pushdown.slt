@@ -89,7 +89,7 @@ query I
 explain select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
 ----
    BatchExchange { order: [], dist: Single }
-   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: (((((i1 = 580) AND (i1 > 500)) AND (i1 < 600)) AND (i1 >= 550)) AND (i1 <= 590)) AND (i1 != 570) }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: (((((i1 = 580) AND (i1 > 500)) AND (i1 < 600)) AND (i1 >= 550)) AND (i1 <= 590)) AND (i1 != 570) }
 
 query I
 select i1 from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
@@ -100,7 +100,7 @@ query I
 explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
 ----
    BatchExchange { order: [], dist: Single }
-   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: i1 IN (5, 4, 1, 3, 2) }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 IN (5, 4, 1, 3, 2) }
 
 query I
 select i1 from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
@@ -122,7 +122,7 @@ explain select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
    BatchExchange { order: [], dist: Single }
    └─BatchProject { exprs: [i1] }
      └─BatchFilter { predicate: (i2 = i3) }
-       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], predicate: i1 > 500 }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 > 500 }
 
 query I
 select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
