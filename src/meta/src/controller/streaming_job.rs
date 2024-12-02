@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_LABEL;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
@@ -87,6 +88,7 @@ impl CatalogController {
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
+        job_label: String, // todo: can we move it to StreamContext?
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -96,6 +98,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
+            label: Set(job_label),
         };
         job.insert(txn).await?;
 
@@ -175,6 +178,9 @@ impl CatalogController {
             }
         }
 
+        // todo: should be derived from database;
+        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+
         let mut relations = vec![];
 
         match streaming_job {
@@ -189,6 +195,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    job_label,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -222,6 +229,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    job_label,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -239,6 +247,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    job_label,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -275,6 +284,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    job_label,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -306,6 +316,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    job_label,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -743,6 +754,8 @@ impl CatalogController {
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
+        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
             &txn,
@@ -754,6 +767,7 @@ impl CatalogController {
             ctx,
             parallelism,
             max_parallelism,
+            job_label,
         )
         .await?;
 
