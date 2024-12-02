@@ -624,8 +624,6 @@ impl StreamActorManager {
                     &shared_context,
                     &local_barrier_manager,
                 )
-                // If hummock tracing is not enabled, it directly returns wrapped future.
-                .may_trace_hummock()
                 .await?;
 
             let dispatcher = self.create_dispatcher(
@@ -683,8 +681,10 @@ impl StreamActorManager {
                 };
                 let instrumented = monitor.instrument(traced);
                 let with_config = crate::CONFIG.scope(self.env.config().clone(), instrumented);
+                // If hummock tracing is not enabled, it directly returns wrapped future.
+                let may_track_hummock = with_config.may_trace_hummock();
 
-                self.runtime.spawn(with_config)
+                self.runtime.spawn(may_track_hummock)
             };
 
             let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
