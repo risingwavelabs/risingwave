@@ -527,3 +527,8 @@ def quantile(f, percentiles):
     return list(
         map(lambda p: f(quantile_map[str(p)][0], quantile_map[str(p)][1]), percentiles)
     )
+
+
+def epoch_to_unix_millis(epoch_expr):
+    # UNIX_RISINGWAVE_DATE_SEC
+    return f"(1617235200000+({epoch_expr} != 0)/65536)"
