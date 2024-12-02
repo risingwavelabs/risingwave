@@ -63,6 +63,7 @@ pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::error::ErrorCode;
@@ -504,6 +505,10 @@ impl Binder {
             &self.search_path,
             &self.auth_context.user_name,
         )
+    }
+
+    fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {
+        SchemaPath::new(schema_name, &self.search_path, &self.auth_context.user_name)
     }
 
     pub fn set_clause(&mut self, clause: Option<Clause>) {
