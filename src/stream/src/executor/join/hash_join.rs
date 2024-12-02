@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::alloc::Global;
 use std::cmp::Ordering;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
@@ -45,6 +44,7 @@ use crate::consistency::{consistency_error, consistency_panic, enable_strict_con
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
+use crate::executor::StreamExecutorError;
 use crate::task::{ActorId, AtomicU64Ref, FragmentId};
 
 /// Memcomparable encoding.
@@ -224,6 +224,34 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     metrics: JoinHashMapMetrics,
 }
 
+impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
+    pub(crate) fn get_table_mut_refs(
+        &mut self,
+    ) -> (
+        &[usize],
+        &[DataType],
+        &[usize],
+        &OrderedRowSerde,
+        &mut StateTable<S>,
+        Option<&mut StateTable<S>>,
+    ) {
+        let degree_state = self.degree_state.as_mut();
+        let (order_key_indices, pk_indices, state_table) = (
+            &self.state.order_key_indices,
+            &self.state.pk_indices,
+            &mut self.state.table,
+        );
+        (
+            order_key_indices,                  // degree table update
+            &self.join_key_data_types,          // decode key from state_table
+            pk_indices,                         // decode pk from state_table
+            &self.pk_serializer,                // serialize pk for entry_state (state table)
+            state_table,                        // state table
+            degree_state.map(|d| &mut d.table), // for degree table
+        )
+    }
+}
+
 pub struct TableInner<S: StateStore> {
     /// Indices of the (cache) pk in a state row
     pk_indices: Vec<usize>,
@@ -363,6 +391,28 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.state.table.update_watermark(watermark.clone());
         if let Some(degree_state) = &mut self.degree_state {
             degree_state.table.update_watermark(watermark);
+        }
+    }
+
+    /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
+    /// `update_state` after some operations to put the state back.
+    ///
+    /// If the state does not exist in the cache, fetch the remote storage and return. If it still
+    /// does not exist in the remote storage, a [`JoinEntryState`] with empty cache will be
+    /// returned.
+    ///
+    /// Note: This will NOT remove anything from remote storage.
+    pub fn take_state_opt(&mut self, key: &K) -> Option<HashValueType> {
+        self.metrics.total_lookup_count += 1;
+        if self.inner.contains(key) {
+            tracing::debug!("hit cache for join key: {:?}", key);
+            // Do not update the LRU statistics here with `peek_mut` since we will put the state
+            // back.
+            let mut state = self.inner.peek_mut(key).unwrap();
+            Some(state.take())
+        } else {
+            tracing::debug!("miss cache for join key: {:?}", key);
+            None
         }
     }
 
@@ -563,6 +613,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(entry_state)
     }
 
+    pub fn error_context(&self, row: &impl Row) -> String {
+        self.state.error_context(row)
+    }
+
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
@@ -680,7 +734,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// memory and in the degree table.
     fn manipulate_degree(
         &mut self,
-        join_row_ref: &mut StateValueType,
         join_row: &mut JoinRow<OwnedRow>,
         action: impl Fn(&mut DegreeType),
     ) {
@@ -690,7 +743,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .1
             .into_owned_row();
 
-        action(&mut join_row_ref.degree);
         action(&mut join_row.degree);
 
         let new_degree = join_row.to_table_rows(&self.state.order_key_indices).1;
@@ -700,22 +752,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
     /// memory and in the degree table.
-    pub fn inc_degree(
-        &mut self,
-        join_row_ref: &mut StateValueType,
-        join_row: &mut JoinRow<OwnedRow>,
-    ) {
-        self.manipulate_degree(join_row_ref, join_row, |d| *d += 1)
+    pub fn inc_degree(&mut self, join_row: &mut JoinRow<OwnedRow>) {
+        self.manipulate_degree(join_row, |d| *d += 1)
     }
 
     /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
     /// memory and in the degree table.
-    pub fn dec_degree(
-        &mut self,
-        join_row_ref: &mut StateValueType,
-        join_row: &mut JoinRow<OwnedRow>,
-    ) {
-        self.manipulate_degree(join_row_ref, join_row, |d| {
+    pub fn dec_degree(&mut self, join_row: &mut JoinRow<OwnedRow>) {
+        self.manipulate_degree(join_row, |d| {
             *d = d.checked_sub(1).unwrap_or_else(|| {
                 consistency_panic!("Tried to decrement zero join row degree");
                 0
@@ -769,10 +813,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
+use risingwave_common::array::{Op, RowRef};
 use risingwave_common_estimate_size::KvSize;
+use risingwave_expr::expr::NonStrictExpression;
 use thiserror::Error;
 
 use super::*;
+use crate::executor::join::builder::JoinChunkBuilder;
+use crate::executor::prelude::try_stream;
+use crate::executor::Watermark;
 
 /// We manages a `HashMap` in memory for all entries belonging to a join key.
 /// When evicted, `cached` does not hold any entries.
