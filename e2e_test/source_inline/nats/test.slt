@@ -40,7 +40,7 @@ system ok
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
 
 statement ok
-alter table t_nats set streaming_parallelism to 6;
+alter table t_nats set PARALLELISM to 6;
 
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
@@ -56,7 +56,7 @@ system ok
 python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 6
 
 statement ok
-alter table t_nats set streaming_parallelism to 2;
+alter table t_nats set PARALLELISM to 2;
 
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
