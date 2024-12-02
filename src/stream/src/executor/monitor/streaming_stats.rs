@@ -254,7 +254,7 @@ impl StreamingMetrics {
         .relabel_debug_1(level);
 
         let materialize_current_epoch = register_guarded_int_gauge_vec_with_registry!(
-            "materialize_current_epoch",
+            "stream_mview_current_epoch",
             "The current epoch of the materialized executor",
             &["actor_id", "table_id", "fragment_id"],
             registry

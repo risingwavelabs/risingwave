@@ -456,7 +456,7 @@ class Panels:
             **self.common_options,
         )
 
-    def timeseries_id(self, title, description, targets):
+    def timeseries_epoch(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
