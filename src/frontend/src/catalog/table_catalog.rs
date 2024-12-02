@@ -182,6 +182,8 @@ pub struct TableCatalog {
     pub vnode_count: VnodeCount,
 
     pub webhook_info: Option<PbWebhookSourceInfo>,
+
+    pub job_id: Option<TableId>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -467,6 +469,7 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
+            job_id: self.job_id.map(|id| id.table_id),
         }
     }
 
@@ -660,6 +663,7 @@ impl From<PbTable> for TableCatalog {
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
+            job_id: tb.job_id.map(TableId::from),
         }
     }
 }
@@ -752,6 +756,7 @@ mod tests {
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
+            job_id: None,
         }
         .into();
 
@@ -820,6 +825,7 @@ mod tests {
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
                 webhook_info: None,
+                job_id: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

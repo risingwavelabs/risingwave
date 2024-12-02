@@ -243,7 +243,7 @@ impl From<PbTable> for ActiveModel {
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(None),
+            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),
