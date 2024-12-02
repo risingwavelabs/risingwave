@@ -228,6 +228,12 @@ impl common::WorkerNode {
             .expect("property should be exist")
             .parallelism as usize
     }
+
+    pub fn resource_group(&self) -> Option<String> {
+        self.property
+            .as_ref()
+            .and_then(|p| p.resource_group.clone())
+    }
 }
 
 impl stream_plan::SourceNode {

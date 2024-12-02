@@ -66,7 +66,8 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
 use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
+    check_subscription_name_duplicate, get_database_resource_group,
+    get_existing_job_resource_group, get_fragment_ids_by_jobs, get_internal_tables_by_id,
     rename_relation, rename_relation_refer,
 };
 use crate::controller::utils::{
@@ -2522,6 +2523,7 @@ impl CatalogController {
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
             name: Set(name.to_owned()),
+            ..Default::default()
         };
         let database = active_model.update(&txn).await?;
 
@@ -3227,6 +3229,19 @@ impl CatalogController {
             })
             .collect();
         Ok(res)
+    }
+
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        get_existing_job_resource_group(&inner.db, streaming_job_id).await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        get_database_resource_group(&inner.db, database_id).await
     }
 }
 
