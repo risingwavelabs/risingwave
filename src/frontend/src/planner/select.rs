@@ -320,7 +320,7 @@ impl Planner {
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
-    fn substitute_subqueries(
+    pub(super) fn substitute_subqueries(
         &mut self,
         mut root: PlanRef,
         mut exprs: Vec<ExprImpl>,
@@ -366,10 +366,27 @@ impl Planner {
             .zip_eq_fast(rewriter.correlated_indices_collection)
             .zip_eq_fast(rewriter.correlated_ids)
         {
+            let return_type = subquery.return_type();
             let subroot = self.plan_query(subquery.query)?;
 
             let right = match subquery.kind {
                 SubqueryKind::Scalar => subroot.into_unordered_subplan(),
+                SubqueryKind::UpdateSet => {
+                    let plan = subroot.into_unordered_subplan();
+
+                    // Compose all input columns into a struct with `ROW` function.
+                    let all_input_refs = plan
+                        .schema()
+                        .data_types()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, data_type)| InputRef::new(i, data_type).into())
+                        .collect::<Vec<_>>();
+                    let call =
+                        FunctionCall::new_unchecked(ExprType::Row, all_input_refs, return_type);
+
+                    LogicalProject::create(plan, vec![call.into()])
+                }
                 SubqueryKind::Existential => {
                     self.create_exists(subroot.into_unordered_subplan())?
                 }

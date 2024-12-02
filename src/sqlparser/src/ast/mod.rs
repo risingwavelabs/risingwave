@@ -38,8 +38,8 @@ use winnow::PResult;
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
-    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption,
+    ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{
     get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
@@ -52,8 +52,8 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, SecretRef,
-    SecretRefAsType, TrimWhereField, Value,
+    ConnectionRefValue, CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType,
+    SecretRefAsType, SecretRefValue, TrimWhereField, Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
@@ -1141,6 +1141,7 @@ pub enum ExplainFormat {
     Json,
     Xml,
     Yaml,
+    Dot,
 }
 
 impl fmt::Display for ExplainFormat {
@@ -1150,6 +1151,7 @@ impl fmt::Display for ExplainFormat {
             ExplainFormat::Json => f.write_str("JSON"),
             ExplainFormat::Xml => f.write_str("XML"),
             ExplainFormat::Yaml => f.write_str("YAML"),
+            ExplainFormat::Dot => f.write_str("DOT"),
         }
     }
 }
@@ -1306,6 +1308,8 @@ pub enum Statement {
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
         include_column_options: IncludeOption,
+        /// `VALIDATE SECRET secure_secret_name AS secure_compare ()`
+        webhook_info: Option<WebhookSourceInfo>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1435,6 +1439,13 @@ pub enum Statement {
         /// Connection name
         name: ObjectName,
         operation: AlterConnectionOperation,
+    },
+    /// ALTER SECRET
+    AlterSecret {
+        /// Secret name
+        name: ObjectName,
+        with_options: Vec<SqlOption>,
+        operation: AlterSecretOperation,
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
@@ -1839,6 +1850,7 @@ impl fmt::Display for Statement {
                 query,
                 cdc_table_info,
                 include_column_options,
+                webhook_info,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1887,6 +1899,10 @@ impl fmt::Display for Statement {
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
+                }
+                if let Some(info)= webhook_info {
+                    write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
+                    write!(f, " AS {}", info.signature_expr)?;
                 }
                 Ok(())
             }
@@ -1964,6 +1980,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
+            }
+            Statement::AlterSecret { name, with_options, operation } => {
+                write!(f, "ALTER SECRET {}", name)?;
+                if !with_options.is_empty() {
+                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
+                }
+                write!(f, " {}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
@@ -2734,7 +2757,7 @@ impl ParseTo for ObjectType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
     pub name: ObjectName,
-    pub value: Value,
+    pub value: SqlOptionValue,
 }
 
 impl fmt::Display for SqlOption {
@@ -2750,6 +2773,44 @@ impl fmt::Display for SqlOption {
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SqlOptionValue {
+    Value(Value),
+    SecretRef(SecretRefValue),
+    ConnectionRef(ConnectionRefValue),
+}
+
+impl fmt::Debug for SqlOptionValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
+                write!(f, "connection {:?}", connection_ref)
+            }
+        }
+    }
+}
+
+impl fmt::Display for SqlOptionValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SqlOptionValue::Value(value) => write!(f, "{}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
+                write!(f, "connection {}", connection_ref)
+            }
+        }
+    }
+}
+
+impl From<Value> for SqlOptionValue {
+    fn from(value: Value) -> Self {
+        SqlOptionValue::Value(value)
     }
 }
 
@@ -3146,7 +3207,10 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
         let mut always_retry_on_network_error = None;
         for option in with_options {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
-                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+                always_retry_on_network_error = Some(matches!(
+                    option.value,
+                    SqlOptionValue::Value(Value::Boolean(true))
+                ));
             } else {
                 return Err(StrError(format!("Unsupported option: {}", option.name)));
             }

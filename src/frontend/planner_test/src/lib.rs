@@ -435,6 +435,7 @@ impl TestCase {
                     cdc_table_info,
                     include_column_options,
                     wildcard_idx,
+                    webhook_info,
                     ..
                 } => {
                     let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
@@ -453,6 +454,7 @@ impl TestCase {
                         with_version_column,
                         cdc_table_info,
                         include_column_options,
+                        webhook_info,
                     )
                     .await?;
                 }
@@ -850,6 +852,7 @@ impl TestCase {
                     false,
                     None,
                     None,
+                    false,
                 ) {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));

@@ -227,7 +227,7 @@ impl Fragment {
         self.r
             .worker_nodes
             .iter()
-            .map(|w| (w.id, w.parallelism as usize))
+            .map(|w| (w.id, w.parallelism()))
             .collect()
     }
 
@@ -361,14 +361,12 @@ impl Cluster {
         Ok(response)
     }
 
-    /// `table_id -> actor_id -> splits`
-    pub async fn list_source_splits(&self) -> Result<BTreeMap<u32, BTreeMap<u32, String>>> {
+    /// `actor_id -> splits`
+    pub async fn list_source_splits(&self) -> Result<BTreeMap<u32, String>> {
         let info = self.get_cluster_info().await?;
         let mut res = BTreeMap::new();
 
         for table in info.table_fragments {
-            let mut table_actor_splits = BTreeMap::new();
-
             for (actor_id, splits) in table.actor_splits {
                 let splits = splits
                     .splits
@@ -377,9 +375,8 @@ impl Cluster {
                     .map(|split| split.id())
                     .collect_vec()
                     .join(",");
-                table_actor_splits.insert(actor_id, splits);
+                res.insert(actor_id, splits);
             }
-            res.insert(table.table_id, table_actor_splits);
         }
 
         Ok(res)

@@ -33,7 +33,7 @@ use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, TableFragments, TableParallelism};
+use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{RescheduleOptions, TableResizePolicy};
 use crate::{model, MetaResult};
 
@@ -66,7 +66,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn recover_background_mv_progress(
         &self,
-    ) -> MetaResult<HashMap<TableId, (String, TableFragments)>> {
+    ) -> MetaResult<HashMap<TableId, (String, StreamJobFragments)>> {
         let mgr = &self.metadata_manager;
         let mviews = mgr
             .catalog_controller
@@ -80,14 +80,17 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .get_job_fragments_by_id(mview.table_id)
                 .await?;
-            let table_fragments = TableFragments::from_protobuf(table_fragments);
-            if table_fragments.tracking_progress_actor_ids().is_empty() {
+            let stream_job_fragments = StreamJobFragments::from_protobuf(table_fragments);
+            if stream_job_fragments
+                .tracking_progress_actor_ids()
+                .is_empty()
+            {
                 // If there's no tracking actor in the mview, we can finish the job directly.
                 mgr.catalog_controller
                     .finish_streaming_job(mview.table_id, None)
                     .await?;
             } else {
-                mview_map.insert(table_id, (mview.definition.clone(), table_fragments));
+                mview_map.insert(table_id, (mview.definition.clone(), stream_job_fragments));
             }
         }
 
@@ -131,7 +134,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered mview progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel();
+                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
 
                     let mut active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -175,7 +178,7 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     };
 
-                    if self.scheduled_barriers.pre_apply_drop_cancel() {
+                    if self.scheduled_barriers.pre_apply_drop_cancel(None) {
                         info = self.resolve_graph_info().await.inspect_err(|err| {
                             warn!(error = %err.as_report(), "resolve actor info failed");
                         })?
@@ -264,9 +267,7 @@ impl GlobalBarrierWorkerContextImpl {
         let active_worker_slots: HashSet<_> = active_nodes
             .current()
             .values()
-            .flat_map(|node| {
-                (0..node.parallelism).map(|idx| WorkerSlotId::new(node.id, idx as usize))
-            })
+            .flat_map(|node| (0..node.parallelism()).map(|idx| WorkerSlotId::new(node.id, idx)))
             .collect();
 
         let expired_worker_slots: BTreeSet<_> = all_inuse_worker_slots
@@ -295,7 +296,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .current()
                 .values()
                 .flat_map(|worker| {
-                    (0..worker.parallelism).map(move |i| WorkerSlotId::new(worker.id, i as _))
+                    (0..worker.parallelism()).map(move |i| WorkerSlotId::new(worker.id, i as _))
                 })
                 .collect_vec();
 
@@ -313,7 +314,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .current()
                         .values()
                         .flat_map(|worker| {
-                            (0..worker.parallelism * factor)
+                            (0..worker.parallelism() * factor)
                                 .map(move |i| WorkerSlotId::new(worker.id, i as _))
                         })
                         .collect_vec();
@@ -369,7 +370,7 @@ impl GlobalBarrierWorkerContextImpl {
                         let current_nodes = active_nodes
                             .current()
                             .values()
-                            .map(|node| (node.id, &node.host, node.parallelism))
+                            .map(|node| (node.id, &node.host, node.parallelism()))
                             .collect_vec();
                         warn!(
                             current_nodes = ?current_nodes,
@@ -410,7 +411,7 @@ impl GlobalBarrierWorkerContextImpl {
         let available_parallelism = active_nodes
             .current()
             .values()
-            .map(|worker_node| worker_node.parallelism as usize)
+            .map(|worker_node| worker_node.parallelism())
             .sum();
 
         let table_parallelisms: HashMap<_, _> = {

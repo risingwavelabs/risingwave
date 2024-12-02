@@ -1,0 +1,104 @@
+# Deletions in a single commit are posistion delete, deletions across multiple commits are equail delete. sink_decouple = false, so we'll commit every 1s.
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_explain_for_delete',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    primary_key = 'i1,i2',
+);
+
+statement ok
+insert into s1 values(1,'2','3');
+
+statement ok
+insert into s1 values(7,'8','9');
+
+statement ok
+insert into s1 values(4,'5','6');
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    database.name = 'demo_db',
+    table.name = 'test_explain_for_delete',
+);
+
+statement ok
+flush;
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
+7 8 9
+
+query I
+explain select * from iceberg_t1_source;
+----
+ BatchExchange { order: [], dist: Single }
+ └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: TRUE }
+
+statement ok
+flush;
+
+statement ok
+delete from s1 where i1 = 7;
+
+statement ok
+flush;
+
+sleep 5s
+
+query I
+select * from iceberg_t1_source order by i1;
+----
+1 2 3
+4 5 6
+
+query I
+explain select * from iceberg_t1_source;
+----
+ BatchExchange { order: [], dist: Single }
+ └─BatchHashJoin { type: LeftAnti, predicate: i1 = i1 AND i2 = i2 AND (_iceberg_sequence_number < _iceberg_sequence_number) }
+   ├─BatchExchange { order: [], dist: HashShard(i1, i2) }
+   │ └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3, _iceberg_sequence_number], iceberg_scan_type: DataScan, predicate: TRUE }
+   └─BatchExchange { order: [], dist: HashShard(i1, i2) }
+     └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, _iceberg_sequence_number], iceberg_scan_type: EqualityDeleteScan, predicate: TRUE }
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source;
+
+statement ok
+DROP TABLE s1 cascade;

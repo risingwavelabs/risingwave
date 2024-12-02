@@ -50,3 +50,9 @@
     select distinct on (4) * from t;
   expected_outputs:
     - binder_error
+# Issue #19608
+- sql: |
+    create table t (a int, b int, c int);
+    WITH s AS (SELECT DISTINCT ON (a+1) true as id, * FROM t) SELECT a,b,c from s;
+  expected_outputs:
+    - batch_plan

@@ -14,13 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
     connection, database, function, index, object, schema, secret, sink, source, subscription,
-    table, view,
+    table, view, PrivateLinkService,
 };
+use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
@@ -32,7 +33,7 @@ use risingwave_pb::catalog::{
 };
 use sea_orm::{DatabaseConnection, ModelTrait};
 
-use crate::MetaError;
+use crate::{MetaError, MetaResult};
 
 pub mod catalog;
 pub mod cluster;
@@ -59,21 +60,56 @@ impl From<sea_orm::DbErr> for MetaError {
 #[derive(Clone)]
 pub struct SqlMetaStore {
     pub conn: DatabaseConnection,
+    pub endpoint: String,
 }
 
 pub const IN_MEMORY_STORE: &str = "sqlite::memory:";
 
 impl SqlMetaStore {
-    pub fn new(conn: DatabaseConnection) -> Self {
-        Self { conn }
+    pub fn new(conn: DatabaseConnection, endpoint: String) -> Self {
+        Self { conn, endpoint }
     }
 
     #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
-        use risingwave_meta_model_migration::{Migrator, MigratorTrait};
         let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
-        Self { conn }
+        Self {
+            conn,
+            endpoint: IN_MEMORY_STORE.to_string(),
+        }
+    }
+
+    /// Check whether the cluster, which uses SQL as the backend, is a new cluster.
+    /// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
+    /// then it is considered an old cluster.
+    ///
+    /// Note: this check should be performed before [`Self::up()`].
+    async fn is_first_launch(&self) -> MetaResult<bool> {
+        let migrations = Migrator::get_applied_migrations(&self.conn)
+            .await
+            .context("failed to get applied migrations")?;
+        for migration in migrations {
+            if migration.name() == "m20230908_072257_init"
+                && migration.status() == MigrationStatus::Applied
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Apply all the migrations to the meta store before starting the service.
+    ///
+    /// Returns whether the cluster is the first launch.
+    pub async fn up(&self) -> MetaResult<bool> {
+        let cluster_first_launch = self.is_first_launch().await?;
+        // Try to upgrade if any new model changes are added.
+        Migrator::up(&self.conn, None)
+            .await
+            .context("failed to upgrade models in meta store")?;
+
+        Ok(cluster_first_launch)
     }
 }
 
@@ -166,6 +202,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             retention_seconds: value.0.retention_seconds.map(|id| id as u32),
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
+            webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
         }
     }
 }
@@ -216,6 +253,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
         if let Some(secret_ref) = value.0.secret_ref {
             secret_ref_map = secret_ref.to_protobuf();
         }
+        #[allow(deprecated)] // for `dependent_relations`
         Self {
             id: value.0.sink_id as _,
             schema_id: value.1.schema_id.unwrap() as _,
@@ -223,7 +261,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             name: value.0.name,
             columns: value.0.columns.to_protobuf(),
             plan_pk: value.0.plan_pk.to_protobuf(),
-            dependent_relations: vec![], // todo: deprecate it.
+            dependent_relations: vec![],
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
@@ -327,15 +365,18 @@ impl From<ObjectModel<view::Model>> for PbView {
 
 impl From<ObjectModel<connection::Model>> for PbConnection {
     fn from(value: ObjectModel<connection::Model>) -> Self {
+        let info: PbConnectionInfo = if value.0.info == PrivateLinkService::default() {
+            PbConnectionInfo::ConnectionParams(value.0.params.to_protobuf())
+        } else {
+            PbConnectionInfo::PrivateLinkService(value.0.info.to_protobuf())
+        };
         Self {
             id: value.1.oid as _,
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
-            info: Some(PbConnectionInfo::PrivateLinkService(
-                value.0.info.to_protobuf(),
-            )),
+            info: Some(info),
         }
     }
 }

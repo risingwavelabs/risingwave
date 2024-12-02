@@ -12,22 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::types::StructType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::error::{bail_bind_error, bind_error, ErrorCode, Result, RwError};
+use crate::expr::{Expr as _, ExprImpl, SubqueryKind};
 use crate::user::UserId;
 use crate::TableCatalog;
+
+/// Project into `exprs` in `BoundUpdate` to get the new values for updating.
+#[derive(Debug, Clone, Copy)]
+pub enum UpdateProject {
+    /// Use the expression at the given index in `exprs`.
+    Simple(usize),
+    /// Use the `i`-th field of the expression (returning a struct) at the given index in `exprs`.
+    Composite(usize, usize),
+}
+
+impl UpdateProject {
+    /// Offset the index by `i`.
+    pub fn offset(self, i: usize) -> Self {
+        match self {
+            UpdateProject::Simple(index) => UpdateProject::Simple(index + i),
+            UpdateProject::Composite(index, j) => UpdateProject::Composite(index + i, j),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct BoundUpdate {
@@ -48,9 +67,13 @@ pub struct BoundUpdate {
 
     pub selection: Option<ExprImpl>,
 
-    /// Expression used to project to the updated row. The assigned columns will use the new
-    /// expression, and the other columns will be simply `InputRef`.
+    /// Expression used to evaluate the new values for the columns.
     pub exprs: Vec<ExprImpl>,
+
+    /// Mapping from the index of the column to be updated, to the index of the expression in `exprs`.
+    ///
+    /// By constructing two `Project` nodes with `exprs` and `projects`, we can get the new values.
+    pub projects: HashMap<usize, UpdateProject>,
 
     // used for the 'RETURNING" keyword to indicate the returning items and schema
     // if the list is empty and the schema is None, the output schema will be a INT64 as the
@@ -124,107 +147,115 @@ impl Binder {
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
-        let mut assignment_exprs = HashMap::new();
-        for Assignment { id, value } in assignments {
-            // FIXME: Parsing of `id` is not strict. It will even treat `a.b` as `(a, b)`.
-            let assignments = match (id.as_slice(), value) {
-                // _ = (subquery)
-                (_ids, AssignmentValue::Expr(Expr::Subquery(_))) => {
-                    return Err(ErrorCode::BindError(
-                        "subquery on the right side of assignment is unsupported".to_owned(),
-                    )
-                    .into())
-                }
-                // col = expr
-                ([id], value) => {
-                    vec![(id.clone(), value)]
-                }
-                // (col1, col2) = (expr1, expr2)
-                // TODO: support `DEFAULT` in multiple assignments
-                (ids, AssignmentValue::Expr(Expr::Row(values))) if ids.len() == values.len() => id
-                    .into_iter()
-                    .zip_eq_fast(values.into_iter().map(AssignmentValue::Expr))
-                    .collect(),
-                // (col1, col2) = <other expr>
-                _ => {
-                    return Err(ErrorCode::BindError(
-                        "number of columns does not match number of values".to_owned(),
-                    )
-                    .into())
-                }
+        let mut exprs = Vec::new();
+        let mut projects = HashMap::new();
+
+        macro_rules! record {
+            ($id:expr, $project:expr) => {
+                let id_index = $id.as_input_ref().unwrap().index;
+                projects
+                    .try_insert(id_index, $project)
+                    .map_err(|_e| bind_error!("multiple assignments to the same column"))?;
             };
+        }
 
-            for (id, value) in assignments {
-                let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
-                let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
-                    let id_index = id_input_ref.index;
-                    if table
-                        .table_catalog
-                        .pk()
-                        .iter()
-                        .any(|k| k.column_index == id_index)
-                    {
-                        return Err(ErrorCode::BindError(
-                            "update modifying the PK column is unsupported".to_owned(),
-                        )
-                        .into());
-                    }
-                    if table
-                        .table_catalog
-                        .generated_col_idxes()
-                        .contains(&id_index)
-                    {
-                        return Err(ErrorCode::BindError(
-                            "update modifying the generated column is unsupported".to_owned(),
-                        )
-                        .into());
-                    }
-                    if cols_refed_by_generated_pk.contains(id_index) {
-                        return Err(ErrorCode::BindError(
-                            "update modifying the column referenced by generated columns that are part of the primary key is not allowed".to_owned(),
-                        )
-                        .into());
-                    }
-                    id_index
-                } else {
-                    unreachable!()
-                };
+        for Assignment { id, value } in assignments {
+            let ids: Vec<_> = id
+                .iter()
+                .map(|id| self.bind_expr(Expr::Identifier(id.clone())))
+                .try_collect()?;
 
-                let value_expr = match value {
-                    AssignmentValue::Expr(expr) => {
-                        self.bind_expr(expr)?.cast_assign(id_expr.return_type())?
-                    }
-                    AssignmentValue::Default => default_columns_from_catalog
-                        .get(&id_index)
-                        .cloned()
-                        .unwrap_or_else(|| ExprImpl::literal_null(id_expr.return_type())),
-                };
+            match (ids.as_slice(), value) {
+                // `SET col1 = DEFAULT`, `SET (col1, col2, ...) = DEFAULT`
+                (ids, AssignmentValue::Default) => {
+                    for id in ids {
+                        let id_index = id.as_input_ref().unwrap().index;
+                        let expr = default_columns_from_catalog
+                            .get(&id_index)
+                            .cloned()
+                            .unwrap_or_else(|| ExprImpl::literal_null(id.return_type()));
 
-                match assignment_exprs.entry(id_expr) {
-                    Entry::Occupied(_) => {
-                        return Err(ErrorCode::BindError(
-                            "multiple assignments to same column".to_owned(),
-                        )
-                        .into())
+                        exprs.push(expr);
+                        record!(id, UpdateProject::Simple(exprs.len() - 1));
                     }
-                    Entry::Vacant(v) => {
-                        v.insert(value_expr);
+                }
+
+                // `SET col1 = expr`
+                ([id], AssignmentValue::Expr(expr)) => {
+                    let expr = self.bind_expr(expr)?.cast_assign(id.return_type())?;
+                    exprs.push(expr);
+                    record!(id, UpdateProject::Simple(exprs.len() - 1));
+                }
+                // `SET (col1, col2, ...) = (val1, val2, ...)`
+                (ids, AssignmentValue::Expr(Expr::Row(values))) => {
+                    if ids.len() != values.len() {
+                        bail_bind_error!("number of columns does not match number of values");
                     }
+
+                    for (id, value) in ids.iter().zip_eq_fast(values) {
+                        let expr = self.bind_expr(value)?.cast_assign(id.return_type())?;
+                        exprs.push(expr);
+                        record!(id, UpdateProject::Simple(exprs.len() - 1));
+                    }
+                }
+                // `SET (col1, col2, ...) = (SELECT ...)`
+                (ids, AssignmentValue::Expr(Expr::Subquery(subquery))) => {
+                    let expr = self.bind_subquery_expr(*subquery, SubqueryKind::UpdateSet)?;
+
+                    if expr.return_type().as_struct().len() != ids.len() {
+                        bail_bind_error!("number of columns does not match number of values");
+                    }
+
+                    let target_type = StructType::new(
+                        id.iter()
+                            .zip_eq_fast(ids)
+                            .map(|(id, expr)| (id.real_value(), expr.return_type())),
+                    )
+                    .into();
+                    let expr = expr.cast_assign(target_type)?;
+
+                    exprs.push(expr);
+
+                    for (i, id) in ids.iter().enumerate() {
+                        record!(id, UpdateProject::Composite(exprs.len() - 1, i));
+                    }
+                }
+
+                (_ids, AssignmentValue::Expr(_expr)) => {
+                    bail_bind_error!("source for a multiple-column UPDATE item must be a sub-SELECT or ROW() expression");
                 }
             }
         }
 
-        let exprs = table
-            .table_catalog
-            .columns()
-            .iter()
-            .enumerate()
-            .filter_map(|(i, c)| {
-                c.can_dml()
-                    .then_some(InputRef::new(i, c.data_type().clone()).into())
-            })
-            .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
-            .collect_vec();
+        // Check whether updating these columns is allowed.
+        for &id_index in projects.keys() {
+            if (table.table_catalog.pk())
+                .iter()
+                .any(|k| k.column_index == id_index)
+            {
+                return Err(ErrorCode::BindError(
+                    "update modifying the PK column is unsupported".to_owned(),
+                )
+                .into());
+            }
+            if (table.table_catalog.generated_col_idxes()).contains(&id_index) {
+                return Err(ErrorCode::BindError(
+                    "update modifying the generated column is unsupported".to_owned(),
+                )
+                .into());
+            }
+            if cols_refed_by_generated_pk.contains(id_index) {
+                return Err(ErrorCode::BindError(
+                    "update modifying the column referenced by generated columns that are part of the primary key is not allowed".to_owned(),
+                )
+                .into());
+            }
+
+            let col = &table.table_catalog.columns()[id_index];
+            if !col.can_dml() {
+                bail_bind_error!("update modifying column `{}` is unsupported", col.name());
+            }
+        }
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let returning = !returning_list.is_empty();
@@ -236,6 +267,7 @@ impl Binder {
             owner,
             table,
             selection,
+            projects,
             exprs,
             returning_list,
             returning_schema: if returning {

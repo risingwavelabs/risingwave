@@ -27,6 +27,7 @@ pub struct Model {
     pub is_serving: bool,
     pub is_unschedulable: bool,
     pub internal_rpc_host_addr: Option<String>,
+    pub label: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

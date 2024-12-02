@@ -36,22 +36,25 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, Table, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, GeneratedColumnDesc,
 };
+use risingwave_pb::secret::secret_ref::PbRefAsType;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, ObjectName, OnConflict, SourceWatermark, TableConstraint,
+    CdcTableInfo, ColumnDef, ColumnOption, DataType, DataType as AstDataType, ExplainOptions,
+    Format, FormatEncodeOptions, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
+    TableConstraint, WebhookSourceInfo,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
-use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
@@ -506,6 +509,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         include_column_options,
         &mut col_id_gen,
         false,
+        false,
         rate_limit,
     )
     .await?;
@@ -540,6 +544,7 @@ pub(crate) fn gen_create_table_plan(
     append_only: bool,
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
@@ -547,9 +552,9 @@ pub(crate) fn gen_create_table_plan(
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
 
-    let (_, secret_refs) = context.with_options().clone().into_parts();
-    if !secret_refs.is_empty() {
-        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference is not allowed in options when creating table without external source".to_string()).into());
+    let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
+    if !secret_refs.is_empty() || !connection_refs.is_empty() {
+        return Err(crate::error::ErrorCode::InvalidParameterValue("Secret reference and Connection reference are not allowed in options when creating table without external source".to_string()).into());
     }
 
     gen_create_table_plan_without_source(
@@ -564,6 +569,7 @@ pub(crate) fn gen_create_table_plan(
         on_conflict,
         with_version_column,
         Some(col_id_gen.into_version()),
+        webhook_info,
     )
 }
 
@@ -580,6 +586,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     version: Option<TableVersion>,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
     let (mut columns, pk_column_ids, row_id_index) =
@@ -621,6 +628,7 @@ pub(crate) fn gen_create_table_plan_without_source(
         None,
         database_id,
         schema_id,
+        webhook_info,
     )
 }
 
@@ -651,6 +659,7 @@ fn gen_table_plan_with_source(
         Some(cloned_source_catalog),
         database_id,
         schema_id,
+        None,
     )
 }
 
@@ -671,6 +680,7 @@ fn gen_table_plan_inner(
     source_catalog: Option<SourceCatalog>,
     database_id: DatabaseId,
     schema_id: SchemaId,
+    webhook_info: Option<PbWebhookSourceInfo>,
 ) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
@@ -741,6 +751,7 @@ fn gen_table_plan_inner(
         is_external_source,
         retention_seconds,
         None,
+        webhook_info,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -866,6 +877,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         true,
         None,
         Some(cdc_table_id),
+        None,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -947,6 +959,7 @@ pub(super) async fn handle_create_table_plan(
     on_conflict: Option<OnConflict>,
     with_version_column: Option<String>,
     include_column_options: IncludeOption,
+    webhook_info: Option<WebhookSourceInfo>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
@@ -956,116 +969,161 @@ pub(super) async fn handle_create_table_plan(
         &cdc_table_info,
     )?;
 
-    let ((plan, source, table), job_type) =
-        match (format_encode, cdc_table_info.as_ref()) {
-            (Some(format_encode), None) => (
-                gen_create_table_plan_with_source(
-                    handler_args,
-                    explain_options,
-                    table_name.clone(),
-                    column_defs,
-                    wildcard_idx,
-                    constraints,
-                    format_encode,
-                    source_watermarks,
-                    col_id_gen,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                )
-                .await?,
-                TableJobType::General,
-            ),
-            (None, None) => {
-                let context = OptimizerContext::new(handler_args, explain_options);
-                let (plan, table) = gen_create_table_plan(
-                    context,
-                    table_name.clone(),
-                    column_defs,
-                    constraints,
-                    col_id_gen,
-                    source_watermarks,
-                    append_only,
-                    on_conflict,
-                    with_version_column,
+    let ((plan, source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
+        (Some(format_encode), None) => (
+            gen_create_table_plan_with_source(
+                handler_args,
+                explain_options,
+                table_name.clone(),
+                column_defs,
+                wildcard_idx,
+                constraints,
+                format_encode,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+            )
+            .await?,
+            TableJobType::General,
+        ),
+        (None, None) => {
+            let webhook_info = webhook_info
+                .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
+                .transpose()?;
+
+            let context = OptimizerContext::new(handler_args, explain_options);
+            let (plan, table) = gen_create_table_plan(
+                context,
+                table_name.clone(),
+                column_defs,
+                constraints,
+                col_id_gen,
+                source_watermarks,
+                append_only,
+                on_conflict,
+                with_version_column,
+                webhook_info,
+            )?;
+
+            ((plan, None, table), TableJobType::General)
+        }
+
+        (None, Some(cdc_table)) => {
+            sanity_check_for_cdc_table(
+                append_only,
+                &column_defs,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
+            let session = &handler_args.session;
+            let db_name = session.database();
+            let (schema_name, resolved_table_name) =
+                Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+            let (database_id, schema_id) =
+                session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+            // cdc table cannot be append-only
+            let (format_encode, source_name) =
+                Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+
+            let source = {
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                let schema_name = format_encode
+                    .clone()
+                    .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+                let (source, _) = catalog_reader.get_source_by_name(
+                    db_name,
+                    SchemaPath::Name(schema_name.as_str()),
+                    source_name.as_str(),
                 )?;
+                source.clone()
+            };
+            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
+                &source.with_properties,
+                cdc_table.external_table_name.clone(),
+            )?;
 
-                ((plan, None, table), TableJobType::General)
-            }
+            let (columns, pk_names) = match wildcard_idx {
+                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                None => {
+                    for column_def in &column_defs {
+                        for option_def in &column_def.options {
+                            if let ColumnOption::DefaultColumns(_) = option_def.option {
+                                return Err(ErrorCode::NotSupported(
+                                            "Default value for columns defined on the table created from a CDC source".into(),
+                                            "Remove the default value expression in the column definitions".into(),
+                                        )
+                                            .into());
+                            }
+                        }
+                    }
 
-            (None, Some(cdc_table)) => {
-                sanity_check_for_cdc_table(
-                    append_only,
-                    &column_defs,
-                    &wildcard_idx,
-                    &constraints,
-                    &source_watermarks,
-                )?;
+                    let (mut columns, pk_names) =
+                        bind_cdc_table_schema(&column_defs, &constraints, None)?;
+                    // read default value definition from external db
+                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
+                    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                        .context("failed to extract external table config")?;
 
-                let session = &handler_args.session;
-                let db_name = session.database();
-                let (schema_name, resolved_table_name) =
-                    Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-                let (database_id, schema_id) =
-                    session.get_database_and_schema_id_for_create(schema_name.clone())?;
+                    let table = ExternalTableImpl::connect(config)
+                        .await
+                        .context("failed to auto derive table schema")?;
+                    let external_columns: Vec<_> = table
+                        .column_descs()
+                        .iter()
+                        .cloned()
+                        .map(|column_desc| ColumnCatalog {
+                            column_desc,
+                            is_hidden: false,
+                        })
+                        .collect();
+                    for (col, external_col) in
+                        columns.iter_mut().zip_eq_fast(external_columns.into_iter())
+                    {
+                        col.column_desc.generated_or_default_column =
+                            external_col.column_desc.generated_or_default_column;
+                    }
+                    (columns, pk_names)
+                }
+            };
 
-                // cdc table cannot be append-only
-                let (format_encode, source_name) =
-                    Binder::resolve_schema_qualified_name(db_name, cdc_table.source_name.clone())?;
+            let context: OptimizerContextRef =
+                OptimizerContext::new(handler_args, explain_options).into();
+            let (plan, table) = gen_create_table_plan_for_cdc_table(
+                context,
+                source,
+                cdc_table.external_table_name.clone(),
+                column_defs,
+                columns,
+                pk_names,
+                cdc_with_options,
+                col_id_gen,
+                on_conflict,
+                with_version_column,
+                include_column_options,
+                table_name,
+                resolved_table_name,
+                database_id,
+                schema_id,
+                TableId::placeholder(),
+            )?;
 
-                let source = {
-                    let catalog_reader = session.env().catalog_reader().read_guard();
-                    let schema_name = format_encode
-                        .clone()
-                        .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
-                    let (source, _) = catalog_reader.get_source_by_name(
-                        db_name,
-                        SchemaPath::Name(schema_name.as_str()),
-                        source_name.as_str(),
-                    )?;
-                    source.clone()
-                };
-                let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                    &source.with_properties,
-                    cdc_table.external_table_name.clone(),
-                )?;
-
-                let (columns, pk_names) = match wildcard_idx {
-                    Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
-                    None => bind_cdc_table_schema(&column_defs, &constraints, None)?,
-                };
-
-                let context: OptimizerContextRef =
-                    OptimizerContext::new(handler_args, explain_options).into();
-                let (plan, table) = gen_create_table_plan_for_cdc_table(
-                    context,
-                    source,
-                    cdc_table.external_table_name.clone(),
-                    column_defs,
-                    columns,
-                    pk_names,
-                    cdc_with_options,
-                    col_id_gen,
-                    on_conflict,
-                    with_version_column,
-                    include_column_options,
-                    table_name,
-                    resolved_table_name,
-                    database_id,
-                    schema_id,
-                    TableId::placeholder(),
-                )?;
-
-                ((plan, None, table), TableJobType::SharedCdcSource)
-            }
-            (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+            ((plan, None, table), TableJobType::SharedCdcSource)
+        }
+        (Some(_), Some(_)) => {
+            return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
-            .into()),
-        };
+            .into())
+        }
+    };
     Ok((plan, source, table, job_type))
 }
 
@@ -1214,6 +1272,7 @@ pub async fn handle_create_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     include_column_options: IncludeOption,
+    webhook_info: Option<WebhookSourceInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -1246,6 +1305,7 @@ pub async fn handle_create_table(
             on_conflict,
             with_version_column,
             include_column_options,
+            webhook_info,
         )
         .await?;
 
@@ -1278,7 +1338,8 @@ pub fn check_create_table_with_source(
     if cdc_table_info.is_some() {
         return Ok(format_encode);
     }
-    let defined_source = with_options.contains_key(UPSTREAM_SOURCE_KEY);
+    let defined_source = with_options.is_source_connector();
+
     if !include_column_options.is_empty() && !defined_source {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),
@@ -1310,6 +1371,7 @@ pub async fn generate_stream_graph_for_replace_table(
     with_version_column: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
     new_version_columns: Option<Vec<ColumnCatalog>>,
+    include_column_options: IncludeOption,
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
@@ -1328,7 +1390,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 append_only,
                 on_conflict,
                 with_version_column,
-                vec![],
+                include_column_options,
             )
             .await?,
             TableJobType::General,
@@ -1345,6 +1407,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 append_only,
                 on_conflict,
                 with_version_column,
+                original_catalog.webhook_info.clone(),
             )?;
             ((plan, None, table), TableJobType::General)
         }
@@ -1448,12 +1511,71 @@ fn get_source_and_resolved_table_name(
     Ok((source, resolved_table_name, database_id, schema_id))
 }
 
+// validate the webhook_info and also bind the webhook_info to protobuf
+fn bind_webhook_info(
+    session: &Arc<SessionImpl>,
+    columns_defs: &[ColumnDef],
+    webhook_info: WebhookSourceInfo,
+) -> Result<PbWebhookSourceInfo> {
+    // validate columns
+    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &DataType::Jsonb {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Table with webhook source should have exactly one JSONB column".to_owned(),
+        )
+        .into());
+    }
+
+    let WebhookSourceInfo {
+        secret_ref,
+        signature_expr,
+    } = webhook_info;
+
+    // validate secret_ref
+    let db_name = session.database();
+    let (schema_name, secret_name) =
+        Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
+    let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+    let pb_secret_ref = PbSecretRef {
+        secret_id: secret_catalog.id.secret_id(),
+        ref_as: match secret_ref.ref_as {
+            SecretRefAsType::Text => PbRefAsType::Text,
+            SecretRefAsType::File => PbRefAsType::File,
+        }
+        .into(),
+    };
+
+    let secure_compare_context = SecureCompareContext {
+        column_name: columns_defs[0].name.real_value(),
+        secret_name,
+    };
+    let mut binder = Binder::new_for_ddl_with_secure_compare(session, secure_compare_context);
+    let expr = binder.bind_expr(signature_expr.clone())?;
+
+    // validate expr, ensuring it is SECURE_COMPARE()
+    if expr.as_function_call().is_none()
+        || expr.as_function_call().unwrap().func_type()
+            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+    {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The signature verification function must be SECURE_COMPARE()".to_owned(),
+        )
+        .into());
+    }
+
+    let pb_webhook_info = PbWebhookSourceInfo {
+        secret_ref: Some(pb_secret_ref),
+        signature_expr: Some(expr.to_expr_proto()),
+    };
+
+    Ok(pb_webhook_info)
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
         Field, DEFAULT_DATABASE_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use super::*;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
@@ -1518,10 +1640,9 @@ mod tests {
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
             "v1" => DataType::Int16,
-            "v2" => DataType::new_struct(
-                vec![DataType::Int64,DataType::Float64,DataType::Float64],
-                vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
-            ),
+            "v2" => StructType::new(
+                vec![("v3", DataType::Int64),("v4", DataType::Float64),("v5", DataType::Float64)],
+            ).into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
 

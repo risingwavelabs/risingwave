@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,8 +25,9 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
+    FunctionId, IndexId, ObjectId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::session_config::SessionConfig;
@@ -56,6 +57,7 @@ use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
@@ -279,6 +281,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -309,7 +312,8 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph).await?;
+        self.create_materialized_view(table, graph, HashSet::new())
+            .await?;
         Ok(())
     }
 
@@ -340,6 +344,7 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         _affected_table_change: Option<ReplaceTablePlan>,
+        _dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         self.create_sink_inner(sink, graph)
     }
@@ -648,6 +653,18 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_secret(
+        &self,
+        _secret_id: u32,
+        _secret_name: String,
+        _database_id: u32,
+        _schema_id: u32,
+        _owner_id: u32,
+        _payload: Vec<u8>,
+    ) -> Result<()> {
+        unreachable!()
     }
 }
 
@@ -1063,6 +1080,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn get_cluster_limits(&self) -> RpcResult<Vec<ClusterLimit>> {
+        Ok(vec![])
+    }
+
+    async fn list_rate_limits(&self) -> RpcResult<Vec<RateLimitInfo>> {
         Ok(vec![])
     }
 }

@@ -132,6 +132,7 @@ pub fn rw_timestamp_column_desc() -> ColumnDesc {
 }
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
+pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 
 // The number of columns output by the cdc source job
 // see `debezium_cdc_source_schema()` for details
@@ -160,6 +161,14 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
     )
 }
 
+pub fn iceberg_sequence_num_column_desc() -> ColumnDesc {
+    ColumnDesc::named(
+        ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Int64,
+    )
+}
+
 /// The local system catalog reader in the frontend node.
 pub trait SysCatalogReader: Sync + Send + 'static {
     /// Reads the data of the system catalog table.
@@ -168,6 +177,8 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
+pub type ObjectId = u32;
+
 #[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq, Copy)]
 #[display("{database_id}")]
 pub struct DatabaseId {
@@ -175,7 +186,7 @@ pub struct DatabaseId {
 }
 
 impl DatabaseId {
-    pub fn new(database_id: u32) -> Self {
+    pub const fn new(database_id: u32) -> Self {
         DatabaseId { database_id }
     }
 

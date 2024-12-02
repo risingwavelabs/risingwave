@@ -36,6 +36,7 @@ use risingwave_meta_model::{
     SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
     ViewId,
 };
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -78,8 +79,8 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{
-    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
-    IGNORED_NOTIFICATION_VERSION,
+    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
+    NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::rpc::ddl_controller::DropMode;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -1237,6 +1238,7 @@ impl CatalogController {
 
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+        let connection_ids = get_referred_connection_ids_from_source(&pb_source);
 
         let source_obj = Self::create_object(
             &txn,
@@ -1252,8 +1254,9 @@ impl CatalogController {
         Source::insert(source).exec(&txn).await?;
 
         // add secret dependency
-        if !secret_ids.is_empty() {
-            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
+        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),
                     used_by: Set(source_id as _),
@@ -1397,6 +1400,43 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn alter_secret(
+        &self,
+        pb_secret: PbSecret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+
+        ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::update(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = pb_secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Secret(secret_plain),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)
@@ -1417,7 +1457,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
         ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
 
-        // Find affect users with privileges on the connection.
+        // Find affect users with privileges on the secret.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
@@ -1464,6 +1504,16 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_connection.schema_id as _, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
+        let mut dep_secrets = HashSet::new();
+        if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
+            dep_secrets.extend(
+                params
+                    .secret_refs
+                    .values()
+                    .map(|secret_ref| secret_ref.secret_id),
+            );
+        }
+
         let conn_obj = Self::create_object(
             &txn,
             ObjectType::Connection,
@@ -1475,6 +1525,16 @@ impl CatalogController {
         pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
+
+        for secret_id in dep_secrets {
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(secret_id as _),
+                used_by: Set(conn_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
 
         txn.commit().await?;
 
@@ -2259,7 +2319,6 @@ impl CatalogController {
             .filter(|obj| {
                 obj.obj_type == ObjectType::Table
                     || obj.obj_type == ObjectType::Sink
-                    || obj.obj_type == ObjectType::Subscription
                     || obj.obj_type == ObjectType::Index
             })
             .map(|obj| obj.oid)

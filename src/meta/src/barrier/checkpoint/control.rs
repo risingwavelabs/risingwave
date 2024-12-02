@@ -89,7 +89,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
-        let database_id = from_partial_graph_id(resp.partial_graph_id).0;
+        let database_id = DatabaseId::new(resp.database_id);
         self.databases
             .get_mut(&database_id)
             .expect("should exist")
@@ -232,7 +232,11 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(
-                    creating_job.info.table_fragments.table_id().table_id,
+                    creating_job
+                        .info
+                        .stream_job_fragments
+                        .stream_job_id()
+                        .table_id,
                     creating_job.gen_ddl_progress(),
                 )]);
             }
@@ -431,8 +435,7 @@ impl DatabaseCheckpointControl {
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
         );
-        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
-        assert_eq!(database_id, self.database_id);
+        let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
@@ -639,7 +642,7 @@ impl DatabaseCheckpointControl {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
                             info,
-                            replace_table_info: None,
+                            replace_stream_job: None,
                         }));
                     });
                 let task = task.get_or_insert_default();
@@ -676,7 +679,7 @@ impl DatabaseCheckpointControl {
                     resps,
                     self.creating_streaming_job_controls[&table_id]
                         .info
-                        .table_fragments
+                        .stream_job_fragments
                         .all_table_ids()
                         .map(TableId::new),
                     is_first_time,
@@ -830,7 +833,7 @@ impl DatabaseCheckpointControl {
                 .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
-            let job_id = info.table_fragments.table_id();
+            let job_id = info.stream_job_fragments.stream_job_id();
             control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
             self.creating_streaming_job_controls.insert(
                 job_id,

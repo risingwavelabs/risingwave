@@ -74,3 +74,6 @@
     sql parser error: expected an expression, found: [
     LINE 1: SELECT [1,2]
                    ^
+- input: CREATE TABLE t (params STRUCT<a STRUCT<b int>>[])
+  formatted_sql: CREATE TABLE t (params STRUCT<a STRUCT<b INT>>[])
+  formatted_ast: 'CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "params", quote_style: None }, data_type: Some(Array(Struct([StructField { name: Ident { value: "a", quote_style: None }, data_type: Struct([StructField { name: Ident { value: "b", quote_style: None }, data_type: Int }]) }]))), collation: None, options: [] }], wildcard_idx: None, constraints: [], with_options: [], format_encode: None, source_watermarks: [], append_only: false, on_conflict: None, with_version_column: None, query: None, cdc_table_info: None, include_column_options: [], webhook_info: None }'

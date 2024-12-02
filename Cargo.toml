@@ -80,7 +80,12 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
+# foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "19bc2def14dfa8bb7d6581fb625584694bc7f4a0", features = [
+    "tracing",
+    "nightly",
+    "prometheus",
+] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -138,7 +143,7 @@ otlp-embedded = { git = "https://github.com/risingwavelabs/otlp-embedded", rev =
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
 # branch rw_patch
-icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "68bc9654ea1a1f696b79718b7bcbd79f43488186", features = [
+icelake = { git = "https://github.com/risingwavelabs/icelake.git", rev = "0ec44fa826c91139c9cf459b005741df990ae9da", features = [
     "prometheus",
 ] }
 # branch dev-rebase-main-20241030
@@ -155,7 +160,11 @@ arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
+deltalake = { version = "0.20.1", features = [
+    "s3",
+    "gcs",
+    "datafusion",
+] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
@@ -163,7 +172,7 @@ parquet = { version = "53.2", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [
     "default",
 ] }
-thiserror-ext = "0.1.2"
+thiserror-ext = { version = "0.2.1", features = ["backtrace"] }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
     "profiling",

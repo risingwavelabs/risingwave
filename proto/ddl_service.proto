@@ -86,6 +86,8 @@ message CreateSinkRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
   optional ReplaceTablePlan affected_table_change = 3;
+  // The list of object IDs that this sink depends on.
+  repeated uint32 dependencies = 4;
 }
 
 message CreateSinkResponse {
@@ -136,6 +138,9 @@ message CreateMaterializedViewRequest {
     SERVERLESS = 2;
   }
   BackfillType backfill = 3;
+
+  // The list of object IDs that this materialized view depends on.
+  repeated uint32 dependencies = 4;
 }
 
 message CreateMaterializedViewResponse {
@@ -349,7 +354,7 @@ message DropIndexResponse {
 }
 
 message ReplaceTablePlan {
-  // The new table catalog, with the correct table ID and a new version.
+  // The new table catalog, with the correct (old) table ID and a new version.
   // If the new version does not match the subsequent version in the meta service's
   // catalog, this request will be rejected.
   catalog.Table table = 1;
@@ -414,6 +419,19 @@ message DropSecretResponse {
   WaitVersion version = 1;
 }
 
+message AlterSecretRequest {
+  uint32 secret_id = 1;
+  string name = 2;
+  bytes value = 3;
+  uint32 database_id = 4;
+  uint32 schema_id = 5;
+  uint32 owner_id = 6;
+}
+
+message AlterSecretResponse {
+  WaitVersion version = 1;
+}
+
 message CreateConnectionRequest {
   message PrivateLink {
     catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
@@ -424,7 +442,8 @@ message CreateConnectionRequest {
   uint32 database_id = 2;
   uint32 schema_id = 3;
   oneof payload {
-    PrivateLink private_link = 4;
+    PrivateLink private_link = 4 [deprecated = true];
+    catalog.ConnectionParams connection_params = 6;
   }
   uint32 owner_id = 5;
 }
@@ -510,6 +529,7 @@ service DdlService {
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
   rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
+  rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);
   rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);

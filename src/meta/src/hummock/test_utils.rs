@@ -25,17 +25,17 @@ use risingwave_common::util::epoch::test_epoch;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Levels;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo, SyncResult,
 };
 use risingwave_meta_model::WorkerId;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::CompactionConfig;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::controller::catalog::CatalogController;
@@ -153,31 +153,34 @@ pub fn generate_test_sstables_with_table_id(
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
-        sst_info.push(SstableInfo {
-            object_id: sst_id,
-            sst_id,
-            key_range: KeyRange {
-                left: Bytes::from(key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                )),
-                right: Bytes::from(key_with_epoch(
-                    format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
-                        .as_bytes()
-                        .to_vec(),
-                    epoch,
-                )),
-                right_exclusive: false,
-            },
-            file_size: object_size,
-            table_ids: vec![table_id],
-            uncompressed_file_size: object_size,
-            max_epoch: epoch,
-            sst_size: object_size,
-            ..Default::default()
-        });
+        sst_info.push(
+            SstableInfoInner {
+                object_id: sst_id,
+                sst_id,
+                key_range: KeyRange {
+                    left: Bytes::from(key_with_epoch(
+                        format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
+                            .as_bytes()
+                            .to_vec(),
+                        epoch,
+                    )),
+                    right: Bytes::from(key_with_epoch(
+                        format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
+                            .as_bytes()
+                            .to_vec(),
+                        epoch,
+                    )),
+                    right_exclusive: false,
+                },
+                file_size: object_size,
+                table_ids: vec![table_id],
+                uncompressed_file_size: object_size,
+                max_epoch: epoch,
+                sst_size: object_size,
+                ..Default::default()
+            }
+            .into(),
+        );
     }
     sst_info
 }
@@ -186,21 +189,24 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         let object_size = 2;
-        sst_info.push(SstableInfo {
-            object_id: sst_id,
-            sst_id,
-            key_range: KeyRange {
-                left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
-                right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
-                right_exclusive: false,
-            },
-            file_size: object_size,
-            table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            uncompressed_file_size: object_size,
-            max_epoch: epoch,
-            sst_size: object_size,
-            ..Default::default()
-        });
+        sst_info.push(
+            SstableInfoInner {
+                object_id: sst_id,
+                sst_id,
+                key_range: KeyRange {
+                    left: Bytes::from(iterator_test_key_of_epoch(sst_id, i + 1, epoch)),
+                    right: Bytes::from(iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch)),
+                    right_exclusive: false,
+                },
+                file_size: object_size,
+                table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
+                uncompressed_file_size: object_size,
+                max_epoch: epoch,
+                sst_size: object_size,
+                ..Default::default()
+            }
+            .into(),
+        );
     }
     sst_info
 }
@@ -347,11 +353,11 @@ pub async fn setup_compute_env_with_metric(
             WorkerType::ComputeNode,
             fake_host_address,
             Property {
-                worker_node_parallelism: fake_parallelism as _,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                parallelism: fake_parallelism as _,
+                ..Default::default()
             },
             Default::default(),
         )

@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, ObjectId};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::catalog::{
@@ -78,6 +79,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -115,6 +117,7 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<PbReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()>;
@@ -174,6 +177,16 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_connection(&self, connection_id: u32) -> Result<()>;
 
     async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
+
+    async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()>;
 
     async fn alter_name(
         &self,
@@ -246,11 +259,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph)
+            .create_materialized_view(table, graph, dependencies)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
@@ -316,10 +330,11 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, affected_table_change)
+            .create_sink(sink, graph, affected_table_change, dependencies)
             .await?;
         self.wait_version(version).await
     }
@@ -504,6 +519,29 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()> {
         let version = self.meta_client.alter_swap_rename(object).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        payload: Vec<u8>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_secret(
+                secret_id,
+                secret_name,
+                database_id,
+                schema_id,
+                owner_id,
+                payload,
+            )
+            .await?;
         self.wait_version(version).await
     }
 }

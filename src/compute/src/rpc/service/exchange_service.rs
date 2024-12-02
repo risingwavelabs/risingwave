@@ -19,6 +19,7 @@ use either::Either;
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     permits, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
@@ -93,6 +94,7 @@ impl ExchangeService for ExchangeServiceImpl {
             down_actor_id,
             up_fragment_id,
             down_fragment_id,
+            database_id,
         } = {
             let req = request_stream
                 .next()
@@ -106,7 +108,7 @@ impl ExchangeService for ExchangeServiceImpl {
 
         let receiver = self
             .stream_mgr
-            .take_receiver((up_actor_id, down_actor_id))
+            .take_receiver(DatabaseId::new(database_id), (up_actor_id, down_actor_id))
             .await?;
 
         // Map the remaining stream to add-permits.

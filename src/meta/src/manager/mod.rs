@@ -71,6 +71,32 @@ pub fn get_referred_secret_ids_from_source(source: &PbSource) -> MetaResult<Hash
     Ok(secret_ids)
 }
 
+pub fn get_referred_connection_ids_from_source(source: &PbSource) -> HashSet<u32> {
+    let mut connection_ids = HashSet::new();
+    if let Some(conn_id) = source.connection_id {
+        connection_ids.insert(conn_id);
+    }
+    if let Some(info) = &source.info
+        && let Some(conn_id) = info.connection_id
+    {
+        connection_ids.insert(conn_id);
+    }
+    connection_ids
+}
+
+pub fn get_referred_connection_ids_from_sink(sink: &PbSink) -> HashSet<u32> {
+    let mut connection_ids = HashSet::new();
+    if let Some(format_desc) = &sink.format_desc
+        && let Some(conn_id) = format_desc.connection_id
+    {
+        connection_ids.insert(conn_id);
+    }
+    if let Some(conn_id) = sink.connection_id {
+        connection_ids.insert(conn_id);
+    }
+    connection_ids
+}
+
 pub fn get_referred_secret_ids_from_sink(sink: &PbSink) -> HashSet<u32> {
     let mut secret_ids = HashSet::new();
     for secret_ref in sink.get_secret_refs().values() {

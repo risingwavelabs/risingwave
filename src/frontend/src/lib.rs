@@ -71,6 +71,7 @@ pub(crate) mod error;
 mod meta_client;
 pub mod test_utils;
 mod user;
+pub mod webhook;
 
 pub mod health_service;
 mod monitor;
@@ -149,6 +150,11 @@ pub struct FrontendOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
     #[clap(long, hide = true, env = "ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
@@ -162,9 +168,14 @@ pub struct FrontendOpts {
     )]
     pub temp_secret_file_dir: String,
 
-    /// Total available memory for the frontend node in bytes. Used by both computing and storage.
+    /// Total available memory for the frontend node in bytes. Used for batch computing.
     #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
     pub frontend_total_memory_bytes: usize,
+
+    /// The address that the webhook service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
+    pub webhook_listen_addr: String,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -199,6 +210,7 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
 
@@ -213,6 +225,9 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+
+        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
+        let _task = tokio::spawn(webhook_service.serve());
 
         pg_serve(
             &listen_addr,

@@ -25,7 +25,7 @@ use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -35,14 +35,12 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 
-/// Includes full information about a table.
+/// `TableCatalog` Includes full information about a table.
 ///
-/// Currently, it can be either:
-/// - a table or a source
-/// - a materialized view
-/// - an index
+/// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+/// It is not the same as a user-side table created by `CREATE TABLE`.
 ///
-/// Use `self.table_type()` to determine the type of the table.
+/// Use [`Self::table_type()`] to determine the [`TableType`] of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -182,6 +180,8 @@ pub struct TableCatalog {
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
     pub vnode_count: VnodeCount,
+
+    pub webhook_info: Option<PbWebhookSourceInfo>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -191,6 +191,7 @@ pub enum TableType {
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
+    /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
     /// Internal tables for executors.
     Internal,
@@ -282,7 +283,7 @@ impl TableCatalog {
         self.table_type
     }
 
-    pub fn is_table(&self) -> bool {
+    pub fn is_user_table(&self) -> bool {
         self.table_type == TableType::Table
     }
 
@@ -465,6 +466,7 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            webhook_info: self.webhook_info.clone(),
         }
     }
 
@@ -657,6 +659,7 @@ impl From<PbTable> for TableCatalog {
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
+            webhook_info: tb.webhook_info,
         }
     }
 }
@@ -748,6 +751,7 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            webhook_info: None,
         }
         .into();
 
@@ -762,10 +766,11 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::new_struct(
-                                vec![DataType::Varchar, DataType::Varchar],
-                                vec!["address".to_string(), "zipcode".to_string()]
-                            ),
+                            data_type: StructType::new(vec![
+                                ("address", DataType::Varchar),
+                                ("zipcode", DataType::Varchar)
+                            ],)
+                            .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
@@ -814,6 +819,7 @@ mod tests {
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
+                webhook_info: None,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

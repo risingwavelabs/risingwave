@@ -42,10 +42,10 @@ use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager, TracingExtractLayer};
 use risingwave_connector::source::monitor::GLOBAL_SOURCE_METRICS;
 use risingwave_dml::dml_manager::DmlManager;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -124,11 +124,12 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &advertise_addr,
         Property {
-            worker_node_parallelism: opts.parallelism as u64,
+            parallelism: opts.parallelism as u32,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_string(),
+            node_label: Some(opts.node_label.clone()),
         },
         &config.meta,
     )
@@ -288,15 +289,14 @@ pub async fn compute_node_serve(
         batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
     ));
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let target_memory = if let Some(v) = opts.memory_manager_target_bytes {
+        v
+    } else {
+        compute_memory_bytes + storage_memory_bytes
+    };
+
     let memory_mgr = MemoryManager::new(MemoryManagerConfig {
-        total_memory: compute_memory_bytes + storage_memory_bytes,
+        target_memory,
         threshold_aggressive: config
             .streaming
             .developer
@@ -325,10 +325,14 @@ pub async fn compute_node_serve(
     });
 
     // Run a background memory manager
-    tokio::spawn(memory_mgr.clone().run(
-        system_params.barrier_interval_ms(),
-        system_params_manager.watch_params(),
-    ));
+    tokio::spawn(
+        memory_mgr.clone().run(Duration::from_millis(
+            config
+                .streaming
+                .developer
+                .memory_controller_update_interval_ms as _,
+        )),
+    );
 
     let heap_profiler = HeapProfiler::new(
         opts.total_memory_bytes,
@@ -542,8 +546,7 @@ fn print_memory_config(
     reserved_memory_bytes: usize,
 ) {
     let memory_config = format!(
-        "\n\
-        Memory outline:\n\
+        "Memory outline:\n\
         > total_memory: {}\n\
         >     storage_memory: {}\n\
         >         block_cache_capacity: {}\n\

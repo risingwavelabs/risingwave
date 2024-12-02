@@ -197,6 +197,8 @@ message ExprNode {
     INET_NTOA = 329;
     QUOTE_LITERAL = 330;
     QUOTE_NULLABLE = 331;
+    HMAC = 332;
+    SECURE_COMPARE = 333;
 
     // Unary operators
     NEG = 401;
@@ -325,6 +327,7 @@ message ExprNode {
     HAS_SCHEMA_PRIVILEGE = 2409;
     PG_IS_IN_RECOVERY = 2411;
     RW_RECOVERY_STATUS = 2412;
+    RW_EPOCH_TO_TS = 2413;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;

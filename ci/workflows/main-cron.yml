@@ -4,6 +4,37 @@ auto-retry: &auto-retry
     - signal_reason: agent_stop
       limit: 3
 
+sql-backend: &sql-backend
+  matrix:
+    setup:
+      backend: [""]
+      endpoint: [""]
+    adjustments:
+      - with:
+          backend: ""
+          endpoint: ""
+        skip: true # hack
+      - with:
+          backend: "sqlite"
+          # sqlite3 /tmp/rwmeta.db
+          endpoint: "sqlite:///tmp/rwmeta.db?mode=rwc"
+      - with:
+          backend: "postgres"
+          # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
+          endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
+      - with:
+          backend: "mysql"
+          # mysql -h mysql -P 3306 -u root -p123456 -D rwmeta
+          endpoint: "mysql://root:123456@mysql:3306/rwmeta"
+  env:
+    RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
+
+docker-compose-common: &docker-compose-common
+    config: ci/docker-compose.yml
+    mount-buildkite-agent: true
+    propagate-environment: true
+    run: rw-build-env
+
 steps:
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
@@ -62,8 +93,9 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (release)"
+  - label: "end-to-end test (release, {{matrix.backend}} backend)"
     key: "e2e-test-release"
+    <<: *sql-backend
     command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
@@ -75,11 +107,10 @@ steps:
       - "docslt"
     plugins:
       - docker-compose#v5.1.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
+          <<: *docker-compose-common
+          run: pg-mysql-backend-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "slow end-to-end test (release)"
@@ -143,7 +174,7 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 11
+    timeout_in_minutes: 13
     retry: *auto-retry
 
   - label: "end-to-end test (parallel, in-memory) (release)"
@@ -347,7 +378,7 @@ steps:
 
   - label: "end-to-end test (madsim)"
     key: "e2e-test-deterministic"
-    command: "TEST_NUM=32 timeout 120m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 timeout 130m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -364,12 +395,12 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 120
+    timeout_in_minutes: 135
     retry: *auto-retry
 
   - label: "end-to-end test (madsim, random vnode count)"
     key: "e2e-test-deterministic-random-vnode-count"
-    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true timeout 120m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=32 RW_SIM_RANDOM_VNODE_COUNT=true timeout 130m ci/scripts/deterministic-e2e-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
@@ -386,12 +417,12 @@ steps:
           environment:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 120
+    timeout_in_minutes: 135
     retry: *auto-retry
 
   - label: "recovery test (madsim)"
     key: "recovery-test-deterministic"
-    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 65m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 timeout 70m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -404,7 +435,7 @@ steps:
           mount-buildkite-agent: true
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 70
+    timeout_in_minutes: 75
     retry: *auto-retry
 
   # Ddl statements will randomly run with background_ddl.
@@ -615,40 +646,40 @@ steps:
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
-  #  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
-  #    key: "backwards-compat-tests"
-  #    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
-  #    if: |
-  #      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-  #      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
-  #      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
-  #    depends_on:
-  #      - "build"
-  #    plugins:
-  #      - docker-compose#v5.1.0:
-  #          run: source-test-env
-  #          config: ci/docker-compose.yml
-  #          mount-buildkite-agent: true
-  #          environment:
-  #            - BUILDKITE_BRANCH
-  #      - ./ci/plugins/upload-failure-logs
-  #    matrix:
-  #      setup:
-  #        # Test the 4 latest versions against the latest main.
-  #        # e.g.
-  #        # 1: 2.0.0
-  #        # 2: 1.1.1
-  #        # 3: 1.0.1
-  #        # 4: 1.0.0
-  #        # It is ordered by the full version number, rather than minor / major version.
-  #        # We can change to just be on major version in the future.
-  #        version_offset:
-  #          - "1"
-  #          - "2"
-  #          - "3"
-  #          - "4"
-  #    timeout_in_minutes: 30
-  #    retry: *auto-retry
+  - label: "Backwards compatibility tests version_offset={{matrix.version_offset}}"
+    key: "backwards-compat-tests"
+    command: "VERSION_OFFSET={{matrix.version_offset}} RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-backwards-compat-tests"
+      || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.1.0:
+          run: source-test-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_BRANCH
+      - ./ci/plugins/upload-failure-logs
+    matrix:
+      setup:
+        # Test the 4 latest versions against the latest main.
+        # e.g.
+        # 1: 2.0.0
+        # 2: 1.1.1
+        # 3: 1.0.1
+        # 4: 1.0.0
+        # It is ordered by the full version number, rather than minor / major version.
+        # We can change to just be on major version in the future.
+        version_offset:
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+    timeout_in_minutes: 30
+    retry: *auto-retry
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
@@ -717,48 +748,8 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v4.9.0:
+      - docker-compose#v5.1.0:
           run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "end-to-end test (postgres backend)"
-    key: e2e-test-postgres-backend
-    command: "ci/scripts/e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe-pg-backend"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test-other-backends"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-      - "docslt"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: pg-mysql-backend-test-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    retry: *auto-retry
-
-  - label: "end-to-end test (mysql backend)"
-    key: e2e-test-mysql-backend
-    command: "ci/scripts/e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe-mysql-backend"
-    if: |
-      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test-other-backends"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-test-other-backends?(,|$$)/
-    depends_on:
-      - "build"
-      - "build-other"
-      - "docslt"
-    plugins:
-      - docker-compose#v5.1.0:
-          run: pg-mysql-backend-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
