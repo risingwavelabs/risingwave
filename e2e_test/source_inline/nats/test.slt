@@ -16,7 +16,7 @@ set streaming_parallelism to 4;
 statement ok
 create table t_nats (i int ) with (
   connector = 'nats',
-  server_url='nats:4222',
+  server_url='nats-server:4222',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo1',
