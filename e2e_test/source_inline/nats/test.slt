@@ -30,7 +30,7 @@ sleep 1s
 # at least once
 query T
 select count(*) >= 100 from t_nats;
----
+----
 t
 
 system ok
@@ -46,7 +46,7 @@ sleep 3s
 
 query T
 select count(*) >= 200 from t_nats;
----
+----
 t
 
 system ok
@@ -60,7 +60,7 @@ python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "te
 
 query T
 select count(*) >= 300 from t_nats;
----
+----
 t
 
 system ok
