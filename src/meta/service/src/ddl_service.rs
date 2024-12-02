@@ -931,7 +931,7 @@ impl DdlService for DdlServiceImpl {
                     Err(Status::invalid_argument(format!(
                         "invalid column type: {} from cdc table change, column: {:?}",
                         column_type, c
-                    )));
+                    )))
                 };
                 if c.is_generated() {
                     return invalid_col_type("generated column", &c);
