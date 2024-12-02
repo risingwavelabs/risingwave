@@ -217,7 +217,7 @@ impl DynamicLevelSelectorCore {
             None => {
                 // If the number of files in L0 is less than the number of pending files, it means
                 // that may be encountered some issue, we can work around it.
-                tracing::info!(
+                tracing::warn!(
                     "The number of files in L0 {} is less than the number of pending files {} group {} pending_tasks_ids {:?} compacting_files {:?}",
                     l0_file_count, handlers[0].pending_file_count(), levels.group_id, handlers[0].pending_tasks_ids(), handlers[0].compacting_files()
                 );
