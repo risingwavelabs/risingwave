@@ -49,7 +49,7 @@ async def produce_message(stream_name: str, subject: str):
     await nc.close()
 
 
-async def consume_message(stream_name: str, subject: str):
+async def consume_message(_stream_name: str, subject: str):
     nc = NATS()
     await nc.connect(servers=[NATS_SERVER])
     js = nc.jetstream()
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         elif command == "produce_stream":
             asyncio.run(produce_message(stream_name, subject))
     elif command == "validate_state":
-        if len(sys.argv) != 5:
+        if len(sys.argv) != 4:
             print("Error: Both table name and expected count are required")
             sys.exit(1)
         table_name = sys.argv[2]
