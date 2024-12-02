@@ -682,7 +682,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![1, 2, 3],
+                        table_ids: vec![1, 2],
                         ..Default::default()
                     }),
                 );
