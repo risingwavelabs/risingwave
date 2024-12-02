@@ -15,3 +15,5 @@
 pub type WorkerNodeId = u32;
 
 pub const DEFAULT_COMPUTE_NODE_LABEL: &str = "default";
+
+pub const DEFAULT_STREAMING_JOB_LABEL: &str = DEFAULT_COMPUTE_NODE_LABEL;
