@@ -241,7 +241,7 @@ fn gen_batch_query_plan(
         ..
     } = bind_result;
 
-    let mut planner = Planner::new(context);
+    let mut planner = Planner::new_for_batch(context);
 
     let mut logical = planner.plan(bound)?;
     let schema = logical.schema();

@@ -40,13 +40,30 @@ pub struct Planner {
     /// Mapping of `ShareId` to its share plan.
     /// The share plan can be a CTE, a source, a view and so on.
     share_cache: HashMap<ShareId, PlanRef>,
+    /// Plan for stream or batch.
+    plan_for: PlanFor
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PlanFor {
+    Stream,
+    Batch,
 }
 
 impl Planner {
-    pub fn new(ctx: OptimizerContextRef) -> Planner {
+    pub fn new_for_batch(ctx: OptimizerContextRef) -> Planner {
         Planner {
             ctx,
             share_cache: Default::default(),
+            plan_for: PlanFor::Batch,
+        }
+    }
+
+    pub fn new_for_stream(ctx: OptimizerContextRef) -> Planner {
+        Planner {
+            ctx,
+            share_cache: Default::default(),
+            plan_for: PlanFor::Stream,
         }
     }
 
@@ -57,5 +74,9 @@ impl Planner {
 
     pub fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
+    }
+
+    pub fn plan_for(&self) -> PlanFor {
+        self.plan_for
     }
 }
