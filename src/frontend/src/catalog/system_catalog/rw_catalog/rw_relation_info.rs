@@ -53,7 +53,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 table_ids.push(t.id.table_id);
             });
 
-            schema_catalog.iter_table().for_each(|t| {
+            schema_catalog.iter_user_table().for_each(|t| {
                 table_ids.push(t.id.table_id);
             });
 
@@ -100,7 +100,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             }
         });
 
-        schema_catalog.iter_table().for_each(|t| {
+        schema_catalog.iter_user_table().for_each(|t| {
             if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),

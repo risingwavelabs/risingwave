@@ -18,21 +18,24 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::{pending, poll_fn, Future};
 use std::mem::replace;
 use std::sync::Arc;
-use std::task::Poll;
+use std::task::{Context, Poll};
 
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
 use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::Barrier;
-use crate::task::{ActorId, PartialGraphId, SharedContext, StreamActorManager};
+use crate::task::{
+    ActorId, LocalBarrierManager, PartialGraphId, SharedContext, StreamActorManager,
+};
 
 struct IssuedState {
     /// Actor ids remaining to be collected.
@@ -70,15 +73,24 @@ struct BarrierState {
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
-use risingwave_pb::stream_service::streaming_control_stream_request::InitialPartialGraph;
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    DatabaseInitialPartialGraph, InitialPartialGraph,
+};
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
+use crate::task::barrier_manager::LocalBarrierEvent;
+
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
+    running_actors: BTreeSet<ActorId>,
     graph_states: &'a HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 }
 
 impl Display for ManagedBarrierStateDebugInfo<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "running_actors: ")?;
+        for actor_id in &self.running_actors {
+            write!(f, "{}, ", actor_id)?;
+        }
         for (partial_graph_id, graph_states) in self.graph_states {
             writeln!(f, "--- Partial Group {}", partial_graph_id.0)?;
             write!(f, "{}", graph_states)?;
@@ -324,22 +336,84 @@ impl PartialGraphManagedBarrierState {
 }
 
 pub(crate) struct ManagedBarrierState {
+    pub(crate) databases: HashMap<DatabaseId, DatabaseManagedBarrierState>,
+    pub(crate) current_shared_context: HashMap<DatabaseId, Arc<SharedContext>>,
+}
+
+pub(super) enum ManagedBarrierStateEvent {
+    BarrierCollected {
+        partial_graph_id: PartialGraphId,
+        barrier: Barrier,
+    },
+    ActorError {
+        actor_id: ActorId,
+        err: StreamError,
+    },
+}
+
+impl ManagedBarrierState {
+    pub(super) fn new(
+        actor_manager: Arc<StreamActorManager>,
+        initial_partial_graphs: Vec<DatabaseInitialPartialGraph>,
+    ) -> Self {
+        let mut databases = HashMap::new();
+        let mut current_shared_context = HashMap::new();
+        for database in initial_partial_graphs {
+            let database_id = DatabaseId::new(database.database_id);
+            assert!(!databases.contains_key(&database_id));
+            let shared_context = Arc::new(SharedContext::new(database_id, &actor_manager.env));
+            let state = DatabaseManagedBarrierState::new(
+                actor_manager.clone(),
+                shared_context.clone(),
+                database.graphs,
+            );
+            databases.insert(database_id, state);
+            current_shared_context.insert(database_id, shared_context);
+        }
+
+        Self {
+            databases,
+            current_shared_context,
+        }
+    }
+
+    pub(super) fn next_event(
+        &mut self,
+    ) -> impl Future<Output = (DatabaseId, ManagedBarrierStateEvent)> + '_ {
+        poll_fn(|cx| {
+            for (database_id, database) in &mut self.databases {
+                if let Poll::Ready(event) = database.poll_next_event(cx) {
+                    return Poll::Ready((*database_id, event));
+                }
+            }
+            Poll::Pending
+        })
+    }
+}
+
+pub(crate) struct DatabaseManagedBarrierState {
     pub(super) actor_states: HashMap<ActorId, InflightActorState>,
 
     pub(super) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
 
     actor_manager: Arc<StreamActorManager>,
 
-    current_shared_context: Arc<SharedContext>,
+    pub(super) current_shared_context: Arc<SharedContext>,
+    pub(super) local_barrier_manager: LocalBarrierManager,
+
+    barrier_event_rx: UnboundedReceiver<LocalBarrierEvent>,
+    pub(super) actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 }
 
-impl ManagedBarrierState {
+impl DatabaseManagedBarrierState {
     /// Create a barrier manager state. This will be called only once.
     pub(super) fn new(
         actor_manager: Arc<StreamActorManager>,
         current_shared_context: Arc<SharedContext>,
         initial_partial_graphs: Vec<InitialPartialGraph>,
     ) -> Self {
+        let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
+            LocalBarrierManager::new();
         Self {
             actor_states: Default::default(),
             graph_states: initial_partial_graphs
@@ -352,11 +426,15 @@ impl ManagedBarrierState {
                 .collect(),
             actor_manager,
             current_shared_context,
+            local_barrier_manager,
+            barrier_event_rx,
+            actor_failure_rx,
         }
     }
 
     pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
         ManagedBarrierStateDebugInfo {
+            running_actors: self.actor_states.keys().cloned().collect(),
             graph_states: &self.graph_states,
         }
     }
@@ -403,7 +481,7 @@ impl InflightActorState {
     }
 }
 
-impl ManagedBarrierState {
+impl DatabaseManagedBarrierState {
     pub(super) fn register_barrier_sender(
         &mut self,
         actor_id: ActorId,
@@ -469,7 +547,7 @@ impl PartialGraphManagedBarrierState {
     }
 }
 
-impl ManagedBarrierState {
+impl DatabaseManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
@@ -508,6 +586,7 @@ impl ManagedBarrierState {
                 actor,
                 (*subscriptions).clone(),
                 self.current_shared_context.clone(),
+                self.local_barrier_manager.clone(),
             );
             assert!(self
                 .actor_states
@@ -567,10 +646,47 @@ impl ManagedBarrierState {
         Ok(())
     }
 
-    pub(super) fn next_collected_epoch(
+    pub(super) fn poll_next_event(
         &mut self,
-    ) -> impl Future<Output = (PartialGraphId, Barrier)> + '_ {
-        poll_fn(|_| {
+        cx: &mut Context<'_>,
+    ) -> Poll<ManagedBarrierStateEvent> {
+        if let Poll::Ready(option) = self.actor_failure_rx.poll_recv(cx) {
+            let (actor_id, err) = option.expect("non-empty when tx in local_barrier_manager");
+            return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+        }
+        while let Poll::Ready(event) = self.barrier_event_rx.poll_recv(cx) {
+            match event.expect("non-empty when tx in local_barrier_manager") {
+                LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
+                    self.collect(actor_id, epoch);
+                }
+                LocalBarrierEvent::ReportCreateProgress {
+                    epoch,
+                    actor,
+                    state,
+                } => {
+                    self.update_create_mview_progress(epoch, actor, state);
+                }
+                LocalBarrierEvent::RegisterBarrierSender {
+                    actor_id,
+                    barrier_sender,
+                } => {
+                    if let Err(err) = self.register_barrier_sender(actor_id, barrier_sender) {
+                        return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+                    }
+                }
+            }
+        }
+        if let Some((partial_graph_id, barrier)) = self.next_collected_epoch() {
+            return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
+                partial_graph_id,
+                barrier,
+            });
+        }
+        Poll::Pending
+    }
+
+    pub(super) fn next_collected_epoch(&mut self) -> Option<(PartialGraphId, Barrier)> {
+        {
             let mut output = None;
             for (partial_graph_id, graph_state) in &mut self.graph_states {
                 if let Some(barrier) = graph_state.may_have_collected_all() {
@@ -581,12 +697,12 @@ impl ManagedBarrierState {
                     break;
                 }
             }
-            output.map(Poll::Ready).unwrap_or(Poll::Pending)
-        })
+            output
+        }
     }
 }
 
-impl ManagedBarrierState {
+impl DatabaseManagedBarrierState {
     pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) {
         let (prev_partial_graph_id, is_finished) = self
             .actor_states

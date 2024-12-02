@@ -571,26 +571,17 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
-    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+    pub async fn get_running_actors_for_source_backfill(
         &self,
         id: FragmentId,
-    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+    ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_and_upstream_of_fragment(id as _)
+            .get_running_actors_for_source_backfill(id as _)
             .await?;
         Ok(actor_ids
             .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as ActorId,
-                    actors
-                        .into_inner()
-                        .into_iter()
-                        .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
-                        .collect(),
-                )
-            })
+            .map(|(id, upstream)| (id as ActorId, upstream as ActorId))
             .collect())
     }
 
@@ -685,15 +676,20 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
-            .get_mv_depended_subscriptions()
+            .get_mv_depended_subscriptions(database_id)
             .await?
             .into_iter()
-            .map(|(database_id, mv_depended_subscriptions)| {
+            .map(|(loaded_database_id, mv_depended_subscriptions)| {
+                if let Some(database_id) = database_id {
+                    assert_eq!(loaded_database_id, database_id);
+                }
                 (
-                    DatabaseId::new(database_id as _),
+                    DatabaseId::new(loaded_database_id as _),
                     mv_depended_subscriptions
                         .into_iter()
                         .map(|(table_id, subscriptions)| {

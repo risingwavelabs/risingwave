@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions,
+    PrometheusMetricsRegistry, RateLimitPicker,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -41,6 +41,9 @@ use crate::monitor::{
 };
 use crate::opts::StorageOpts;
 use crate::StateStore;
+
+static FOYER_METRICS_REGISTRY: LazyLock<PrometheusMetricsRegistry> =
+    LazyLock::new(|| PrometheusMetricsRegistry::new(GLOBAL_METRICS_REGISTRY.clone()));
 
 mod opaque_type {
     use super::*;
@@ -613,19 +616,13 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const MB: usize = 1 << 20;
 
-        if cfg!(not(madsim)) {
-            metrics_prometheus::Recorder::builder()
-                .with_registry(GLOBAL_METRICS_REGISTRY.deref().clone())
-                .build_and_install();
-        }
-
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.meta")
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.meta_cache_shard_num)
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
@@ -668,13 +665,13 @@ impl StateStoreImpl {
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
                     state_store_metrics.clone(),
                 )))
                 .memory(opts.block_cache_capacity_mb * MB)
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
-                .with_object_pool_capacity(1024 * opts.block_cache_shard_num)
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                     // FIXME(MrCroxx): Calculate block weight more accurately.
                     u64::BITS as usize * 2 / 8 + value.raw().len()

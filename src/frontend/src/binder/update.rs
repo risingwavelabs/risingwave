@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::StructType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
@@ -206,10 +206,12 @@ impl Binder {
                         bail_bind_error!("number of columns does not match number of values");
                     }
 
-                    let target_type = DataType::new_struct(
-                        ids.iter().map(|id| id.return_type()).collect(),
-                        id.iter().map(|id| id.real_value()).collect(),
-                    );
+                    let target_type = StructType::new(
+                        id.iter()
+                            .zip_eq_fast(ids)
+                            .map(|(id, expr)| (id.real_value(), expr.return_type())),
+                    )
+                    .into();
                     let expr = expr.cast_assign(target_type)?;
 
                     exprs.push(expr);

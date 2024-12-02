@@ -144,6 +144,7 @@ impl StreamContext {
         PbExprContext {
             // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
             time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
+            strict_mode: false,
         }
     }
 
@@ -423,27 +424,30 @@ impl StreamJobFragments {
         source_fragments
     }
 
+    /// Returns (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`)).
+    ///
+    /// Note: the fragment `source_backfill_fragment_id` may actually have multiple upstream fragments,
+    /// but only one of them is the upstream source fragment, which is what we return.
     pub fn source_backfill_fragments(
         &self,
     ) -> MetadataModelResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
-        let mut source_fragments = HashMap::new();
+        let mut source_backfill_fragments = HashMap::new();
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) = actor.nodes.as_ref().unwrap().find_source_backfill() {
-                    if fragment.upstream_fragment_ids.len() != 1 {
-                        return Err(anyhow::anyhow!("SourceBackfill should have only one upstream fragment, found {:?} for fragment {}", fragment.upstream_fragment_ids, fragment.fragment_id).into());
-                    }
-                    source_fragments
+                if let Some((source_id, upstream_source_fragment_id)) =
+                    actor.nodes.as_ref().unwrap().find_source_backfill()
+                {
+                    source_backfill_fragments
                         .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
-                        .insert((fragment.fragment_id, fragment.upstream_fragment_ids[0]));
+                        .insert((fragment.fragment_id, upstream_source_fragment_id));
 
                     break;
                 }
             }
         }
-        Ok(source_fragments)
+        Ok(source_backfill_fragments)
     }
 
     /// Resolve dependent table

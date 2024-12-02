@@ -297,6 +297,11 @@ impl Parser<'_> {
                 }
             }
             Ok(expected.into())
+        } else if connector.contains("webhook") {
+            parser_err!(
+                "Source with webhook connector is not supported. \
+                 Please use the `CREATE TABLE ... WITH ...` statement instead.",
+            );
         } else {
             Ok(parse_format_encode(self)?)
         }
@@ -845,7 +850,7 @@ impl ParseTo for CreateSecretStatement {
         impl_parse_to!(with_properties: WithProperties, parser);
         let mut credential = Value::Null;
         if parser.parse_keyword(Keyword::AS) {
-            credential = parser.parse_value()?;
+            credential = parser.ensure_parse_value()?;
         }
         Ok(Self {
             if_not_exists,

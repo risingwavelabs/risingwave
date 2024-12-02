@@ -30,6 +30,7 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, hash, must_match};
+use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -151,6 +152,7 @@ pub enum DdlCommand {
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CreateSecret(Secret),
+    AlterSecret(Secret),
     DropSecret(SecretId),
     CommentOn(Comment),
     CreateSubscription(Subscription),
@@ -179,6 +181,7 @@ impl DdlCommand {
             | DdlCommand::CreateConnection(_)
             | DdlCommand::CommentOn(_)
             | DdlCommand::CreateSecret(_)
+            | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
             DdlCommand::CreateStreamingJob(_, _, _, _, _)
             | DdlCommand::CreateSourceWithoutStreamingJob(_)
@@ -350,6 +353,7 @@ impl DdlController {
                 }
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
+                DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source(source).await,
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
@@ -501,6 +505,7 @@ impl DdlController {
     }
 
     async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        validate_connection(&connection).await?;
         self.metadata_manager
             .catalog_controller
             .create_connection(connection)
@@ -520,10 +525,9 @@ impl DdlController {
         .await
     }
 
-    async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
-        // The 'secret' part of the request we receive from the frontend is in plaintext;
-        // here, we need to encrypt it before storing it in the catalog.
-        let secret_plain_payload = secret.value.clone();
+    // The 'secret' part of the request we receive from the frontend is in plaintext;
+    // here, we need to encrypt it before storing it in the catalog.
+    fn get_encrypted_payload(&self, secret: &Secret) -> MetaResult<Vec<u8>> {
         let secret_store_private_key = self
             .env
             .opts
@@ -531,16 +535,21 @@ impl DdlController {
             .clone()
             .ok_or_else(|| anyhow!("secret_store_private_key is not configured"))?;
 
-        let encrypted_payload = {
-            let encrypted_secret = SecretEncryption::encrypt(
-                secret_store_private_key.as_slice(),
-                secret.get_value().as_slice(),
-            )
-            .context(format!("failed to encrypt secret {}", secret.name))?;
-            encrypted_secret
-                .serialize()
-                .context(format!("failed to serialize secret {}", secret.name))?
-        };
+        let encrypted_payload = SecretEncryption::encrypt(
+            secret_store_private_key.as_slice(),
+            secret.get_value().as_slice(),
+        )
+        .context(format!("failed to encrypt secret {}", secret.name))?;
+        Ok(encrypted_payload
+            .serialize()
+            .context(format!("failed to serialize secret {}", secret.name))?)
+    }
+
+    async fn create_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
+        // The 'secret' part of the request we receive from the frontend is in plaintext;
+        // here, we need to encrypt it before storing it in the catalog.
+        let secret_plain_payload = secret.value.clone();
+        let encrypted_payload = self.get_encrypted_payload(&secret)?;
         secret.value = encrypted_payload;
 
         self.metadata_manager
@@ -553,6 +562,16 @@ impl DdlController {
         self.metadata_manager
             .catalog_controller
             .drop_secret(secret_id as _)
+            .await
+    }
+
+    async fn alter_secret(&self, mut secret: Secret) -> MetaResult<NotificationVersion> {
+        let secret_plain_payload = secret.value.clone();
+        let encrypted_payload = self.get_encrypted_payload(&secret)?;
+        secret.value = encrypted_payload;
+        self.metadata_manager
+            .catalog_controller
+            .alter_secret(secret, secret_plain_payload)
             .await
     }
 

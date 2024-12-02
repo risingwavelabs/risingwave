@@ -18,7 +18,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionId, PrivateLinkService};
+use crate::{ConnectionId, ConnectionParams, PrivateLinkService};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "connection")]
@@ -27,8 +27,9 @@ pub struct Model {
     pub connection_id: ConnectionId,
     pub name: String,
 
-    // todo: Private link service has been deprecated, consider using a new field for the connection info
+    // Private link service has been deprecated
     pub info: PrivateLinkService,
+    pub params: ConnectionParams,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -69,14 +70,15 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbConnection> for ActiveModel {
     fn from(conn: PbConnection) -> Self {
-        let Some(PbInfo::PrivateLinkService(private_link_srv)) = conn.info else {
-            unreachable!("private link not provided.")
+        let Some(PbInfo::ConnectionParams(connection_params)) = conn.info else {
+            unreachable!("private link has been deprecated.")
         };
 
         Self {
             connection_id: Set(conn.id as _),
             name: Set(conn.name),
-            info: Set(PrivateLinkService::from(&private_link_srv)),
+            info: Set(PrivateLinkService::default()),
+            params: Set(ConnectionParams::from(&connection_params)),
         }
     }
 }

@@ -173,7 +173,7 @@ serde_with::with_prefix!(batch_prefix "batch_");
 pub enum MetaBackend {
     #[default]
     Mem,
-    Sql, // keep for backward compatibility
+    Sql, // any database url
     Sqlite,
     Postgres,
     Mysql,
@@ -1433,7 +1433,7 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            3600 * 3
+            3600 * 6
         }
 
         pub fn gc_history_retention_time_sec() -> u64 {
@@ -1441,7 +1441,7 @@ pub mod default {
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            600
+            3600
         }
 
         pub fn full_gc_object_limit() -> u64 {

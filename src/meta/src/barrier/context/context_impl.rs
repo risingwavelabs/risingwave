@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
@@ -27,7 +28,8 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, RecoveryReason, ReplaceStreamJobPlan, Scheduled,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
+    Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::{MetaError, MetaResult};
@@ -42,16 +44,20 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason) {
+    fn abort_and_mark_blocked(
+        &self,
+        database_id: Option<DatabaseId>,
+        recovery_reason: RecoveryReason,
+    ) {
         self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering");
+            .abort_and_mark_blocked(database_id, "cluster is under recovering");
     }
 
-    fn mark_ready(&self) {
-        self.scheduled_barriers.mark_ready();
+    fn mark_ready(&self, database_id: Option<DatabaseId>) {
+        self.scheduled_barriers.mark_ready(database_id);
         self.set_status(BarrierManagerStatus::Running);
     }
 
@@ -77,6 +83,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
         self.reload_runtime_info_impl().await
+    }
+
+    async fn reload_database_runtime_info(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+        self.reload_database_runtime_info_impl(database_id).await
     }
 }
 

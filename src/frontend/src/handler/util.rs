@@ -34,14 +34,19 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
     CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName, OrderByExpr, Query,
     Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
-use crate::error::{ErrorCode, Result as RwResult};
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::{current, SessionImpl};
+use crate::HashSet;
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -269,6 +274,40 @@ pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
         .epoch_in_micros()
         / 1000000) as u64;
     Ok(seconds)
+}
+
+pub fn ensure_connection_type_allowed(
+    connection_type: PbConnectionType,
+    allowed_types: &HashSet<PbConnectionType>,
+) -> RwResult<()> {
+    if !allowed_types.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, allowed_types
+        ))));
+    }
+    Ok(())
+}
+
+fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
+    match connection_type {
+        PbConnectionType::Kafka => KAFKA_CONNECTOR,
+        PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
+        _ => unreachable!(),
+    }
+}
+
+pub fn check_connector_match_connection_type(
+    connector: &str,
+    connection_type: &PbConnectionType,
+) -> RwResult<()> {
+    if !connector.eq(connection_type_to_connector(connection_type)) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {} and connection type {:?} are not compatible",
+            connector, connection_type
+        ))));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

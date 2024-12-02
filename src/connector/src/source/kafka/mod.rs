@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
-use crate::connector_common::{AwsAuthProps, KafkaConnection, KafkaPrivateLinkCommon};
+use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
 
 mod client_context;
 pub mod enumerator;
@@ -144,7 +144,7 @@ pub struct KafkaProperties {
     pub common: KafkaCommon,
 
     #[serde(flatten)]
-    pub connection: KafkaConnection,
+    pub connection: KafkaConnectionProps,
 
     #[serde(flatten)]
     pub rdkafka_properties_common: RdKafkaPropertiesCommon,
