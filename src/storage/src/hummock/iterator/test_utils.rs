@@ -254,10 +254,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             table,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         ));
     }
     result

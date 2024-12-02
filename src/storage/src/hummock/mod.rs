@@ -95,10 +95,7 @@ pub async fn get_from_sstable_info(
         sstable,
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
-        (
-            *sstable_info.table_ids.first().unwrap(),
-            *sstable_info.table_ids.last().unwrap(),
-        ),
+        sstable_info,
     );
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.

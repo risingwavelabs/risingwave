@@ -71,10 +71,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
                 max_preload_retry_times: 0,
                 prefetch_for_large_query: false,
             }),
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(_err) = iter.rewind().await {

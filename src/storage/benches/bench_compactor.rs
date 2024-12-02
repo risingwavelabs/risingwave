@@ -230,15 +230,7 @@ async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
     let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
-    let mut iter = SstableIterator::new(
-        table,
-        sstable_store.clone(),
-        default_read_options,
-        (
-            *info.table_ids.first().unwrap(),
-            *info.table_ids.last().unwrap(),
-        ),
-    );
+    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options, info);
     iter.rewind().await.unwrap();
     while iter.is_valid() {
         iter.next().await.unwrap();

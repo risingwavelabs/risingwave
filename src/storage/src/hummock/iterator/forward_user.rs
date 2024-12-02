@@ -324,29 +324,15 @@ mod tests {
                 table0,
                 sstable_store.clone(),
                 read_options.clone(),
-                (
-                    *sstable_info_0.table_ids.first().unwrap(),
-                    *sstable_info_0.table_ids.last().unwrap(),
-                ),
+                &sstable_info_0,
             ),
             SstableIterator::create(
                 table1,
                 sstable_store.clone(),
                 read_options.clone(),
-                (
-                    *sstable_info_1.table_ids.first().unwrap(),
-                    *sstable_info_1.table_ids.last().unwrap(),
-                ),
+                &sstable_info_1,
             ),
-            SstableIterator::create(
-                table2,
-                sstable_store,
-                read_options.clone(),
-                (
-                    *sstable_info_2.table_ids.first().unwrap(),
-                    *sstable_info_2.table_ids.last().unwrap(),
-                ),
-            ),
+            SstableIterator::create(table2, sstable_store, read_options.clone(), &sstable_info_2),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -402,29 +388,15 @@ mod tests {
                 table0,
                 sstable_store.clone(),
                 read_options.clone(),
-                (
-                    *sstable_info_0.table_ids.first().unwrap(),
-                    *sstable_info_0.table_ids.last().unwrap(),
-                ),
+                &sstable_info_0,
             ),
             SstableIterator::create(
                 table1,
                 sstable_store.clone(),
                 read_options.clone(),
-                (
-                    *sstable_info_1.table_ids.first().unwrap(),
-                    *sstable_info_1.table_ids.last().unwrap(),
-                ),
+                &sstable_info_1,
             ),
-            SstableIterator::create(
-                table2,
-                sstable_store,
-                read_options,
-                (
-                    *sstable_info_2.table_ids.first().unwrap(),
-                    *sstable_info_2.table_ids.last().unwrap(),
-                ),
-            ),
+            SstableIterator::create(table2, sstable_store, read_options, &sstable_info_2),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -493,20 +465,9 @@ mod tests {
                 table0,
                 sstable_store.clone(),
                 read_options.clone(),
-                (
-                    *sstable_info_0.table_ids.first().unwrap(),
-                    *sstable_info_0.table_ids.last().unwrap(),
-                ),
+                &sstable_info_0,
             ),
-            SstableIterator::create(
-                table1,
-                sstable_store.clone(),
-                read_options,
-                (
-                    *sstable_info_1.table_ids.first().unwrap(),
-                    *sstable_info_1.table_ids.last().unwrap(),
-                ),
-            ),
+            SstableIterator::create(table1, sstable_store.clone(), read_options, &sstable_info_1),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -564,10 +525,7 @@ mod tests {
             table,
             sstable_store,
             read_options,
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
 
@@ -650,10 +608,7 @@ mod tests {
             table.clone(),
             sstable_store.clone(),
             read_options.clone(),
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
 
@@ -712,10 +667,7 @@ mod tests {
             table,
             sstable_store,
             read_options,
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
 
@@ -758,10 +710,7 @@ mod tests {
             table,
             sstable_store,
             read_options,
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
@@ -830,10 +779,7 @@ mod tests {
             table,
             sstable_store,
             read_options,
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -912,10 +858,7 @@ mod tests {
             table0,
             sstable_store.clone(),
             read_options.clone(),
-            (
-                *sstable_info_0.table_ids.first().unwrap(),
-                *sstable_info_0.table_ids.last().unwrap(),
-            ),
+            &sstable_info_0,
         )];
 
         let min_count = (TEST_KEYS_COUNT / 5) as u64;

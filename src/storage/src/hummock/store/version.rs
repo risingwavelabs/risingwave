@@ -877,10 +877,7 @@ impl HummockVersionReader {
                 table_holder,
                 self.sstable_store.clone(),
                 sst_read_options.clone(),
-                (
-                    *sstable_info.table_ids.first().unwrap(),
-                    *sstable_info.table_ids.last().unwrap(),
-                ),
+                sstable_info,
             ));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -936,10 +933,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        (
-                            *sstable_infos[0].table_ids.first().unwrap(),
-                            *sstable_infos[0].table_ids.last().unwrap(),
-                        ),
+                        &sstable_infos[0],
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -974,10 +968,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        (
-                            *sstable_info.table_ids.first().unwrap(),
-                            *sstable_info.table_ids.last().unwrap(),
-                        ),
+                        sstable_info,
                     ));
                     local_stats.overlapping_iter_count += 1;
                 }
@@ -1043,10 +1034,7 @@ impl HummockVersionReader {
                             table_holder,
                             sstable_store,
                             read_options,
-                            (
-                                *sstable_info.table_ids.first().unwrap(),
-                                *sstable_info.table_ids.last().unwrap(),
-                            ),
+                            sstable_info,
                         ),
                         local_stat,
                     ))

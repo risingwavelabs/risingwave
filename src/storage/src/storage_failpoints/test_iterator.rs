@@ -182,10 +182,7 @@ async fn test_failpoints_merge_invalid_key() {
                 table,
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
-                (
-                    *sstable_info.table_ids.first().unwrap(),
-                    *sstable_info.table_ids.last().unwrap(),
-                ),
+                &sstable_info,
             ));
         }
         iters
@@ -275,19 +272,13 @@ async fn test_failpoints_user_read_err() {
             table0,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-            (
-                *sstable_info_0.table_ids.first().unwrap(),
-                *sstable_info_0.table_ids.last().unwrap(),
-            ),
+            &sstable_info_0,
         ),
         SstableIterator::new(
             table1,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-            (
-                *sstable_info_1.table_ids.first().unwrap(),
-                *sstable_info_1.table_ids.last().unwrap(),
-            ),
+            &sstable_info_1,
         ),
     ];
 

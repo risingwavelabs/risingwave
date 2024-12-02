@@ -16,8 +16,8 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
@@ -32,7 +32,7 @@ pub trait SstableIteratorType: HummockIterator + 'static {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
-        read_table_id_range: (StateTableId, StateTableId),
+        sstable_info_ref: &SstableInfo,
     ) -> Self;
 }
 
@@ -68,10 +68,14 @@ impl SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
-        read_table_id_range: (StateTableId, StateTableId),
+        sstable_info_ref: &SstableInfo,
     ) -> Self {
         let mut start_idx = 0;
         let mut end_idx = sstable.meta.block_metas.len() - 1;
+        let read_table_id_range = (
+            *sstable_info_ref.table_ids.first().unwrap(),
+            *sstable_info_ref.table_ids.last().unwrap(),
+        );
         let block_meta_count = sstable.meta.block_metas.len();
 
         while start_idx < block_meta_count
@@ -334,9 +338,9 @@ impl SstableIteratorType for SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
-        read_table_id_range: (StateTableId, StateTableId),
+        sstable_info_ref: &SstableInfo,
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options, read_table_id_range)
+        SstableIterator::new(sstable, sstable_store, options, sstable_info_ref)
     }
 }
 
@@ -352,7 +356,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{TableKey, UserKey};
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -375,10 +379,7 @@ mod tests {
             handle,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         );
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
@@ -422,10 +423,7 @@ mod tests {
             sstable,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
-            (
-                *sstable_info.table_ids.first().unwrap(),
-                *sstable_info.table_ids.last().unwrap(),
-            ),
+            &sstable_info,
         );
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -534,10 +532,7 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store.clone(),
             options.clone(),
-            (
-                *sst_info.table_ids.first().unwrap(),
-                *sst_info.table_ids.last().unwrap(),
-            ),
+            &sst_info,
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
@@ -560,10 +555,7 @@ mod tests {
             sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
             sstable_store,
             options.clone(),
-            (
-                *sst_info.table_ids.first().unwrap(),
-                *sst_info.table_ids.last().unwrap(),
-            ),
+            &sst_info,
         );
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
@@ -589,10 +581,7 @@ mod tests {
                 sstable,
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
-                (
-                    *sstable_info.table_ids.first().unwrap(),
-                    *sstable_info.table_ids.last().unwrap(),
-                ),
+                &sstable_info,
             );
             sstable_iter.rewind().await.unwrap();
             assert!(sstable_iter.is_valid());
@@ -651,7 +640,10 @@ mod tests {
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    (0, 3),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![0, 1, 2, 3],
+                        ..Default::default()
+                    }),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
@@ -689,7 +681,10 @@ mod tests {
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    (1, 2),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![1, 2, 3],
+                        ..Default::default()
+                    }),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
@@ -727,7 +722,10 @@ mod tests {
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    (2, 3),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2, 3],
+                        ..Default::default()
+                    }),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());
@@ -765,7 +763,10 @@ mod tests {
                     sstable,
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
-                    (2, 2),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2],
+                        ..Default::default()
+                    }),
                 );
                 sstable_iter.rewind().await.unwrap();
                 assert!(sstable_iter.is_valid());

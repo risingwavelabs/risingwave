@@ -90,10 +90,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 table,
                 self.sstable_store.clone(),
                 self.read_options.clone(),
-                (
-                    *self.sstable_infos[idx].table_ids.first().unwrap(),
-                    *self.sstable_infos[idx].table_ids.last().unwrap(),
-                ),
+                &self.sstable_infos[idx],
             );
 
             if let Some(key) = seek_key {

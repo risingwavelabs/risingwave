@@ -52,10 +52,7 @@ async fn test_failpoints_table_read() {
         table,
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
-        (
-            *sstable_info.table_ids.first().unwrap(),
-            *sstable_info.table_ids.last().unwrap(),
-        ),
+        &sstable_info,
     );
     sstable_iter.rewind().await.unwrap();
 
@@ -134,10 +131,7 @@ async fn test_failpoints_vacuum_and_metadata() {
         sstable_store.sstable(&info, &mut stats).await.unwrap(),
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
-        (
-            *info.table_ids.first().unwrap(),
-            *info.table_ids.last().unwrap(),
-        ),
+        &info,
     );
     let mut cnt = 0;
     sstable_iter.rewind().await.unwrap();
