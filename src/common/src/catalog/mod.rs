@@ -132,6 +132,7 @@ pub fn rw_timestamp_column_desc() -> ColumnDesc {
 }
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
+pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 
 // The number of columns output by the cdc source job
 // see `debezium_cdc_source_schema()` for details
@@ -157,6 +158,14 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
         TABLE_NAME_COLUMN_NAME,
         ColumnId::placeholder(),
         DataType::Varchar,
+    )
+}
+
+pub fn iceberg_sequence_num_column_desc() -> ColumnDesc {
+    ColumnDesc::named(
+        ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Int64,
     )
 }
 
