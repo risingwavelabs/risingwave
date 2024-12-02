@@ -4,7 +4,7 @@ from nats.aio.client import Client as NATS
 from nats.js.api import StreamConfig
 import psycopg2
 
-NATS_SERVER = "nats-server:4222"
+NATS_SERVER = "nats://nats-server:4222"
 
 async def create_stream(stream_name: str, subject: str):
     # Create a NATS client
