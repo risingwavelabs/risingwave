@@ -383,6 +383,7 @@ impl CatalogController {
             .oid;
             table_id_map.insert(table.id, table_id as u32);
             table.id = table_id as _;
+            table.job_id = Some(job_id as _);
 
             let table_model = table::ActiveModel {
                 table_id: Set(table_id as _),

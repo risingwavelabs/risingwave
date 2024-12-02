@@ -25,6 +25,7 @@ struct RwInternalTable {
     id: i32,
     name: String,
     schema_id: i32,
+    job_id: i32,
     owner: i32,
     definition: String,
     acl: Vec<String>,
@@ -48,6 +49,7 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
                 id: table.id.table_id as i32,
                 name: table.name().into(),
                 schema_id: schema.id() as i32,
+                job_id: table.job_id.unwrap().table_id as i32,
                 owner: table.owner as i32,
                 definition: table.create_sql(),
                 acl: get_acl_items(
