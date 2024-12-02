@@ -643,16 +643,15 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
-// TODO()
 #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
-async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: usize) {
+async fn ensure_max_chunk_size(stream: BoxSourceStream, max_chunk_size: usize) {
     #[for_await]
     for batch in stream {
         let mut batch = batch?;
         let mut start = 0;
         let end = batch.len();
         while start < end {
-            let next = std::cmp::min(start + rate_limit, end);
+            let next = std::cmp::min(start + max_chunk_size, end);
             yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
             start = next;
         }
@@ -674,9 +673,8 @@ impl<P: ByteStreamSourceParser> P {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
 
-        // TODO()
         // Ensure chunk size is smaller than the required maximum.
-        let data_stream = Box::pin(ensure_largest_at_rate_limit(
+        let data_stream = Box::pin(ensure_max_chunk_size(
             data_stream,
             self.source_ctx().source_ctrl_opts.max_chunk_size,
         ));
