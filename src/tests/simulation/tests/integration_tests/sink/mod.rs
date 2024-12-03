@@ -22,6 +22,8 @@ mod recovery;
 mod scale;
 #[cfg(madsim)]
 mod utils;
+#[cfg(madsim)]
+mod rate_limit;
 
 #[macro_export]
 macro_rules! assert_with_err_returned {
