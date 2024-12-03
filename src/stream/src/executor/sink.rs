@@ -53,6 +53,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     need_advance_delete: bool,
     re_construct_with_sink_pk: bool,
     compact_chunk: bool,
+    rate_limit: Option<u32>
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -94,6 +95,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_store_factory: F,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
+        rate_limit: Option<u32>,
     ) -> StreamExecutorResult<Self> {
         let sink = build_sink(sink_param.clone())
             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
@@ -181,6 +183,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             need_advance_delete,
             re_construct_with_sink_pk,
             compact_chunk,
+            rate_limit
         })
     }
 
@@ -241,6 +244,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             };
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+            // Init the rate limit
+            rate_limit_tx.send(self.rate_limit);
 
             self.log_store_factory
                 .build()
@@ -322,6 +327,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                                    self.rate_limit = new_rate_limit;
                                     rate_limit_tx.send(new_rate_limit).await?;
                                 }
                             }
