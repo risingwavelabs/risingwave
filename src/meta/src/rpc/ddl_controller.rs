@@ -145,7 +145,7 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceStreamJobInfo>),
     AlterName(alter_name_request::Object, String),
     AlterSwapRename(alter_swap_rename_request::Object),
-    ReplaceTable(ReplaceStreamJobInfo),
+    ReplaceStreamJob(ReplaceStreamJobInfo),
     AlterNonSharedSource(Source),
     AlterObjectOwner(Object, UserId),
     AlterSetSchema(alter_set_schema_request::Object, SchemaId),
@@ -185,7 +185,7 @@ impl DdlCommand {
             | DdlCommand::AlterSwapRename(_) => true,
             DdlCommand::CreateStreamingJob(_, _, _, _, _)
             | DdlCommand::CreateNonSharedSource(_)
-            | DdlCommand::ReplaceTable(_)
+            | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
             | DdlCommand::CreateSubscription(_) => false,
         }
@@ -330,7 +330,7 @@ impl DdlController {
                     ctrl.drop_streaming_job(job_id, drop_mode, target_replace_info)
                         .await
                 }
-                DdlCommand::ReplaceTable(ReplaceStreamJobInfo {
+                DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
                     col_index_mapping,
@@ -354,7 +354,9 @@ impl DdlController {
                 DdlCommand::CreateSecret(secret) => ctrl.create_secret(secret).await,
                 DdlCommand::DropSecret(secret_id) => ctrl.drop_secret(secret_id).await,
                 DdlCommand::AlterSecret(secret) => ctrl.alter_secret(secret).await,
-                DdlCommand::AlterNonSharedSource(source) => ctrl.alter_source(source).await,
+                DdlCommand::AlterNonSharedSource(source) => {
+                    ctrl.alter_non_shared_source(source).await
+                }
                 DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
@@ -464,7 +466,7 @@ impl DdlController {
 
     /// This replaces the source in the catalog.
     /// Note: `StreamSourceInfo` in downstream MVs' `SourceExecutor`s are not updated.
-    async fn alter_source(&self, source: Source) -> MetaResult<NotificationVersion> {
+    async fn alter_non_shared_source(&self, source: Source) -> MetaResult<NotificationVersion> {
         self.metadata_manager
             .catalog_controller
             .alter_non_shared_source(source)
@@ -1299,7 +1301,7 @@ impl DdlController {
         &self,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        table_col_index_mapping: Option<ColIndexMapping>,
+        col_index_mapping: Option<ColIndexMapping>,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1352,7 +1354,7 @@ impl DdlController {
                     ctx,
                     &streaming_job,
                     fragment_graph,
-                    table_col_index_mapping.clone(),
+                    col_index_mapping.as_ref(),
                     tmp_id as _,
                 )
                 .await?;
@@ -1412,7 +1414,7 @@ impl DdlController {
                         tmp_id,
                         streaming_job,
                         merge_updates,
-                        table_col_index_mapping,
+                        col_index_mapping,
                         SinkIntoTableContext {
                             creating_sink_id: None,
                             dropping_sink_id: None,
@@ -1690,14 +1692,12 @@ impl DdlController {
         stream_ctx: StreamContext,
         stream_job: &StreamingJob,
         mut fragment_graph: StreamFragmentGraph,
-        // TODO(alter-source): check what does this mean
-        table_col_index_mapping: Option<ColIndexMapping>,
+        col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         match &stream_job {
-            StreamingJob::Table(..) => {}
-            StreamingJob::Source(..)
-            | StreamingJob::MaterializedView(..)
+            StreamingJob::Table(..) | StreamingJob::Source(..) => {}
+            StreamingJob::MaterializedView(..)
             | StreamingJob::Sink(..)
             | StreamingJob::Index(..) => {
                 bail_not_implemented!("schema change for {}", stream_job.job_type_str())
@@ -1721,16 +1721,16 @@ impl DdlController {
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
-        let original_mview_fragment = old_fragments
-            .mview_fragment()
-            .expect("mview fragment not found");
+        let original_root_fragment = old_fragments
+            .root_fragment()
+            .expect("root fragment not found");
 
         let job_type = StreamingJobType::from(stream_job);
 
         // Map the column indices in the dispatchers with the given mapping.
         let (mut downstream_fragments, downstream_actor_location) =
             self.metadata_manager.get_downstream_fragments(id).await?;
-        if let Some(mapping) = &table_col_index_mapping {
+        if let Some(mapping) = &col_index_mapping {
             for (d, _f) in &mut downstream_fragments {
                 *d = mapping.rewrite_dispatch_strategy(d).ok_or_else(|| {
                     // The `rewrite` only fails if some column is dropped.
@@ -1742,11 +1742,11 @@ impl DdlController {
         }
 
         // build complete graph based on the table job type
-        let complete_graph = match job_type {
-            StreamingJobType::Table(TableJobType::General) => {
+        let complete_graph = match &job_type {
+            StreamingJobType::Table(TableJobType::General) | StreamingJobType::Source => {
                 CompleteStreamFragmentGraph::with_downstreams(
                     fragment_graph,
-                    original_mview_fragment.fragment_id,
+                    original_root_fragment.fragment_id,
                     downstream_fragments,
                     downstream_actor_location,
                     job_type,
@@ -1763,7 +1763,7 @@ impl DdlController {
                     fragment_graph,
                     upstream_root_fragments,
                     upstream_actor_location,
-                    original_mview_fragment.fragment_id,
+                    original_root_fragment.fragment_id,
                     downstream_fragments,
                     downstream_actor_location,
                     job_type,
@@ -1777,7 +1777,7 @@ impl DdlController {
 
         // XXX: what is this parallelism?
         // Is it "assigned parallelism"?
-        let parallelism = NonZeroUsize::new(original_mview_fragment.get_actors().len())
+        let parallelism = NonZeroUsize::new(original_root_fragment.get_actors().len())
             .expect("The number of actors in the original table fragment should be greater than 0");
 
         let actor_graph_builder =
@@ -1791,8 +1791,11 @@ impl DdlController {
             merge_updates,
         } = actor_graph_builder.generate_graph(&self.env, stream_job, expr_context)?;
 
-        // general table job type does not have upstream job, so the dispatchers should be empty
-        if matches!(job_type, StreamingJobType::Table(TableJobType::General)) {
+        // general table & source does not have upstream job, so the dispatchers should be empty
+        if matches!(
+            job_type,
+            StreamingJobType::Source | StreamingJobType::Table(TableJobType::General)
+        ) {
             assert!(dispatchers.is_empty());
         }
 

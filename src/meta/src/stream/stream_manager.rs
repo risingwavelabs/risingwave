@@ -476,7 +476,13 @@ impl GlobalStreamManager {
         }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
         let tmp_table_id = new_fragments.stream_job_id();
-        let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+        let init_split_assignment = if streaming_job.is_source() {
+            self.source_manager
+                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .await?
+        } else {
+            self.source_manager.allocate_splits(&tmp_table_id).await?
+        };
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
