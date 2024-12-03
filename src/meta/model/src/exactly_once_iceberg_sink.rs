@@ -19,6 +19,8 @@ use sea_orm::{DeriveEntityModel, DeriveRelation, EnumIter};
 #[sea_orm(table_name = "exactly_once_iceberg_sink_metadata")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
+    pub sink_id: u32,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub end_epoch: u64,
     pub start_epoch: u64,
     pub metadata: ::prost::alloc::vec::Vec<u8>,

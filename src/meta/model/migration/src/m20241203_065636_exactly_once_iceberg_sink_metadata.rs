@@ -12,10 +12,14 @@ impl MigrationTrait for Migration {
                     .table(IcebergSinkMetadata::Table)
                     .if_not_exists()
                     .col(
+                        ColumnDef::new(IcebergSinkMetadata::SinkId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
                         ColumnDef::new(IcebergSinkMetadata::EndEpoch)
                             .big_integer()
-                            .not_null()
-                            .primary_key(),
+                            .not_null(),
                     )
                     .col(
                         ColumnDef::new(IcebergSinkMetadata::StartEpoch)
@@ -27,16 +31,6 @@ impl MigrationTrait for Migration {
                             .blob()
                             .not_null(),
                     )
-                    .to_owned(),
-            )
-            .await?;
-
-        manager
-            .create_index(
-                Index::create()
-                    .table(IcebergSinkMetadata::Table)
-                    .name("idx_iceberg_sink_metadata_start_epoch")
-                    .col(IcebergSinkMetadata::StartEpoch)
                     .to_owned(),
             )
             .await?;
@@ -53,6 +47,7 @@ impl MigrationTrait for Migration {
 #[derive(DeriveIden)]
 enum IcebergSinkMetadata {
     Table,
+    SinkId,
     EndEpoch,
     StartEpoch,
     Metadata,

@@ -422,6 +422,7 @@ impl Sink for IcebergSink {
             table,
             partition_type,
             last_commit_epoch: 0,
+            sink_id: self.param.sink_id.sink_id(),
             db,
         })
     }
@@ -853,6 +854,7 @@ pub struct IcebergSinkCommitter {
     pub partition_type: Any,
     pub last_commit_epoch: u64,
 
+    pub(crate) sink_id: u32,
     pub(crate) db: DatabaseConnection,
 }
 
@@ -932,6 +934,7 @@ impl IcebergSinkCommitter {
         pre_commit_metadata: Vec<u8>,
     ) -> anyhow::Result<()> {
         let m = exactly_once_iceberg_sink::ActiveModel {
+            sink_id: Set(self.sink_id),
             end_epoch: Set(end_epoch),
             start_epoch: Set(start_epoch),
             metadata: Set(pre_commit_metadata),
