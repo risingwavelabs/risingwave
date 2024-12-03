@@ -369,7 +369,7 @@ pub async fn get_partition_compute_info(
 }
 
 async fn get_partition_compute_info_for_iceberg(
-    _iceberg_config: &IcebergConfig,
+    iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
     // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
     return Ok(None);
