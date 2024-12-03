@@ -5045,6 +5045,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5070,8 +5076,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21c47fb079b7e98dbe64ba1e25573a37bda50755470654a05407281180e9e32c"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5088,15 +5095,16 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e3a47ce88e9ebcf215324ac362e01af2ce6cfa5cc77954ca96d1ef696c764ea"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
  "cfg-if",
  "fastrace",
  "futures",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
@@ -5106,9 +5114,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "foyer-intrusive-collections"
+version = "0.10.0-dev"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4fee46bea69e0596130e3210e65d3424e0ac1e6df3bde6636304bdf1ca4a3b"
+dependencies = [
+ "memoffset",
+]
+
+[[package]]
 name = "foyer-memory"
-version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1627a2a766a7171a6dea6ea13c4b62663dec750404a2a4d0d5d065a6b537dc2d"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5116,9 +5134,9 @@ dependencies = [
  "equivalent",
  "fastrace",
  "foyer-common",
+ "foyer-intrusive-collections",
  "futures",
- "hashbrown 0.14.5",
- "intrusive-collections",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
@@ -5131,8 +5149,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.13.0-dev"
-source = "git+https://github.com/mrcroxx/foyer?rev=19bc2def14dfa8bb7d6581fb625584694bc7f4a0#19bc2def14dfa8bb7d6581fb625584694bc7f4a0"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70dfacf446e6314c69155eff41d678b79eee21b7e8ad62615047bd5180dbd205"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -5152,7 +5171,7 @@ dependencies = [
  "foyer-memory",
  "fs4",
  "futures",
- "hashbrown 0.14.5",
+ "hashbrown 0.15.0",
  "itertools 0.13.0",
  "libc",
  "lz4",
@@ -5165,7 +5184,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.3",
  "tracing",
- "twox-hash",
+ "twox-hash 2.0.1",
  "zstd 0.13.0",
 ]
 
@@ -5259,9 +5278,9 @@ dependencies = [
 
 [[package]]
 name = "fs4"
-version = "0.9.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8c6b3bd49c37d2aa3f3f2220233b29a7cd23f79d1fe70e5337d25fb390793de"
+checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
 dependencies = [
  "rustix 0.38.37",
  "windows-sys 0.52.0",
@@ -5862,6 +5881,11 @@ name = "hashbrown"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e087f84d4f86bf4b218b927129862374b72199ae7d8657835f1e89000eea4fb"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "hashlink"
@@ -6547,14 +6571,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
-name = "intrusive-collections"
-version = "0.9.7"
-source = "git+https://github.com/foyer-rs/intrusive-rs?rev=94cfac4701dbc0033b7bc27e31c46bf3a12d96d7#94cfac4701dbc0033b7bc27e31c46bf3a12d96d7"
-dependencies = [
- "memoffset",
-]
-
-[[package]]
 name = "io-extras"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7229,7 +7245,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
 dependencies = [
- "twox-hash",
+ "twox-hash 1.6.3",
 ]
 
 [[package]]
@@ -7746,7 +7762,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "twox-hash",
+ "twox-hash 1.6.3",
  "url",
 ]
 
@@ -8707,7 +8723,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash",
+ "twox-hash 1.6.3",
  "zstd 0.13.0",
  "zstd-sys",
 ]
@@ -8742,7 +8758,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash",
+ "twox-hash 1.6.3",
  "zstd 0.13.0",
  "zstd-sys",
 ]
@@ -10425,7 +10441,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.63",
- "twox-hash",
+ "twox-hash 1.6.3",
 ]
 
 [[package]]
@@ -10482,7 +10498,7 @@ dependencies = [
  "tokio-stream 0.1.15",
  "tokio-util",
  "tracing",
- "twox-hash",
+ "twox-hash 1.6.3",
  "uuid",
  "workspace-hack",
 ]
@@ -10693,7 +10709,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "twox-hash",
+ "twox-hash 1.6.3",
  "url",
  "uuid",
  "workspace-hack",
@@ -15098,6 +15114,15 @@ dependencies = [
  "cfg-if",
  "rand",
  "static_assertions",
+]
+
+[[package]]
+name = "twox-hash"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6db6856664807f43c17fbaf2718e2381ac1476a449aa104f5f64622defa1245"
+dependencies = [
+ "rand",
 ]
 
 [[package]]
