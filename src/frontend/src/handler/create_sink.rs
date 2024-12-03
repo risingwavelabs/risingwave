@@ -369,7 +369,7 @@ pub async fn get_partition_compute_info(
 }
 
 async fn get_partition_compute_info_for_iceberg(
-    iceberg_config: &IcebergConfig,
+    _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
     // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
     return Ok(None);
@@ -377,10 +377,10 @@ async fn get_partition_compute_info_for_iceberg(
     #[allow(unreachable_code)]
     {
         // TODO: check table if exists
-        if iceberg_config.create_table_if_not_exists {
+        if _iceberg_config.create_table_if_not_exists {
             return Ok(None);
         }
-        let table = iceberg_config.load_table().await?;
+        let table = _iceberg_config.load_table().await?;
         let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok()
         else {
             return Ok(None);
