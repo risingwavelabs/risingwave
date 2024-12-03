@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 
 const TELEMETRY_FRONTEND_REPORT_TYPE: &str = "frontend";
 
-#[allow(dead_code)] // please remove when used
 pub(crate) fn report_event(
     event_stage: PbTelemetryEventStage,
     event_name: &str,
