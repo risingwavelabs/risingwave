@@ -15,6 +15,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(let_chains)]
+#![recursion_limit = "256"]
 
 use core::str::FromStr;
 use core::sync::atomic::Ordering;
