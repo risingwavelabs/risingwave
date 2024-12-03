@@ -25,8 +25,8 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
-    SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
+    fill_adaptive_split, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
+    SourceProperties, SplitEnumerator, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_connector::{dispatch_source_prop, WithOptionsSecResolved};
 use risingwave_meta_model::SourceId;
@@ -110,7 +110,8 @@ pub async fn create_source_worker_handle(
     let current_splits_ref = splits.clone();
 
     let connector_properties = extract_prop_from_new_source(source)?;
-    let enable_scale_in = connector_properties.enable_split_scale_in();
+    let enable_scale_in = connector_properties.enable_drop_split();
+    let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
     let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
     let handle = dispatch_source_prop!(connector_properties, prop, {
         let mut worker = ConnectorSourceWorker::create(
@@ -142,7 +143,8 @@ pub async fn create_source_worker_handle(
         handle,
         sync_call_tx,
         splits,
-        enable_scale_in,
+        enable_drop_split: enable_scale_in,
+        enable_adaptive_splits,
     })
 }
 
@@ -262,12 +264,17 @@ pub struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
-    enable_scale_in: bool,
+    enable_drop_split: bool,
+    enable_adaptive_splits: bool,
 }
 
 impl ConnectorSourceWorkerHandle {
     async fn discovered_splits(&self) -> Option<BTreeMap<SplitId, SplitImpl>> {
         self.splits.lock().await.splits.clone()
+    }
+
+    pub fn get_enable_adaptive_splits(&self) -> bool {
+        self.enable_adaptive_splits
     }
 }
 
@@ -290,6 +297,36 @@ pub struct SourceManagerRunningInfo {
     pub source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
     pub backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+}
+
+async fn handle_discover_splits(
+    handle: &ConnectorSourceWorkerHandle,
+    source_id: SourceId,
+    actors: &HashSet<ActorId>,
+) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
+    let Some(mut discovered_splits) = handle.discovered_splits().await else {
+        tracing::info!(
+            "The discover loop for source {} is not ready yet; we'll wait for the next run",
+            source_id
+        );
+        return Ok(BTreeMap::new());
+    };
+    if discovered_splits.is_empty() {
+        tracing::warn!("No splits discovered for source {}", source_id);
+    }
+
+    if handle.enable_adaptive_splits {
+        // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
+        // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
+        // And prev splits record should be dropped via CN.
+
+        debug_assert!(handle.enable_drop_split);
+        debug_assert!(discovered_splits.len() == 1);
+        discovered_splits =
+            fill_adaptive_split(discovered_splits.values().next().unwrap(), actors)?;
+    }
+
+    Ok(discovered_splits)
 }
 
 impl SourceManagerCore {
@@ -317,7 +354,7 @@ impl SourceManagerCore {
     async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitAssignment>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
 
-        for (source_id, handle) in &self.managed_sources {
+        'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
                 Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
                 _ => {
@@ -326,19 +363,7 @@ impl SourceManagerCore {
             };
             let backfill_fragment_ids = self.backfill_fragments.get(source_id);
 
-            let Some(discovered_splits) = handle.discovered_splits().await else {
-                tracing::info!(
-                    "The discover loop for source {} is not ready yet; we'll wait for the next run",
-                    source_id
-                );
-                continue;
-            };
-
-            if discovered_splits.is_empty() {
-                tracing::warn!("No splits discovered for source {}", source_id);
-            }
-
-            for &fragment_id in source_fragment_ids {
+            'loop_fragment: for &fragment_id in source_fragment_ids {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
@@ -347,15 +372,21 @@ impl SourceManagerCore {
                     Ok(actors) => {
                         if actors.is_empty() {
                             tracing::warn!("No actors found for fragment {}", fragment_id);
-                            continue;
+                            continue 'loop_fragment;
                         }
                         actors
                     }
                     Err(err) => {
                         tracing::warn!(error = %err.as_report(), "Failed to get the actor of the fragment, maybe the fragment doesn't exist anymore");
-                        continue;
+                        continue 'loop_fragment;
                     }
                 };
+
+                let discovered_splits = handle_discover_splits(handle, *source_id, &actors).await?;
+                if discovered_splits.is_empty() {
+                    // The discover loop for this source is not ready yet; we'll wait for the next run
+                    continue 'loop_source;
+                }
 
                 let prev_actor_splits: HashMap<_, _> = actors
                     .into_iter()
@@ -375,7 +406,8 @@ impl SourceManagerCore {
                     prev_actor_splits,
                     &discovered_splits,
                     SplitDiffOptions {
-                        enable_scale_in: handle.enable_scale_in,
+                        enable_scale_in: handle.enable_drop_split,
+                        enable_adaptive: handle.enable_adaptive_splits,
                     },
                 ) {
                     split_assignment.insert(fragment_id, new_assignment);
@@ -520,6 +552,9 @@ impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
 #[derive(Debug)]
 struct SplitDiffOptions {
     enable_scale_in: bool,
+
+    /// For most connectors, this should be false. When enabled, RisingWave will not track any progress.
+    enable_adaptive: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -527,6 +562,7 @@ impl Default for SplitDiffOptions {
     fn default() -> Self {
         SplitDiffOptions {
             enable_scale_in: false,
+            enable_adaptive: false,
         }
     }
 }
@@ -601,7 +637,7 @@ where
         .filter(|split_id| !prev_split_ids.contains(split_id))
         .collect();
 
-    if opts.enable_scale_in {
+    if opts.enable_scale_in || opts.enable_adaptive {
         // if we support scale in, no more splits are discovered, and no splits are dropped, return
         // we need to check if discovered_split_ids is empty, because if it is empty, we need to
         // handle the case of scale in to zero (like deleting all objects from s3)
@@ -623,7 +659,7 @@ where
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
 
     for (actor_id, mut splits) in actor_splits {
-        if opts.enable_scale_in {
+        if opts.enable_scale_in || opts.enable_adaptive {
             splits.retain(|split| !dropped_splits.contains(&split.id()));
         }
 
@@ -887,7 +923,7 @@ impl SourceManager {
 
         let mut assigned = HashMap::new();
 
-        for (source_id, fragments) in source_fragments {
+        'loop_source: for (source_id, fragments) in source_fragments {
             let handle = core
                 .managed_sources
                 .get(&source_id)
@@ -906,15 +942,8 @@ impl SourceManager {
                     .context("failed to receive sync call response")??;
             }
 
-            let splits = handle.discovered_splits().await.unwrap();
-
-            if splits.is_empty() {
-                tracing::warn!("no splits detected for source {}", source_id);
-                continue;
-            }
-
             for fragment_id in fragments {
-                let empty_actor_splits = table_fragments
+                let empty_actor_splits: HashMap<u32, Vec<SplitImpl>> = table_fragments
                     .fragments
                     .get(&fragment_id)
                     .unwrap()
@@ -922,6 +951,12 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
+                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
+                let splits = handle_discover_splits(handle, source_id, &actor_hashset).await?;
+                if splits.is_empty() {
+                    tracing::warn!("no splits detected for source {}", source_id);
+                    continue 'loop_source;
+                }
 
                 if let Some(diff) = reassign_splits(
                     fragment_id,
@@ -1051,7 +1086,8 @@ impl SourceManager {
 
         let connector_properties = extract_prop_from_existing_source(&source)?;
 
-        let enable_scale_in = connector_properties.enable_split_scale_in();
+        let enable_drop_split = connector_properties.enable_drop_split();
+        let enable_adaptive_splits = connector_properties.enable_adaptive_splits();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
@@ -1089,7 +1125,8 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits,
-                enable_scale_in,
+                enable_drop_split,
+                enable_adaptive_splits,
             },
         );
         Ok(())
@@ -1258,6 +1295,7 @@ mod tests {
 
         let opts = SplitDiffOptions {
             enable_scale_in: true,
+            enable_adaptive: false,
         };
 
         let prev_split_ids: HashSet<_> = actor_splits
@@ -1303,6 +1341,7 @@ mod tests {
 
         let opts = SplitDiffOptions {
             enable_scale_in: true,
+            enable_adaptive: false,
         };
 
         let diff = reassign_splits(

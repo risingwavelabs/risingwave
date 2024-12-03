@@ -321,10 +321,7 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<BoundBaseTable> {
         let db_name = &self.db_name;
-        let schema_path = match schema_name {
-            Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
-        };
+        let schema_path = self.bind_schema_path(schema_name);
         let (table_catalog, schema_name) =
             self.catalog
                 .get_created_table_by_name(db_name, schema_path, table_name)?;
@@ -358,10 +355,7 @@ impl Binder {
         is_insert: bool,
     ) -> Result<&'a TableCatalog> {
         let db_name = &self.db_name;
-        let schema_path = match schema_name {
-            Some(schema_name) => SchemaPath::Name(schema_name),
-            None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
-        };
+        let schema_path = self.bind_schema_path(schema_name);
 
         let (table, _schema_name) =
             self.catalog
