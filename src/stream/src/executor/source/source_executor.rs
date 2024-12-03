@@ -546,11 +546,6 @@ impl<S: StateStore> SourceExecutor<S> {
             .await?
             {
                 if let Message::Barrier(barrier) = barrier {
-                    tracing::info!(
-                        "=== [debug] received a barrier when building source stream: {:?}",
-                        barrier
-                    );
-
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             // handle mutation of rate limit
