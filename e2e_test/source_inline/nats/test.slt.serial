@@ -28,7 +28,7 @@ format plain encode json;
 statement ok
 select * from t_nats;
 
-sleep 1s
+sleep 3s
 
 # at least once
 query T
@@ -60,6 +60,8 @@ alter table t_nats set PARALLELISM to 2;
 
 system ok
 python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+
+sleep 3s
 
 query T
 select count(*) >= 300 from t_nats;
