@@ -205,13 +205,26 @@ impl DynamicLevelSelectorCore {
     ) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
-        let idle_file_count = levels
+        let l0_file_count = levels
             .l0
             .sub_levels
             .iter()
-            .map(|level| level.table_infos.len())
-            .sum::<usize>()
-            - handlers[0].get_pending_file_count();
+            .map(|sub_level| sub_level.table_infos.len())
+            .sum::<usize>();
+
+        let idle_file_count = match l0_file_count.checked_sub(handlers[0].pending_file_count()) {
+            Some(count) => count,
+            None => {
+                // If the number of files in L0 is less than the number of pending files, it means
+                // that may be encountered some issue, we can work around it.
+                tracing::warn!(
+                    "The number of files in L0 {} is less than the number of pending files {} group {} pending_tasks_ids {:?} compacting_files {:?}",
+                    l0_file_count, handlers[0].pending_file_count(), levels.group_id, handlers[0].pending_tasks_ids(), handlers[0].compacting_files()
+                );
+
+                0
+            }
+        };
 
         if idle_file_count > 0 {
             // trigger l0 compaction when the number of files is too large.
@@ -254,7 +267,7 @@ impl DynamicLevelSelectorCore {
                 })
                 .map(|level| level.total_file_size)
                 .sum::<u64>()
-                .saturating_sub(handlers[0].get_pending_output_file_size(ctx.base_level as u32));
+                .saturating_sub(handlers[0].pending_output_file_size(ctx.base_level as u32));
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
             let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
 
@@ -305,7 +318,7 @@ impl DynamicLevelSelectorCore {
                 continue;
             }
             let output_file_size =
-                handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
+                handlers[level_idx].pending_output_file_size(level.level_idx + 1);
             let total_size = level.total_file_size.saturating_sub(output_file_size);
             if total_size == 0 {
                 continue;
