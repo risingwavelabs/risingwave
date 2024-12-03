@@ -179,6 +179,8 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 // EOF
                 break;
             }
+            // note that the buffer contains the newline character
+            debug_assert_eq!(n_read, line_buf.len());
 
             batch.push(SourceMessage {
                 key: None,
