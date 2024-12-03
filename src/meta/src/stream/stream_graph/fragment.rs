@@ -708,7 +708,8 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV and CDC/Source Table with the upstream existing
+    /// Create a new [`CompleteStreamFragmentGraph`] for newly created job (which has no downstreams).
+    /// e.g., MV on MV and CDC/Source Table with the upstream existing
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
@@ -727,8 +728,8 @@ impl CompleteStreamFragmentGraph {
         )
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `StreamScan` fragments.
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table/source,
+    /// with the downstream existing `StreamScan`/`StreamSourceScan` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
@@ -748,7 +749,7 @@ impl CompleteStreamFragmentGraph {
         )
     }
 
-    /// For replacing an existing table based on shared cdc source
+    /// For replacing an existing table based on shared cdc source, which has both upstreams and downstreams.
     pub fn with_upstreams_and_downstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,

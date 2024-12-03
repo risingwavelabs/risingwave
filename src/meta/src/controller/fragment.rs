@@ -24,7 +24,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, Sink, StreamingJob};
+use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
     ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
@@ -46,7 +46,7 @@ use risingwave_pb::meta::{
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, PbDispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
+    DispatchStrategy, PbFragmentTypeFlag, PbStreamActor, PbStreamContext,
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
@@ -1346,29 +1346,41 @@ impl CatalogController {
         Ok(actors)
     }
 
-    pub async fn get_upstream_root_fragments(
+    /// Get and filter the "**root**" fragments of the specified jobs.
+    /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
+    ///
+    /// Root fragment connects to downstream jobs.
+    ///
+    /// ## What can be the root fragment
+    /// - For MV, it should have one `MView` fragment.
+    /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
+    /// - For source, it should have one `Source` fragment.
+    ///
+    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
+    pub async fn get_root_fragments(
         &self,
-        upstream_job_ids: Vec<ObjectId>,
+        job_ids: Vec<ObjectId>,
     ) -> MetaResult<(HashMap<ObjectId, PbFragment>, Vec<(ActorId, WorkerId)>)> {
         let inner = self.inner.read().await;
 
         let all_upstream_fragments = Fragment::find()
-            .filter(fragment::Column::JobId.is_in(upstream_job_ids))
+            .filter(fragment::Column::JobId.is_in(job_ids))
             .all(&inner.db)
             .await?;
         // job_id -> fragment
-        let mut fragments = HashMap::<ObjectId, fragment::Model>::new();
+        let mut root_fragments = HashMap::<ObjectId, fragment::Model>::new();
         for fragment in all_upstream_fragments {
             if fragment.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0 {
-                _ = fragments.insert(fragment.job_id, fragment);
+                _ = root_fragments.insert(fragment.job_id, fragment);
             } else if fragment.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
-                // look for Source fragment if there's no MView fragment
-                _ = fragments.try_insert(fragment.job_id, fragment);
+                // look for Source fragment only if there's no MView fragment
+                // (notice try_insert here vs insert above)
+                _ = root_fragments.try_insert(fragment.job_id, fragment);
             }
         }
 
-        let mut root_fragments = HashMap::new();
-        for (_, fragment) in fragments {
+        let mut root_fragments_pb = HashMap::new();
+        for (_, fragment) in root_fragments {
             let actors = fragment.find_related(Actor).all(&inner.db).await?;
             let actor_dispatchers = get_actor_dispatchers(
                 &inner.db,
@@ -1376,7 +1388,7 @@ impl CatalogController {
             )
             .await?;
 
-            root_fragments.insert(
+            root_fragments_pb.insert(
                 fragment.job_id,
                 Self::compose_fragment(fragment, actors, actor_dispatchers)?.0,
             );
@@ -1389,35 +1401,34 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
 
-        Ok((root_fragments, actors))
+        Ok((root_fragments_pb, actors))
     }
 
-    /// Get the downstream `Chain` fragments of the specified table.
-    pub async fn get_downstream_chain_fragments(
+    pub async fn get_root_fragment(
+        &self,
+        job_id: ObjectId,
+    ) -> MetaResult<(PbFragment, Vec<(ActorId, WorkerId)>)> {
+        let (mut root_fragments, actors) = self.get_root_fragments(vec![job_id]).await?;
+        let root_fragment = root_fragments
+            .remove(&job_id)
+            .context(format!("root fragment for job {} not found", job_id))?;
+        Ok((root_fragment, actors))
+    }
+
+    /// Get the downstream fragments connected to the specified job.
+    pub async fn get_downstream_fragments(
         &self,
         job_id: ObjectId,
     ) -> MetaResult<(
         Vec<(DispatchStrategy, PbFragment)>,
         Vec<(ActorId, WorkerId)>,
     )> {
-        let mview_fragment = self.get_mview_fragment(job_id).await?;
-        let downstream_dispatches: HashMap<_, _> = mview_fragment.actors[0]
-            .dispatcher
-            .iter()
-            .map(|d| {
-                let fragment_id = d.dispatcher_id as FragmentId;
-                let strategy = PbDispatchStrategy {
-                    r#type: d.r#type,
-                    dist_key_indices: d.dist_key_indices.clone(),
-                    output_indices: d.output_indices.clone(),
-                };
-                (fragment_id, strategy)
-            })
-            .collect();
+        let (root_fragment, actors) = self.get_root_fragment(job_id).await?;
+        let dispatches = root_fragment.dispatches();
 
         let inner = self.inner.read().await;
-        let mut chain_fragments = vec![];
-        for (fragment_id, dispatch_strategy) in downstream_dispatches {
+        let mut downstream_fragments = vec![];
+        for (fragment_id, dispatch_strategy) in dispatches {
             let mut fragment_actors = Fragment::find_by_id(fragment_id)
                 .find_with_related(Actor)
                 .all(&inner.db)
@@ -1433,17 +1444,10 @@ impl CatalogController {
             )
             .await?;
             let fragment = Self::compose_fragment(fragment, actors, actor_dispatchers)?.0;
-            chain_fragments.push((dispatch_strategy, fragment));
+            downstream_fragments.push((dispatch_strategy, fragment));
         }
 
-        let actors: Vec<(ActorId, WorkerId)> = Actor::find()
-            .select_only()
-            .columns([actor::Column::ActorId, actor::Column::WorkerId])
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        Ok((chain_fragments, actors))
+        Ok((downstream_fragments, actors))
     }
 
     pub async fn load_source_fragment_ids(
@@ -1514,35 +1518,6 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
         Ok(splits.into_iter().collect())
-    }
-
-    /// Get the `Materialize` fragment of the specified table.
-    pub async fn get_mview_fragment(&self, job_id: ObjectId) -> MetaResult<PbFragment> {
-        let inner = self.inner.read().await;
-        let mut fragments = Fragment::find()
-            .filter(fragment::Column::JobId.eq(job_id))
-            .all(&inner.db)
-            .await?;
-        fragments.retain(|f| f.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0);
-        if fragments.is_empty() {
-            bail!("No mview fragment found for job {}", job_id);
-        }
-        assert_eq!(fragments.len(), 1);
-
-        let fragment = fragments.pop().unwrap();
-        let actor_with_dispatchers = fragment
-            .find_related(Actor)
-            .find_with_related(ActorDispatcher)
-            .all(&inner.db)
-            .await?;
-        let mut actors = vec![];
-        let mut actor_dispatchers = HashMap::new();
-        for (actor, dispatchers) in actor_with_dispatchers {
-            actor_dispatchers.insert(actor.actor_id, dispatchers);
-            actors.push(actor);
-        }
-
-        Ok(Self::compose_fragment(fragment, actors, actor_dispatchers)?.0)
     }
 
     /// Get the actor count of `Materialize` or `Sink` fragment of the specified table.
