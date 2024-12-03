@@ -381,7 +381,13 @@ impl HummockManager {
             for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
                 if sst.sst_info.table_ids == match_ids {
                     // The SST contains all the tables in the group should be last key
-                    assert!(index == len - 1);
+                    assert!(
+                        index == len - 1,
+                        "SST should be the last key in the group {} index {} len {}",
+                        group_id,
+                        index,
+                        len
+                    );
                     commit_sstables
                         .entry(group_id)
                         .or_default()
@@ -399,23 +405,38 @@ impl HummockManager {
                     .sum();
 
                 let sstable_info = sst.sst_info;
+                let sst_id = sstable_info.sst_id;
+                let object_id = sstable_info.object_id;
+                let right_sst_size = origin_sst_size.checked_sub(new_sst_size).unwrap_or_else(|| {
+                    panic!(
+                        "group_id {} sst_id {} object_id {} is not split correctly, new_sst_size {} is larger than origin_sst_size {} match_ids {:?} table_stats {:?}",
+                        group_id, sst_id, object_id, new_sst_size, origin_sst_size, match_ids, sst.table_stats
+                    );
+                });
                 let (left, right) = split_sst(
                     sstable_info,
                     &mut new_sst_id,
                     group_split::build_split_key(*match_ids.last().unwrap() + 1, VirtualNode::ZERO),
                     new_sst_size,
-                    origin_sst_size - new_sst_size,
+                    right_sst_size,
                 );
 
-                if let Some(left) = left {
-                    commit_sstables.entry(group_id).or_default().push(left);
-                }
+                commit_sstables
+                    .entry(group_id)
+                    .or_default()
+                    .push(left.unwrap_or_else(|| {
+                        panic!(
+                            "group_id {} sst_id {} object_id {} is not split correctly, left part is missing ",
+                            group_id, sst_id, object_id
+                        );
+                    }));
 
-                if let Some(right) = right {
-                    sst.sst_info = right;
-                } else {
-                    break;
-                }
+                sst.sst_info = right.unwrap_or_else(|| {
+                    panic!(
+                        "group_id {} sst_id {} object_id {} is not split correctly, right part is missing ",
+                        group_id, sst_id, object_id
+                    );
+                });
             }
         }
 
