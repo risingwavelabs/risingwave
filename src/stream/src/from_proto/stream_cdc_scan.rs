@@ -94,15 +94,13 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         .context("failed to parse external table config")?;
 
         let database_name = table_config.database.clone();
-        let table_reader = table_type
-            .create_table_reader(table_config, table_schema.clone(), table_pk_indices.clone())
-            .await?;
 
         let external_table = ExternalStorageTable::new(
             TableId::new(table_desc.table_id),
             schema_table_name,
             database_name,
-            table_reader,
+            table_config,
+            table_type,
             table_schema,
             table_pk_order_types,
             table_pk_indices,
