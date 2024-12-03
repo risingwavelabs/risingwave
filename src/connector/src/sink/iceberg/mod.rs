@@ -43,10 +43,11 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_meta_model::exactly_once_iceberg_sink;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
@@ -754,13 +755,13 @@ const DATA_FILES: &str = "data_files";
 const DELETE_FILES: &str = "delete_files";
 
 #[derive(Default, Debug, Clone)]
-struct WriteResult {
-    data_files: Vec<DataFile>,
-    delete_files: Vec<DataFile>,
+pub struct WriteResult {
+    pub data_files: Vec<DataFile>,
+    pub delete_files: Vec<DataFile>,
 }
 
 impl WriteResult {
-    fn try_from(value: &SinkMetadata, partition_type: &Any) -> Result<Self> {
+    pub fn try_from(value: &SinkMetadata, partition_type: &Any) -> Result<Self> {
         if let Some(Serialized(v)) = &value.metadata {
             let mut values = if let serde_json::Value::Object(v) =
                 serde_json::from_slice::<serde_json::Value>(&v.metadata)
@@ -846,12 +847,11 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
     }
 }
 
-#[warn(dead_code)]
 pub struct IcebergSinkCommitter {
-    catalog: CatalogRef,
-    table: Table,
-    partition_type: Any,
-    last_commit_epoch: u64,
+    pub catalog: CatalogRef,
+    pub table: Table,
+    pub partition_type: Any,
+    pub last_commit_epoch: u64,
 
     pub(crate) db: DatabaseConnection,
 }
@@ -897,10 +897,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
-        let pre_commit_metadata =
-            IcebergPreCommitMetadata::new(write_results.clone(), epoch, self.last_commit_epoch);
-
         // todo: write into meta store
+        self.persist_pre_commit_metadata(self.db.clone(), self.last_commit_epoch, epoch, vec![])
+            .await?;
 
         self.last_commit_epoch = epoch;
         // Load the latest table to avoid concurrent modification with the best effort.
@@ -920,6 +919,26 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         })?;
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+        Ok(())
+    }
+}
+
+impl IcebergSinkCommitter {
+    async fn persist_pre_commit_metadata(
+        &self,
+        db: DatabaseConnection,
+        start_epoch: u64,
+        end_epoch: u64,
+        pre_commit_metadata: Vec<u8>,
+    ) -> anyhow::Result<()> {
+        let m = exactly_once_iceberg_sink::ActiveModel {
+            end_epoch: Set(end_epoch),
+            start_epoch: Set(start_epoch),
+            metadata: Set(pre_commit_metadata),
+        };
+        exactly_once_iceberg_sink::Entity::insert(m)
+            .exec(&db)
+            .await?;
         Ok(())
     }
 }

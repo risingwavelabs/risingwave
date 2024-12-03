@@ -22,7 +22,7 @@ use core::sync::atomic::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use sea_orm::DatabaseConnection;
+
 use anyhow::anyhow;
 use clap::Parser;
 use futures::channel::oneshot;
@@ -63,6 +63,7 @@ use risingwave_connector::source::{
 };
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
+use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Deserializer};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;

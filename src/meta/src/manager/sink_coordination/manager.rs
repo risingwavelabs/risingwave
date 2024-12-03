@@ -73,8 +73,12 @@ pub struct SinkCoordinatorManager {
 
 impl SinkCoordinatorManager {
     pub fn start_worker(db: DatabaseConnection) -> (Self, (JoinHandle<()>, Sender<()>)) {
-        Self::start_worker_with_spawn_worker(move  |param, manager_request_stream| {
-            tokio::spawn(CoordinatorWorker::run(param, manager_request_stream, db.clone()))
+        Self::start_worker_with_spawn_worker(move |param, manager_request_stream| {
+            tokio::spawn(CoordinatorWorker::run(
+                param,
+                manager_request_stream,
+                db.clone(),
+            ))
         })
     }
 
