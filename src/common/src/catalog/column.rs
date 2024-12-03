@@ -24,8 +24,8 @@ use risingwave_pb::plan_common::{
 };
 
 use super::{
-    iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
-    USER_COLUMN_ID_OFFSET,
+    iceberg_file_path_column_desc, iceberg_file_pos_column_desc, iceberg_sequence_num_column_desc,
+    row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET,
 };
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
@@ -488,6 +488,20 @@ impl ColumnCatalog {
     pub fn iceberg_sequence_num_column() -> Self {
         Self {
             column_desc: iceberg_sequence_num_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_file_path_column() -> Self {
+        Self {
+            column_desc: iceberg_file_path_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_file_pos_column() -> Self {
+        Self {
+            column_desc: iceberg_file_pos_column_desc(),
             is_hidden: true,
         }
     }
