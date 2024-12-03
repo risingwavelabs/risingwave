@@ -17,7 +17,7 @@ script = '''
 
 set -euo pipefail
 
-if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ ^(11|17|19|20|21|22) ]]); then
+if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}' | cut -d. -f1)" -ge 11 ]]); then
   echo "JDK 11+ is not installed. Please install JDK 11+ first."
   exit 1
 fi

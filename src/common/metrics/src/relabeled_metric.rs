@@ -21,16 +21,25 @@ use crate::{
 };
 
 /// For all `Relabeled*Vec` below,
-/// - when `metric_level` <= `relabel_threshold`, they behaves exactly the same as their inner
+/// - when `metric_level` <= `relabel_threshold`, they behave exactly the same as their inner
 ///   metric.
-/// - when `metric_level` > `relabel_threshold`, all their input label values are rewrite to "" when
+/// - when `metric_level` > `relabel_threshold`, the first `relabel_num` labels are rewrite to "" when
 ///   calling `with_label_values`. That's means the metric vec is aggregated into a single metric.
-///
 ///
 /// These wrapper classes add a `metric_level` field to corresponding metric.
 /// We could have use one single struct to represent all `MetricVec<T: MetricVecBuilder>`, rather
 /// than specializing them one by one. However, that's undoable because prometheus crate doesn't
 /// export `MetricVecBuilder` implementation like `HistogramVecBuilder`.
+///
+/// ## Note
+///
+/// CAUTION! Relabelling might cause expected result!
+///
+/// For counters (including histogram because it uses counters internally), it's usually natural
+/// to sum up the count from multiple labels.
+///
+/// For the rest (such as Gauge), the semantics becomes "any/last of the recorded value". Please be
+/// cautious.
 #[derive(Clone, Debug)]
 pub struct RelabeledMetricVec<M> {
     relabel_threshold: MetricLevel,
@@ -160,5 +169,9 @@ pub type RelabeledGuardedHistogramVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedHistogramVec<N>>;
 pub type RelabeledGuardedIntCounterVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedIntCounterVec<N>>;
+
+/// CAUTION! Relabelling a Gauge might cause expected result!
+///
+/// See [`RelabeledMetricVec`] for details.
 pub type RelabeledGuardedIntGaugeVec<const N: usize> =
     RelabeledMetricVec<LabelGuardedIntGaugeVec<N>>;
