@@ -394,17 +394,32 @@ impl HummockManager {
             })
             .collect::<HashSet<_>>();
         async fn write_sstable_infos(
-            sst_infos: impl Iterator<Item = &SstableInfo>,
+            mut sst_infos: impl Iterator<Item = &SstableInfo>,
             txn: &DatabaseTransaction,
+            batch_size: usize,
         ) -> Result<usize> {
             let mut count = 0;
-            for sst_info in sst_infos {
-                let m = hummock_sstable_info::ActiveModel {
-                    sst_id: Set(sst_info.sst_id.try_into().unwrap()),
-                    object_id: Set(sst_info.object_id.try_into().unwrap()),
-                    sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
-                };
-                hummock_sstable_info::Entity::insert(m)
+            let mut is_finished = false;
+            while !is_finished {
+                let mut remain = batch_size;
+                let mut batch = vec![];
+                while remain > 0 {
+                    let Some(sst_info) = sst_infos.next() else {
+                        is_finished = true;
+                        break;
+                    };
+                    batch.push(hummock_sstable_info::ActiveModel {
+                        sst_id: Set(sst_info.sst_id.try_into().unwrap()),
+                        object_id: Set(sst_info.object_id.try_into().unwrap()),
+                        sstable_info: Set(SstableInfoV2Backend::from(&sst_info.to_protobuf())),
+                    });
+                    remain -= 1;
+                    count += 1;
+                }
+                if batch.is_empty() {
+                    break;
+                }
+                hummock_sstable_info::Entity::insert_many(batch)
                     .on_conflict(
                         OnConflict::column(hummock_sstable_info::Column::SstId)
                             .do_nothing()
@@ -413,7 +428,6 @@ impl HummockManager {
                     .do_nothing()
                     .exec(txn)
                     .await?;
-                count += 1;
             }
             Ok(count)
         }
@@ -447,6 +461,7 @@ impl HummockManager {
                     .get_sst_infos_from_groups(&select_groups)
                     .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
                 txn,
+                self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
             )
             .await?;
             let m = hummock_time_travel_version::ActiveModel {
@@ -473,6 +488,7 @@ impl HummockManager {
                 .newly_added_sst_infos(Some(&select_groups))
                 .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
             txn,
+            self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
         .await?;
         // Ignore delta which adds no data.
