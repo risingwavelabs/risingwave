@@ -297,6 +297,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
+
+                    self.metrics
+                        .materialize_current_epoch
+                        .set(b.epoch.curr as i64);
+
                     Message::Barrier(b)
                 }
             }

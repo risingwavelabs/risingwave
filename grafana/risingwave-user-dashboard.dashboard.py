@@ -744,6 +744,26 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_latency(
+                    "Latency of Materialize Views & Sinks",
+                    "The current epoch that the Materialize Executors or Sink Executor are processing. If an MV/Sink's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
+                            f"max(timestamp({metric('stream_mview_current_epoch')}) - {epoch_to_unix_millis(metric('stream_mview_current_epoch'))}/1000) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "{{table_id}} {{table_name}}",
+                        ),
+                        panels.target(
+                            f"max(timestamp({metric('log_store_latest_read_epoch')}) - {epoch_to_unix_millis(metric('log_store_latest_read_epoch'))}/1000) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} (output)",
+                        ),
+                        panels.target(
+                            f"max(timestamp({metric('log_store_latest_write_epoch')}) - {epoch_to_unix_millis(metric('log_store_latest_write_epoch'))}/1000) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} (enqueue)",
+                        ),
+                    ]
+                ),
             ],
         )
     ]
