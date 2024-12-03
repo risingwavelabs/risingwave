@@ -383,6 +383,7 @@ impl CatalogController {
             .oid;
             table_id_map.insert(table.id, table_id as u32);
             table.id = table_id as _;
+            table.job_id = Some(job_id as _);
 
             let table_model = table::ActiveModel {
                 table_id: Set(table_id as _),
@@ -1208,7 +1209,7 @@ impl CatalogController {
         // 4. update catalogs and notify.
         let mut relations = vec![];
         match job_type {
-            StreamingJobType::Table => {
+            StreamingJobType::Table(_) => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
                     .find_also_related(Object)
                     .one(txn)
