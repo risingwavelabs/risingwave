@@ -470,6 +470,9 @@ message Table {
   // The information used by webhook source to validate the incoming data.
   optional WebhookSourceInfo webhook_info = 41;
 
+  // This field stores the job ID for internal tables.
+  optional uint32 job_id = 42;
+
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
