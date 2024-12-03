@@ -530,9 +530,9 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
                 }
             })
-            .instrument(tracing::info_span!("build_source_stream_with_retry"))
-            .await
-            .expect("Retry build source stream until success.")
+                .instrument(tracing::info_span!("build_source_stream_with_retry"))
+                .await
+                .expect("Retry build source stream until success.")
         });
 
         let mut need_resume_after_build = false;
@@ -548,7 +548,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 if let Message::Barrier(barrier) = barrier {
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            // handle mutation of rate limit
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
                                     && *new_rate_limit != self.rate_limit_rps
@@ -558,6 +557,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                         self.rate_limit_rps,
                                         *new_rate_limit
                                     );
+
+                                    // update the rate limit option, we will apply the rate limit
+                                    // when we finish building the source stream.
                                     self.rate_limit_rps = *new_rate_limit;
                                 }
                             }
