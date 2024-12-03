@@ -5165,7 +5165,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.3",
  "tracing",
- "twox-hash",
+ "twox-hash 1.6.3",
  "zstd 0.13.0",
 ]
 
@@ -7229,7 +7229,7 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ea9b256699eda7b0387ffbc776dd625e28bde3918446381781245b7a50349d8"
 dependencies = [
- "twox-hash",
+ "twox-hash 1.6.3",
 ]
 
 [[package]]
@@ -7746,7 +7746,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tokio-util",
- "twox-hash",
+ "twox-hash 1.6.3",
  "url",
 ]
 
@@ -8707,7 +8707,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash",
+ "twox-hash 1.6.3",
  "zstd 0.13.0",
  "zstd-sys",
 ]
@@ -8742,7 +8742,7 @@ dependencies = [
  "snap",
  "thrift",
  "tokio",
- "twox-hash",
+ "twox-hash 1.6.3",
  "zstd 0.13.0",
  "zstd-sys",
 ]
@@ -10425,7 +10425,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.63",
- "twox-hash",
+ "twox-hash 2.0.1",
 ]
 
 [[package]]
@@ -10482,7 +10482,7 @@ dependencies = [
  "tokio-stream 0.1.15",
  "tokio-util",
  "tracing",
- "twox-hash",
+ "twox-hash 2.0.1",
  "uuid",
  "workspace-hack",
 ]
@@ -10693,7 +10693,7 @@ dependencies = [
  "tracing-futures",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "twox-hash",
+ "twox-hash 2.0.1",
  "url",
  "uuid",
  "workspace-hack",
@@ -15098,6 +15098,15 @@ dependencies = [
  "cfg-if",
  "rand",
  "static_assertions",
+]
+
+[[package]]
+name = "twox-hash"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6db6856664807f43c17fbaf2718e2381ac1476a449aa104f5f64622defa1245"
+dependencies = [
+ "rand",
 ]
 
 [[package]]
