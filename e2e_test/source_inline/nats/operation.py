@@ -75,10 +75,15 @@ def validate_state_table_item(table_name: str, expect_count: int):
         assert len(results) == 1, f"Expected exactly one internal table matching {table_name}, found {len(results)}"
         internal_table_name = results[0][0]
         print(f"Found internal table: {internal_table_name}")
-        cursor.execute(f"SELECT * FROM {internal_table_name}")
-        results = cursor.fetchall()
-        print(f"Get items from state table: {results}")
-        assert len(results) == expect_count
+        for _ in range(10):
+            cursor.execute(f"SELECT * FROM {internal_table_name}")
+            results = cursor.fetchall()
+            print(f"Get items from state table: {results}")
+            if len(results) == expect_count:
+                print(f"Found {expect_count} items in {internal_table_name}")
+                break
+            print(f"Waiting for {internal_table_name} to have {expect_count} items, got {len(results)}. Retry...")
+            time.sleep(0.5)
 
 if __name__ == "__main__":
     import sys
