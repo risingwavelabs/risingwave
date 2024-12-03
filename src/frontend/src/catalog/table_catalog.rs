@@ -794,7 +794,7 @@ mod tests {
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
             job_id: None,
-            engine: PbEngine::Hummock.into(),
+            engine: Some(PbEngine::Hummock as i32),
         }
         .into();
 
