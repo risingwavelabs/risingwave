@@ -1209,7 +1209,7 @@ impl CatalogController {
         // 4. update catalogs and notify.
         let mut relations = vec![];
         match job_type {
-            StreamingJobType::Table => {
+            StreamingJobType::Table(_) => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
                     .find_also_related(Object)
                     .one(txn)

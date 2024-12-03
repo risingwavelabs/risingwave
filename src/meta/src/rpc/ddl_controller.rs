@@ -70,8 +70,8 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::SinkIntoTableContext;
 use crate::error::{bail_invalid_parameter, bail_unavailable};
 use crate::manager::{
-    DdlType, LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
-    IGNORED_NOTIFICATION_VERSION,
+    LocalNotification, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob,
+    StreamingJobType, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
@@ -1709,7 +1709,7 @@ impl DdlController {
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
             create_type: stream_job.create_type(),
-            ddl_type: (&stream_job).into(),
+            job_type: (&stream_job).into(),
             streaming_job: stream_job,
             replace_table_job_info,
             option: CreateStreamingJobOption {},
@@ -1753,11 +1753,11 @@ impl DdlController {
             .mview_fragment()
             .expect("mview fragment not found");
 
-        let ddl_type = DdlType::from(stream_job);
-        let DdlType::Table(table_job_type) = &ddl_type else {
+        let job_type = StreamingJobType::from(stream_job);
+        let StreamingJobType::Table(table_job_type) = &job_type else {
             bail!(
-                "only support replacing table streaming job, ddl_type: {:?}",
-                ddl_type
+                "only support replacing table streaming job, job_type: {:?}",
+                job_type
             )
         };
 
@@ -1789,7 +1789,7 @@ impl DdlController {
                 original_table_fragment.fragment_id,
                 downstream_fragments,
                 downstream_actor_location,
-                ddl_type,
+                job_type,
             )?,
 
             TableJobType::SharedCdcSource => {
@@ -1806,7 +1806,7 @@ impl DdlController {
                     original_table_fragment.fragment_id,
                     downstream_fragments,
                     downstream_actor_location,
-                    ddl_type,
+                    job_type,
                 )?
             }
             TableJobType::Unspecified => {

@@ -24,7 +24,7 @@ use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, QuerySelect};
-use strum::{EnumDiscriminants, EnumIs};
+use strum::EnumIs;
 
 use super::{
     get_referred_connection_ids_from_sink, get_referred_connection_ids_from_source,
@@ -35,8 +35,7 @@ use crate::{MetaError, MetaResult};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
-#[strum_discriminants(name(StreamingJobType))]
+#[derive(Debug, Clone, EnumIs)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -46,7 +45,7 @@ pub enum StreamingJob {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DdlType {
+pub enum StreamingJobType {
     MaterializedView,
     Sink,
     Table(TableJobType),
@@ -54,25 +53,25 @@ pub enum DdlType {
     Source,
 }
 
-impl From<&StreamingJob> for DdlType {
+impl From<&StreamingJob> for StreamingJobType {
     fn from(job: &StreamingJob) -> Self {
         match job {
-            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
-            StreamingJob::Sink(_, _) => DdlType::Sink,
-            StreamingJob::Table(_, _, ty) => DdlType::Table(*ty),
-            StreamingJob::Index(_, _) => DdlType::Index,
-            StreamingJob::Source(_) => DdlType::Source,
+            StreamingJob::MaterializedView(_) => StreamingJobType::MaterializedView,
+            StreamingJob::Sink(_, _) => StreamingJobType::Sink,
+            StreamingJob::Table(_, _, ty) => StreamingJobType::Table(*ty),
+            StreamingJob::Index(_, _) => StreamingJobType::Index,
+            StreamingJob::Source(_) => StreamingJobType::Source,
         }
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::derivable_impls)]
-impl Default for DdlType {
+impl Default for StreamingJobType {
     fn default() -> Self {
         // This should not be used by mock services,
         // so we can just pick an arbitrary default variant.
-        DdlType::MaterializedView
+        StreamingJobType::MaterializedView
     }
 }
 
