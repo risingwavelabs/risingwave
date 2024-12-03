@@ -591,6 +591,7 @@ pub(crate) mod tests {
             cdc_table_id: None,
             vnode_count: VnodeCount::set(vnode_count),
             webhook_info: None,
+            job_id: None,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),

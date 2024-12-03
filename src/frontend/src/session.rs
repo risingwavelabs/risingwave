@@ -89,7 +89,7 @@ use self::cursor_manager::CursorManager;
 use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
-use crate::catalog::root_catalog::Catalog;
+use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
@@ -987,19 +987,9 @@ impl SessionImpl {
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
-        let connection = schema
-            .get_connection_by_name(connection_name)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::ItemNotFound(format!(
-                    "connection {} not found",
-                    connection_name
-                )))
-            })?;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+        let (connection, _) =
+            catalog_reader.get_connection_by_name(db_name, schema_path, connection_name)?;
         Ok(connection.clone())
     }
 
@@ -1034,19 +1024,9 @@ impl SessionImpl {
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
-        let subscription = schema
-            .get_subscription_by_name(subscription_name)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::ItemNotFound(format!(
-                    "subscription {} not found",
-                    subscription_name
-                )))
-            })?;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+        let (subscription, _) =
+            catalog_reader.get_subscription_by_name(db_name, schema_path, subscription_name)?;
         Ok(subscription.clone())
     }
 
@@ -1084,17 +1064,8 @@ impl SessionImpl {
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
-        let secret = schema.get_secret_by_name(secret_name).ok_or_else(|| {
-            RwError::from(ErrorCode::ItemNotFound(format!(
-                "secret {} not found",
-                secret_name
-            )))
-        })?;
+        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+        let (secret, _) = catalog_reader.get_secret_by_name(db_name, schema_path, secret_name)?;
         Ok(secret.clone())
     }
 
