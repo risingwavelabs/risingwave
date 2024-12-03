@@ -203,7 +203,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             cdc_table_id: value.0.cdc_table_id,
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
-            engine: PbEngine::from(value.0.engine) as _,
+            engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
         }
     }
 }

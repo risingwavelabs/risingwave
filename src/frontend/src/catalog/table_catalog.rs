@@ -24,7 +24,9 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
@@ -490,7 +492,7 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            engine: self.engine.to_protobuf().into(),
+            engine: Some(self.engine.to_protobuf().into()),
         }
     }
 
@@ -595,7 +597,10 @@ impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
-        let tb_engine = tb.engine();
+        let tb_engine = tb
+            .get_engine()
+            .map(|engine| PbEngine::try_from(*engine).expect("Invalid engine"))
+            .unwrap_or(PbEngine::Hummock);
         let table_type = tb.get_table_type().unwrap();
         let stream_job_status = tb
             .get_stream_job_status()
