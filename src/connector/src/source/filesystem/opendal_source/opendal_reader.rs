@@ -196,6 +196,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
         }
 
         if !batch.is_empty() {
+            batch.shrink_to_fit();
             yield batch;
         }
     }
