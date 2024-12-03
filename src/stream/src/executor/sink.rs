@@ -34,6 +34,7 @@ use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
 };
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc::unbounded_channel;
 
 use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
 use crate::executor::prelude::*;
@@ -239,6 +240,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 log_store_write_rows,
             };
 
+            let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
+
             self.log_store_factory
                 .build()
                 .map(move |(log_reader, log_writer)| {
@@ -246,6 +249,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        rate_limit_tx,
                     );
 
                     let consume_log_stream_future = dispatch_sink!(self.sink, sink, {
@@ -256,6 +260,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.actor_context,
+                            rate_limit_rx,
                         )
                         .instrument_await(format!("consume_log (sink_id {sink_id})"))
                         .map_ok(|never| match never {}); // unify return type to `Message`
@@ -275,6 +280,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: impl LogWriter,
         actor_id: ActorId,
+        rate_limit_tx: UnboundedSender<Option<u32>>,
     ) {
         pin_mut!(input);
         let barrier = expect_first_barrier(&mut input).await?;
@@ -313,6 +319,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Mutation::Resume => {
                                 log_writer.resume()?;
                                 is_paused = false;
+                            }
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                                    rate_limit_tx.send(new_rate_limit).await?;
+                                }
                             }
                             _ => (),
                         }
@@ -463,6 +474,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         actor_context: ActorContextRef,
+        rate_limit_rx: UnboundedReceiver<Option<u32>>,
     ) -> StreamExecutorResult<!> {
         let visible_columns = columns
             .iter()
@@ -501,7 +513,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     chunk
                 }
             })
-            .monitored(metrics);
+            .monitored(metrics)
+            .rate_limited(rate_limit_rx);
 
         log_reader.init().await?;
 
