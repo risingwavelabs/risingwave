@@ -14,14 +14,15 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::max_column_id;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
+use super::create_source::generate_stream_graph_for_source;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -38,7 +39,7 @@ pub async fn handle_alter_source_column(
     operation: AlterSourceOperation,
 ) -> Result<RwPgResponse> {
     // Get original definition
-    let session = handler_args.session;
+    let session = handler_args.session.clone();
     let db_name = session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
@@ -66,9 +67,6 @@ pub async fn handle_alter_source_column(
         )
         .into());
     };
-    if catalog.info.is_shared() {
-        bail_not_implemented!(issue = 16003, "alter shared source");
-    }
 
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
@@ -96,6 +94,7 @@ pub async fn handle_alter_source_column(
         SourceEncode::Json | SourceEncode::Csv | SourceEncode::Bytes | SourceEncode::Parquet => {}
     }
 
+    let old_columns = catalog.columns.clone();
     let columns = &mut catalog.columns;
     match operation {
         AlterSourceOperation::AddColumn { column_def } => {
@@ -121,9 +120,30 @@ pub async fn handle_alter_source_column(
     catalog.version += 1;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_source(catalog.to_prost(schema_id, db_id))
-        .await?;
+    if catalog.info.is_shared() {
+        let graph = generate_stream_graph_for_source(handler_args, catalog.clone())?;
+
+        // Calculate the mapping from the original columns to the new columns.
+        let col_index_mapping = ColIndexMapping::new(
+            old_columns
+                .iter()
+                .map(|old_c| {
+                    catalog
+                        .columns
+                        .iter()
+                        .position(|new_c| new_c.column_id() == old_c.column_id())
+                })
+                .collect(),
+            catalog.columns.len(),
+        );
+        catalog_writer
+            .replace_source(catalog.to_prost(schema_id, db_id), graph, col_index_mapping)
+            .await?
+    } else {
+        catalog_writer
+            .alter_source(catalog.to_prost(schema_id, db_id))
+            .await?
+    };
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
