@@ -244,7 +244,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
             let (rate_limit_tx, rate_limit_rx) = unbounded_channel();
             // Init the rate limit
-            rate_limit_tx.send(self.rate_limit);
+            rate_limit_tx.send(self.rate_limit).unwrap();
 
             self.log_store_factory
                 .build()
@@ -326,7 +326,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
-                                    rate_limit_tx.send(*new_rate_limit)?;
+                                    if let Err(e) = rate_limit_tx.send(*new_rate_limit) {
+                                        error!(
+                                            error = %e.as_report(),
+                                            "fail to send sink ate limit update"
+                                        );
+                                        return Err(StreamExecutorError::from(e.to_string()));
+                                    }
                                 }
                             }
                             _ => (),

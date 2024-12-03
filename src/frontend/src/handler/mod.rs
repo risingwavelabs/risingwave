@@ -937,7 +937,7 @@ pub async fn handle(
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::SetSinkRateLimit { rate_limit },
-        } if materialized => {
+        } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::Sink,
