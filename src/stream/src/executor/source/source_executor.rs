@@ -527,7 +527,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     Err(e) => {
                         tracing::warn!(error = %e.as_report(), "failed to build source stream, retrying...");
                         Err(e)
-                    },
+                    }
                 }
             })
             .instrument(tracing::info_span!("build_source_stream_with_retry"))
@@ -551,11 +551,37 @@ impl<S: StateStore> SourceExecutor<S> {
                         barrier
                     );
 
-                    // We record the Resume mutation here and postpone the resume of the source stream
-                    // after we have successfully built the source stream.
-                    if let Some(Mutation::Resume) = barrier.mutation.as_deref() {
-                        need_resume_after_build = true;
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            // handle mutation of rate limit
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                                    && *new_rate_limit != self.rate_limit_rps
+                                {
+                                    tracing::info!(
+                                        "updating rate limit from {:?} to {:?}",
+                                        self.rate_limit_rps,
+                                        *new_rate_limit
+                                    );
+                                    self.rate_limit_rps = *new_rate_limit;
+                                }
+                            }
+                            Mutation::Resume => {
+                                // We record the Resume mutation here and postpone the resume of the source stream
+                                // after we have successfully built the source stream.
+                                need_resume_after_build = true;
+                            }
+                            _ => {
+                                // ignore other mutations and output a warn log
+                                tracing::warn!(
+                                    "Received a mutation {:?} to be ignored, because we only handle Throttle and Resume before
+                                    finish building source stream.",
+                                    mutation
+                                );
+                            }
+                        }
                     }
+
                     // bump state store epoch
                     let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
@@ -571,7 +597,9 @@ impl<S: StateStore> SourceExecutor<S> {
         let (source_chunk_reader, latest_splits) =
             reader_and_splits.expect("source chunk reader and splits must be created");
 
-        let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
+        let source_chunk_reader = apply_rate_limit(source_chunk_reader, self.rate_limit_rps)
+            .boxed()
+            .map_err(StreamExecutorError::connector_error);
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
             // Then even it receives no messages, we can observe it in state table.
