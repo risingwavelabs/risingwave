@@ -65,6 +65,7 @@ use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, CreateSourceStatement, Encode, Format,
     FormatEncodeOptions, ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
@@ -315,8 +316,11 @@ pub(crate) async fn bind_columns_from_source(
 
     let options_with_secret = match with_properties {
         Either::Left(options) => {
-            let (sec_resolve_props, connection_type, _) =
-                resolve_connection_ref_and_secret_ref(options.clone(), session)?;
+            let (sec_resolve_props, connection_type, _) = resolve_connection_ref_and_secret_ref(
+                options.clone(),
+                session,
+                TelemetryDatabaseObject::Source,
+            )?;
             if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
                     "connection type {:?} is not allowed, allowed types: {:?}",
@@ -336,6 +340,7 @@ pub(crate) async fn bind_columns_from_source(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(format_encode.row_options())?,
             session,
+            TelemetryDatabaseObject::Source,
         )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 
@@ -1622,7 +1627,11 @@ pub async fn bind_create_source_or_table_with_connector(
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
     let (with_properties, connection_type, connector_conn_ref) =
-        resolve_connection_ref_and_secret_ref(with_properties, session)?;
+        resolve_connection_ref_and_secret_ref(
+            with_properties,
+            session,
+            TelemetryDatabaseObject::Source,
+        )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
