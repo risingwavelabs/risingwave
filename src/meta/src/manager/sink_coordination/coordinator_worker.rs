@@ -26,6 +26,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -33,6 +34,7 @@ use tokio::time::sleep;
 use tonic::Status;
 use tracing::{error, warn};
 
+use crate::controller::SqlMetaStore;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 
 async fn run_future_with_periodic_fn<F: Future>(
@@ -193,6 +195,7 @@ impl CoordinatorWorker {
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        db: DatabaseConnection,
     ) {
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
@@ -206,7 +209,7 @@ impl CoordinatorWorker {
             }
         };
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator().await {
+            let coordinator = match sink.new_coordinator(db).await {
                 Ok(coordinator) => coordinator,
                 Err(e) => {
                     error!(

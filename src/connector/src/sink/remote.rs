@@ -50,6 +50,7 @@ use risingwave_rpc_client::{
     DEFAULT_BUFFER_SIZE,
 };
 use rw_futures_util::drop_either_future;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver};
@@ -550,7 +551,7 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
         .into_log_sinker(metrics))
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }

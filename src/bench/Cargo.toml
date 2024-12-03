@@ -38,6 +38,7 @@ risingwave_pb = { workspace = true }
 risingwave_rt = { workspace = true, optional = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
+sea-orm  = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }

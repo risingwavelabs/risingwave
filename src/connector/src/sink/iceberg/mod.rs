@@ -46,6 +46,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::DatabaseConnection;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
@@ -410,7 +411,7 @@ impl Sink for IcebergSink {
         ))
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, db: DatabaseConnection) -> Result<Self::Coordinator> {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
@@ -419,6 +420,8 @@ impl Sink for IcebergSink {
             catalog,
             table,
             partition_type,
+            last_commit_epoch: 0,
+            db,
         })
     }
 }
@@ -750,7 +753,7 @@ impl SinkWriter for IcebergWriter {
 const DATA_FILES: &str = "data_files";
 const DELETE_FILES: &str = "delete_files";
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 struct WriteResult {
     data_files: Vec<DataFile>,
     delete_files: Vec<DataFile>,
@@ -843,10 +846,33 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
     }
 }
 
+#[warn(dead_code)]
 pub struct IcebergSinkCommitter {
     catalog: CatalogRef,
     table: Table,
     partition_type: Any,
+    last_commit_epoch: u64,
+
+    pub(crate) db: DatabaseConnection,
+}
+
+#[warn(dead_code)]
+
+struct IcebergPreCommitMetadata {
+    file_info: Vec<WriteResult>,
+
+    start_epoch: u64,
+    end_epoch: u64,
+}
+
+impl IcebergPreCommitMetadata {
+    fn new(file_info: Vec<WriteResult>, start_epoch: u64, end_epoch: u64) -> Self {
+        Self {
+            file_info,
+            start_epoch,
+            end_epoch,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -858,7 +884,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-
         let write_results = metadata
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
@@ -871,6 +896,13 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+
+        let pre_commit_metadata =
+            IcebergPreCommitMetadata::new(write_results.clone(), epoch, self.last_commit_epoch);
+
+        // todo: write into meta store
+
+        self.last_commit_epoch = epoch;
         // Load the latest table to avoid concurrent modification with the best effort.
         self.table = self
             .catalog

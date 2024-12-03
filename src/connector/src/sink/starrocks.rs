@@ -28,6 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
+use sea_orm::DatabaseConnection;
 use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
@@ -337,7 +338,7 @@ impl Sink for StarrocksSink {
         ))
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
+    async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         let header = HeaderBuilder::new()
             .add_common_header()
             .set_user_password(

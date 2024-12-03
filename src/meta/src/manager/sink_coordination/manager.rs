@@ -24,6 +24,7 @@ use risingwave_connector::sink::SinkParam;
 use risingwave_pb::connector_service::coordinate_request::Msg;
 use risingwave_pb::connector_service::{coordinate_request, CoordinateRequest, CoordinateResponse};
 use rw_futures_util::pending_on_none;
+use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -33,6 +34,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{debug, error, info, warn};
 
+use crate::controller::SqlMetaStore;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 use crate::manager::sink_coordination::SinkWriterRequestStream;
@@ -70,9 +72,9 @@ pub struct SinkCoordinatorManager {
 }
 
 impl SinkCoordinatorManager {
-    pub fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
-        Self::start_worker_with_spawn_worker(|param, manager_request_stream| {
-            tokio::spawn(CoordinatorWorker::run(param, manager_request_stream))
+    pub fn start_worker(db: DatabaseConnection) -> (Self, (JoinHandle<()>, Sender<()>)) {
+        Self::start_worker_with_spawn_worker(move  |param, manager_request_stream| {
+            tokio::spawn(CoordinatorWorker::run(param, manager_request_stream, db.clone()))
         })
     }
 

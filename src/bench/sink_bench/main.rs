@@ -15,13 +15,14 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(let_chains)]
+#![recursion_limit = "256"]
 
 use core::str::FromStr;
 use core::sync::atomic::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-
+use sea_orm::DatabaseConnection;
 use anyhow::anyhow;
 use clap::Parser;
 use futures::channel::oneshot;
@@ -376,7 +377,7 @@ where
     <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
     <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
 {
-    if let Ok(coordinator) = sink.new_coordinator().await {
+    if let Ok(coordinator) = sink.new_coordinator(DatabaseConnection::Disconnected).await {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
             Box::new(coordinator),
         )));

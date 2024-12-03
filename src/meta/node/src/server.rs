@@ -477,7 +477,8 @@ pub async fn start_service_as_election_leader(
         .unwrap(),
     );
 
-    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    let (sink_manager, shutdown_handle) =
+        SinkCoordinatorManager::start_worker(env.meta_store_ref().conn.clone());
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
 
