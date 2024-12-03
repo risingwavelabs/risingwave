@@ -1399,19 +1399,21 @@ pub async fn create_iceberg_engine_table(
     let data_directory = system_params.data_directory().to_string();
     let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
 
-    let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
-        s3_region
-    } else {
-        bail!("To create an iceberg engine table, AWS_REGION needed to be set");
-    };
-
-    let (s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
-        s3 if s3.starts_with("hummock+s3://") => (
-            s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-            None,
-            None,
-            None,
-        ),
+    let (s3_region, s3_bucket, s3_endpoint, s3_ak, s3_sk) = match state_store_endpoint {
+        s3 if s3.starts_with("hummock+s3://") => {
+            let s3_region = if let Ok(s3_region) = std::env::var("AWS_REGION") {
+                s3_region
+            } else {
+                bail!("To create an iceberg engine table with s3 backend, AWS_REGION needed to be set");
+            };
+            (
+                s3_region,
+                s3.strip_prefix("hummock+s3://").unwrap().to_string(),
+                None,
+                None,
+                None,
+            )
+        }
         minio if minio.starts_with("hummock+minio://") => {
             let server = minio.strip_prefix("hummock+minio://").unwrap();
             let (access_key_id, rest) = server.split_once(':').unwrap();
@@ -1427,6 +1429,7 @@ pub async fn create_iceberg_engine_table(
             };
             let (address, bucket) = rest.split_once('/').unwrap();
             (
+                "us-east-1".to_string(),
                 bucket.to_string(),
                 Some((endpoint_prefix.to_string() + address).to_string()),
                 Some(access_key_id.to_string()),
@@ -1615,6 +1618,7 @@ pub async fn create_iceberg_engine_table(
     with.insert("catalog.name".to_string(), iceberg_catalog_name.clone());
     with.insert("database.name".to_string(), iceberg_database_name.clone());
     with.insert("table.name".to_string(), iceberg_table_name.to_string());
+    // TODO: change the `commit_checkpoint_interval` to a configurable value
     with.insert("commit_checkpoint_interval".to_string(), "1".to_string());
     with.insert("create_table_if_not_exists".to_string(), "true".to_string());
     with.insert("enable_config_load".to_string(), "true".to_string());

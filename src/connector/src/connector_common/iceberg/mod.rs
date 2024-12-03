@@ -236,6 +236,10 @@ impl IcebergCommon {
             java_catalog_configs
                 .insert("init-creation-stacktrace".to_string(), "false".to_string());
 
+            if let Some(region) = &self.region {
+                java_catalog_configs
+                    .insert("client.region".to_string(), region.clone().to_string());
+            }
             if let Some(endpoint) = &self.endpoint {
                 java_catalog_configs
                     .insert("s3.endpoint".to_string(), endpoint.clone().to_string());
