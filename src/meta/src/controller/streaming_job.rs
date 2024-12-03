@@ -1412,6 +1412,7 @@ impl CatalogController {
             let mut found = false;
             if (*fragment_type_mask & PbFragmentTypeFlag::StreamScan as i32 != 0)
                 || (*fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0)
+                || (*fragment_type_mask & PbFragmentTypeFlag::Sink as i32 != 0)
             {
                 visit_stream_node(stream_node, |node| match node {
                     PbNodeBody::StreamCdcScan(node) => {
@@ -1428,6 +1429,9 @@ impl CatalogController {
                             found = true;
                         }
                     }
+                    PbNodeBody::Sink(node) => {
+                        node.rate_limit = rate_limit;
+                    }
                     _ => {}
                 });
             }
@@ -1436,7 +1440,7 @@ impl CatalogController {
 
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
-                "stream scan node or source node not found in job id {job_id}"
+                "stream scan node, source node or sink node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();

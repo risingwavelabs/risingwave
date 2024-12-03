@@ -34,11 +34,10 @@ use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam, GLOBAL_SINK_METRICS,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::common::compact_chunk::{merge_chunk_row, StreamChunkCompactor};
 use crate::executor::prelude::*;
-
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
@@ -53,7 +52,7 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     need_advance_delete: bool,
     re_construct_with_sink_pk: bool,
     compact_chunk: bool,
-    rate_limit: Option<u32>
+    rate_limit: Option<u32>,
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -183,7 +182,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             need_advance_delete,
             re_construct_with_sink_pk,
             compact_chunk,
-            rate_limit
+            rate_limit,
         })
     }
 
@@ -327,8 +326,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
-                                    self.rate_limit = new_rate_limit;
-                                    rate_limit_tx.send(new_rate_limit).await?;
+                                    rate_limit_tx.send(*new_rate_limit)?;
                                 }
                             }
                             _ => (),

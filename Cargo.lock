@@ -10991,6 +10991,7 @@ dependencies = [
  "deltalake",
  "duration-str",
  "easy-ext",
+ "either",
  "elasticsearch",
  "enum-as-inner 0.6.0",
  "expect-test",

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
@@ -22,7 +23,6 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
-use anyhow::Ok;
 use await_tree::InstrumentAwait;
 use futures::{TryFuture, TryFutureExt};
 use governor::clock::MonotonicClock;
@@ -347,33 +347,33 @@ struct RateLimitedLogReaderCore<R: LogReader> {
     next_chunk_id: usize,
 }
 impl<R: LogReader> RateLimitedLogReaderCore<R> {
-    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+    async fn next_item(&mut self) -> LogStoreResult<Either<SplittedChunk, (u64, LogStoreReadItem)>> {
         // Get upstream chunk from unconsumed_chunk_queue first.
         // If unconsumed_chunk_queue is empty, get the chunk from the inner log reader.
-        let splitted_chunk = match self.unconsumed_chunk_queue.pop_back() {
-            Some(splitted_chunk) => splitted_chunk,
+        match self.unconsumed_chunk_queue.pop_back() {
+            Some(splitted_chunk) => Ok(Either::Left(splitted_chunk)),
             None => {
                 let (epoch, item) = self.inner.next_item().await?;
                 match item {
-                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => SplittedChunk {
-                        chunk,
-                        upstream_chunk_offset: UpstreamChunkOffset::Chunk { epoch, chunk_id },
-                        is_last: true,
-                    },
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                        Ok(Either::Left(SplittedChunk {
+                            chunk,
+                            upstream_chunk_offset: UpstreamChunkOffset::Chunk { epoch, chunk_id },
+                            is_last: true,
+                        }))
+                    }
                     LogStoreReadItem::Barrier { .. } => {
                         self.consumed_offset_queue.push_front((
                             TruncateOffset::Barrier { epoch },
                             TruncateOffset::Barrier { epoch },
                         ));
                         self.next_chunk_id = 0;
-                        return Ok((epoch, item));
+                        Ok(Either::Right((epoch, item)))
                     }
-                    LogStoreReadItem::UpdateVnodeBitmap(..) => {
-                        return Ok((epoch, item));
-                    }
+                    LogStoreReadItem::UpdateVnodeBitmap(..) => Ok(Either::Right((epoch, item))),
                 }
             }
-        };
+        }
     }
 }
 
@@ -416,7 +416,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         }
     }
 
-    async fn next_item_with_rate_limit(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+    async fn apply_rate_limit(&mut self, splitted_chunk: SplittedChunk) -> LogStoreResult<(u64, LogStoreReadItem)> {
         // Apply rate limit. If the chunk is too large, split it into smaller chunks.
         let splitted_chunk = if let Some((limit, limiter)) = self.rate_limiter.as_mut() {
             let required_permits: usize = splitted_chunk.chunk.compute_chunk_permits(*limit as _);
@@ -437,7 +437,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
                 // The remaining chunks will be pushed to the queue
                 for chunk in chunks.rev() {
                     // The last chunk after splitting inherits the `is_last` from the original chunk
-                    self.unconsumed_chunk_queue.push_back(SplittedChunk {
+                    self.core.unconsumed_chunk_queue.push_back(SplittedChunk {
                         chunk,
                         upstream_chunk_offset,
                         is_last,
@@ -462,10 +462,10 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 
         // Update the consumed_offset_queue if the `splitted_chunk` is the last chunk of the upstream chunk
         let epoch = splitted_chunk.upstream_chunk_offset.epoch();
-        let downstream_chunk_id = self.next_chunk_id;
-        self.next_chunk_id += 1;
+        let downstream_chunk_id = self.core.next_chunk_id;
+        self.core.next_chunk_id += 1;
         if splitted_chunk.is_last {
-            self.consumed_offset_queue.push_front((
+            self.core.consumed_offset_queue.push_front((
                 TruncateOffset::Chunk {
                     epoch,
                     chunk_id: downstream_chunk_id,
@@ -486,22 +486,30 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 
 impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
     async fn init(&mut self) -> LogStoreResult<()> {
-        self.inner.init().await
+        self.core.inner.init().await
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         loop {
             select! {
                 biased;
-                item = pin!(self.control_rx.recv()) => {
-                    if let Some(new_rate_limit) = item {
+                rate_limit_change = pin!(self.control_rx.recv()) => {
+                    if let Some(new_rate_limit) = rate_limit_change {
                         self.update_rate_limit(new_rate_limit);
                     } else {
                         tracing::warn!("rate limit control channel closed");
                     }
                 },
-                item = self.next_item_with_rate_limit() => {
-                    return item;
+                item = self.core.next_item() => {
+                    let item = item?;
+                    match item {
+                        Either::Left(splitted_chunk) => {
+                            return self.apply_rate_limit(splitted_chunk).await;
+                        },
+                        Either::Right(item) => {
+                            return Ok(item);
+                        },
+                    }
                 }
             }
         }
@@ -509,7 +517,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         let mut truncate_offset = None;
-        while let Some((downstream_offset, upstream_offset)) = self.consumed_offset_queue.pop_back()
+        while let Some((downstream_offset, upstream_offset)) = self.core.consumed_offset_queue.pop_back()
         {
             if downstream_offset <= offset {
                 truncate_offset = Some(upstream_offset);
@@ -518,7 +526,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
             }
         }
         if let Some(offset) = truncate_offset {
-            self.inner.truncate(offset)
+            self.core.inner.truncate(offset)
         } else {
             Ok(())
         }
@@ -527,10 +535,10 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
     fn rewind(
         &mut self,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.unconsumed_chunk_queue.clear();
-        self.consumed_offset_queue.clear();
-        self.next_chunk_id = 0;
-        self.inner.rewind()
+        self.core.unconsumed_chunk_queue.clear();
+        self.core.consumed_offset_queue.clear();
+        self.core.next_chunk_id = 0;
+        self.core.inner.rewind()
     }
 }
 
