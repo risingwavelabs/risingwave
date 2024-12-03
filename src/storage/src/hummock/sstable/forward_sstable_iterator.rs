@@ -71,7 +71,39 @@ impl SstableIterator {
             *sstable_info_ref.table_ids.first().unwrap(),
             *sstable_info_ref.table_ids.last().unwrap(),
         );
+        assert!(
+            read_table_id_range.0 <= read_table_id_range.1,
+            "invalid table id range {} - {}",
+            read_table_id_range.0,
+            read_table_id_range.1
+        );
         let block_meta_count = sstable.meta.block_metas.len();
+        assert!(block_meta_count > 0);
+        assert!(
+            sstable.meta.block_metas[0].table_id().table_id() <= read_table_id_range.0,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.0,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            sstable.meta.block_metas[block_meta_count - 1]
+                .table_id()
+                .table_id()
+                >= read_table_id_range.1,
+            "table id {} not found table_ids in block_meta {:?}",
+            read_table_id_range.1,
+            sstable
+                .meta
+                .block_metas
+                .iter()
+                .map(|meta| meta.table_id())
+                .collect::<Vec<_>>()
+        );
 
         while start_idx < block_meta_count
             && sstable.meta.block_metas[start_idx].table_id().table_id() < read_table_id_range.0
@@ -655,7 +687,7 @@ mod tests {
                     sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                     &SstableInfo::from(SstableInfoInner {
-                        table_ids: vec![0, 1, 2, 3],
+                        table_ids: vec![1, 2, 3],
                         ..Default::default()
                     }),
                 );
