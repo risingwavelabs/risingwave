@@ -63,7 +63,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
 };
 use risingwave_pb::stream_service::{
     streaming_control_stream_response, BarrierCompleteResponse, InjectBarrierRequest,
-    StreamingControlStreamRequest, StreamingControlStreamResponse,
+    PbScoredError, StreamingControlStreamRequest, StreamingControlStreamResponse,
 };
 
 use crate::executor::exchange::permit::Receiver;
@@ -160,12 +160,15 @@ impl ControlStreamHandle {
     pub(super) fn ack_reset_database(
         &mut self,
         database_id: DatabaseId,
-        root_err: Option<StreamError>,
+        root_err: Option<ScoredStreamError>,
         reset_request_id: u32,
     ) {
         self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
             database_id: database_id.database_id,
-            root_err: root_err.map(|err| err.to_report_string()),
+            root_err: root_err.map(|err| PbScoredError {
+                err_msg: err.error.to_report_string(),
+                score: err.score.0,
+            }),
             reset_request_id,
         }));
     }

@@ -82,7 +82,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::{
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
 use crate::task::barrier_manager::await_epoch_completed_future::AwaitEpochCompletedFuture;
-use crate::task::barrier_manager::LocalBarrierEvent;
+use crate::task::barrier_manager::{LocalBarrierEvent, ScoredStreamError};
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
@@ -361,9 +361,7 @@ impl SuspendedDatabaseState {
         if let Some(hummock) = self.inner.actor_manager.env.state_store().as_hummock() {
             hummock.clear_tables(self.inner.table_ids).await;
         }
-        ResetDatabaseOutput {
-            root_err: root_err.error,
-        }
+        ResetDatabaseOutput { root_err }
     }
 }
 
@@ -373,7 +371,7 @@ pub(crate) struct ResettingDatabaseState {
 }
 
 pub(crate) struct ResetDatabaseOutput {
-    pub(crate) root_err: StreamError,
+    pub(crate) root_err: ScoredStreamError,
 }
 
 pub(crate) enum DatabaseStatus {
