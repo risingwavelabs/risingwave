@@ -38,6 +38,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
 
         let exec = DmlExecutor::new(
+            params.actor_context.clone(),
             upstream,
             params.env.dml_manager_ref(),
             table_id,

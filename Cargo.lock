@@ -12142,6 +12142,7 @@ name = "risingwave_stream"
 version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "assert_matches",
  "async-recursion",
  "async-stream",
