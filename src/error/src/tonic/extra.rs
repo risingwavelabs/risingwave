@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Score(pub i32);
 
-/// A [`StreamError`] with a score, used to find the root cause of actor failures.
+/// A error with a score, used to find the root cause of multiple failures.
 #[derive(Debug, Clone)]
 pub struct ScoredError<E> {
     pub error: E,
