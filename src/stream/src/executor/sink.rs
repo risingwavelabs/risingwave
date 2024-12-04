@@ -683,6 +683,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            None,
         )
         .await
         .unwrap();
@@ -812,6 +813,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
+            None,
         )
         .await
         .unwrap();
@@ -914,6 +916,7 @@ mod test {
             BoundedInMemLogStoreFactory::new(1),
             1024,
             vec![DataType::Int64, DataType::Int64],
+            None,
         )
         .await
         .unwrap();
