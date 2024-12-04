@@ -152,10 +152,34 @@ impl ObserverState for FrontendObserverNode {
             secrets,
         } = snapshot;
 
+        tracing::info!("database {}, schema {}, source {}, sink {}, table {}, index {}, view {}, function {}, connection {}, user {}, node {}, hummock_snapshot {}, session_params {}, version {}, secret {}",
+            databases.len(),
+            schemas.len(),
+            sources.len(),
+            sinks.len(),
+            tables.len(),
+            indexes.len(),
+            views.len(),
+            functions.len(),
+            connections.len(),
+            users.len(),
+            nodes.len(),
+            hummock_snapshot.is_some(),
+            session_params.is_some(),
+            version.is_some(),
+            secrets.len(),
+        );
         for db in databases {
+            tracing::info!("create database {} {}", db.name, db.id);
             catalog_guard.create_database(&db)
         }
         for schema in schemas {
+            tracing::info!(
+                "create schema {} {} db {}",
+                schema.name,
+                schema.id,
+                schema.database_id
+            );
             catalog_guard.create_schema(&schema)
         }
         for source in sources {
@@ -177,6 +201,16 @@ impl ObserverState for FrontendObserverNode {
             catalog_guard.create_view(&view)
         }
         for function in functions {
+            tracing::info!(
+                "create function {} {} {:?} {:?} {:?} db {} schema {}",
+                function.name,
+                function.id,
+                function.runtime,
+                function.function_type,
+                function.kind,
+                function.database_id,
+                function.schema_id,
+            );
             catalog_guard.create_function(&function)
         }
         for connection in connections {
