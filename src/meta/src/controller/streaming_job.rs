@@ -1415,14 +1415,7 @@ impl CatalogController {
         job_id: ObjectId,
         rate_limit: Option<u32>,
         for_sink: bool,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>>
-    where
-        F: FnMut((&mut i32, &mut i32, &mut StreamNode)) -> bool,
-    {
-        assert!(
-            fragment_mask & PbFragmentTypeFlag::rate_limit_fragments() != 0,
-            "mask {fragment_mask} must be rate limit fragments mask"
-        );
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1494,7 +1487,6 @@ impl CatalogController {
             }
         }
 
-        
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
@@ -1519,7 +1511,8 @@ impl CatalogController {
         job_id: ObjectId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        self.update_rate_limit_by_job_id(job_id, rate_limit, false).await
+        self.update_rate_limit_by_job_id(job_id, rate_limit, false)
+            .await
     }
 
     // edit the `rate_limit` of the `Sink` node in given `table_id`'s fragments
@@ -1529,7 +1522,8 @@ impl CatalogController {
         job_id: ObjectId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        self.update_rate_limit_by_job_id(job_id, rate_limit, true).await
+        self.update_rate_limit_by_job_id(job_id, rate_limit, true)
+            .await
     }
 
     pub async fn update_dml_rate_limit_by_job_id(

@@ -331,7 +331,7 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
 type UpstreamChunkOffset = TruncateOffset;
 type DownstreamChunkOffset = TruncateOffset;
 
-struct SplittedChunk {
+struct SplitChunk {
     chunk: StreamChunk,
     upstream_chunk_offset: UpstreamChunkOffset,
     // Indicate whether this is the last split chunk from the same `upstream_chunk_offset`
@@ -343,20 +343,20 @@ struct RateLimitedLogReaderCore<R: LogReader> {
     // Newer items at the front
     consumed_offset_queue: VecDeque<(DownstreamChunkOffset, UpstreamChunkOffset)>,
     // Newer items at the front
-    unconsumed_chunk_queue: VecDeque<SplittedChunk>,
+    unconsumed_chunk_queue: VecDeque<SplitChunk>,
     next_chunk_id: usize,
 }
 impl<R: LogReader> RateLimitedLogReaderCore<R> {
-    async fn next_item(&mut self) -> LogStoreResult<Either<SplittedChunk, (u64, LogStoreReadItem)>> {
+    async fn next_item(&mut self) -> LogStoreResult<Either<SplitChunk, (u64, LogStoreReadItem)>> {
         // Get upstream chunk from unconsumed_chunk_queue first.
         // If unconsumed_chunk_queue is empty, get the chunk from the inner log reader.
         match self.unconsumed_chunk_queue.pop_back() {
-            Some(splitted_chunk) => Ok(Either::Left(splitted_chunk)),
+            Some(split_chunk) => Ok(Either::Left(split_chunk)),
             None => {
                 let (epoch, item) = self.inner.next_item().await?;
                 match item {
                     LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
-                        Ok(Either::Left(SplittedChunk {
+                        Ok(Either::Left(SplitChunk {
                             chunk,
                             upstream_chunk_offset: UpstreamChunkOffset::Chunk { epoch, chunk_id },
                             is_last: true,
@@ -416,7 +416,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         }
     }
 
-    async fn apply_rate_limit(&mut self, splitted_chunk: SplittedChunk) -> LogStoreResult<(u64, LogStoreReadItem)> {
+    async fn apply_rate_limit(&mut self, split_chunk: SplitChunk) -> LogStoreResult<(u64, LogStoreReadItem)> {
         // Apply rate limit. If the chunk is too large, split it into smaller chunks.
         let splitted_chunk = if let Some((limit, limiter)) = self.rate_limiter.as_mut() {
             let required_permits: usize = splitted_chunk.chunk.compute_rate_limit_chunk_permits(*limit as _);
@@ -424,20 +424,20 @@ impl<R: LogReader> RateLimitedLogReader<R> {
                 let n = NonZeroU32::new(required_permits as u32).unwrap();
                 // `InsufficientCapacity` should never happen because we have check the cardinality
                 limiter.until_n_ready(n).await.unwrap();
-                splitted_chunk
+                split_chunk
             } else {
                 // Cut the chunk into smaller chunks
-                let mut chunks = splitted_chunk.chunk.split(*limit as _).into_iter();
-                let mut is_last = splitted_chunk.is_last;
-                let upstream_chunk_offset = splitted_chunk.upstream_chunk_offset;
+                let mut chunks = split_chunk.chunk.split(*limit as _).into_iter();
+                let mut is_last = split_chunk.is_last;
+                let upstream_chunk_offset = split_chunk.upstream_chunk_offset;
 
-                // The first chunk after spliting will be returned
+                // The first chunk after splitting will be returned
                 let first_chunk = chunks.next().unwrap();
 
                 // The remaining chunks will be pushed to the queue
                 for chunk in chunks.rev() {
                     // The last chunk after splitting inherits the `is_last` from the original chunk
-                    self.core.unconsumed_chunk_queue.push_back(SplittedChunk {
+                    self.core.unconsumed_chunk_queue.push_back(SplitChunk {
                         chunk,
                         upstream_chunk_offset,
                         is_last,
@@ -450,34 +450,34 @@ impl<R: LogReader> RateLimitedLogReader<R> {
                     NonZeroU32::new(first_chunk.compute_rate_limit_chunk_permits(*limit as _) as u32).unwrap();
                 // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
-                SplittedChunk {
+                SplitChunk {
                     chunk: first_chunk,
                     upstream_chunk_offset,
                     is_last,
                 }
             }
         } else {
-            splitted_chunk
+            split_chunk
         };
 
-        // Update the consumed_offset_queue if the `splitted_chunk` is the last chunk of the upstream chunk
-        let epoch = splitted_chunk.upstream_chunk_offset.epoch();
+        // Update the consumed_offset_queue if the `split_chunk` is the last chunk of the upstream chunk
+        let epoch = split_chunk.upstream_chunk_offset.epoch();
         let downstream_chunk_id = self.core.next_chunk_id;
         self.core.next_chunk_id += 1;
-        if splitted_chunk.is_last {
+        if split_chunk.is_last {
             self.core.consumed_offset_queue.push_front((
                 TruncateOffset::Chunk {
                     epoch,
                     chunk_id: downstream_chunk_id,
                 },
-                splitted_chunk.upstream_chunk_offset,
+                split_chunk.upstream_chunk_offset,
             ));
         }
 
         Ok((
             epoch,
             LogStoreReadItem::StreamChunk {
-                chunk: splitted_chunk.chunk,
+                chunk: split_chunk.chunk,
                 chunk_id: downstream_chunk_id,
             },
         ))
@@ -503,8 +503,8 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                 item = self.core.next_item() => {
                     let item = item?;
                     match item {
-                        Either::Left(splitted_chunk) => {
-                            return self.apply_rate_limit(splitted_chunk).await;
+                        Either::Left(split_chunk) => {
+                            return self.apply_rate_limit(split_chunk).await;
                         },
                         Either::Right(item) => {
                             return Ok(item);
