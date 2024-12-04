@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
+use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -38,6 +41,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
+use tracing::Instrument;
 
 use super::executor_core::StreamSourceCore;
 use super::{
@@ -46,6 +50,7 @@ use super::{
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
+use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::UpdateMutation;
 
@@ -123,6 +128,24 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
         seek_to_latest: bool,
     ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
+        let (stream, latest_splits) = source_desc
+            .source
+            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
+            .await
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok((
+            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            latest_splits,
+        ))
+    }
+
+    /// build the source column ids and the source context which will be used to build the source stream
+    pub fn prepare_source_stream_build(
+        &self,
+        source_desc: &SourceDesc,
+    ) -> (Vec<ColumnId>, SourceContext) {
         let column_ids = source_desc
             .columns
             .iter()
@@ -130,7 +153,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         let (schema_change_tx, mut schema_change_rx) =
-            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
         let schema_change_tx = if self.is_auto_schema_change_enable() {
             let meta_client = self.actor_ctx.meta_client.clone();
             // spawn a task to handle schema change event from source parser
@@ -185,16 +208,8 @@ impl<S: StateStore> SourceExecutor<S> {
             source_desc.source.config.clone(),
             schema_change_tx,
         );
-        let (stream, latest_splits) = source_desc
-            .source
-            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
 
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            latest_splits,
-        ))
+        (column_ids, source_ctx)
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -424,7 +439,7 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_with_stream_source(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver
+        let first_barrier = barrier_receiver
             .recv()
             .instrument_await("source_recv_first_barrier")
             .await
@@ -435,6 +450,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
+        let first_epoch = first_barrier.epoch;
+        let mut boot_state =
+            if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                tracing::debug!(?splits, "boot with splits");
+                splits.to_vec()
+            } else {
+                Vec::default()
+            };
+        let is_pause_on_startup = first_barrier.is_pause_on_startup();
+
+        yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -452,13 +478,7 @@ impl<S: StateStore> SourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut boot_state = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            tracing::debug!(?splits, "boot with splits");
-            boot_state = splits.to_vec();
-        }
-
-        core.split_state_store.init_epoch(barrier.epoch);
+        core.split_state_store.init_epoch(first_epoch);
         let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
 
         for ele in &mut boot_state {
@@ -486,20 +506,98 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
-        let (source_chunk_reader, latest_splits) = self
-            .build_stream_source_reader(
-                &source_desc,
-                recover_state,
-                // For shared source, we start from latest and let the downstream SourceBackfillExecutors to read historical data.
-                // It's highly probable that the work of scanning historical data cannot be shared,
-                // so don't waste work on it.
-                // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
-                // Note that shared CDC source is special. It already starts from latest.
-                self.is_shared_non_cdc && is_uninitialized,
+
+        let mut barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> = None;
+        let seek_to_latest = self.is_shared_non_cdc && is_uninitialized;
+        let source_reader = source_desc.source.clone();
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
+        let source_ctx = Arc::new(source_ctx);
+        let mut build_source_stream_fut = Box::pin(async move {
+            let backoff = get_infinite_backoff_strategy();
+            tokio_retry::Retry::spawn(backoff, || async {
+                match source_reader
+                    .build_stream(
+                        recover_state.clone(),
+                        column_ids.clone(),
+                        source_ctx.clone(),
+                        seek_to_latest,
+                    )
+                    .await {
+                    Ok((stream, latest_splits)) => Ok((stream, latest_splits)),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to build source stream, retrying...");
+                        Err(e)
+                    }
+                }
+            })
+                .instrument(tracing::info_span!("build_source_stream_with_retry"))
+                .await
+                .expect("Retry build source stream until success.")
+        });
+
+        let mut need_resume_after_build = false;
+        // loop to create source stream until success
+        loop {
+            if let Some(barrier) = build_source_stream_and_poll_barrier(
+                &mut barrier_stream,
+                &mut reader_and_splits,
+                &mut build_source_stream_fut,
             )
-            .instrument_await("source_build_reader")
-            .await?;
-        let source_chunk_reader = source_chunk_reader.map_err(StreamExecutorError::connector_error);
+            .await?
+            {
+                if let Message::Barrier(barrier) = barrier {
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                                    && *new_rate_limit != self.rate_limit_rps
+                                {
+                                    tracing::info!(
+                                        "updating rate limit from {:?} to {:?}",
+                                        self.rate_limit_rps,
+                                        *new_rate_limit
+                                    );
+
+                                    // update the rate limit option, we will apply the rate limit
+                                    // when we finish building the source stream.
+                                    self.rate_limit_rps = *new_rate_limit;
+                                }
+                            }
+                            Mutation::Resume => {
+                                // We record the Resume mutation here and postpone the resume of the source stream
+                                // after we have successfully built the source stream.
+                                need_resume_after_build = true;
+                            }
+                            _ => {
+                                // ignore other mutations and output a warn log
+                                tracing::warn!(
+                                    "Received a mutation {:?} to be ignored, because we only handle Throttle and Resume before
+                                    finish building source stream.",
+                                    mutation
+                                );
+                            }
+                        }
+                    }
+
+                    // bump state store epoch
+                    let _ = self.persist_state_and_clear_cache(barrier.epoch).await?;
+                    yield Message::Barrier(barrier);
+                } else {
+                    unreachable!("Only barrier message is expected when building source stream.");
+                }
+            } else {
+                assert!(reader_and_splits.is_some());
+                tracing::info!("source stream created successfully");
+                break;
+            }
+        }
+        let (source_chunk_reader, latest_splits) =
+            reader_and_splits.expect("source chunk reader and splits must be created");
+
+        let source_chunk_reader = apply_rate_limit(source_chunk_reader, self.rate_limit_rps)
+            .boxed()
+            .map_err(StreamExecutorError::connector_error);
         if let Some(latest_splits) = latest_splits {
             // make sure it is written to state table later.
             // Then even it receives no messages, we can observe it in state table.
@@ -511,17 +609,16 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
+        let mut command_paused = false;
 
-        // - If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        // - If the first barrier requires us to pause on startup and we haven't received a Resume mutation, pause the stream.
+        if is_pause_on_startup && !need_resume_after_build {
             tracing::info!("source paused on startup");
             stream.pause_stream();
+            command_paused = true;
         }
-
-        yield Message::Barrier(barrier);
 
         // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
         // milliseconds, considering some other latencies like network and cost in Meta.
@@ -554,17 +651,25 @@ impl<S: StateStore> SourceExecutor<S> {
                     last_barrier_time = Instant::now();
 
                     if self_paused {
-                        stream.resume_stream();
                         self_paused = false;
+                        // command_paused has a higher priority.
+                        if !command_paused {
+                            stream.resume_stream();
+                        }
                     }
 
                     let epoch = barrier.epoch;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            // XXX: Is it possible that the stream is self_paused, and we have pause mutation now? In this case, it will panic.
-                            Mutation::Pause => stream.pause_stream(),
-                            Mutation::Resume => stream.resume_stream(),
+                            Mutation::Pause => {
+                                command_paused = true;
+                                stream.pause_stream()
+                            }
+                            Mutation::Resume => {
+                                command_paused = false;
+                                stream.resume_stream()
+                            }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
                                     actor_id = self.actor_ctx.id,
@@ -720,6 +825,29 @@ impl<S: StateStore> SourceExecutor<S> {
 
         while let Some(barrier) = barrier_receiver.recv().await {
             yield Message::Barrier(barrier);
+        }
+    }
+}
+
+async fn build_source_stream_and_poll_barrier(
+    barrier_stream: &mut BoxStream<'static, StreamExecutorResult<Message>>,
+    reader_and_splits: &mut Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)>,
+    build_future: &mut Pin<
+        Box<impl Future<Output = (BoxChunkSourceStream, Option<Vec<SplitImpl>>)>>,
+    >,
+) -> StreamExecutorResult<Option<Message>> {
+    if reader_and_splits.is_some() {
+        return Ok(None);
+    }
+
+    tokio::select! {
+        biased;
+        build_ret = &mut *build_future => {
+            *reader_and_splits = Some(build_ret);
+            Ok(None)
+        }
+        msg = barrier_stream.next() => {
+            msg.transpose()
         }
     }
 }
@@ -1101,7 +1229,10 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
+            .await
+            .unwrap();
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -1140,7 +1271,10 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
+        source_state_handler
+            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
+            .await
+            .unwrap();
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
