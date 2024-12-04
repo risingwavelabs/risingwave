@@ -49,7 +49,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
         recovery_reason: RecoveryReason,
     ) {
-        self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -58,7 +60,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     fn mark_ready(&self, database_id: Option<DatabaseId>) {
         self.scheduled_barriers.mark_ready(database_id);
-        self.set_status(BarrierManagerStatus::Running);
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Running);
+        }
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
