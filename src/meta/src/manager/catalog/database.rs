@@ -502,6 +502,9 @@ impl DatabaseManager {
                 .all(|s| s.schema_id != schema_id)
             && self.indexes.values().all(|i| i.schema_id != schema_id)
             && self.views.values().all(|v| v.schema_id != schema_id)
+            && self.functions.values().all(|f| f.schema_id != schema_id)
+            && self.connections.values().all(|c| c.schema_id != schema_id)
+            && self.secrets.values().all(|s| s.schema_id != schema_id)
     }
 
     pub fn increase_relation_ref_count(&mut self, relation_id: RelationId) {
