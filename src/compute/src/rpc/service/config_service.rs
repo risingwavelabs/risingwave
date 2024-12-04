@@ -60,16 +60,24 @@ impl ConfigService for ConfigServiceImpl {
         if let Some(meta_cache) = &self.meta_cache
             && req.meta_cache_capacity > 0
         {
-            if let Err(e) = meta_cache.memory().resize(req.meta_cache_capacity as _) {
-                return Err(Status::internal(e.to_report_string()));
+            match meta_cache.memory().resize(req.meta_cache_capacity as _) {
+                Ok(_) => tracing::info!(
+                    "resize meta cache capacity to {:?}",
+                    req.meta_cache_capacity
+                ),
+                Err(e) => return Err(Status::internal(e.to_report_string())),
             }
         }
 
         if let Some(block_cache) = &self.block_cache
             && req.data_cache_capacity > 0
         {
-            if let Err(e) = block_cache.memory().resize(req.data_cache_capacity as _) {
-                return Err(Status::internal(e.to_report_string()));
+            match block_cache.memory().resize(req.data_cache_capacity as _) {
+                Ok(_) => tracing::info!(
+                    "resize data cache capacity to {:?}",
+                    req.data_cache_capacity
+                ),
+                Err(e) => return Err(Status::internal(e.to_report_string())),
             }
         }
 
