@@ -213,8 +213,8 @@ pub enum CreateStreamingJobType {
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
-/// it will build different barriers to send, and may do different stuffs after the barrier is
-/// collected.
+/// it will [build different barriers to send](Self::to_mutation),
+/// and may [do different stuffs after the barrier is collected](CommandContext::post_collect).
 #[derive(Debug, strum::Display)]
 pub enum Command {
     /// `Flush` command will generate a checkpoint barrier. After the barrier is collected and committed
@@ -595,6 +595,7 @@ impl Command {
 
                 Command::Pause(_) => {
                     // Only pause when the cluster is not already paused.
+                    // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
                     if current_paused_reason.is_none() {
                         Some(Mutation::Pause(PauseMutation {}))
                     } else {
@@ -699,7 +700,6 @@ impl Command {
                         ..
                     }) = job_type
                     {
-                        // TODO: support in v2.
                         let update = Self::generate_update_mutation_for_replace_table(
                             old_fragments,
                             merge_updates,

@@ -426,7 +426,7 @@ impl MetadataManager {
     ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
-            .get_upstream_root_fragments(
+            .get_root_fragments(
                 upstream_table_ids
                     .iter()
                     .map(|id| id.table_id as _)
@@ -496,7 +496,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_downstream_chain_fragments(
+    pub async fn get_downstream_fragments(
         &self,
         job_id: u32,
     ) -> MetaResult<(
@@ -505,7 +505,7 @@ impl MetadataManager {
     )> {
         let (fragments, actors) = self
             .catalog_controller
-            .get_downstream_chain_fragments(job_id as _)
+            .get_downstream_fragments(job_id as _)
             .await?;
 
         let actors = actors

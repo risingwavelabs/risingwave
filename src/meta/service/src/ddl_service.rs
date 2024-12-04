@@ -247,7 +247,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateSourceWithoutStreamingJob(source))
+                    .run_command(DdlCommand::CreateNonSharedSource(source))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -702,7 +702,7 @@ impl DdlService for DdlServiceImpl {
         let AlterSourceRequest { source } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
+            .run_command(DdlCommand::AlterNonSharedSource(source.unwrap()))
             .await?;
         Ok(Response::new(AlterSourceResponse {
             status: None,
