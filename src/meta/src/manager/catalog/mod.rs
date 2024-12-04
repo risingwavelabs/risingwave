@@ -265,12 +265,50 @@ impl CatalogManager {
         Ok(catalog_manager)
     }
 
+    async fn clean_zombie_functions(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let mut function_ids_to_remove = vec![];
+        let mut owners_to_decrease_ref = HashSet::new();
+        for (id, function) in functions.tree_ref() {
+            if !database_core.schemas.contains_key(&function.schema_id) {
+                function_ids_to_remove.push(*id);
+                owners_to_decrease_ref.insert(function.owner);
+            }
+        }
+
+        for function_id in &function_ids_to_remove {
+            let _function = functions
+                .remove(*function_id)
+                .ok_or_else(|| MetaError::catalog_id_not_found("function", function_id))?;
+        }
+
+        let objects = function_ids_to_remove
+            .iter()
+            .map(|id| Object::FunctionId(*id))
+            .collect_vec();
+        let _users_need_update = Self::update_user_privileges(&mut users, &objects);
+
+        commit_meta!(self, functions, users)?;
+
+        for owner_id in owners_to_decrease_ref {
+            user_core.decrease_ref(owner_id);
+        }
+
+        Ok(())
+    }
+
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
         self.source_backward_compat_check().await?;
         self.table_sink_catalog_update().await?;
         self.table_catalog_cdc_table_id_update().await?;
+        self.clean_zombie_functions().await?;
         Ok(())
     }
 
