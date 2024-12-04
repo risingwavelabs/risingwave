@@ -169,7 +169,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
     /// Adds the scan range made from the given `kwy_scalar_impls` into the worker slot id
     /// hash map, along with the scan range's virtual node.
     async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
-        let mut scan_range = ScanRange::full_and_table_scan();
+        let mut scan_range = ScanRange::full_table_scan();
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()

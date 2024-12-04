@@ -329,7 +329,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
 
     /// Fetch row from inner side table by the scan range added.
     async fn add_scan_range(&mut self, key_datums: Vec<Datum>) -> Result<()> {
-        let mut scan_range = ScanRange::full_and_table_scan();
+        let mut scan_range = ScanRange::full_table_scan();
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()

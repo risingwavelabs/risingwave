@@ -488,7 +488,7 @@ impl Condition {
         let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
-        let mut scan_range = ScanRange::full_and_table_scan();
+        let mut scan_range = ScanRange::full_table_scan();
         for i in 0..table_desc.order_column_indices().len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {

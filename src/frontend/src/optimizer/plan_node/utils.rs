@@ -485,12 +485,12 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
         if !is_full_range(&scan_range.range) {
             let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
                 (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                (Bound::Unbounded, ub) => ub_struct_to_string(&order_names, ub),
-                (lb, Bound::Unbounded) => lb_struct_to_string(&order_names, lb),
+                (Bound::Unbounded, ub) => ub_to_string(&order_names, ub),
+                (lb, Bound::Unbounded) => lb_to_string(&order_names, lb),
                 (lb, ub) => format!(
                     "{} AND {}",
-                    lb_struct_to_string(&order_names, lb),
-                    ub_struct_to_string(&order_names, ub)
+                    lb_to_string(&order_names, lb),
+                    ub_to_string(&order_names, ub)
                 ),
             };
             range_str.push(bound_range_str);
@@ -503,41 +503,35 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
     range_strs
 }
 
-pub fn ub_struct_to_string(
-    order_names: &Vec<String>,
-    ub: &Bound<Vec<Option<ScalarImpl>>>,
-) -> String {
+pub fn ub_to_string(order_names: &Vec<String>, ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
     match ub {
         Bound::Included(v) => {
-            let (name, value) = struct_to_string(order_names, v);
+            let (name, value) = row_to_string(order_names, v);
             format!("{} <= {}", name, value)
         }
         Bound::Excluded(v) => {
-            let (name, value) = struct_to_string(order_names, v);
+            let (name, value) = row_to_string(order_names, v);
             format!("{} < {}", name, value)
         }
         Bound::Unbounded => unreachable!(),
     }
 }
 
-pub fn lb_struct_to_string(
-    order_names: &Vec<String>,
-    lb: &Bound<Vec<Option<ScalarImpl>>>,
-) -> String {
+pub fn lb_to_string(order_names: &Vec<String>, lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
     match lb {
         Bound::Included(v) => {
-            let (name, value) = struct_to_string(order_names, v);
+            let (name, value) = row_to_string(order_names, v);
             format!("{} >= {}", name, value)
         }
         Bound::Excluded(v) => {
-            let (name, value) = struct_to_string(order_names, v);
+            let (name, value) = row_to_string(order_names, v);
             format!("{} > {}", name, value)
         }
         Bound::Unbounded => unreachable!(),
     }
 }
 
-pub fn struct_to_string(
+pub fn row_to_string(
     order_names: &Vec<String>,
     struct_values: &Vec<Option<ScalarImpl>>,
 ) -> (String, String) {

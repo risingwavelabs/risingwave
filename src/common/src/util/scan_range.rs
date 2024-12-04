@@ -92,7 +92,7 @@ impl ScanRange {
         table_distribution.try_compute_vnode_by_pk_prefix(self.eq_conds.as_slice())
     }
 
-    pub const fn full_and_table_scan() -> Self {
+    pub const fn full_table_scan() -> Self {
         Self {
             eq_conds: vec![],
             range: full_range(),
@@ -175,13 +175,13 @@ mod tests {
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
         let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
-        let mut scan_range = ScanRange::full_and_table_scan();
-        assert!(scan_range.try_compute_vnode(&dist).is_none());
-
-        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
+        let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
+        assert!(scan_range.try_compute_vnode(&dist).is_none());
+
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
@@ -201,7 +201,7 @@ mod tests {
             crate::catalog::get_dist_key_in_pk_indices(&dist_key, &pk).unwrap();
         let dist = TableDistribution::all(dist_key_idx_in_pk, VirtualNode::COUNT_FOR_TEST);
 
-        let mut scan_range = ScanRange::full_and_table_scan();
+        let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
