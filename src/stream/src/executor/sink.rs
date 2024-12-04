@@ -332,7 +332,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                             error = %e.as_report(),
                                             "fail to send sink ate limit update"
                                         );
-                                        return Err(StreamExecutorError::from(e.to_string()));
+                                        return Err(StreamExecutorError::from(
+                                            e.to_report_string(),
+                                        ));
                                     }
                                 }
                             }
