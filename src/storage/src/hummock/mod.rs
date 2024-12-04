@@ -91,19 +91,17 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
-    // use default before refinement.
     let mut iter = SstableIterator::create(
         sstable,
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+        sstable_info,
     );
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
     }
-
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
@@ -118,13 +116,13 @@ pub async fn get_from_sstable_info(
 }
 
 pub fn hit_sstable_bloom_filter(
-    sstable_info_ref: &Sstable,
+    sstable_ref: &Sstable,
     user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let may_exist = sstable_info_ref.may_match_hash(user_key_range, prefix_hash);
+    let may_exist = sstable_ref.may_match_hash(user_key_range, prefix_hash);
     if !may_exist {
         local_stats.bloom_filter_true_negative_counts += 1;
     }

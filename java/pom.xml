@@ -53,7 +53,6 @@
         <module>connector-node/risingwave-source-cdc-test</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
-        <module>connector-node/risingwave-sink-mock-flink</module>
         <module>connector-node/tracing</module>
     </modules>
 
@@ -281,21 +280,6 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-cassandra</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

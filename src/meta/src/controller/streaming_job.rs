@@ -416,6 +416,7 @@ impl CatalogController {
     // TODO: In this function, we also update the `Table` model in the meta store.
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
+    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
     pub async fn prepare_streaming_job(
         &self,
         stream_job_fragments: &StreamJobFragments,
@@ -481,7 +482,7 @@ impl CatalogController {
         }
 
         if !for_replace {
-            // // Update dml fragment id.
+            // Update dml fragment id.
             if let StreamingJob::Table(_, table, ..) = streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
@@ -1025,6 +1026,7 @@ impl CatalogController {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
+        // Update catalog
         match streaming_job {
             StreamingJob::Table(_source, table, _table_job_type) => {
                 // The source catalog should remain unchanged

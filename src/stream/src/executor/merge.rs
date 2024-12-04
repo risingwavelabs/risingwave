@@ -45,7 +45,7 @@ pub(crate) struct MergeExecutorInput {
     upstream_fragment_id: UpstreamFragmentId,
     shared_context: Arc<SharedContext>,
     executor_stats: Arc<StreamingMetrics>,
-    info: ExecutorInfo,
+    pub(crate) info: ExecutorInfo,
     chunk_size: usize,
 }
 
