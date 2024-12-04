@@ -1439,12 +1439,11 @@ impl CatalogController {
             fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
                 let mut found = false;
                 if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
-                    visit_stream_node(stream_node, |node| match node {
-                        PbNodeBody::Sink(node) => {
+                    visit_stream_node(stream_node, |node| {
+                        if let PbNodeBody::Sink(node) = node {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
-                        _ => {}
                     });
                 }
                 found

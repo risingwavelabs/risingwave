@@ -346,6 +346,7 @@ struct RateLimitedLogReaderCore<R: LogReader> {
     unconsumed_chunk_queue: VecDeque<SplitChunk>,
     next_chunk_id: usize,
 }
+
 impl<R: LogReader> RateLimitedLogReaderCore<R> {
     async fn next_item(&mut self) -> LogStoreResult<Either<SplitChunk, (u64, LogStoreReadItem)>> {
         // Get upstream chunk from unconsumed_chunk_queue first.
@@ -377,12 +378,14 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
     }
 }
 
+struct RateLimiterHolder {
+    limit: u32,
+    limiter: RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
+}
+
 pub struct RateLimitedLogReader<R: LogReader> {
     core: RateLimitedLogReaderCore<R>,
-    rate_limiter: Option<(
-        u32,
-        RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
-    )>,
+    rate_limiter: Option<RateLimiterHolder>,
     // None: unlimited. 0: paused.
     control_rx: UnboundedReceiver<Option<u32>>,
 }
@@ -404,13 +407,14 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 
 impl<R: LogReader> RateLimitedLogReader<R> {
     fn update_rate_limit(&mut self, rate_limit: Option<u32>) {
-        if let Some(rate_limit) = rate_limit {
-            if rate_limit == 0 {
+        if let Some(limit) = rate_limit {
+            if limit == 0 {
                 return;
             }
-            let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
+            let quota = Quota::per_second(NonZeroU32::new(limit).unwrap());
             let clock = MonotonicClock;
-            self.rate_limiter = Some((rate_limit, RateLimiter::direct_with_clock(quota, &clock)))
+            let limiter = RateLimiter::direct_with_clock(quota, &clock);
+            self.rate_limiter = Some(RateLimiterHolder { limit, limiter });
         } else {
             self.rate_limiter = None;
         }
@@ -421,47 +425,52 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         split_chunk: SplitChunk,
     ) -> LogStoreResult<(u64, LogStoreReadItem)> {
         // Apply rate limit. If the chunk is too large, split it into smaller chunks.
-        let splitted_chunk = if let Some((limit, limiter)) = self.rate_limiter.as_mut() {
-            let required_permits: usize = splitted_chunk.chunk.compute_rate_limit_chunk_permits(*limit as _);
-            if required_permits <= *limit as _ {
-                let n = NonZeroU32::new(required_permits as u32).unwrap();
-                // `InsufficientCapacity` should never happen because we have check the cardinality
-                limiter.until_n_ready(n).await.unwrap();
-                split_chunk
-            } else {
-                // Cut the chunk into smaller chunks
-                let mut chunks = split_chunk.chunk.split(*limit as _).into_iter();
-                let mut is_last = split_chunk.is_last;
-                let upstream_chunk_offset = split_chunk.upstream_chunk_offset;
+        let split_chunk =
+            if let Some(RateLimiterHolder { limit, limiter }) = self.rate_limiter.as_mut() {
+                let required_permits: usize = split_chunk
+                    .chunk
+                    .compute_rate_limit_chunk_permits(*limit as _);
+                if required_permits <= *limit as _ {
+                    let n = NonZeroU32::new(required_permits as u32).unwrap();
+                    // `InsufficientCapacity` should never happen because we have check the cardinality
+                    limiter.until_n_ready(n).await.unwrap();
+                    split_chunk
+                } else {
+                    // Cut the chunk into smaller chunks
+                    let mut chunks = split_chunk.chunk.split(*limit as _).into_iter();
+                    let mut is_last = split_chunk.is_last;
+                    let upstream_chunk_offset = split_chunk.upstream_chunk_offset;
 
-                // The first chunk after splitting will be returned
-                let first_chunk = chunks.next().unwrap();
+                    // The first chunk after splitting will be returned
+                    let first_chunk = chunks.next().unwrap();
 
-                // The remaining chunks will be pushed to the queue
-                for chunk in chunks.rev() {
-                    // The last chunk after splitting inherits the `is_last` from the original chunk
-                    self.core.unconsumed_chunk_queue.push_back(SplitChunk {
-                        chunk,
+                    // The remaining chunks will be pushed to the queue
+                    for chunk in chunks.rev() {
+                        // The last chunk after splitting inherits the `is_last` from the original chunk
+                        self.core.unconsumed_chunk_queue.push_back(SplitChunk {
+                            chunk,
+                            upstream_chunk_offset,
+                            is_last,
+                        });
+                        is_last = false;
+                    }
+
+                    // Trigger rate limit and return the first chunk
+                    let n = NonZeroU32::new(
+                        first_chunk.compute_rate_limit_chunk_permits(*limit as _) as u32,
+                    )
+                    .unwrap();
+                    // chunks split should have effective chunk size <= limit
+                    limiter.until_n_ready(n).await.unwrap();
+                    SplitChunk {
+                        chunk: first_chunk,
                         upstream_chunk_offset,
                         is_last,
-                    });
-                    is_last = false;
+                    }
                 }
-
-                // Trigger rate limit and return the first chunk
-                let n =
-                    NonZeroU32::new(first_chunk.compute_rate_limit_chunk_permits(*limit as _) as u32).unwrap();
-                // chunks split should have effective chunk size <= limit
-                limiter.until_n_ready(n).await.unwrap();
-                SplitChunk {
-                    chunk: first_chunk,
-                    upstream_chunk_offset,
-                    is_last,
-                }
-            }
-        } else {
-            split_chunk
-        };
+            } else {
+                split_chunk
+            };
 
         // Update the consumed_offset_queue if the `split_chunk` is the last chunk of the upstream chunk
         let epoch = split_chunk.upstream_chunk_offset.epoch();
