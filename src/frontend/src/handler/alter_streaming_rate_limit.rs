@@ -90,10 +90,7 @@ pub async fn handle_alter_streaming_rate_limit(
             let (table, schema_name) =
                 reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::Table {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "\"{table_name}\" ",
-                ))
-                .into());
+                return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)

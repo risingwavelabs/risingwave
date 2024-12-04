@@ -62,7 +62,9 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
     assert_eq!(id_count, test_sink.store.id_count());
 
     // sink should be running without rate limit
-    session.run("alter sink set sink_rate_limit to default").await?;
+    session
+        .run("alter sink set sink_rate_limit to default")
+        .await?;
     sleep(Duration::from_secs(1)).await;
     assert!(test_sink.store.id_count() > id_count);
 

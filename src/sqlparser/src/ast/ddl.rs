@@ -184,7 +184,9 @@ pub enum AlterSinkOperation {
     SwapRenameSink {
         target_sink: ObjectName,
     },
-    SetSinkRateLimit { rate_limit: i32 },
+    SetSinkRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
