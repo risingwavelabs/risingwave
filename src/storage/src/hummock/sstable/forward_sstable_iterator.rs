@@ -172,7 +172,8 @@ impl SstableIterator {
                     }
                 };
                 if start_idx + 1 < end_idx {
-                    self.preload_end_block_idx = end_idx;
+                    self.preload_end_block_idx =
+                        std::cmp::min(end_idx, self.read_block_meta_range.1);
                 }
             }
         }
