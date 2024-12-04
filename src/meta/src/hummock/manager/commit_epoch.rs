@@ -407,6 +407,7 @@ impl HummockManager {
                 let sstable_info = sst.sst_info;
                 let sst_id = sstable_info.sst_id;
                 let object_id = sstable_info.object_id;
+                let sstable_table_ids = sstable_info.table_ids.clone();
                 let right_sst_size = origin_sst_size.checked_sub(new_sst_size).unwrap_or_else(|| {
                     panic!(
                         "group_id {} sst_id {} object_id {} is not split correctly, new_sst_size {} is larger than origin_sst_size {} match_ids {:?} table_stats {:?}",
@@ -426,15 +427,15 @@ impl HummockManager {
                     .or_default()
                     .push(left.unwrap_or_else(|| {
                         panic!(
-                            "group_id {} sst_id {} object_id {} is not split correctly, left part is missing ",
-                            group_id, sst_id, object_id
+                            "group_id {} sst_id {} object_id {} is not split correctly, left part is missing sstable_table_ids {:?} match_ids {:?}",
+                            group_id, sst_id, object_id, sstable_table_ids, match_ids
                         );
                     }));
 
                 sst.sst_info = right.unwrap_or_else(|| {
                     panic!(
-                        "group_id {} sst_id {} object_id {} is not split correctly, right part is missing ",
-                        group_id, sst_id, object_id
+                        "group_id {} sst_id {} object_id {} is not split correctly, right part is missing sstable_table_ids {:?} match_ids {:?}",
+                        group_id, sst_id, object_id, sstable_table_ids, match_ids
                     );
                 });
             }
