@@ -637,6 +637,11 @@ impl SourceMessage {
             meta: SourceMeta::Empty,
         }
     }
+
+    /// Check whether the source message is an empty message.
+    pub fn is_empty(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
+    }
 }
 
 #[derive(Debug, Clone)]
