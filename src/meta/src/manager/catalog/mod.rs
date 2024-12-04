@@ -273,11 +273,11 @@ impl CatalogManager {
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
         let mut function_ids_to_remove = vec![];
-        let mut owners_to_decrease_ref = HashSet::new();
+        let mut owners_to_decrease_ref = HashMap::new();
         for (id, function) in functions.tree_ref() {
             if !database_core.schemas.contains_key(&function.schema_id) {
                 function_ids_to_remove.push(*id);
-                owners_to_decrease_ref.insert(function.owner);
+                *owners_to_decrease_ref.entry(function.owner).or_insert(0) += 1;
             }
         }
 
@@ -295,8 +295,8 @@ impl CatalogManager {
 
         commit_meta!(self, functions, users)?;
 
-        for owner_id in owners_to_decrease_ref {
-            user_core.decrease_ref(owner_id);
+        for (owner_id, cnt) in owners_to_decrease_ref {
+            user_core.decrease_ref_count(owner_id, cnt);
         }
 
         Ok(())
