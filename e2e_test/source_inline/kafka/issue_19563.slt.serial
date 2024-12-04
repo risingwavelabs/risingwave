@@ -55,7 +55,7 @@ cat <<EOF | rpk topic produce test-topic-19563
 {"v1": "0001-01-01 21:00:00"}
 EOF
 
-sleep 6s
+sleep 10s
 
 # Below lower bound and above upper bound are not shown
 query I
