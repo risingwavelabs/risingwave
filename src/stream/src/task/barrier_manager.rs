@@ -432,6 +432,9 @@ impl LocalBarrierWorker {
                 );
                 Ok(())
             }
+            Request::ResetDatabase(_) => {
+                unimplemented!("should not receive this request yet")
+            }
             Request::Init(_) => {
                 unreachable!()
             }
