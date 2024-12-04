@@ -273,8 +273,8 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     #[for_await]
     for batch in data_stream {
         // It's possible that the split is not active, which means the next batch may arrive
-        // very lately, so we should prefer emitting all records in current batch at the end of
-        // each iteration, instead of merging them with the next batch. An exception is when
+        // very lately, so we should prefer emitting all records in current batch before the end
+        // of each iteration, instead of merging them with the next batch. An exception is when
         // a transaction is not committed yet, in which yield when the transaction is committed.
 
         let batch = batch?;
