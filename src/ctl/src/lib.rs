@@ -283,7 +283,9 @@ enum HummockCommands {
         concurrency: u32,
     },
     ResizeCache {
+        #[clap(long)]
         meta_cache_capacity: Option<u64>,
+        #[clap(long)]
         data_cache_capacity: Option<u64>,
     },
 }
