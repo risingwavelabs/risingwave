@@ -261,7 +261,7 @@ impl LocalBarrierWorker {
             self.state
                 .databases
                 .values_mut()
-                .map(|database| database.abort_actors()),
+                .map(|database| database.abort()),
         )
         .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
