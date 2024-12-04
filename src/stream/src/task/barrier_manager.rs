@@ -896,7 +896,7 @@ impl LocalBarrierWorker {
         self.await_epoch_completed_futures.remove(&database_id);
         self.control_stream_handle.ack_reset_database(
             database_id,
-            reset_output.map(|output| output.root_err),
+            reset_output.and_then(|output| output.root_err),
             reset_request_id,
         );
     }
@@ -907,10 +907,8 @@ impl LocalBarrierWorker {
     }
 
     /// When some other failure happens (like failed to send barrier), the error is reported using
-    /// this function. The control stream will be reset and the meta service will then trigger recovery.
-    ///
-    /// This is similar to [`Self::notify_actor_failure`], but since there's not always an actor failure,
-    /// the given `err` will be used if there's no root failure found.
+    /// this function. The control stream will be responded with a message to notify about the error,
+    /// and the global barrier worker will later reset and rerun the database.
     fn on_database_failure(
         &mut self,
         database_id: DatabaseId,
@@ -942,7 +940,7 @@ impl DatabaseManagedBarrierState {
     async fn try_find_root_actor_failure(
         &mut self,
         first_failure: Option<(Option<ActorId>, StreamError)>,
-    ) -> ScoredStreamError {
+    ) -> Option<ScoredStreamError> {
         let mut later_errs = vec![];
         // fetch more actor errors within a timeout
         let _ = tokio::time::timeout(Duration::from_secs(3), async {
@@ -965,7 +963,6 @@ impl DatabaseManagedBarrierState {
             .chain(later_errs.into_iter())
             .map(|e| e.with_score())
             .max_by_key(|e| e.score)
-            .expect("non-empty")
     }
 }
 

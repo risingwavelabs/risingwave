@@ -371,7 +371,7 @@ pub(crate) struct ResettingDatabaseState {
 }
 
 pub(crate) struct ResetDatabaseOutput {
-    pub(crate) root_err: ScoredStreamError,
+    pub(crate) root_err: Option<ScoredStreamError>,
 }
 
 pub(crate) enum DatabaseStatus {
