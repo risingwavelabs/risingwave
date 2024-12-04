@@ -250,7 +250,7 @@ impl<P: ByteStreamSourceParser> P {
 
 /// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
 /// committed to avoid potential OOM.
-const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+const MAX_TRANSACTION_SIZE: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
@@ -272,29 +272,15 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 
     #[for_await]
     for batch in data_stream {
+        // It's possible that the split is not active, which means the next batch may arrive
+        // very lately, so we should prefer emitting all records in current batch at the end of
+        // each iteration, instead of merging them with the next batch. An exception is when
+        // a transaction is not committed yet, in which yield when the transaction is committed.
+
         let batch = batch?;
         let batch_len = batch.len();
 
-        let mut last_batch_not_yielded = false;
-        if let Some(Transaction { len, id }) = &mut current_transaction {
-            // Dirty state. The last batch is not yielded due to uncommitted transaction.
-            if *len > MAX_ROWS_FOR_TRANSACTION {
-                // Large transaction. Force commit.
-                tracing::warn!(
-                    id,
-                    len,
-                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
-                );
-                *len = 0; // reset `len` while keeping `id`
-                yield chunk_builder.take(batch_len);
-            } else {
-                last_batch_not_yielded = true
-            }
-        } else {
-            // Clean state. Reserve capacity for the builder.
-            assert!(chunk_builder.is_empty());
-            let _ = chunk_builder.take(batch_len);
-        }
+        let mut txn_started_in_last_batch = current_transaction.is_some();
 
         let process_time_ms = chrono::Utc::now().timestamp_millis();
         for (i, msg) in batch.into_iter().enumerate() {
@@ -393,9 +379,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         tracing::debug!(id, "commit upstream transaction");
                         current_transaction = None;
 
-                        if last_batch_not_yielded {
+                        if txn_started_in_last_batch {
                             yield chunk_builder.take(batch_len - (i + 1));
-                            last_batch_not_yielded = false;
+                            txn_started_in_last_batch = false;
                         }
                     }
                 },
@@ -424,9 +410,21 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             }
         }
 
-        // If we are not in a transaction, we should yield the chunk now.
-        if current_transaction.is_none() {
-            yield chunk_builder.take(0);
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // in transaction, check whether it's too large
+            if *len > MAX_TRANSACTION_SIZE {
+                // force commit
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_TRANSACTION_SIZE} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield chunk_builder.take(batch_len); // use curr batch len as next capacity, just a hint
+            }
+        } else if !chunk_builder.is_empty() {
+            // not in transaction, yield the chunk now
+            yield chunk_builder.take(batch_len); // use curr batch len as next capacity, just a hint
         }
     }
 }
