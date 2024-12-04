@@ -261,8 +261,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 ) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
-    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut chunk_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
         id: Box<str>,
@@ -287,14 +286,14 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
                 );
                 *len = 0; // reset `len` while keeping `id`
-                yield builder.take(batch_len);
+                yield chunk_builder.take(batch_len);
             } else {
                 last_batch_not_yielded = true
             }
         } else {
             // Clean state. Reserve capacity for the builder.
-            assert!(builder.is_empty());
-            let _ = builder.take(batch_len);
+            assert!(chunk_builder.is_empty());
+            let _ = chunk_builder.take(batch_len);
         }
 
         let process_time_ms = chrono::Utc::now().timestamp_millis();
@@ -305,7 +304,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     "got a empty message, could be a heartbeat"
                 );
                 // Emit an empty invisible row for the heartbeat message.
-                parser.emit_empty_row(heartbeat_builder.row_writer().invisible().with_meta(
+                parser.emit_empty_row(chunk_builder.row_writer().invisible().with_meta(
                     MessageMeta {
                         meta: &msg.meta,
                         split_id: &msg.split_id,
@@ -330,12 +329,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
-            let old_len = builder.len();
+            let old_len = chunk_builder.len();
             match parser
                 .parse_one_with_txn(
                     msg.key,
                     msg.payload,
-                    builder.row_writer().with_meta(MessageMeta {
+                    chunk_builder.row_writer().with_meta(MessageMeta {
                         meta: &msg.meta,
                         split_id: &msg.split_id,
                         offset: &msg.offset,
@@ -348,7 +347,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     // Aggregate the number of new rows into the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        let n_new_rows = builder.len() - old_len;
+                        let n_new_rows = chunk_builder.len() - old_len;
                         *len += n_new_rows;
                     }
 
@@ -395,7 +394,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         current_transaction = None;
 
                         if last_batch_not_yielded {
-                            yield builder.take(batch_len - (i + 1));
+                            yield chunk_builder.take(batch_len - (i + 1));
                             last_batch_not_yielded = false;
                         }
                     }
@@ -425,16 +424,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             }
         }
 
-        // emit heartbeat for each message batch
-        // we must emit heartbeat chunk before the data chunk,
-        // otherwise the source offset could be backward due to the heartbeat
-        if !heartbeat_builder.is_empty() {
-            yield heartbeat_builder.take(0);
-        }
-
         // If we are not in a transaction, we should yield the chunk now.
         if current_transaction.is_none() {
-            yield builder.take(0);
+            yield chunk_builder.take(0);
         }
     }
 }
