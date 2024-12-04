@@ -3446,8 +3446,7 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()?
-            {
+            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
             } else {
                 return self.expected("SCHEMA/PARALLELISM after SET");

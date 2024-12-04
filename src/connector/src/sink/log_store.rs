@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::Either;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
@@ -24,6 +23,7 @@ use std::task::Poll;
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
+use either::Either;
 use futures::{TryFuture, TryFutureExt};
 use governor::clock::MonotonicClock;
 use governor::middleware::NoOpMiddleware;
@@ -416,7 +416,10 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         }
     }
 
-    async fn apply_rate_limit(&mut self, split_chunk: SplitChunk) -> LogStoreResult<(u64, LogStoreReadItem)> {
+    async fn apply_rate_limit(
+        &mut self,
+        split_chunk: SplitChunk,
+    ) -> LogStoreResult<(u64, LogStoreReadItem)> {
         // Apply rate limit. If the chunk is too large, split it into smaller chunks.
         let split_chunk = if let Some((limit, limiter)) = self.rate_limiter.as_mut() {
             let required_permits: usize = split_chunk.chunk.compute_chunk_permits(*limit as _);
@@ -517,7 +520,8 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
         let mut truncate_offset = None;
-        while let Some((downstream_offset, upstream_offset)) = self.core.consumed_offset_queue.pop_back()
+        while let Some((downstream_offset, upstream_offset)) =
+            self.core.consumed_offset_queue.pop_back()
         {
             if downstream_offset <= offset {
                 truncate_offset = Some(upstream_offset);

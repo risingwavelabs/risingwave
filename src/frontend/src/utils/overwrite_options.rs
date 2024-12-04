@@ -23,8 +23,8 @@ pub struct OverwriteOptions {
 
 impl OverwriteOptions {
     pub(crate) const BACKFILL_RATE_LIMIT_KEY: &'static str = "backfill_rate_limit";
-    pub(crate) const SOURCE_RATE_LIMIT_KEY: &'static str = "source_rate_limit";
     pub(crate) const SINK_RATE_LIMIT_KEY: &'static str = "sink_rate_limit";
+    pub(crate) const SOURCE_RATE_LIMIT_KEY: &'static str = "source_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
         let source_rate_limit = {
