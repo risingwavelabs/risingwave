@@ -13,16 +13,24 @@
 // limitations under the License.
 use std::sync::Arc;
 
+use foyer::HybridCache;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::error::tonic::ToTonicStatus;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::compute::config_service_server::ConfigService;
-use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
+use risingwave_pb::compute::{
+    ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
+};
+use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::task::LocalStreamManager;
+use thiserror_ext::AsReport;
 use tonic::{Code, Request, Response, Status};
 
 pub struct ConfigServiceImpl {
     batch_mgr: Arc<BatchManager>,
     stream_mgr: LocalStreamManager,
+    meta_cache: Option<HybridCache<HummockSstableObjectId, Box<Sstable>>>,
+    block_cache: Option<HybridCache<SstableBlockIndex, Box<Block>>>,
 }
 
 #[async_trait::async_trait]
@@ -42,13 +50,45 @@ impl ConfigService for ConfigServiceImpl {
         };
         Ok(Response::new(show_config_response))
     }
+
+    async fn resize_cache(
+        &self,
+        request: Request<ResizeCacheRequest>,
+    ) -> Result<Response<ResizeCacheResponse>, Status> {
+        let req = request.into_inner();
+
+        if let Some(meta_cache) = &self.meta_cache
+            && req.meta_cache_capacity > 0
+        {
+            if let Err(e) = meta_cache.memory().resize(req.meta_cache_capacity as _) {
+                return Err(Status::internal(e.to_report_string()));
+            }
+        }
+
+        if let Some(block_cache) = &self.block_cache
+            && req.data_cache_capacity > 0
+        {
+            if let Err(e) = block_cache.memory().resize(req.data_cache_capacity as _) {
+                return Err(Status::internal(e.to_report_string()));
+            }
+        }
+
+        Ok(Response::new(ResizeCacheResponse {}))
+    }
 }
 
 impl ConfigServiceImpl {
-    pub fn new(batch_mgr: Arc<BatchManager>, stream_mgr: LocalStreamManager) -> Self {
+    pub fn new(
+        batch_mgr: Arc<BatchManager>,
+        stream_mgr: LocalStreamManager,
+        meta_cache: Option<HybridCache<HummockSstableObjectId, Box<Sstable>>>,
+        block_cache: Option<HybridCache<SstableBlockIndex, Box<Block>>>,
+    ) -> Self {
         Self {
             batch_mgr,
             stream_mgr,
+            meta_cache,
+            block_cache,
         }
     }
 }
