@@ -151,24 +151,31 @@ impl SstableIterator {
     }
 
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
+        assert!(
+            start_idx >= self.read_block_meta_range.0 && start_idx <= self.read_block_meta_range.1
+        );
+
         self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.meta.block_metas;
+            let block_metas = &self.sst.meta.block_metas
+                [self.read_block_meta_range.0..=self.read_block_meta_range.1];
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx <= self.read_block_meta_range.1 {
                 let end_idx = match bound {
-                    Unbounded => block_metas.len(),
+                    Unbounded => self.read_block_meta_range.1,
                     Included(dest_key) => {
                         let dest_key = dest_key.as_ref();
-                        block_metas.partition_point(|block_meta| {
-                            FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
-                        })
+                        self.read_block_meta_range.0
+                            + block_metas.partition_point(|block_meta| {
+                                FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
+                            })
                     }
                     Excluded(end_key) => {
                         let end_key = end_key.as_ref();
-                        block_metas.partition_point(|block_meta| {
-                            FullKey::decode(&block_meta.smallest_key).user_key < end_key
-                        })
+                        self.read_block_meta_range.0
+                            + block_metas.partition_point(|block_meta| {
+                                FullKey::decode(&block_meta.smallest_key).user_key < end_key
+                            })
                     }
                 };
                 if start_idx + 1 < end_idx {
