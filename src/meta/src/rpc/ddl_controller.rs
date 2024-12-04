@@ -128,7 +128,7 @@ pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
-    DropSchema(SchemaId),
+    DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
@@ -163,7 +163,7 @@ impl DdlCommand {
     fn allow_in_recovery(&self) -> bool {
         match self {
             DdlCommand::DropDatabase(_)
-            | DdlCommand::DropSchema(_)
+            | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
@@ -298,7 +298,9 @@ impl DdlController {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
-                DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
+                DdlCommand::DropSchema(schema_id, drop_mode) => {
+                    ctrl.drop_schema(schema_id, drop_mode).await
+                }
                 DdlCommand::CreateNonSharedSource(source) => {
                     ctrl.create_non_shared_source(source).await
                 }
@@ -431,8 +433,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, DropMode::Restrict, None)
+    async fn drop_schema(
+        &self,
+        schema_id: SchemaId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)
             .await
     }
 
