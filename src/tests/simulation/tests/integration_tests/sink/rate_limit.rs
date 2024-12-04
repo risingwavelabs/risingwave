@@ -54,7 +54,7 @@ async fn test_sink_decouple_rate_limit() -> Result<()> {
     sleep(Duration::from_secs(1)).await;
     assert!(test_sink.store.id_count() > 0);
     assert!(test_sink.store.id_count() <= 8);
-    
+
     // sink should be paused
     session.run("alter sink set sink_rate_limit to 0").await?;
     let id_count = test_sink.store.id_count();
