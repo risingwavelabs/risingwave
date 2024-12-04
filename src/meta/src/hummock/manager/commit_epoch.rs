@@ -378,8 +378,8 @@ impl HummockManager {
             let len = group_table_ids.len();
             let mut group_table_ids = group_table_ids.into_iter().collect_vec();
             group_table_ids.sort_by_key(|(_, table_ids)| table_ids[0]);
-            for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
-                if sst.sst_info.table_ids == match_ids {
+            for (index, (group_id, match_ids)) in group_table_ids.iter().enumerate() {
+                if sst.sst_info.table_ids == *match_ids {
                     // The SST contains all the tables in the group should be last key
                     assert!(
                         index == len - 1,
@@ -389,7 +389,7 @@ impl HummockManager {
                         len
                     );
                     commit_sstables
-                        .entry(group_id)
+                        .entry(*group_id)
                         .or_default()
                         .push(sst.sst_info);
                     break;
@@ -410,8 +410,8 @@ impl HummockManager {
                 let sstable_table_ids = sstable_info.table_ids.clone();
                 let right_sst_size = origin_sst_size.checked_sub(new_sst_size).unwrap_or_else(|| {
                     panic!(
-                        "group_id {} sst_id {} object_id {} is not split correctly, new_sst_size {} is larger than origin_sst_size {} match_ids {:?} table_stats {:?}",
-                        group_id, sst_id, object_id, new_sst_size, origin_sst_size, match_ids, sst.table_stats
+                        "group_id {} sst_id {} object_id {} is not split correctly, new_sst_size {} is larger than origin_sst_size {} match_ids {:?} table_stats {:?} group_table_ids {:?}",
+                        group_id, sst_id, object_id, new_sst_size, origin_sst_size, match_ids, sst.table_stats, group_table_ids
                     );
                 });
                 let (left, right) = split_sst(
@@ -423,19 +423,19 @@ impl HummockManager {
                 );
 
                 commit_sstables
-                    .entry(group_id)
+                    .entry(*group_id)
                     .or_default()
                     .push(left.unwrap_or_else(|| {
                         panic!(
-                            "group_id {} sst_id {} object_id {} is not split correctly, left part is missing sstable_table_ids {:?} match_ids {:?}",
-                            group_id, sst_id, object_id, sstable_table_ids, match_ids
+                            "group_id {} sst_id {} object_id {} is not split correctly, left part is missing sstable_table_ids {:?} match_ids {:?} group_table_ids {:?}",
+                            group_id, sst_id, object_id, sstable_table_ids, match_ids, group_table_ids
                         );
                     }));
 
                 sst.sst_info = right.unwrap_or_else(|| {
                     panic!(
-                        "group_id {} sst_id {} object_id {} is not split correctly, right part is missing sstable_table_ids {:?} match_ids {:?}",
-                        group_id, sst_id, object_id, sstable_table_ids, match_ids
+                        "group_id {} sst_id {} object_id {} is not split correctly, right part is missing sstable_table_ids {:?} match_ids {:?} group_table_ids {:?}",
+                        group_id, sst_id, object_id, sstable_table_ids, match_ids, group_table_ids
                     );
                 });
             }
