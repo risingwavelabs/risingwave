@@ -472,37 +472,30 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
     let explain_max_range = 20;
     for scan_range in scan_ranges.iter().take(explain_max_range) {
         #[expect(clippy::disallowed_methods)]
-        match scan_range {
-            ScanRange::PrefixScanRange(scan_range) => {
-                let mut range_str = scan_range
-                    .eq_conds
-                    .iter()
-                    .zip(order_names.iter())
-                    .map(|(v, name)| match v {
-                        Some(v) => format!("{} = {:?}", name, v),
-                        None => format!("{} IS NULL", name),
-                    })
-                    .collect_vec();
-                if !is_full_range(&scan_range.range) {
-                    let i = scan_range.eq_conds.len();
-                    range_str.push(range_to_string(&order_names[i], &scan_range.range))
-                }
-                range_strs.push(range_str.join(" AND "));
-            }
-            ScanRange::RowScanRange(scan_range) => {
-                let range_str = match (&scan_range.range.0, &scan_range.range.1) {
-                    (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                    (Bound::Unbounded, ub) => ub_struct_to_string(&order_names, ub),
-                    (lb, Bound::Unbounded) => lb_struct_to_string(&order_names, lb),
-                    (lb, ub) => format!(
-                        "{} AND {}",
-                        lb_struct_to_string(&order_names, lb),
-                        ub_struct_to_string(&order_names, ub)
-                    ),
-                };
-                range_strs.push(range_str);
-            }
+        let mut range_str = scan_range
+            .eq_conds
+            .iter()
+            .zip(order_names.iter())
+            .map(|(v, name)| match v {
+                Some(v) => format!("{} = {:?}", name, v),
+                None => format!("{} IS NULL", name),
+            })
+            .collect_vec();
+
+        if !is_full_range(&scan_range.range) {
+            let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
+                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+                (Bound::Unbounded, ub) => ub_struct_to_string(&order_names, ub),
+                (lb, Bound::Unbounded) => lb_struct_to_string(&order_names, lb),
+                (lb, ub) => format!(
+                    "{} AND {}",
+                    lb_struct_to_string(&order_names, lb),
+                    ub_struct_to_string(&order_names, ub)
+                ),
+            };
+            range_str.push(bound_range_str);
         }
+        range_strs.push(range_str.join(" AND "));
     }
     if scan_ranges.len() > explain_max_range {
         range_strs.push("...".to_string());
@@ -558,31 +551,12 @@ pub fn struct_to_string(
             None => values.push("null".to_string()),
         }
     }
-    let name_str = format!("({})", names.iter().join(", "));
-    let value_str = format!("({})", values.iter().join(", "));
-    (name_str, value_str)
-}
-
-pub fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-    match (&range.0, &range.1) {
-        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-        (Bound::Unbounded, ub) => ub_to_string(name, ub),
-        (lb, Bound::Unbounded) => lb_to_string(name, lb),
-        (lb, ub) => format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub)),
-    }
-}
-
-fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-    match lb {
-        Bound::Included(v) => format!("{} >= {:?}", name, v),
-        Bound::Excluded(v) => format!("{} > {:?}", name, v),
-        Bound::Unbounded => unreachable!(),
-    }
-}
-fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-    match ub {
-        Bound::Included(v) => format!("{} <= {:?}", name, v),
-        Bound::Excluded(v) => format!("{} < {:?}", name, v),
-        Bound::Unbounded => unreachable!(),
+    if names.len() == 1 {
+        (names[0].clone(), values[0].clone())
+    } else {
+        (
+            format!("({})", names.iter().join(", ")),
+            format!("({})", values.iter().join(", ")),
+        )
     }
 }

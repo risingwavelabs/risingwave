@@ -190,7 +190,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                 bail!("Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}");
             };
 
-            scan_range.extend_eq_conds(vec![datum]);
+            scan_range.eq_conds.push(datum);
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;

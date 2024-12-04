@@ -105,88 +105,54 @@ impl ScanRange {
         scan_range: PbScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
-        match scan_range.scan_range.unwrap() {
-            scan_range::ScanRange::PrefixScanRange(and_scan_range) => {
-                let pk_prefix = OwnedRow::new(
-                    and_scan_range
-                        .eq_conds
-                        .iter()
-                        .map(|v| {
-                            let ty = pk_types.next().unwrap();
-                            deserialize_datum(v.as_slice(), &ty)
-                        })
-                        .try_collect()?,
-                );
-                if and_scan_range.lower_bound.is_none() && and_scan_range.upper_bound.is_none() {
-                    return Ok(Self {
-                        pk_prefix,
-                        ..Self::full()
-                    });
-                }
-
-                let bound_ty = pk_types.next().unwrap();
-                let build_bound =
-                    |bound: &scan_range::prefix_scan_range::Bound| -> Bound<OwnedRow> {
-                        let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
-                        if bound.inclusive {
-                            Bound::Included(OwnedRow::new(vec![datum]))
-                        } else {
-                            Bound::Excluded(OwnedRow::new(vec![datum]))
-                        }
-                    };
-
-                let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
-                    and_scan_range.lower_bound.as_ref(),
-                    and_scan_range.upper_bound.as_ref(),
-                ) {
-                    (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
-                    (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
-                    (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
-                    (None, None) => unreachable!(),
-                };
-                Ok(Self {
-                    pk_prefix,
-                    next_col_bounds,
+        let pk_prefix = OwnedRow::new(
+            scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types.next().unwrap();
+                    deserialize_datum(v.as_slice(), &ty)
                 })
-            }
-            scan_range::ScanRange::RowScanRange(row_scan_range) => {
-                let pk_prefix = OwnedRow::new(vec![]);
-
-                let mut build_bound =
-                    |bound: &scan_range::row_scan_range::Bound| -> Result<Bound<OwnedRow>> {
-                        let next_col_bounds = OwnedRow::new(
-                            bound
-                                .value
-                                .iter()
-                                .map(|v| {
-                                    let ty = pk_types.next().unwrap();
-                                    deserialize_datum(v.as_slice(), &ty)
-                                })
-                                .try_collect()?,
-                        );
-                        if bound.inclusive {
-                            Ok(Bound::Included(next_col_bounds))
-                        } else {
-                            Ok(Bound::Excluded(next_col_bounds))
-                        }
-                    };
-
-                let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
-                    row_scan_range.lower_bound.as_ref(),
-                    row_scan_range.upper_bound.as_ref(),
-                ) {
-                    (Some(lb), Some(ub)) => (build_bound(lb)?, build_bound(ub)?),
-                    (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)?),
-                    (Some(lb), None) => (build_bound(lb)?, Bound::Unbounded),
-                    (None, None) => unreachable!(),
-                };
-
-                Ok(Self {
-                    pk_prefix,
-                    next_col_bounds,
-                })
-            }
+                .try_collect()?,
+        );
+        if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
+            return Ok(Self {
+                pk_prefix,
+                ..Self::full()
+            });
         }
+
+        let mut build_bound = |bound: &scan_range::Bound| -> Result<Bound<OwnedRow>> {
+            let next_col_bounds = OwnedRow::new(
+                bound
+                    .value
+                    .iter()
+                    .map(|v| {
+                        let ty = pk_types.next().unwrap();
+                        deserialize_datum(v.as_slice(), &ty)
+                    })
+                    .try_collect()?,
+            );
+            if bound.inclusive {
+                Ok(Bound::Included(next_col_bounds))
+            } else {
+                Ok(Bound::Excluded(next_col_bounds))
+            }
+        };
+
+        let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
+            scan_range.lower_bound.as_ref(),
+            scan_range.upper_bound.as_ref(),
+        ) {
+            (Some(lb), Some(ub)) => (build_bound(lb)?, build_bound(ub)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)?),
+            (Some(lb), None) => (build_bound(lb)?, Bound::Unbounded),
+            (None, None) => unreachable!(),
+        };
+        Ok(Self {
+            pk_prefix,
+            next_col_bounds,
+        })
     }
 
     /// Create a scan range for full table scan.

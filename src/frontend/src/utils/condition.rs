@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::{PrefixScanRange, RowScanRange, ScanRange};
+use risingwave_common::util::scan_range::ScanRange;
 
 use crate::error::Result;
 use crate::expr::{
@@ -319,9 +319,7 @@ impl Condition {
             .iter()
             .all(|(scan_ranges, other_condition)| {
                 other_condition.always_true()
-                    && scan_ranges
-                        .iter()
-                        .all(|x| (!x.is_full_table_scan()) && x.is_and_scan_range())
+                    && scan_ranges.iter().all(|x| (!x.is_full_table_scan()))
             });
 
         if all_equal {
@@ -332,14 +330,10 @@ impl Condition {
                 .into_iter()
                 .flat_map(|(scan_ranges, _)| scan_ranges)
                 // sort, large one first
-                .map(|scan_range| match scan_range {
-                    ScanRange::PrefixScanRange(a) => a,
-                    ScanRange::RowScanRange(_) => panic!("unexpected row scan range"),
-                })
                 .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
                 .collect_vec();
             // Make sure each range never overlaps with others, that's what scan range mean.
-            let mut non_overlap_scan_ranges: Vec<PrefixScanRange> = vec![];
+            let mut non_overlap_scan_ranges: Vec<ScanRange> = vec![];
             for s1 in &scan_ranges {
                 let overlap = non_overlap_scan_ranges.iter().any(|s2| {
                     #[allow(clippy::disallowed_methods)]
@@ -356,10 +350,6 @@ impl Condition {
                 }
             }
 
-            let non_overlap_scan_ranges = non_overlap_scan_ranges
-                .into_iter()
-                .map(ScanRange::PrefixScanRange)
-                .collect();
             Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
         } else {
             Ok(None)
@@ -435,13 +425,14 @@ impl Condition {
                 }
 
                 if !pk_struct.is_empty() {
-                    let scan_range = ScanRange::RowScanRange(RowScanRange {
+                    let scan_range = ScanRange {
+                        eq_conds: vec![],
                         range: match func_type {
                             ExprType::GreaterThan => (Bound::Excluded(pk_struct), Bound::Unbounded),
                             ExprType::LessThan => (Bound::Unbounded, Bound::Excluded(pk_struct)),
                             _ => unreachable!(),
                         },
-                    });
+                    };
                     if !all_added {
                         return Ok(Some((
                             vec![scan_range],
@@ -540,10 +531,17 @@ impl Condition {
                     if eq_conds.is_empty() {
                         return Ok(false_cond());
                     }
-                    scan_range.extend_eq_conds(eq_conds.into_iter());
+                    scan_range.eq_conds.extend(eq_conds.into_iter());
                 }
                 0 => {
-                    scan_range.set_and_scan_range((lower_bound, upper_bound));
+                    // scan_range.range.push((lower_bound, upper_bound));
+                    // scan_range.set_and_scan_range((lower_bound, upper_bound));
+                    let convert = |bound| match bound {
+                        Bound::Included(l) => Bound::Included(vec![Some(l)]),
+                        Bound::Excluded(l) => Bound::Excluded(vec![Some(l)]),
+                        Bound::Unbounded => Bound::Unbounded,
+                    };
+                    scan_range.range = (convert(lower_bound), convert(upper_bound));
                     other_conds.extend(groups[i + 1..].iter().flatten().cloned());
                     break;
                 }
@@ -564,7 +562,7 @@ impl Condition {
                         .into_iter()
                         .map(|lit| {
                             let mut scan_range = scan_range.clone();
-                            scan_range.extend_eq_conds(vec![lit]);
+                            scan_range.eq_conds.push(lit);
                             scan_range
                         })
                         .collect();

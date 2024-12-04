@@ -350,14 +350,10 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                 bail!("Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}");
             };
 
-            scan_range.extend_eq_conds(vec![datum]);
+            scan_range.eq_conds.push(datum);
         }
 
-        let pk_prefix = if let ScanRange::PrefixScanRange(and_scan_range) = scan_range {
-            OwnedRow::new(and_scan_range.eq_conds)
-        } else {
-            panic!("scan_range should be PrefixScanRange");
-        };
+        let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
             let row = self.table.get_row(&pk_prefix, self.epoch.into()).await?;
