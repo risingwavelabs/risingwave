@@ -103,6 +103,11 @@ message StreamingControlStreamRequest {
   }
 }
 
+message ScoredError {
+  string err_msg = 1;
+  int32 score = 2;
+}
+
 message StreamingControlStreamResponse {
   message InitResponse {}
   message ShutdownResponse {}
@@ -112,7 +117,7 @@ message StreamingControlStreamResponse {
 
   message ResetDatabaseResponse {
     uint32 database_id = 1;
-    optional string root_err = 2;
+    optional ScoredError root_err = 2;
     uint32 reset_request_id = 3;
   }
 

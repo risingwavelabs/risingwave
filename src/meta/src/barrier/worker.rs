@@ -31,6 +31,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use tonic::Status;
 use tracing::{debug, error, info, warn, Instrument};
 
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
@@ -317,6 +318,15 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         match event {
                             CheckpointControlEvent::EnteringInitializing(entering_initializing) => {
                                 let database_id = entering_initializing.database_id();
+                                let error = merge_node_rpc_errors(&format!("database {} reset", database_id), entering_initializing.action.0.iter().filter_map(|(worker_id, resp)| {
+                                    resp.root_err.as_ref().map(|root_err| {
+                                        (*worker_id, ScoredError {
+                                            error: Status::internal(&root_err.err_msg),
+                                            score: Score(root_err.score)
+                                        })
+                                    })
+                                }));
+                                Self::report_collect_failure(&self.env, &error);
                                 if let Some(runtime_info) = self.context.reload_database_runtime_info(database_id).await? {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
                                         warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
@@ -343,7 +353,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
-                                self.report_collect_failure(&err);
+                                Self::report_collect_failure(&self.env, &err);
                                 self.failure_recovery(err).await;
                             }  else {
                                 warn!(worker_id, "no barrier to collect from worker, ignore err");
@@ -521,14 +531,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
 impl<C> GlobalBarrierWorker<C> {
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, error: &MetaError) {
+    pub(super) fn report_collect_failure(env: &MetaSrvEnv, error: &MetaError) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
             error: error.to_report_string(),
         };
-        self.env
-            .event_log_manager_ref()
+        env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
 }
@@ -573,6 +582,7 @@ mod retry_strategy {
 }
 
 pub(crate) use retry_strategy::*;
+use risingwave_common::error::tonic::extra::{Score, ScoredError};
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.

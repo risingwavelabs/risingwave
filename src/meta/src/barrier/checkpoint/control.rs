@@ -234,7 +234,6 @@ impl CheckpointControl {
             }
         } else {
             let Some(max_prev_epoch) = self.max_prev_epoch() else {
-                assert!(self.databases.is_empty());
                 return Ok(());
             };
             let curr_epoch = max_prev_epoch.next();
@@ -392,14 +391,17 @@ impl CheckpointControl {
                         if let Poll::Ready(action) = poll_result {
                             let this = this.take().expect("checked Some");
                             return Poll::Ready(match action {
-                                RecoveringStateAction::EnterInitializing => {
+                                RecoveringStateAction::EnterInitializing(reset_workers) => {
                                     CheckpointControlEvent::EnteringInitializing(
-                                        this.new_database_status_action(database_id),
+                                        this.new_database_status_action(
+                                            database_id,
+                                            EnterInitializing(reset_workers),
+                                        ),
                                     )
                                 }
                                 RecoveringStateAction::EnterRunning => {
                                     CheckpointControlEvent::EnteringRunning(
-                                        this.new_database_status_action(database_id),
+                                        this.new_database_status_action(database_id, EnterRunning),
                                     )
                                 }
                             });
