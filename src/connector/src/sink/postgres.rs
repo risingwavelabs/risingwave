@@ -343,7 +343,7 @@ impl PostgresSinkWriter {
             client
                 .prepare_typed(&insert_sql, &schema_types)
                 .await
-                .context("Failed to prepare insert statement")?
+                .context(format!("Failed to prepare insert statement, {:?}", &insert_sql))?
         };
 
         let delete_statement = if is_append_only {
@@ -358,7 +358,7 @@ impl PostgresSinkWriter {
                 client
                     .prepare_typed(&delete_sql, &delete_types)
                     .await
-                    .context("Failed to prepare delete statement")?,
+                    .context(format!("Failed to prepare delete statement, {:?}", &delete_sql))?,
             )
         };
 
@@ -370,7 +370,7 @@ impl PostgresSinkWriter {
                 client
                     .prepare_typed(&upsert_sql, &schema_types)
                     .await
-                    .context("Failed to prepare upsert statement")?,
+                    .context(format!("Failed to prepare upsert statement, {:?}", &upsert_sql))?,
             )
         };
 

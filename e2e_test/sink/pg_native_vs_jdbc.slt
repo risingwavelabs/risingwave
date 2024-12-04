@@ -1,0 +1,70 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS pg_sink;
+
+statement ok
+DROP SINK IF EXISTS pg_sink_jdbc;
+
+statement ok
+DROP TABLE IF EXISTS datagen_source;
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source;'
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source_jdbc;'
+
+system ok
+psql -c 'CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar);'
+
+system ok
+psql -c 'CREATE TABLE datagen_source_jdbc (id INT PRIMARY KEY, v1 varchar);'
+
+statement ok
+CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar) WITH (
+  connector = 'datagen',
+  fields.id.kind = 'sequence',
+  fields.id.start = '1',
+  fields.id.end = '1000000',
+  fields.v1.type = 'random',
+  datagen.rows.per.second = '10000',
+  datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
+CREATE SINK pg_sink FROM datagen_source WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='$PGDATABASE',
+    table='datagen_source',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://${PGHOST}:${PGPORT}/${PGDATABASE}?user=${PGUSER}&password=${PGPASSWORD}',
+    table.name='datagen_source_jdbc',
+    primary_key='id',
+    type='upsert'
+);
+
+statement ok
+DROP SINK IF EXISTS pg_sink;
+
+statement ok
+DROP SINK IF EXISTS pg_sink_jdbc;
+
+statement ok
+DROP TABLE IF EXISTS datagen_source;
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source;'
+
+system ok
+psql -c 'DROP TABLE IF EXISTS datagen_source_jdbc;'
