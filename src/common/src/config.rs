@@ -2041,7 +2041,7 @@ pub mod default {
         }
 
         pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
-            10
+            100
         }
 
         pub fn memory_controller_threshold_aggressive() -> f64 {
