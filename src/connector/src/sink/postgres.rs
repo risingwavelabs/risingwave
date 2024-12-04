@@ -28,13 +28,12 @@ use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::Statement;
 
-use super::{
-    SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
-};
+use super::{SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, LogSinker, SinkLogReader};
 use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
 use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
-use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::writer::{SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
+use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 
 pub const POSTGRES_SINK: &str = "postgres";
 
@@ -143,7 +142,7 @@ impl TryFrom<SinkParam> for PostgresSink {
 
 impl Sink for PostgresSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<PostgresSinkWriter>;
+    type LogSinker = PostgresSinkWriter;
 
     const SINK_NAME: &'static str = POSTGRES_SINK;
 
@@ -246,8 +245,7 @@ impl Sink for PostgresSink {
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?
-        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
+        .await?)
     }
 }
 
@@ -387,64 +385,60 @@ impl PostgresSinkWriter {
         Ok(writer)
     }
 
-    async fn flush(&mut self) -> Result<()> {
+    async fn write_batch(&self, chunk: StreamChunk) -> Result<()> {
         if self.is_append_only {
-            for chunk in self.buffer.drain() {
-                for (op, row) in chunk.rows() {
-                    match op {
-                        Op::Insert => {
-                            self.client
-                                .execute_raw(
-                                    &self.insert_statement,
-                                    rw_row_to_pg_values!(row, self.insert_statement),
-                                )
-                                .await?;
-                        }
-                        Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                            debug_assert!(!self.is_append_only);
-                        }
+            for (op, row) in chunk.rows() {
+                match op {
+                    Op::Insert => {
+                        self.client
+                            .execute_raw(
+                                &self.insert_statement,
+                                rw_row_to_pg_values!(row, self.insert_statement),
+                            )
+                            .await?;
+                    }
+                    Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
+                        debug_assert!(!self.is_append_only);
                     }
                 }
             }
         } else {
             let mut unmatched_update_insert = 0;
-            for chunk in self.buffer.drain() {
-                for (op, row) in chunk.rows() {
-                    match op {
-                        Op::Insert => {
-                            self.client
-                                .execute_raw(
-                                    &self.insert_statement,
-                                    rw_row_to_pg_values!(row, self.insert_statement),
-                                )
-                                .await?;
-                        }
-                        Op::UpdateInsert => {
-                            unmatched_update_insert += 1;
-                            self.client
-                                .execute_raw(
-                                    self.upsert_statement.as_ref().unwrap(),
-                                    rw_row_to_pg_values!(
-                                        row,
-                                        self.upsert_statement.as_ref().unwrap()
-                                    ),
-                                )
-                                .await?;
-                        }
-                        Op::Delete => {
-                            self.client
-                                .execute_raw(
-                                    self.delete_statement.as_ref().unwrap(),
-                                    rw_row_to_pg_values!(
-                                        row.project(&self.pk_indices),
-                                        self.delete_statement.as_ref().unwrap()
-                                    ),
-                                )
-                                .await?;
-                        }
-                        Op::UpdateDelete => {
-                            unmatched_update_insert -= 1;
-                        }
+            for (op, row) in chunk.rows() {
+                match op {
+                    Op::Insert => {
+                        self.client
+                            .execute_raw(
+                                &self.insert_statement,
+                                rw_row_to_pg_values!(row, self.insert_statement),
+                            )
+                            .await?;
+                    }
+                    Op::UpdateInsert => {
+                        unmatched_update_insert += 1;
+                        self.client
+                            .execute_raw(
+                                self.upsert_statement.as_ref().unwrap(),
+                                rw_row_to_pg_values!(
+                                    row,
+                                    self.upsert_statement.as_ref().unwrap()
+                                ),
+                            )
+                            .await?;
+                    }
+                    Op::Delete => {
+                        self.client
+                            .execute_raw(
+                                self.delete_statement.as_ref().unwrap(),
+                                rw_row_to_pg_values!(
+                                    row.project(&self.pk_indices),
+                                    self.delete_statement.as_ref().unwrap()
+                                ),
+                            )
+                            .await?;
+                    }
+                    Op::UpdateDelete => {
+                        unmatched_update_insert -= 1;
                     }
                 }
             }
@@ -456,32 +450,21 @@ impl PostgresSinkWriter {
 }
 
 #[async_trait]
-impl SinkWriter for PostgresSinkWriter {
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        Ok(())
-    }
-
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let cardinality = self.buffer.push(chunk);
-        if cardinality >= self.config.max_batch_rows {
-            self.flush().await?;
+impl LogSinker for PostgresSinkWriter {
+    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+        loop {
+            let (epoch, item) = log_reader.next_item().await?;
+            match item {
+                LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                    self.write_batch(chunk).await?;
+                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
+                }
+                LogStoreReadItem::Barrier { .. } => {
+                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                }
+                LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+            }
         }
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata> {
-        if is_checkpoint {
-            self.flush().await?;
-        }
-        Ok(())
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
     }
 }
 
