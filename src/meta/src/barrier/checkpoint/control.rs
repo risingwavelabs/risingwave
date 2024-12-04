@@ -38,7 +38,7 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo, EMPTY_SUBSCRIPTION_INFO};
+use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingCommand, TrackingJob};
 use crate::barrier::rpc::{from_partial_graph_id, ControlStreamManager};

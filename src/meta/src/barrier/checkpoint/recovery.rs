@@ -34,6 +34,7 @@ use crate::barrier::worker::{
     get_retry_backoff_strategy, RetryBackoffFuture, RetryBackoffStrategy,
 };
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
+use crate::MetaResult;
 
 enum DatabaseRecoveringStage {
     Resetting {
@@ -321,17 +322,21 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             mut source_splits,
             mut background_jobs,
         } = runtime_info;
-        match control_stream_manager.inject_database_initial_barrier(
-            self.database_id,
-            database_fragment_info,
-            &mut state_table_committed_epochs,
-            &mut stream_actors,
-            &mut source_splits,
-            &mut background_jobs,
-            subscription_info,
-            None,
-            &self.control.hummock_version_stats,
-        ) {
+        let result: MetaResult<_> = try {
+            control_stream_manager.add_partial_graph(self.database_id, None)?;
+            control_stream_manager.inject_database_initial_barrier(
+                self.database_id,
+                database_fragment_info,
+                &mut state_table_committed_epochs,
+                &mut stream_actors,
+                &mut source_splits,
+                &mut background_jobs,
+                subscription_info,
+                None,
+                &self.control.hummock_version_stats,
+            )?
+        };
+        match result {
             Ok((remaining_workers, database, prev_epoch)) => {
                 status.stage = DatabaseRecoveringStage::Initializing {
                     remaining_workers,
