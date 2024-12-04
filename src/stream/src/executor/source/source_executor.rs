@@ -1229,10 +1229,7 @@ mod tests {
         )
         .await;
         // there must exist state for new add partition
-        source_state_handler
-            .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
-            .await
-            .unwrap();
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(test_epoch(2)));
         source_state_handler
             .get(new_assignment[1].id())
             .await
@@ -1271,10 +1268,7 @@ mod tests {
         )
         .await;
 
-        source_state_handler
-            .init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)))
-            .await
-            .unwrap();
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5 * test_epoch(1)));
 
         assert!(source_state_handler
             .try_recover_from_state_store(&prev_assignment[0])
