@@ -14,13 +14,17 @@
 
 use std::collections::BTreeMap;
 use std::mem;
+use std::num::NonZeroU32;
 
 use either::Either;
 use futures::TryStreamExt;
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
+use risingwave_expr::codegen::BoxStream;
 
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -43,6 +47,9 @@ pub struct DmlExecutor {
     column_descs: Vec<ColumnDesc>,
 
     chunk_size: usize,
+
+    /// Rate limit in rows/s.
+    rate_limit_rps: Option<u32>,
 }
 
 /// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
@@ -69,6 +76,7 @@ impl DmlExecutor {
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
         chunk_size: usize,
+        rate_limit_rps: Option<u32>,
     ) -> Self {
         Self {
             upstream,
@@ -77,6 +85,7 @@ impl DmlExecutor {
             table_version_id,
             column_descs,
             chunk_size,
+            rate_limit_rps,
         }
     }
 
@@ -99,11 +108,10 @@ impl DmlExecutor {
             self.table_version_id,
             &self.column_descs,
         )?;
-        let reader = handle
-            .stream_reader()
-            .into_stream()
-            .map_err(StreamExecutorError::from)
-            .boxed();
+        let reader =
+            apply_dml_rate_limit(handle.stream_reader().into_stream(), self.rate_limit_rps)
+                .boxed()
+                .map_err(StreamExecutorError::from);
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
@@ -271,6 +279,67 @@ impl Execute for DmlExecutor {
     }
 }
 
+type BoxTxnMessageStream = BoxStream<'static, risingwave_dml::error::Result<TxnMsg>>;
+#[try_stream(ok = TxnMsg, error = risingwave_dml::error::DmlError)]
+async fn apply_dml_rate_limit(stream: BoxTxnMessageStream, rate_limit_rps: Option<u32>) {
+    if rate_limit_rps == Some(0) {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+        unreachable!();
+    }
+
+    let limiter = rate_limit_rps.map(|limit| {
+        tracing::info!(rate_limit = limit, "DML rate limit applied");
+        RateLimiter::direct_with_clock(
+            Quota::per_second(NonZeroU32::new(limit).unwrap()),
+            &MonotonicClock,
+        )
+    });
+
+    #[for_await]
+    for txn_msg in stream {
+        let txn_msg = txn_msg?;
+        match txn_msg {
+            TxnMsg::Begin(txn_id) => {
+                yield TxnMsg::Begin(txn_id);
+            }
+            TxnMsg::End(txn_id) => {
+                yield TxnMsg::End(txn_id);
+            }
+            TxnMsg::Rollback(txn_id) => {
+                yield TxnMsg::Rollback(txn_id);
+            }
+            TxnMsg::Data(txn_id, chunk) => {
+                let chunk_size = chunk.capacity();
+                if rate_limit_rps.is_none() || chunk_size == 0 {
+                    // no limit, or empty chunk
+                    yield TxnMsg::Data(txn_id, chunk);
+                    continue;
+                }
+                let limiter = limiter.as_ref().unwrap();
+                let limit = rate_limit_rps.unwrap() as usize;
+                let required_permits = chunk_size;
+                if required_permits <= limit {
+                    let n = NonZeroU32::new(required_permits as u32).unwrap();
+                    // `InsufficientCapacity` should never happen because we have check the cardinality
+                    limiter.until_n_ready(n).await.unwrap();
+                    yield TxnMsg::Data(txn_id, chunk);
+                } else {
+                    // Cut the chunk into smaller chunks
+                    for small_chunk in chunk.split(limit) {
+                        let required_permits = small_chunk.capacity();
+                        let n = NonZeroU32::new(required_permits as u32).unwrap();
+                        // chunks split should have effective chunk size <= limit
+                        limiter.until_n_ready(n).await.unwrap();
+                        yield TxnMsg::Data(txn_id, small_chunk);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -309,6 +378,7 @@ mod tests {
             INITIAL_TABLE_VERSION_ID,
             column_descs,
             1024,
+            None,
         );
         let mut dml_executor = dml_executor.boxed().execute();
 
