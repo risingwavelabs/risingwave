@@ -187,7 +187,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             identity: format!("DmlExecutor {:X}", 2),
         },
         DmlExecutor::new(
-            ActorContext::for_test(0).into(),
+            ActorContext::for_test(0),
             source_executor,
             dml_manager.clone(),
             table_id,

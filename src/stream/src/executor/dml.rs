@@ -451,7 +451,7 @@ mod tests {
         let source = source.into_executor(schema, pk_indices);
 
         let dml_executor = DmlExecutor::new(
-            ActorContext::for_test(0).into(),
+            ActorContext::for_test(0),
             source,
             dml_manager.clone(),
             table_id,
