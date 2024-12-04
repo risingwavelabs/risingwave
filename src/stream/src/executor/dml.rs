@@ -55,6 +55,7 @@ pub struct DmlExecutor {
 
     /// Rate limit in rows/s.
     rate_limiter: Arc<ArcSwap<DmlRateLimiter>>,
+    /// The handle used to resume a data stream that has been paused due to rate limiting.
     rate_limit_resume_tx: oneshot::Sender<()>,
 }
 
@@ -86,6 +87,7 @@ impl DmlRateLimiter {
         }
     }
 
+    /// If true, the rate limiter should block the data stream, by invoking `block_until_resume`.
     fn is_pause(&self) -> bool {
         self.row_per_second == Some(0)
     }
@@ -98,6 +100,7 @@ impl DmlRateLimiter {
         let _ = resume_rx.await;
     }
 
+    /// If true, the rate limiter should never block the data stream.
     fn is_unlimited(&self) -> bool {
         self.row_per_second.is_none()
     }
@@ -221,7 +224,9 @@ impl DmlExecutor {
                                         let (tx, rx) = oneshot::channel();
                                         self.rate_limiter
                                             .store(DmlRateLimiter::new(*new_rate_limit, rx).into());
+                                        // Resume the data stream if it is being blocked by the old rate limiter.
                                         let _ = self.rate_limit_resume_tx.send(());
+                                        // Store the new resume tx.
                                         self.rate_limit_resume_tx = tx;
                                     }
                                 }
