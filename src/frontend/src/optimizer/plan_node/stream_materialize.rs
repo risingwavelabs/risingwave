@@ -296,6 +296,7 @@ impl StreamMaterialize {
             cdc_table_id: None,
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
             webhook_info,
+            job_id: None,
             engine: match table_type {
                 TableType::Table => engine,
                 TableType::MaterializedView | TableType::Index | TableType::Internal => {

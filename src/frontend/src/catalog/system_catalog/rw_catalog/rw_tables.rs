@@ -45,7 +45,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_table().map(|table| RwTable {
+            schema.iter_user_table().map(|table| RwTable {
                 id: table.id.table_id as i32,
                 name: table.name().to_string(),
                 schema_id: schema.id() as i32,

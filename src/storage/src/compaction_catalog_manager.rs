@@ -569,7 +569,8 @@ mod tests {
             cdc_table_id: None,
             maybe_vnode_count: None,
             webhook_info: None,
-            engine: PbEngine::Hummock.into(),
+            job_id: None,
+            engine: Some(PbEngine::Hummock as i32),
         }
     }
 

@@ -28,7 +28,8 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, RecoveryReason, ReplaceStreamJobPlan, Scheduled,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
+    Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::{MetaError, MetaResult};
@@ -82,6 +83,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
         self.reload_runtime_info_impl().await
+    }
+
+    async fn reload_database_runtime_info(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+        self.reload_database_runtime_info_impl(database_id).await
     }
 }
 

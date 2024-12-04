@@ -24,7 +24,9 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
@@ -183,6 +185,8 @@ pub struct TableCatalog {
 
     pub webhook_info: Option<PbWebhookSourceInfo>,
 
+    pub job_id: Option<TableId>,
+
     pub engine: Engine,
 }
 
@@ -306,7 +310,7 @@ impl TableCatalog {
         }
     }
 
-    pub fn is_table(&self) -> bool {
+    pub fn is_user_table(&self) -> bool {
         self.table_type == TableType::Table
     }
 
@@ -490,7 +494,8 @@ impl TableCatalog {
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
             webhook_info: self.webhook_info.clone(),
-            engine: self.engine.to_protobuf().into(),
+            job_id: self.job_id.map(|id| id.table_id),
+            engine: Some(self.engine.to_protobuf().into()),
         }
     }
 
@@ -595,7 +600,10 @@ impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
-        let tb_engine = tb.engine();
+        let tb_engine = tb
+            .get_engine()
+            .map(|engine| PbEngine::try_from(*engine).expect("Invalid engine"))
+            .unwrap_or(PbEngine::Hummock);
         let table_type = tb.get_table_type().unwrap();
         let stream_job_status = tb
             .get_stream_job_status()
@@ -690,6 +698,7 @@ impl From<PbTable> for TableCatalog {
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
             webhook_info: tb.webhook_info,
+            job_id: tb.job_id.map(TableId::from),
             engine,
         }
     }
@@ -784,7 +793,8 @@ mod tests {
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
             webhook_info: None,
-            engine: PbEngine::Hummock.into(),
+            job_id: None,
+            engine: Some(PbEngine::Hummock as i32),
         }
         .into();
 
@@ -853,6 +863,7 @@ mod tests {
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
                 webhook_info: None,
+                job_id: None,
                 engine: Engine::Hummock,
             }
         );

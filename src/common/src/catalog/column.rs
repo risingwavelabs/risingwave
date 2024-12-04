@@ -23,7 +23,10 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::{row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET};
+use super::{
+    iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
+    USER_COLUMN_ID_OFFSET,
+};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::types::{DataType, StructType};
 use crate::util::value_encoding::DatumToProtoExt;
@@ -478,6 +481,13 @@ impl ColumnCatalog {
     pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_sequence_num_column() -> Self {
+        Self {
+            column_desc: iceberg_sequence_num_column_desc(),
             is_hidden: true,
         }
     }

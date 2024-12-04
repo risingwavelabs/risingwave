@@ -1254,16 +1254,17 @@ mod tests {
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .flush_all_events()
-            .await;
+        barrier_test_env.flush_all_events().await;
 
         let input = Executor::new(
             Default::default(),
-            ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone())
-                .boxed(),
+            ReceiverExecutor::for_test(
+                actor_id,
+                rx,
+                barrier_test_env.shared_context.clone(),
+                barrier_test_env.local_barrier_manager.clone(),
+            )
+            .boxed(),
         );
         let executor = Box::new(DispatchExecutor::new(
             input,

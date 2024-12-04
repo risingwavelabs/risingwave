@@ -89,7 +89,7 @@ pub async fn handle_swap_rename(
                 ))
                 .into());
             }
-            if stmt_type == StatementType::ALTER_TABLE && !src_table.is_table() {
+            if stmt_type == StatementType::ALTER_TABLE && !src_table.is_user_table() {
                 return Err(CatalogError::NotFound("table", src_obj_name.to_string()).into());
             } else if stmt_type == StatementType::ALTER_MATERIALIZED_VIEW && !src_table.is_mview() {
                 return Err(

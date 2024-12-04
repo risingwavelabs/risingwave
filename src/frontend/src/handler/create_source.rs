@@ -26,7 +26,8 @@ use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert}
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
-    INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME, ROWID_PREFIX,
+    ICEBERG_SEQUENCE_NUM_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -65,6 +66,7 @@ use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, CreateSourceStatement, Encode, Format,
     FormatEncodeOptions, ObjectName, ProtobufSchema, SourceWatermark, TableConstraint,
@@ -315,8 +317,11 @@ pub(crate) async fn bind_columns_from_source(
 
     let options_with_secret = match with_properties {
         Either::Left(options) => {
-            let (sec_resolve_props, connection_type, _) =
-                resolve_connection_ref_and_secret_ref(options.clone(), session)?;
+            let (sec_resolve_props, connection_type, _) = resolve_connection_ref_and_secret_ref(
+                options.clone(),
+                session,
+                TelemetryDatabaseObject::Source,
+            )?;
             if !ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
                 return Err(RwError::from(ProtocolError(format!(
                     "connection type {:?} is not allowed, allowed types: {:?}",
@@ -336,6 +341,7 @@ pub(crate) async fn bind_columns_from_source(
         resolve_connection_ref_and_secret_ref(
             WithOptions::try_from(format_encode.row_options())?,
             session,
+            TelemetryDatabaseObject::Source,
         )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
 
@@ -1394,7 +1400,7 @@ pub async fn extract_iceberg_columns(
         let iceberg_schema: arrow_schema_iceberg::Schema =
             iceberg::arrow::schema_to_arrow_schema(table.metadata().current_schema())?;
 
-        let columns = iceberg_schema
+        let mut columns: Vec<ColumnCatalog> = iceberg_schema
             .fields()
             .iter()
             .enumerate()
@@ -1412,6 +1418,7 @@ pub async fn extract_iceberg_columns(
                 }
             })
             .collect();
+        columns.push(ColumnCatalog::iceberg_sequence_num_column());
 
         Ok(columns)
     } else {
@@ -1437,6 +1444,7 @@ pub async fn check_iceberg_source(
     let schema = Schema {
         fields: columns
             .iter()
+            .filter(|&c| c.column_desc.name != ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
             .cloned()
             .map(|c| c.column_desc.into())
             .collect(),
@@ -1622,7 +1630,11 @@ pub async fn bind_create_source_or_table_with_connector(
     resolve_privatelink_in_with_option(&mut with_properties)?;
 
     let (with_properties, connection_type, connector_conn_ref) =
-        resolve_connection_ref_and_secret_ref(with_properties, session)?;
+        resolve_connection_ref_and_secret_ref(
+            with_properties,
+            session,
+            TelemetryDatabaseObject::Source,
+        )?;
     ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type

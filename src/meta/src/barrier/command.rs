@@ -48,7 +48,7 @@ use crate::barrier::utils::collect_resp_info;
 use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
-use crate::manager::{DdlType, StreamingJob};
+use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::{build_actor_connector_splits, SplitAssignment, ThrottleConfig};
 
@@ -157,7 +157,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     pub init_split_assignment: SplitAssignment,
     pub definition: String,
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
     pub create_type: CreateType,
     pub streaming_job: StreamingJob,
     pub internal_tables: Vec<Table>,

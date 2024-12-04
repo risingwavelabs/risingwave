@@ -89,7 +89,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
-        let database_id = from_partial_graph_id(resp.partial_graph_id).0;
+        let database_id = DatabaseId::new(resp.database_id);
         self.databases
             .get_mut(&database_id)
             .expect("should exist")
@@ -435,8 +435,7 @@ impl DatabaseCheckpointControl {
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
         );
-        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
-        assert_eq!(database_id, self.database_id);
+        let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {

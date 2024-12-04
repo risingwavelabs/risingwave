@@ -22,7 +22,7 @@ either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.4"
 parking_lot = { workspace = true }
-pprof = { version = "0.13", features = ["flamegraph"] }
+pprof = { version = "0.14", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"

@@ -161,6 +161,7 @@ pub struct RemoteInput {
 }
 
 use remote_input::RemoteInputStreamInner;
+use risingwave_common::catalog::DatabaseId;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -170,6 +171,7 @@ impl RemoteInput {
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
+        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits: usize,
     ) -> Self {
@@ -182,6 +184,7 @@ impl RemoteInput {
                 upstream_addr,
                 up_down_ids,
                 up_down_frag,
+                database_id,
                 metrics,
                 batched_permits,
             ),
@@ -194,6 +197,7 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
+    use risingwave_common::catalog::DatabaseId;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::task_service::{permits, GetStreamResponse};
     use risingwave_rpc_client::ComputeClientPool;
@@ -211,6 +215,7 @@ mod remote_input {
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
+        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
     ) -> RemoteInputStreamInner {
@@ -219,6 +224,7 @@ mod remote_input {
             upstream_addr,
             up_down_ids,
             up_down_frag,
+            database_id,
             metrics,
             batched_permits_limit,
         )
@@ -230,12 +236,19 @@ mod remote_input {
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
+        database_id: DatabaseId,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
     ) {
         let client = client_pool.get_by_addr(upstream_addr).await?;
         let (stream, permits_tx) = client
-            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .get_stream(
+                up_down_ids.0,
+                up_down_ids.1,
+                up_down_frag.0,
+                up_down_frag.1,
+                database_id,
+            )
             .await?;
 
         let up_actor_id = up_down_ids.0.to_string();
@@ -336,6 +349,7 @@ pub(crate) fn new_input(
             upstream_addr,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
+            context.database_id,
             metrics,
             context.config.developer.exchange_batched_permits,
         )

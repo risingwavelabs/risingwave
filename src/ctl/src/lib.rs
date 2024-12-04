@@ -26,7 +26,9 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::Compressi
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
-use crate::cmd_impl::hummock::{build_compaction_config_vec, list_pinned_versions};
+use crate::cmd_impl::hummock::{
+    build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
+};
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -272,6 +274,13 @@ enum HummockCommands {
         left_group_id: u64,
         #[clap(long)]
         right_group_id: u64,
+    },
+    MigrateLegacyObject {
+        url: String,
+        source_dir: String,
+        target_dir: String,
+        #[clap(long, default_value = "100")]
+        concurrency: u32,
     },
 }
 
@@ -713,6 +722,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
                 .await?
+        }
+
+        Commands::Hummock(HummockCommands::MigrateLegacyObject {
+            url,
+            source_dir,
+            target_dir,
+            concurrency,
+        }) => {
+            migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
         }
         Commands::Table(TableCommands::Scan {
             mv_name,
