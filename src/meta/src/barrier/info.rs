@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use risingwave_common::catalog::TableId;
 use risingwave_meta_model::WorkerId;
@@ -45,6 +46,9 @@ pub(crate) enum CommandFragmentChanges {
     },
     RemoveFragment,
 }
+
+pub static EMPTY_SUBSCRIPTION_INFO: LazyLock<InflightSubscriptionInfo> =
+    LazyLock::new(|| InflightSubscriptionInfo::default());
 
 #[derive(Default, Clone, Debug)]
 pub struct InflightSubscriptionInfo {

@@ -166,6 +166,13 @@ impl DatabaseRecoveringState {
         }
         Poll::Pending
     }
+
+    pub(super) fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
+        match &self.stage {
+            DatabaseRecoveringStage::Resetting { .. } => None,
+            DatabaseRecoveringStage::Initializing { database, .. } => Some(database),
+        }
+    }
 }
 
 pub(crate) struct DatabaseStatusAction<'a, A> {
