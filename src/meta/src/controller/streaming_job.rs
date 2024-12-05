@@ -1407,6 +1407,65 @@ impl CatalogController {
         Ok(fragment_actors)
     }
 
+    pub async fn update_dml_rate_limit_by_job_id(
+        &self,
+        job_id: ObjectId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let mut fragments = fragments
+            .into_iter()
+            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .collect_vec();
+
+        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+            let mut found = false;
+            if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
+                visit_stream_node(stream_node, |node| {
+                    if let PbNodeBody::Dml(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                });
+            }
+            found
+        });
+
+        if fragments.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "dml node not found in job id {job_id}"
+            )));
+        }
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
+        for (id, _, stream_node) in fragments {
+            fragment::ActiveModel {
+                fragment_id: Set(id),
+                stream_node: Set(StreamNode::from(&stream_node)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
+
+        txn.commit().await?;
+
+        Ok(fragment_actors)
+    }
+
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
