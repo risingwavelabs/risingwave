@@ -28,6 +28,8 @@ use crate::error::ConnectorResult;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 use crate::{dispatch_connection_impl, ConnectionImpl};
 
+pub const SCHEMA_REGISTRY_CONNECTION_TYPE: &str = "schema_registry";
+
 #[async_trait]
 pub trait Connection {
     async fn test_connection(&self) -> ConnectorResult<()>;
@@ -118,11 +120,20 @@ impl Connection for IcebergConnection {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct SchemaRegistryConnection {}
+pub struct ConfluentSchemaRegistryConnection {
+    #[serde(rename = "schema.registry")]
+    url: String,
+    // ref `SchemaRegistryAuth`
+    #[serde(rename = "schema.registry.username")]
+    username: Option<String>,
+    #[serde(rename = "schema.registry.password")]
+    password: Option<String>,
+}
 
 #[async_trait]
-impl Connection for SchemaRegistryConnection {
+impl Connection for ConfluentSchemaRegistryConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
-        todo!()
+        // todo
+        Ok(())
     }
 }
