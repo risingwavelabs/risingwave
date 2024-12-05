@@ -331,6 +331,16 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+        _mapping: ColIndexMapping,
+    ) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
     async fn create_source(
         &self,
         source: PbSource,

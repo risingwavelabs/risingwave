@@ -27,7 +27,7 @@ use either::Either;
 use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
-use replace_job_plan::{ReplaceJob, ReplaceTable};
+use replace_job_plan::ReplaceJob;
 use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
@@ -614,23 +614,17 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn replace_table(
+    pub async fn replace_job(
         &self,
-        source: Option<PbSource>,
-        table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
-        job_type: PbTableJobType,
+        replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
         let request = ReplaceJobPlanRequest {
             plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
-                replace_job: Some(ReplaceJob::ReplaceTable(ReplaceTable {
-                    source,
-                    table: Some(table),
-                    job_type: job_type as _,
-                })),
+                replace_job: Some(replace_job),
             }),
         };
         let resp = self.inner.replace_job_plan(request).await?;
