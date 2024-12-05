@@ -101,16 +101,15 @@ impl From<&AsOf> for PbAsOf {
 
 impl ScanRange {
     /// Create a scan range from the prost representation.
-    pub fn new(
-        scan_range: PbScanRange,
-        mut pk_types: impl Iterator<Item = DataType>,
-    ) -> Result<Self> {
+    pub fn new(scan_range: PbScanRange, mut pk_types: Vec<DataType>) -> Result<Self> {
+        let mut index = 0;
         let pk_prefix = OwnedRow::new(
             scan_range
                 .eq_conds
                 .iter()
                 .map(|v| {
-                    let ty = pk_types.next().unwrap();
+                    let ty = pk_types.get(index).unwrap();
+                    index += 1;
                     deserialize_datum(v.as_slice(), &ty)
                 })
                 .try_collect()?,
@@ -122,13 +121,14 @@ impl ScanRange {
             });
         }
 
-        let mut build_bound = |bound: &scan_range::Bound| -> Result<Bound<OwnedRow>> {
+        let build_bound = |bound: &scan_range::Bound, mut index| -> Result<Bound<OwnedRow>> {
             let next_col_bounds = OwnedRow::new(
                 bound
                     .value
                     .iter()
                     .map(|v| {
-                        let ty = pk_types.next().unwrap();
+                        let ty = pk_types.get(index).unwrap();
+                        index += 1;
                         deserialize_datum(v.as_slice(), &ty)
                     })
                     .try_collect()?,
@@ -144,9 +144,9 @@ impl ScanRange {
             scan_range.lower_bound.as_ref(),
             scan_range.upper_bound.as_ref(),
         ) {
-            (Some(lb), Some(ub)) => (build_bound(lb)?, build_bound(ub)?),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)?),
-            (Some(lb), None) => (build_bound(lb)?, Bound::Unbounded),
+            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
             (None, None) => unreachable!(),
         };
         Ok(Self {
@@ -229,14 +229,18 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges
                     .iter()
                     .map(|scan_range| {
-                        let pk_types = table_desc.pk.iter().map(|order| {
-                            DataType::from(
-                                table_desc.columns[order.column_index as usize]
-                                    .column_type
-                                    .as_ref()
-                                    .unwrap(),
-                            )
-                        });
+                        let pk_types = table_desc
+                            .pk
+                            .iter()
+                            .map(|order| {
+                                DataType::from(
+                                    table_desc.columns[order.column_index as usize]
+                                        .column_type
+                                        .as_ref()
+                                        .unwrap(),
+                                )
+                            })
+                            .collect_vec();
                         ScanRange::new(scan_range.clone(), pk_types)
                     })
                     .try_collect()?
