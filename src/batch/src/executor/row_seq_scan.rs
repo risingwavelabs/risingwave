@@ -442,10 +442,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
         let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
 
-        let build_bound = |other_bound_is_bounded: bool, bound| {
+        let build_bound = |other_bound_is_bounded: bool, bound , order_type_nulls| {
             match bound {
                 Bound::Unbounded => {
-                    if other_bound_is_bounded && order_type.nulls_are_first() {
+                    if other_bound_is_bounded && order_type_nulls {
                         // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
                         Bound::Excluded(OwnedRow::new(vec![None]))
                     } else {
@@ -457,8 +457,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 Bound::Excluded(x) => Bound::Excluded(x),
             }
         };
-        let start_bound = build_bound(end_bound_is_bounded, start_bound);
-        let end_bound = build_bound(start_bound_is_bounded, end_bound);
+        let start_bound = build_bound(end_bound_is_bounded, start_bound,order_type.nulls_are_first());
+        let end_bound = build_bound(start_bound_is_bounded, end_bound,order_type.nulls_are_last());
 
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
