@@ -602,7 +602,7 @@ impl Default for SplitDiffOptions {
 ///
 /// If an actor has an upstream actor, it should be a backfill executor,
 /// and its splits should be aligned with the upstream actor. **`reassign_splits` should not be used in this case.
-/// Use `align_backfill_splits` instead.**
+/// Use [`align_splits`] instead.**
 ///
 /// - `fragment_id`: just for logging
 ///
@@ -1089,7 +1089,7 @@ impl SourceManager {
     /// Allocates splits to actors for a newly created `SourceBackfill` executor.
     ///
     /// Unlike [`Self::allocate_splits`], which creates a new assignment,
-    /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_backfill_splits`]).
+    /// this method aligns the splits for backfill fragments with its upstream source fragment ([`align_splits`]).
     pub async fn allocate_splits_for_backfill(
         &self,
         table_id: &TableId,
