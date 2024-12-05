@@ -101,7 +101,7 @@ impl From<&AsOf> for PbAsOf {
 
 impl ScanRange {
     /// Create a scan range from the prost representation.
-    pub fn new(scan_range: PbScanRange, mut pk_types: Vec<DataType>) -> Result<Self> {
+    pub fn new(scan_range: PbScanRange, pk_types: Vec<DataType>) -> Result<Self> {
         let mut index = 0;
         let pk_prefix = OwnedRow::new(
             scan_range
@@ -110,7 +110,7 @@ impl ScanRange {
                 .map(|v| {
                     let ty = pk_types.get(index).unwrap();
                     index += 1;
-                    deserialize_datum(v.as_slice(), &ty)
+                    deserialize_datum(v.as_slice(), ty)
                 })
                 .try_collect()?,
         );
@@ -129,7 +129,7 @@ impl ScanRange {
                     .map(|v| {
                         let ty = pk_types.get(index).unwrap();
                         index += 1;
-                        deserialize_datum(v.as_slice(), &ty)
+                        deserialize_datum(v.as_slice(), ty)
                     })
                     .try_collect()?,
             );
