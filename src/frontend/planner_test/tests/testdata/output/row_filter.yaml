@@ -1,0 +1,33 @@
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2,v3) > (1,2,3);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [v1, v2, v3], scan_ranges: [(v1, v2, v3) > (Int32(1), Int32(2), Int32(3))] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2) > (1,2);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: t, columns: [v1, v2, v3], scan_ranges: [(v1, v2) > (Int32(1), Int32(2))] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v3) > (2,3);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (Row(t.v1, t.v3) > '(2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32] })) }
+      └─BatchScan { table: t, columns: [v1, v2, v3], scan_ranges: [v1 > Int32(2)] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v3,v2,v1) > (1,2,3);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (Row(t.v3, t.v2, t.v1) > '(1,2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32, Int32] })) }
+      └─BatchScan { table: t, columns: [v1, v2, v3] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2,v1) > (1,2,3);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (Row(t.v1, t.v2, t.v1) > '(1,2,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32, Int32] })) }
+      └─BatchScan { table: t, columns: [v1, v2, v3], scan_ranges: [(v1, v2) > (Int32(1), Int32(2))] }

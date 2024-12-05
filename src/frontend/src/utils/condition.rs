@@ -356,7 +356,7 @@ impl Condition {
         }
     }
 
-    fn split_struct_to_scan_ranges(
+    fn split_row_cmp_to_scan_ranges(
         &self,
         table_desc: Rc<TableDesc>,
     ) -> Result<Option<(Vec<ScanRange>, Self)>> {
@@ -479,7 +479,7 @@ impl Condition {
             }
         }
         if let Some((scan_ranges, other_condition)) =
-            self.split_struct_to_scan_ranges(table_desc.clone())?
+            self.split_row_cmp_to_scan_ranges(table_desc.clone())?
         {
             return Ok((scan_ranges, other_condition));
         }
@@ -534,8 +534,6 @@ impl Condition {
                     scan_range.eq_conds.extend(eq_conds.into_iter());
                 }
                 0 => {
-                    // scan_range.range.push((lower_bound, upper_bound));
-                    // scan_range.set_and_scan_range((lower_bound, upper_bound));
                     let convert = |bound| match bound {
                         Bound::Included(l) => Bound::Included(vec![Some(l)]),
                         Bound::Excluded(l) => Bound::Excluded(vec![Some(l)]),
