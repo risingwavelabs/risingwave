@@ -685,7 +685,7 @@ impl HummockMemoryCollector {
 
 impl MemoryCollector for HummockMemoryCollector {
     fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
+        self.sstable_store.meta_cache().memory().usage() as _
     }
 
     fn get_data_memory_usage(&self) -> u64 {
@@ -701,13 +701,13 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
-        self.sstable_store.get_meta_memory_usage() as f64
-            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.meta_cache().memory().usage() as f64
+            / self.sstable_store.meta_cache().memory().capacity() as f64
     }
 
     fn get_block_cache_memory_usage_ratio(&self) -> f64 {
-        self.get_data_memory_usage() as f64
-            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.block_cache().memory().usage() as f64
+            / self.sstable_store.block_cache().memory().capacity() as f64
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {
