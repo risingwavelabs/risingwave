@@ -53,12 +53,12 @@ pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
-use self::util::get_kafka_topic;
+use self::utils::get_kafka_topic;
 use crate::connector_common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
 use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
-use crate::parser::util::{
+use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
     extreact_timestamp_from_meta,
 };
@@ -90,7 +90,7 @@ mod protobuf;
 pub mod scalar_adapter;
 mod unified;
 mod upsert_parser;
-mod util;
+mod utils;
 
 use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
