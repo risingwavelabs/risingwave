@@ -506,10 +506,10 @@ mod tests {
             },
         ]);
         let table_name = "test_table";
-        let sql = create_insert_sql(&schema, table_name);
+        let sql = create_insert_sql(&schema, table_name, 3);
         check(
             sql,
-            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2)"],
+            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2), ($3, $4), ($5, $6)"],
         );
     }
 
@@ -530,7 +530,7 @@ mod tests {
             },
         ]);
         let table_name = "test_table";
-        let sql = create_delete_sql(&schema, table_name, &[1]);
-        check(sql, expect!["DELETE FROM test_table WHERE b = $2"]);
+        let sql = create_delete_sql(&schema, table_name, &[1], 3);
+        check(sql, expect!["DELETE FROM test_table WHERE (b = $2)OR(b = $3)OR(b = $4)"]);
     }
 }
