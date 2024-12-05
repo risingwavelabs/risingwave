@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
@@ -40,9 +40,9 @@ struct RwSink {
     created_at_cluster_version: Option<String>,
 
     // connector properties in json format
-    connector_props: String,
+    connector_props: JsonbVal,
     // format and encode properties in json format
-    format_encode_options: String,
+    format_encode_options: JsonbVal,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sinks")]
@@ -59,7 +59,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                 let connector_props = print_props_with_secret(
                     schema,
                     WithOptionsSecResolved::new(sink.properties.clone(), sink.secret_refs.clone()),
-                );
+                )
+                .into();
                 let format_encode_options = sink
                     .format_desc
                     .as_ref()
@@ -72,7 +73,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                             ),
                         )
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(jsonbb::Value::null)
+                    .into();
                 RwSink {
                     id: sink.id.sink_id as i32,
                     name: sink.name.clone(),

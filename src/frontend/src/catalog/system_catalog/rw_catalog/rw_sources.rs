@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::catalog::SecretId;
-use risingwave_common::types::{Fields, Timestamptz};
+use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::user::grant_privilege::Object;
-use serde_json::{json, Map as JsonMap, Value};
+use serde_json::{json, Map as JsonMap};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
@@ -46,9 +46,9 @@ struct RwSource {
     created_at_cluster_version: Option<String>,
     is_shared: bool,
     // connector properties in json format
-    connector_props: String,
+    connector_props: JsonbVal,
     // format-encode options in json format
-    format_encode_options: String,
+    format_encode_options: JsonbVal,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sources")]
@@ -102,11 +102,13 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     connector_props: print_props_with_secret(
                         schema,
                         source.with_properties.clone(),
-                    ),
+                    )
+                    .into(),
                     format_encode_options: print_props_with_secret(
                         schema,
                         format_encode_props_with_secrets,
-                    ),
+                    )
+                    .into(),
                 }
             })
         })
@@ -116,11 +118,11 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
 pub fn print_props_with_secret(
     schema: &SchemaCatalog,
     props_with_secret: WithOptionsSecResolved,
-) -> String {
+) -> jsonbb::Value {
     let (inner, secret_ref) = props_with_secret.into_parts();
     // if not secret, {"some key": {"type": "plaintext", "value": "xxxx"}}
     // if secret, {"some key": {"type": "secret", "value": {"value": "<secret name>"}}}
-    let mut result: JsonMap<String, Value> = JsonMap::new();
+    let mut result: JsonMap<String, serde_json::Value> = JsonMap::new();
 
     for (k, v) in inner {
         result.insert(k, json!({"type": "plaintext", "value": v}));
@@ -137,5 +139,5 @@ pub fn print_props_with_secret(
         );
     }
 
-    serde_json::to_string(&Value::Object(result)).unwrap()
+    jsonbb::Value::from(serde_json::Value::Object(result))
 }
