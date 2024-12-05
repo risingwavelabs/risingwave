@@ -29,11 +29,10 @@ use crate::binder::{
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
-use crate::optimizer::plan_node::generic::{GenericPlanNode, SourceNodeKind};
+use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject,
-    LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues,
-    PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
+    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -100,7 +99,6 @@ impl Planner {
             table_cardinality,
         );
 
-
         match (base_table.table_catalog.engine, self.plan_for()) {
             (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => Ok(scan.into()),
             (Engine::Iceberg, PlanFor::Batch) => {
@@ -108,68 +106,71 @@ impl Planner {
                 let seesion = opt_ctx.session_ctx();
                 let db_name = seesion.database();
                 let catalog_reader = seesion.env().catalog_reader().read_guard();
+                let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {
                     if let Some(_) = schema.get_table_by_id(&base_table.table_catalog.id) {
-                        let source_catalog = schema
-                            .get_source_by_name(
-                                &base_table.table_catalog.iceberg_source_name().unwrap(),
-                            )
-                            .unwrap();
-                        let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
-                            .columns
-                            .clone()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, column)| (column.name().to_string(), (i, column)))
-                            .collect();
-                        let exprs = scan
-                            .table_catalog()
-                            .column_schema()
-                            .fields()
-                            .into_iter()
-                            .map(|field| {
-                                if let Some((i, source_column)) = column_map.get(&field.name) {
-                                    if source_column.column_desc.data_type == field.data_type {
-                                        ExprImpl::InputRef(
-                                            InputRef::new(*i, field.data_type.clone()).into(),
-                                        )
-                                    } else {
-                                        let mut input_ref = ExprImpl::InputRef(
-                                            InputRef::new(
-                                                *i,
-                                                source_column.column_desc.data_type.clone(),
-                                            )
-                                            .into(),
-                                        );
-                                        FunctionCall::cast_mut(
-                                            &mut input_ref,
-                                            field.data_type().clone(),
-                                            CastContext::Explicit,
-                                        )
-                                        .unwrap();
-                                        input_ref
-                                    }
-                                } else {
-                                    // fields like `_rw_timestamp`, would not be found in source.
-                                    ExprImpl::Literal(
-                                        Literal::new(None, field.data_type.clone()).into(),
-                                    )
-                                }
-                            })
-                            .collect_vec();
-                        let logical_source = LogicalSource::with_catalog(
-                            Rc::new(source_catalog.deref().clone()),
-                            SourceNodeKind::CreateMViewOrBatch,
-                            self.ctx(),
-                            as_of,
-                        )?;
-                        return Ok(LogicalProject::new(logical_source.into(), exprs).into());
+                        source_catalog = schema.get_source_by_name(
+                            &base_table.table_catalog.iceberg_source_name().unwrap(),
+                        );
+                        break;
                     }
                 }
-                bail!(
-                    "failed to plan a iceberg engine table: {}",
-                    base_table.table_catalog.name()
-                );
+                if let Some(source_catalog) = source_catalog {
+                    let column_map: HashMap<String, (usize, ColumnCatalog)> = source_catalog
+                        .columns
+                        .clone()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, column)| (column.name().to_string(), (i, column)))
+                        .collect();
+                    let exprs = scan
+                        .table_catalog()
+                        .column_schema()
+                        .fields()
+                        .into_iter()
+                        .map(|field| {
+                            if let Some((i, source_column)) = column_map.get(&field.name) {
+                                if source_column.column_desc.data_type == field.data_type {
+                                    ExprImpl::InputRef(
+                                        InputRef::new(*i, field.data_type.clone()).into(),
+                                    )
+                                } else {
+                                    let mut input_ref = ExprImpl::InputRef(
+                                        InputRef::new(
+                                            *i,
+                                            source_column.column_desc.data_type.clone(),
+                                        )
+                                        .into(),
+                                    );
+                                    FunctionCall::cast_mut(
+                                        &mut input_ref,
+                                        field.data_type().clone(),
+                                        CastContext::Explicit,
+                                    )
+                                    .unwrap();
+                                    input_ref
+                                }
+                            } else {
+                                // fields like `_rw_timestamp`, would not be found in source.
+                                ExprImpl::Literal(
+                                    Literal::new(None, field.data_type.clone()).into(),
+                                )
+                            }
+                        })
+                        .collect_vec();
+                    let logical_source = LogicalSource::with_catalog(
+                        Rc::new(source_catalog.deref().clone()),
+                        SourceNodeKind::CreateMViewOrBatch,
+                        self.ctx(),
+                        as_of,
+                    )?;
+                    return Ok(LogicalProject::new(logical_source.into(), exprs).into());
+                } else {
+                    bail!(
+                        "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
+                        base_table.table_catalog.name()
+                    );
+                }
             }
         }
     }

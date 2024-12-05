@@ -41,7 +41,7 @@ pub struct Planner {
     /// The share plan can be a CTE, a source, a view and so on.
     share_cache: HashMap<ShareId, PlanRef>,
     /// Plan for stream or batch.
-    plan_for: PlanFor
+    plan_for: PlanFor,
 }
 
 #[derive(Debug, Copy, Clone)]

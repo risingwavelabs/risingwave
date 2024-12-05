@@ -17,9 +17,7 @@ use std::sync::Arc;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{
-    debug_assert_column_ids_distinct, is_system_schema, Field,
-};
+use risingwave_common::catalog::{debug_assert_column_ids_distinct, is_system_schema, Field};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_sqlparser::ast::{AsOf, Statement, TableAlias};
