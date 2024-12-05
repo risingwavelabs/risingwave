@@ -395,7 +395,7 @@ impl PostgresSinkWriter {
                         }
                     }
                     Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                        debug_assert!(!self.is_append_only);
+                        bail!("append-only sink should not receive update insert, update delete and delete operations")
                     }
                 }
             }
