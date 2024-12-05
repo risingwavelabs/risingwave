@@ -286,7 +286,6 @@ pub struct PostgresSinkWriter {
     is_append_only: bool,
     client: tokio_postgres::Client,
     buffer: Buffer,
-    delete_statement: Option<Statement>,
     schema_types: Vec<PgType>,
     schema: Schema,
 }
@@ -341,25 +340,25 @@ impl PostgresSinkWriter {
             }
             schema_types
         };
-
-        let delete_statement = if is_append_only {
-            None
-        } else {
-            let delete_types = pk_indices
-                .iter()
-                .map(|i| schema_types[*i].clone())
-                .collect_vec();
-            let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
-            Some(
-                client
-                    .prepare_typed(&delete_sql, &delete_types)
-                    .await
-                    .context(format!(
-                        "Failed to prepare delete statement, {:?}",
-                        &delete_sql
-                    ))?,
-            )
-        };
+        //
+        // let delete_statement = if is_append_only {
+        //     None
+        // } else {
+        //     let delete_types = pk_indices
+        //         .iter()
+        //         .map(|i| schema_types[*i].clone())
+        //         .collect_vec();
+        //     let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
+        //     Some(
+        //         client
+        //             .prepare_typed(&delete_sql, &delete_types)
+        //             .await
+        //             .context(format!(
+        //                 "Failed to prepare delete statement, {:?}",
+        //                 &delete_sql
+        //             ))?,
+        //     )
+        // };
 
         let writer = Self {
             config,
@@ -367,7 +366,6 @@ impl PostgresSinkWriter {
             is_append_only,
             client,
             buffer: Buffer::new(),
-            delete_statement,
             schema_types,
             schema,
         };
@@ -409,13 +407,18 @@ impl PostgresSinkWriter {
                 )
                 .await?;
         } else {
-            let mut rows = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
+            // 1d flattened array of parameters to be inserted.
+            let mut insert_parameters = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
+            let mut insert_row_count = 0;
+            let mut delete_parameters = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
+            let mut delete_row_count = 0;
             for (op, row) in chunk.rows() {
                 match op {
                     Op::UpdateInsert | Op::UpdateDelete => {
                         bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
                     }
                     Op::Insert => {
+                        insert_row_count += 1;
                         for (i, datum_ref) in row.iter().enumerate() {
                             let pg_datum = datum_ref.map(|s| {
                                 let ty = &self.schema_types[i];
@@ -427,29 +430,46 @@ impl PostgresSinkWriter {
                                     }
                                 }
                             });
-                            rows.push(pg_datum.flatten());
+                            insert_parameters.push(pg_datum.flatten());
                         }
                     }
                     Op::Delete => {
-                        transaction
-                            .execute_raw(
-                                self.delete_statement.as_ref().unwrap(),
-                                rw_row_to_pg_values!(
-                                    row.project(&self.pk_indices),
-                                    self.delete_statement.as_ref().unwrap()
-                                ),
-                            )
-                            .await?;
+                        delete_row_count += 1;
+                        for (i, datum_ref) in row.project(&self.pk_indices).iter().enumerate() {
+                            let pg_datum = datum_ref.map(|s| {
+                                let ty = &self.schema_types[i];
+                                match ScalarAdapter::from_scalar(s, ty) {
+                                    Ok(scalar) => Some(scalar),
+                                    Err(e) => {
+                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
+                                        None
+                                    }
+                                }
+                            });
+                            delete_parameters.push(pg_datum.flatten());
+                        }
                     }
                 }
             }
-            let insert_statement = create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
-            transaction
-                .execute_raw(
-                    &insert_statement,
-                    rows,
-                )
-                .await?;
+            if insert_row_count > 0 {
+                let insert_statement = create_insert_sql(&self.schema, &self.config.table, insert_row_count);
+                transaction
+                    .execute_raw(
+                        &insert_statement,
+                        insert_parameters,
+                    )
+                    .await?;
+            }
+
+            if delete_row_count > 0 {
+                let delete_statement = create_delete_sql(&self.schema, &self.config.table, &self.pk_indices, delete_row_count);
+                transaction
+                    .execute_raw(
+                        &delete_statement,
+                        delete_parameters,
+                    )
+                    .await?;
+            }
         }
 
         transaction.commit().await?;
@@ -498,12 +518,19 @@ fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -
     format!("INSERT INTO {table_name} ({columns}) VALUES {parameters}")
 }
 
-fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
-    let parameters: String = pk_indices
-        .iter()
-        .map(|i| format!("{} = ${}", schema.fields()[*i].name, i + 1))
+fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize], number_of_rows: usize) -> String {
+    let number_of_pk = pk_indices.len();
+    let parameters: String = (0..number_of_rows)
+        .map(|i| {
+            let row_parameters: String = pk_indices
+                .iter()
+                .map(|j| format!("{} = ${}", schema.fields()[*j].name, i * number_of_pk + j + 1))
+                .collect_vec()
+                .join(" AND ");
+            format!("({row_parameters})")
+        })
         .collect_vec()
-        .join(" AND ");
+        .join("OR");
     format!("DELETE FROM {table_name} WHERE {parameters}")
 }
 
