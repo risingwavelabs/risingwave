@@ -282,6 +282,12 @@ enum HummockCommands {
         #[clap(long, default_value = "100")]
         concurrency: u32,
     },
+    ResizeCache {
+        #[clap(long)]
+        meta_cache_capacity_mb: Option<u64>,
+        #[clap(long)]
+        data_cache_capacity_mb: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -731,6 +737,18 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             concurrency,
         }) => {
             migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
+        }
+        Commands::Hummock(HummockCommands::ResizeCache {
+            meta_cache_capacity_mb,
+            data_cache_capacity_mb,
+        }) => {
+            const MIB: u64 = 1024 * 1024;
+            cmd_impl::hummock::resize_cache(
+                context,
+                meta_cache_capacity_mb.map(|v| v * MIB),
+                data_cache_capacity_mb.map(|v| v * MIB),
+            )
+            .await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,

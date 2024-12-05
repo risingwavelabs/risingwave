@@ -12,6 +12,14 @@ message ShowConfigResponse {
   string stream_config = 2;
 }
 
+message ResizeCacheRequest {
+  uint64 meta_cache_capacity = 1;
+  uint64 data_cache_capacity = 2;
+}
+
+message ResizeCacheResponse {}
+
 service ConfigService {
   rpc ShowConfig(ShowConfigRequest) returns (ShowConfigResponse);
+  rpc ResizeCache(ResizeCacheRequest) returns (ResizeCacheResponse);
 }

@@ -404,10 +404,10 @@ pub async fn compute_node_serve(
     let monitor_srv = MonitorServiceImpl::new(
         stream_mgr.clone(),
         config.server.clone(),
-        meta_cache,
-        block_cache,
+        meta_cache.clone(),
+        block_cache.clone(),
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone());
+    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone(), meta_cache, block_cache);
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
