@@ -38,12 +38,14 @@ impl ExecutorBuilder for DmlExecutorBuilder {
         let column_descs = node.column_descs.iter().map(Into::into).collect_vec();
 
         let exec = DmlExecutor::new(
+            params.actor_context.clone(),
             upstream,
             params.env.dml_manager_ref(),
             table_id,
             node.table_version_id,
             column_descs,
             params.env.config().developer.chunk_size,
+            node.rate_limit,
         );
         Ok((params.info, exec).into())
     }
