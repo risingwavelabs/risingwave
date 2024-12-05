@@ -15,6 +15,7 @@
 pub mod parquet_file_handler;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -39,7 +40,6 @@ use crate::source::{
     BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
-
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
 
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
@@ -58,8 +58,21 @@ pub struct IcebergProperties {
 }
 
 use iceberg::table::Table as TableV2;
+use iceberg::Catalog as CatalogV2;
 
 impl IcebergProperties {
+    pub async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
+        let mut java_catalog_props = HashMap::new();
+        if let Some(jdbc_user) = self.jdbc_user.clone() {
+            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+        }
+        if let Some(jdbc_password) = self.jdbc_password.clone() {
+            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+        }
+        // TODO: support path_style_access and java_catalog_props for iceberg source
+        self.common.create_catalog_v2(&java_catalog_props).await
+    }
+
     pub async fn load_table_v2(&self) -> ConnectorResult<TableV2> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
