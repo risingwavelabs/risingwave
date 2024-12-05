@@ -13,4 +13,5 @@
 // limitations under the License.
 
 mod reader;
+mod split_stream;
 pub use reader::S3FileReader;
