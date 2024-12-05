@@ -388,15 +388,11 @@ async fn apply_dml_rate_limit(
                     continue;
                 }
                 let mut guard = rate_limiter.load();
-                loop {
-                    if guard.is_pause() {
-                        // block the stream until the rate limit is reset
-                        guard.block_until_resume().await;
-                        // load the new rate limiter
-                        guard = rate_limiter.load();
-                        continue;
-                    }
-                    break;
+                while guard.is_pause() {
+                    // block the stream until the rate limit is reset
+                    guard.block_until_resume().await;
+                    // load the new rate limiter
+                    guard = rate_limiter.load();
                 }
                 if guard.is_unlimited() {
                     yield TxnMsg::Data(txn_id, chunk);
