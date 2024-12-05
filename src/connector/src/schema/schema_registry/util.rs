@@ -168,12 +168,6 @@ pub struct GetByIdResp {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GetConfigResp {
-    #[serde(rename = "compatibilityLevel")]
-    _compatibility_level: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct GetBySubjectResp {
     pub id: i32,
     pub schema: String,

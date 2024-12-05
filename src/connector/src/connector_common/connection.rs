@@ -136,7 +136,7 @@ impl Connection for ConfluentSchemaRegistryConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
         // GET /config to validate the connection
         let client = ConfluentSchemaRegistryClient::try_from(self)?;
-        client.get_config().await?;
+        client.validate_connection().await?;
         Ok(())
     }
 }

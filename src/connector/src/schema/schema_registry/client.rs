@@ -20,6 +20,7 @@ use futures::future::select_all;
 use itertools::Itertools;
 use reqwest::{Method, Url};
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use thiserror_ext::AsReport as _;
 
 use super::util::*;
@@ -178,7 +179,13 @@ impl Client {
     }
 
     // used for connection validate, just check if request is ok
-    pub async fn get_config(&self) -> SrResult<()> {
+    pub async fn validate_connection(&self) -> SrResult<()> {
+        #[derive(Debug, Deserialize)]
+        struct GetConfigResp {
+            #[serde(rename = "compatibilityLevel")]
+            _compatibility_level: String,
+        }
+
         let _: GetConfigResp = self.concurrent_req(Method::GET, &["config"]).await?;
         Ok(())
     }
