@@ -113,7 +113,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
         .collect())
 }
 
-fn handle_props_with_secret(
+pub fn handle_props_with_secret(
     schema: &SchemaCatalog,
     props_with_secret: WithOptionsSecResolved,
 ) -> String {
