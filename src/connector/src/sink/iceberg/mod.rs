@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use iceberg::spec::ManifestList;
 use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
@@ -43,11 +44,13 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_meta_model::exactly_once_iceberg_sink;
+use risingwave_meta_model::exactly_once_iceberg_sink::{self, Model};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use sea_orm::{DatabaseConnection, EntityTrait, Set};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set,
+};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
@@ -67,6 +70,7 @@ use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
+use crate::source::iceberg::IcebergProperties;
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -416,6 +420,20 @@ impl Sink for IcebergSink {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
+        if self
+            .iceberg_sink_has_pre_commit_metadata(&db, self.param.sink_id.sink_id())
+            .await?
+        {
+            let metadata_map = self
+                .get_metadata_by_sink_id(&db, self.param.sink_id.sink_id())
+                .await?;
+
+            if self.all_files_in_snapshot(&self.config, &vec![]).await? {
+                // skip
+            } else {
+                // recommit
+            }
+        }
 
         Ok(IcebergSinkCommitter {
             catalog,
@@ -425,6 +443,86 @@ impl Sink for IcebergSink {
             sink_id: self.param.sink_id.sink_id(),
             db,
         })
+    }
+}
+
+impl IcebergSink {
+    async fn iceberg_sink_has_pre_commit_metadata(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> anyhow::Result<bool> {
+        let count = exactly_once_iceberg_sink::Entity::find()
+            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+            .count(db)
+            .await?;
+
+        Ok(count > 0)
+    }
+
+    async fn get_metadata_by_sink_id(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> anyhow::Result<BTreeMap<u64, Vec<Vec<u8>>>> {
+        // 查询所有 sink_id 匹配的记录
+        let rows = exactly_once_iceberg_sink::Entity::find()
+            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+            .all(db)
+            .await?;
+
+        // 创建一个 BTreeMap 以存储 end_epoch 和对应的 metadata
+        let mut metadata_map: BTreeMap<u64, Vec<Vec<u8>>> = BTreeMap::new();
+
+        // 遍历每一行，按 end_epoch 分类 metadata
+        for row in rows {
+            metadata_map
+                .entry(row.end_epoch) // 使用 end_epoch 作为键
+                .or_insert_with(Vec::new) // 如果不存在，插入一个新的 Vec<u8>
+                .push(row.metadata); // 将当前行的 metadata 添加到对应的 Vec<u8> 中
+        }
+
+        Ok(metadata_map) // 返回包含 end_epoch 和对应 metadata 的 BTreeMap
+    }
+
+    async fn all_files_in_snapshot(
+        &self,
+        iceberg_config: &IcebergConfig,
+        file_names: &[String],
+    ) -> anyhow::Result<bool> {
+        let iceberg_common = iceberg_config.common.clone();
+        // todo: handel unwrap
+        let table = iceberg_common
+            .load_table_v2(&iceberg_config.java_catalog_props)
+            .await
+            .unwrap();
+        if let Some(snapshot) = table.metadata().current_snapshot() {
+            let manifest_list: ManifestList = snapshot
+                .load_manifest_list(table.file_io(), table.metadata())
+                .await?;
+
+            let mut files_in_snapshot: Vec<String> = vec![];
+            for entry in manifest_list.entries() {
+                let manifest = entry.load_manifest(table.file_io()).await?;
+
+                let manifest_entries = manifest
+                    .entries()
+                    .iter()
+                    .filter(|e| e.is_alive())
+                    .map(|e| e.data_file().file_path().to_string())
+                    .collect::<Vec<_>>();
+
+                files_in_snapshot.extend(manifest_entries);
+            }
+
+            for file_name in file_names {
+                if !files_in_snapshot.contains(file_name) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
     }
 }
 
