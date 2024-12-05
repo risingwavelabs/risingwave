@@ -42,22 +42,17 @@ use risingwave_pb::catalog::{
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
-use self::avro::AvroAccessBuilder;
-use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
-use self::simd_json_parser::DebeziumJsonAccessBuilder;
 pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
-use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
 use self::utils::get_kafka_topic;
 use crate::connector_common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
-use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
     extreact_timestamp_from_meta,
@@ -71,6 +66,7 @@ use crate::source::{
 };
 use crate::with_options::WithOptionsSecResolved;
 
+mod access_builder;
 pub mod additional_columns;
 mod avro;
 mod bytes_parser;
@@ -83,14 +79,14 @@ mod mysql;
 pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
-mod sql_server;
-
 mod protobuf;
 pub mod scalar_adapter;
+mod sql_server;
 mod unified;
 mod upsert_parser;
 mod utils;
 
+use access_builder::{AccessBuilder, AccessBuilderImpl};
 use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -877,62 +873,10 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     }
 }
 
-/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`] from the parsed data.
-pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
-}
-
 #[derive(Debug)]
 pub enum EncodingType {
     Key,
     Value,
-}
-
-#[derive(Debug)]
-pub enum AccessBuilderImpl {
-    Avro(AvroAccessBuilder),
-    Protobuf(ProtobufAccessBuilder),
-    Json(JsonAccessBuilder),
-    Bytes(BytesAccessBuilder),
-    DebeziumAvro(DebeziumAvroAccessBuilder),
-    DebeziumJson(DebeziumJsonAccessBuilder),
-    DebeziumMongoJson(DebeziumMongoJsonAccessBuilder),
-}
-
-impl AccessBuilderImpl {
-    pub async fn new_default(config: EncodingProperties) -> ConnectorResult<Self> {
-        let accessor = match config {
-            EncodingProperties::Avro(_) => {
-                let config = AvroParserConfig::new(config).await?;
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Protobuf(_) => {
-                let config = ProtobufParserConfig::new(config).await?;
-                AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Bytes(_) => {
-                AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Json(config) => {
-                AccessBuilderImpl::Json(JsonAccessBuilder::new(config)?)
-            }
-            _ => unreachable!(),
-        };
-        Ok(accessor)
-    }
-
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
-        let accessor = match self {
-            Self::Avro(builder) => builder.generate_accessor(payload).await?,
-            Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
-            Self::Json(builder) => builder.generate_accessor(payload).await?,
-            Self::Bytes(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumJson(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumMongoJson(builder) => builder.generate_accessor(payload).await?,
-        };
-        Ok(accessor)
-    }
 }
 
 /// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
