@@ -105,9 +105,9 @@ impl Planner {
             (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => Ok(scan.into()),
             (Engine::Iceberg, PlanFor::Batch) => {
                 let opt_ctx = self.ctx();
-                let seesion = opt_ctx.session_ctx();
-                let db_name = seesion.database();
-                let catalog_reader = seesion.env().catalog_reader().read_guard();
+                let session = opt_ctx.session_ctx();
+                let db_name = session.database();
+                let catalog_reader = session.env().catalog_reader().read_guard();
                 let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {
                     if let Some(_) = schema.get_table_by_id(&base_table.table_catalog.id) {
