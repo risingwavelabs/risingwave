@@ -43,7 +43,7 @@ CREATE SINK pg_sink FROM datagen_source WITH (
     primary_key='id',
 );
 
-sleep 10s
+sleep 60s
 
 statement ok
 CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
