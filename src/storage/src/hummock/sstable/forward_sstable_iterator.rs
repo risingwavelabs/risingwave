@@ -162,7 +162,7 @@ impl SstableIterator {
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx <= self.read_block_meta_range.1 {
                 let end_idx = match bound {
-                    Unbounded => self.read_block_meta_range.1,
+                    Unbounded => self.read_block_meta_range.1 + 1,
                     Included(dest_key) => {
                         let dest_key = dest_key.as_ref();
                         self.read_block_meta_range.0
@@ -179,9 +179,10 @@ impl SstableIterator {
                     }
                 };
 
+                // `preload_end_block_idx` is exclusive
                 if next_to_start_idx < end_idx {
                     assert!(
-                        end_idx <= self.read_block_meta_range.1,
+                        end_idx <= self.read_block_meta_range.1 + 1,
                         "end_idx {} > read_block_meta_range.1 {} next_to_start_idx {}",
                         end_idx,
                         self.read_block_meta_range.1,
