@@ -178,10 +178,10 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
-        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
-        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         let row = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
@@ -204,10 +204,10 @@ mod tests {
         let mut scan_range = ScanRange::full_table_scan();
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
-        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
-        scan_range.eq_conds.push(Some(ScalarImpl::from(114)));
+        scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
         assert!(scan_range.try_compute_vnode(&dist).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
