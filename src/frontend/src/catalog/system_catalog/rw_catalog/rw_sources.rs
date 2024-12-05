@@ -45,8 +45,8 @@ struct RwSource {
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
     is_shared: bool,
-    // connection_props in json format
-    connection_props: String,
+    // connector properties in json format
+    connector_props: String,
     // format-encode options in json format
     format_encode_options: String,
 }
@@ -99,7 +99,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     created_at_cluster_version: source.created_at_cluster_version.clone(),
                     is_shared: source.info.is_shared(),
 
-                    connection_props: handle_props_with_secret(
+                    connector_props: handle_props_with_secret(
                         schema,
                         source.with_properties.clone(),
                     ),
