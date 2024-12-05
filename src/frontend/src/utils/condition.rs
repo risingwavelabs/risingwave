@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::error::Result;
 use crate::expr::{
@@ -319,7 +319,9 @@ impl Condition {
             .iter()
             .all(|(scan_ranges, other_condition)| {
                 other_condition.always_true()
-                    && scan_ranges.iter().all(|x| (!x.is_full_table_scan()))
+                    && scan_ranges
+                        .iter()
+                        .all(|x| !x.eq_conds.is_empty() && is_full_range(&x.range))
             });
 
         if all_equal {

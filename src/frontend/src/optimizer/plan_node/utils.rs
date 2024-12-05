@@ -482,15 +482,16 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
             })
             .collect_vec();
 
+        let len = scan_range.eq_conds.len();
         if !is_full_range(&scan_range.range) {
             let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
                 (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                (Bound::Unbounded, ub) => ub_to_string(&order_names, ub),
-                (lb, Bound::Unbounded) => lb_to_string(&order_names, lb),
+                (Bound::Unbounded, ub) => ub_to_string(&order_names[len..], ub),
+                (lb, Bound::Unbounded) => lb_to_string(&order_names[len..], lb),
                 (lb, ub) => format!(
                     "{} AND {}",
-                    lb_to_string(&order_names, lb),
-                    ub_to_string(&order_names, ub)
+                    lb_to_string(&order_names[len..], lb),
+                    ub_to_string(&order_names[len..], ub)
                 ),
             };
             range_str.push(bound_range_str);
@@ -503,7 +504,7 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
     range_strs
 }
 
-pub fn ub_to_string(order_names: &Vec<String>, ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+pub fn ub_to_string(order_names: &[String], ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
     match ub {
         Bound::Included(v) => {
             let (name, value) = row_to_string(order_names, v);
@@ -517,7 +518,7 @@ pub fn ub_to_string(order_names: &Vec<String>, ub: &Bound<Vec<Option<ScalarImpl>
     }
 }
 
-pub fn lb_to_string(order_names: &Vec<String>, lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+pub fn lb_to_string(order_names: &[String], lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
     match lb {
         Bound::Included(v) => {
             let (name, value) = row_to_string(order_names, v);
@@ -532,7 +533,7 @@ pub fn lb_to_string(order_names: &Vec<String>, lb: &Bound<Vec<Option<ScalarImpl>
 }
 
 pub fn row_to_string(
-    order_names: &Vec<String>,
+    order_names: &[String],
     struct_values: &Vec<Option<ScalarImpl>>,
 ) -> (String, String) {
     let mut names = vec![];
