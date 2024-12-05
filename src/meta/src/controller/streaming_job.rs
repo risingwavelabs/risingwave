@@ -1408,12 +1408,13 @@ impl CatalogController {
         Ok(fragment_actors)
     }
 
-    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // edit the `rate_limit` of the relevant stream node in given `table_id`'s fragments
     // return the actor_ids to be applied
-    pub async fn update_backfill_rate_limit_by_job_id(
+    async fn update_rate_limit_by_job_id(
         &self,
         job_id: ObjectId,
         rate_limit: Option<u32>,
+        for_sink: bool,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -1434,33 +1435,57 @@ impl CatalogController {
             .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
-            let mut found = false;
-            if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
-                visit_stream_node(stream_node, |node| match node {
-                    PbNodeBody::StreamCdcScan(node) => {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                    PbNodeBody::StreamScan(node) => {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                    PbNodeBody::SourceBackfill(node) => {
-                        node.rate_limit = rate_limit;
-                        found = true;
-                    }
-                    _ => {}
-                });
+        if for_sink {
+            fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+                let mut found = false;
+                if *fragment_type_mask & PbFragmentTypeFlag::sink_rate_limit_fragments() != 0 {
+                    visit_stream_node(stream_node, |node| {
+                        if let PbNodeBody::Sink(node) = node {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                    });
+                }
+                found
+            });
+            if fragments.is_empty() {
+                return Err(MetaError::invalid_parameter(format!(
+                    "sink node not found in job id {job_id}"
+                )));
             }
-            found
-        });
-
-        if fragments.is_empty() {
-            return Err(MetaError::invalid_parameter(format!(
-                "stream scan node or source node not found in job id {job_id}"
-            )));
+        } else {
+            fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+                let mut found = false;
+                if *fragment_type_mask & PbFragmentTypeFlag::backfill_rate_limit_fragments() != 0 {
+                    visit_stream_node(stream_node, |node| match node {
+                        PbNodeBody::StreamCdcScan(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        PbNodeBody::StreamScan(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        PbNodeBody::SourceBackfill(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        PbNodeBody::Sink(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        _ => {}
+                    });
+                }
+                found
+            });
+            if fragments.is_empty() {
+                return Err(MetaError::invalid_parameter(format!(
+                    "stream scan node or source node not found in job id {job_id}"
+                )));
+            }
         }
+
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
         for (id, _, stream_node) in fragments {
             fragment::ActiveModel {
@@ -1476,6 +1501,28 @@ impl CatalogController {
         txn.commit().await?;
 
         Ok(fragment_actors)
+    }
+
+    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_backfill_rate_limit_by_job_id(
+        &self,
+        job_id: ObjectId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        self.update_rate_limit_by_job_id(job_id, rate_limit, false)
+            .await
+    }
+
+    // edit the `rate_limit` of the `Sink` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_sink_rate_limit_by_job_id(
+        &self,
+        job_id: ObjectId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        self.update_rate_limit_by_job_id(job_id, rate_limit, true)
+            .await
     }
 
     pub async fn post_apply_reschedules(
@@ -1878,6 +1925,14 @@ impl CatalogController {
                         );
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
+                    }
+                    PbNodeBody::Sink(node) => {
+                        debug_assert!(
+                            rate_limit.is_none(),
+                            "one fragment should only have 1 rate limit node"
+                        );
+                        rate_limit = node.rate_limit;
+                        node_name = Some("SINK");
                     }
                     _ => {}
                 }
