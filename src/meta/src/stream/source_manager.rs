@@ -500,13 +500,13 @@ impl SourceManagerCore {
 
         if let Some(fragment_replacements) = fragment_replacements {
             for (old_fragment_id, new_fragment_id) in fragment_replacements {
-                for (_source_id, fragment_ids) in &mut self.source_fragments {
+                for fragment_ids in self.source_fragments.values_mut() {
                     if fragment_ids.remove(&old_fragment_id) {
                         fragment_ids.insert(new_fragment_id);
                     }
                 }
 
-                for (_source_id, fragment_ids) in &mut self.backfill_fragments {
+                for fragment_ids in self.backfill_fragments.values_mut() {
                     let mut new_backfill_fragment_ids = fragment_ids.clone();
                     for (fragment_id, upstream_fragment_id) in fragment_ids.iter() {
                         assert_ne!(
