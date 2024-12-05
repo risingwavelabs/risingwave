@@ -97,6 +97,7 @@ if [[ $mode != "single-node" ]]; then
 fi
 
 sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
+sqllogictest -p 4566 -d dev './e2e_test/dml/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 

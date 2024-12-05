@@ -110,6 +110,10 @@ pub enum AlterTableOperation {
     SetBackfillRateLimit {
         rate_limit: i32,
     },
+    /// `SET DML_RATE_LIMIT TO <rate_limit>`
+    SetDmlRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -299,6 +303,9 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterTableOperation::SetDmlRateLimit { rate_limit } => {
+                write!(f, "SET DML_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }

@@ -3111,8 +3111,11 @@ impl Parser<'_> {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
                 AlterTableOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
+                AlterTableOperation::SetDmlRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
+                return self
+                    .expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3172,6 +3175,28 @@ impl Parser<'_> {
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
             return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
+    /// DML_RATE_LIMIT = default | NUMBER
+    /// DML_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_dml_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("DML_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER TABLE SET DML_RATE_LIMIT");
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1

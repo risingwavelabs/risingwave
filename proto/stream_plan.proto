@@ -734,6 +734,7 @@ message DmlNode {
   uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
+  optional uint32 rate_limit = 4;
 }
 
 message RowIdGenNode {

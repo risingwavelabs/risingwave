@@ -711,6 +711,18 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
+            operation: AlterTableOperation::SetDmlRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::TableDml,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
             operation: AlterTableOperation::SetBackfillRateLimit { rate_limit },
         } => {
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(

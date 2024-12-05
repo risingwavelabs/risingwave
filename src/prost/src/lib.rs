@@ -301,7 +301,6 @@ impl stream_plan::StreamNode {
         None
     }
 }
-
 impl catalog::StreamSourceInfo {
     /// Refer to [`Self::cdc_source_job`] for details.
     pub fn is_shared(&self) -> bool {

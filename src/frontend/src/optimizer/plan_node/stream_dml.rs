@@ -92,6 +92,7 @@ impl StreamNode for StreamDml {
             table_id: 0,                                // Meta will fill this table id.
             table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
+            rate_limit: self.base.ctx().overwrite_options().dml_rate_limit,
         })
     }
 }

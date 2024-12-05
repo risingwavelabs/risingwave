@@ -344,6 +344,10 @@ impl TableFragments {
             != 0
     }
 
+    pub fn dml_rate_limit_fragments(fragment_type_mask: u32) -> bool {
+        (fragment_type_mask & PbFragmentTypeFlag::Dml as u32) != 0
+    }
+
     /// Returns mview actor ids.
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {

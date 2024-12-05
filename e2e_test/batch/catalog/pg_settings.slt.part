@@ -29,6 +29,7 @@ user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
 user datestyle
+user dml_rate_limit
 user extra_float_digits
 user idle_in_transaction_session_timeout
 user intervalstyle

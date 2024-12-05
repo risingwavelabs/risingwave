@@ -218,6 +218,49 @@ impl FragmentManager {
         self.core.read().await
     }
 
+    pub async fn update_dml_rate_limit_by_job_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let mut guard = self.core.write().await;
+        let current_version = guard.table_revision;
+        let map = &mut guard.table_fragments;
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let Some(mut table_fragment) = table_fragments.get_mut(table_id) else {
+            return Ok(HashMap::default());
+        };
+        let mut ret = HashMap::default();
+        for fragment in table_fragment.fragments.values_mut() {
+            if !TableFragments::dml_rate_limit_fragments(fragment.fragment_type_mask) {
+                continue;
+            }
+            for actor in &mut fragment.actors {
+                let stream_node = actor.nodes.as_mut().unwrap();
+                visit_stream_node(stream_node, |node| {
+                    if let risingwave_pb::stream_plan::stream_node::PbNodeBody::Dml(node) = node {
+                        node.rate_limit = rate_limit;
+                        let e = ret.entry(fragment.fragment_id).or_insert_with(|| vec![]);
+                        e.push(actor.actor_id);
+                    }
+                });
+            }
+        }
+        if ret.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "dml node not found in table {table_id}"
+            )));
+        }
+        // Commit changes and notify about the changes.
+        let mut trx = Transaction::default();
+        // save next revision
+        let next_revision = current_version.next();
+        next_revision.store(&mut trx);
+        // commit
+        commit_meta_with_trx!(self, trx, table_fragments)?;
+        Ok(ret)
+    }
+
     pub async fn list_dirty_table_fragments(
         &self,
         check_dirty: impl Fn(&TableFragments) -> bool,

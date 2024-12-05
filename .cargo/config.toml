@@ -26,7 +26,7 @@ rustflags = [
 [target.aarch64-apple-darwin]
 rustflags = [
     # neon is enabled by default
-    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",
+    "-Clink-arg=-fuse-ld=lld",
 ]
 
 # Flags for all targets.

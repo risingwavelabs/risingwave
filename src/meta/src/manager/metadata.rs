@@ -873,6 +873,30 @@ impl MetadataManager {
         }
     }
 
+    pub async fn update_dml_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = match self {
+            MetadataManager::V1(mgr) => {
+                mgr.fragment_manager
+                    .update_dml_rate_limit_by_job_id(table_id, rate_limit)
+                    .await?
+            }
+            MetadataManager::V2(_mgr) => {
+                unimplemented!("DML rate limit not supported for meta store V2")
+                // mgr.catalog_controller
+                //     .update_dml_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+                //     .await?
+            }
+        };
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,

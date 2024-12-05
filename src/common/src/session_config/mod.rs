@@ -56,6 +56,7 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 // otherwise seems like it can't infer the type of -1 when written inline.
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
+const DISABLE_DML_RATE_LIMIT: i32 = -1;
 
 #[serde_as]
 /// This is the Session Config of RisingWave.
@@ -268,6 +269,12 @@ pub struct SessionConfig {
     /// If set to 0, this pauses the snapshot read / source read.
     #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
     source_rate_limit: i32,
+
+    /// Set streaming rate limit (rows per second) for each parallelism for table DML.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the DML.
+    #[parameter(default = DISABLE_DML_RATE_LIMIT)]
+    dml_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
