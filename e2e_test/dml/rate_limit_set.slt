@@ -1,11 +1,11 @@
 statement ok
-set dml_rate_limit to 1;
+set dml_rate_limit to 2;
 
 statement ok
 create table t(v1 int);
 
 statement ok
-alter table t set parallelism to 2;
+alter table t set parallelism to 1;
 
 include ./inserts.slt.part
 
