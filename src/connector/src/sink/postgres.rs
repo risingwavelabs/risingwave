@@ -19,6 +19,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
@@ -28,12 +29,15 @@ use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::Statement;
 
-use super::{SinkError, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, LogSinker, SinkLogReader};
+use super::{
+    LogSinker, SinkError, SinkLogReader, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
 use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
+use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::{SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
-use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 
 pub const POSTGRES_SINK: &str = "postgres";
 
@@ -282,7 +286,6 @@ pub struct PostgresSinkWriter {
     buffer: Buffer,
     insert_statement: Statement,
     delete_statement: Option<Statement>,
-    upsert_statement: Option<Statement>,
 }
 
 impl PostgresSinkWriter {
@@ -341,7 +344,10 @@ impl PostgresSinkWriter {
             client
                 .prepare_typed(&insert_sql, &schema_types)
                 .await
-                .context(format!("Failed to prepare insert statement, {:?}", &insert_sql))?
+                .context(format!(
+                    "Failed to prepare insert statement, {:?}",
+                    &insert_sql
+                ))?
         };
 
         let delete_statement = if is_append_only {
@@ -356,7 +362,10 @@ impl PostgresSinkWriter {
                 client
                     .prepare_typed(&delete_sql, &delete_types)
                     .await
-                    .context(format!("Failed to prepare delete statement, {:?}", &delete_sql))?,
+                    .context(format!(
+                        "Failed to prepare delete statement, {:?}",
+                        &delete_sql
+                    ))?,
             )
         };
 
@@ -368,7 +377,10 @@ impl PostgresSinkWriter {
                 client
                     .prepare_typed(&upsert_sql, &schema_types)
                     .await
-                    .context(format!("Failed to prepare upsert statement, {:?}", &upsert_sql))?,
+                    .context(format!(
+                        "Failed to prepare upsert statement, {:?}",
+                        &upsert_sql
+                    ))?,
             )
         };
 
@@ -380,17 +392,17 @@ impl PostgresSinkWriter {
             buffer: Buffer::new(),
             insert_statement,
             delete_statement,
-            upsert_statement,
         };
         Ok(writer)
     }
 
-    async fn write_batch(&self, chunk: StreamChunk) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        let transaction = self.client.transaction().await?;
         if self.is_append_only {
             for (op, row) in chunk.rows() {
                 match op {
                     Op::Insert => {
-                        self.client
+                        transaction
                             .execute_raw(
                                 &self.insert_statement,
                                 rw_row_to_pg_values!(row, self.insert_statement),
@@ -403,31 +415,21 @@ impl PostgresSinkWriter {
                 }
             }
         } else {
-            let mut unmatched_update_insert = 0;
             for (op, row) in chunk.rows() {
                 match op {
+                    Op::UpdateInsert | Op::UpdateDelete => {
+                        bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
+                    }
                     Op::Insert => {
-                        self.client
+                        transaction
                             .execute_raw(
                                 &self.insert_statement,
                                 rw_row_to_pg_values!(row, self.insert_statement),
                             )
                             .await?;
                     }
-                    Op::UpdateInsert => {
-                        unmatched_update_insert += 1;
-                        self.client
-                            .execute_raw(
-                                self.upsert_statement.as_ref().unwrap(),
-                                rw_row_to_pg_values!(
-                                    row,
-                                    self.upsert_statement.as_ref().unwrap()
-                                ),
-                            )
-                            .await?;
-                    }
                     Op::Delete => {
-                        self.client
+                        transaction
                             .execute_raw(
                                 self.delete_statement.as_ref().unwrap(),
                                 rw_row_to_pg_values!(
@@ -437,13 +439,11 @@ impl PostgresSinkWriter {
                             )
                             .await?;
                     }
-                    Op::UpdateDelete => {
-                        unmatched_update_insert -= 1;
-                    }
                 }
             }
-            assert_eq!(unmatched_update_insert, 0);
         }
+
+        transaction.commit().await?;
 
         Ok(())
     }
@@ -451,7 +451,7 @@ impl PostgresSinkWriter {
 
 #[async_trait]
 impl LogSinker for PostgresSinkWriter {
-    async fn consume_log_and_sink(self, log_reader: &mut impl SinkLogReader) -> Result<!> {
+    async fn consume_log_and_sink(mut self, log_reader: &mut impl SinkLogReader) -> Result<!> {
         loop {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
