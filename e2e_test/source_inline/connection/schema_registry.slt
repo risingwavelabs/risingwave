@@ -52,3 +52,5 @@ drop table t;
 
 statement ok
 drop connection schema_registry_conn;
+
+
