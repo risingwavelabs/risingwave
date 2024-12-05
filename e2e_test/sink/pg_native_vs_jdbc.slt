@@ -54,7 +54,7 @@ CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
     type='upsert'
 );
 
-sleep 600s
+sleep 1200s
 
 statement ok
 DROP SINK IF EXISTS pg_sink;
