@@ -110,7 +110,10 @@ impl Planner {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {
-                    if schema.get_table_by_id(&base_table.table_catalog.id).is_some() {
+                    if schema
+                        .get_table_by_id(&base_table.table_catalog.id)
+                        .is_some()
+                    {
                         source_catalog = schema.get_source_by_name(
                             &base_table.table_catalog.iceberg_source_name().unwrap(),
                         );
