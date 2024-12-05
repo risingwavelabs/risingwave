@@ -25,6 +25,7 @@ use with_options::WithOptions;
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
 use crate::error::ConnectorResult;
+use crate::schema::schema_registry::Client as ConfluentSchemaRegistryClient;
 use crate::source::kafka::{KafkaContextCommon, RwConsumerContext};
 use crate::{dispatch_connection_impl, ConnectionImpl};
 
@@ -122,18 +123,20 @@ impl Connection for IcebergConnection {
 #[serde(deny_unknown_fields)]
 pub struct ConfluentSchemaRegistryConnection {
     #[serde(rename = "schema.registry")]
-    url: String,
+    pub url: String,
     // ref `SchemaRegistryAuth`
     #[serde(rename = "schema.registry.username")]
-    username: Option<String>,
+    pub username: Option<String>,
     #[serde(rename = "schema.registry.password")]
-    password: Option<String>,
+    pub password: Option<String>,
 }
 
 #[async_trait]
 impl Connection for ConfluentSchemaRegistryConnection {
     async fn test_connection(&self) -> ConnectorResult<()> {
-        // todo
+        // GET /config to validate the connection
+        let client = ConfluentSchemaRegistryClient::try_from(self)?;
+        client.get_config().await?;
         Ok(())
     }
 }

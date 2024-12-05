@@ -23,6 +23,7 @@ use serde::de::DeserializeOwned;
 use thiserror_ext::AsReport as _;
 
 use super::util::*;
+use crate::connector_common::ConfluentSchemaRegistryConnection;
 use crate::schema::{invalid_option_error, InvalidOptionError};
 
 pub const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
@@ -69,6 +70,22 @@ pub struct ConcurrentRequestError {
 }
 
 type SrResult<T> = Result<T, ConcurrentRequestError>;
+
+impl TryFrom<&ConfluentSchemaRegistryConnection> for Client {
+    type Error = InvalidOptionError;
+
+    fn try_from(value: &ConfluentSchemaRegistryConnection) -> Result<Self, Self::Error> {
+        let urls = handle_sr_list(value.url.as_str())?;
+
+        Client::new(
+            urls,
+            &SchemaRegistryAuth {
+                username: value.username.clone(),
+                password: value.password.clone(),
+            },
+        )
+    }
+}
 
 impl Client {
     pub(crate) fn new(
@@ -158,6 +175,12 @@ impl Client {
     /// get the latest schema of the subject
     pub async fn get_schema_by_subject(&self, subject: &str) -> SrResult<ConfluentSchema> {
         self.get_subject(subject).await.map(|s| s.schema)
+    }
+
+    // used for connection validate, just check if request is ok
+    pub async fn get_config(&self) -> SrResult<()> {
+        let _: GetConfigResp = self.concurrent_req(Method::GET, &["config"]).await?;
+        Ok(())
     }
 
     /// get the latest version of the subject
