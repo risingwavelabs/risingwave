@@ -28,6 +28,8 @@ use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
 use tokio_postgres::Statement;
+use risingwave_common::types::DataType;
+use tokio_postgres::types::Type as PgType;
 
 use super::{
     LogSinker, SinkError, SinkLogReader, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
@@ -284,8 +286,9 @@ pub struct PostgresSinkWriter {
     is_append_only: bool,
     client: tokio_postgres::Client,
     buffer: Buffer,
-    insert_statement: Statement,
     delete_statement: Option<Statement>,
+    schema_types: Vec<PgType>,
+    schema: Schema,
 }
 
 impl PostgresSinkWriter {
@@ -339,17 +342,6 @@ impl PostgresSinkWriter {
             schema_types
         };
 
-        let insert_statement = {
-            let insert_sql = create_insert_sql(&schema, &config.table);
-            client
-                .prepare_typed(&insert_sql, &schema_types)
-                .await
-                .context(format!(
-                    "Failed to prepare insert statement, {:?}",
-                    &insert_sql
-                ))?
-        };
-
         let delete_statement = if is_append_only {
             None
         } else {
@@ -369,29 +361,15 @@ impl PostgresSinkWriter {
             )
         };
 
-        let upsert_statement = if is_append_only {
-            None
-        } else {
-            let upsert_sql = create_upsert_sql(&schema, &config.table, &pk_indices);
-            Some(
-                client
-                    .prepare_typed(&upsert_sql, &schema_types)
-                    .await
-                    .context(format!(
-                        "Failed to prepare upsert statement, {:?}",
-                        &upsert_sql
-                    ))?,
-            )
-        };
-
         let writer = Self {
             config,
             pk_indices,
             is_append_only,
             client,
             buffer: Buffer::new(),
-            insert_statement,
             delete_statement,
+            schema_types,
+            schema,
         };
         Ok(writer)
     }
@@ -399,34 +377,58 @@ impl PostgresSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let transaction = self.client.transaction().await?;
         if self.is_append_only {
+            // 1d flattened array of parameters to be inserted.
+            let mut rows = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
             for (op, row) in chunk.rows() {
                 match op {
                     Op::Insert => {
-                        transaction
-                            .execute_raw(
-                                &self.insert_statement,
-                                rw_row_to_pg_values!(row, self.insert_statement),
-                            )
-                            .await?;
+                        for (i, datum_ref) in row.iter().enumerate() {
+                            let pg_datum = datum_ref.map(|s| {
+                                let ty = &self.schema_types[i];
+                                match ScalarAdapter::from_scalar(s, ty) {
+                                    Ok(scalar) => Some(scalar),
+                                    Err(e) => {
+                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
+                                        None
+                                    }
+                                }
+                            });
+                            rows.push(pg_datum.flatten());
+                        }
                     }
                     Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
                         debug_assert!(!self.is_append_only);
                     }
                 }
             }
+            let insert_statement = create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
+            transaction
+                .execute_raw(
+                    &insert_statement,
+                    rows,
+                )
+                .await?;
         } else {
+            let mut rows = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
             for (op, row) in chunk.rows() {
                 match op {
                     Op::UpdateInsert | Op::UpdateDelete => {
                         bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
                     }
                     Op::Insert => {
-                        transaction
-                            .execute_raw(
-                                &self.insert_statement,
-                                rw_row_to_pg_values!(row, self.insert_statement),
-                            )
-                            .await?;
+                        for (i, datum_ref) in row.iter().enumerate() {
+                            let pg_datum = datum_ref.map(|s| {
+                                let ty = &self.schema_types[i];
+                                match ScalarAdapter::from_scalar(s, ty) {
+                                    Ok(scalar) => Some(scalar),
+                                    Err(e) => {
+                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
+                                        None
+                                    }
+                                }
+                            });
+                            rows.push(pg_datum.flatten());
+                        }
                     }
                     Op::Delete => {
                         transaction
@@ -441,6 +443,13 @@ impl PostgresSinkWriter {
                     }
                 }
             }
+            let insert_statement = create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
+            transaction
+                .execute_raw(
+                    &insert_statement,
+                    rows,
+                )
+                .await?;
         }
 
         transaction.commit().await?;
@@ -468,46 +477,25 @@ impl LogSinker for PostgresSinkWriter {
     }
 }
 
-fn create_insert_sql(schema: &Schema, table_name: &str) -> String {
+fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -> String {
+    let number_of_columns = schema.len();
     let columns: String = schema
         .fields()
         .iter()
         .map(|field| field.name.clone())
         .collect_vec()
         .join(", ");
-    let parameters: String = (0..schema.fields().len())
-        .map(|i| format!("${}", i + 1))
-        .collect_vec()
-        .join(", ");
-    format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters})")
-}
-
-fn create_upsert_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
-    let columns: String = schema
-        .fields()
-        .iter()
-        .map(|field| field.name.clone())
-        .collect_vec()
-        .join(", ");
-    let parameters: String = (0..schema.fields().len())
-        .map(|i| format!("${}", i + 1))
-        .collect_vec()
-        .join(", ");
-    let pk_columns = pk_indices
-        .iter()
-        .map(|i| schema.fields()[*i].name.clone())
-        .collect_vec()
-        .join(", ");
-    let update_parameters: String = (0..schema.fields().len())
-        .filter(|i| !pk_indices.contains(i))
+    let parameters: String = (0..number_of_rows)
         .map(|i| {
-            let column = schema.fields()[i].name.clone();
-            let param = format!("${}", i + 1);
-            format!("{column} = {param}")
+            let row_parameters = (0..number_of_columns)
+                .map(|j| format!("${}", i * number_of_columns + j + 1))
+                .collect_vec()
+                .join(", ");
+            format!("({row_parameters})")
         })
         .collect_vec()
         .join(", ");
-    format!("INSERT INTO {table_name} ({columns}) VALUES ({parameters}) on conflict ({pk_columns}) do update set {update_parameters}")
+    format!("INSERT INTO {table_name} ({columns}) VALUES {parameters}")
 }
 
 fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize]) -> String {
@@ -577,29 +565,5 @@ mod tests {
         let table_name = "test_table";
         let sql = create_delete_sql(&schema, table_name, &[1]);
         check(sql, expect!["DELETE FROM test_table WHERE b = $2"]);
-    }
-
-    #[test]
-    fn test_create_upsert_sql() {
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "a".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
-            },
-            Field {
-                data_type: DataType::Int32,
-                name: "b".to_owned(),
-                sub_fields: vec![],
-                type_name: "".to_owned(),
-            },
-        ]);
-        let table_name = "test_table";
-        let sql = create_upsert_sql(&schema, table_name, &[1]);
-        check(
-            sql,
-            expect!["INSERT INTO test_table (a, b) VALUES ($1, $2) on conflict (b) do update set a = $1"],
-        );
     }
 }
