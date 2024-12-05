@@ -13,52 +13,29 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
-use tokio_postgres::Statement;
-use risingwave_common::types::DataType;
 use tokio_postgres::types::Type as PgType;
 
 use super::{
-    LogSinker, SinkError, SinkLogReader, SinkWriterMetrics, SINK_TYPE_APPEND_ONLY,
-    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    LogSinker, SinkError, SinkLogReader, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::connector_common::{create_pg_client, PostgresExternalTable, SslMode};
 use crate::parser::scalar_adapter::{validate_pg_type_to_rw_type, ScalarAdapter};
-use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
-use crate::sink::writer::{SinkWriter, SinkWriterExt};
+use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriterParam};
 
 pub const POSTGRES_SINK: &str = "postgres";
-
-macro_rules! rw_row_to_pg_values {
-    ($row:expr, $statement:expr) => {
-        $row.iter().enumerate().map(|(i, d)| {
-            d.and_then(|d| {
-                let ty = &$statement.params()[i];
-                match ScalarAdapter::from_scalar(d, ty) {
-                    Ok(scalar) => Some(scalar),
-                    Err(e) => {
-                        tracing::error!(error=%e.as_report(), scalar=?d, "Failed to convert scalar to pg value");
-                        None
-                    }
-                }
-            })
-        })
-    };
-}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -244,39 +221,14 @@ impl Sink for PostgresSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(PostgresSinkWriter::new(
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        PostgresSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
         )
-        .await?)
-    }
-}
-
-struct Buffer {
-    buffer: Vec<StreamChunk>,
-    size: usize,
-}
-
-impl Buffer {
-    fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            size: 0,
-        }
-    }
-
-    fn push(&mut self, chunk: StreamChunk) -> usize {
-        self.size += chunk.cardinality();
-        self.buffer.push(chunk);
-        self.size
-    }
-
-    fn drain(&mut self) -> Vec<StreamChunk> {
-        self.size = 0;
-        std::mem::take(&mut self.buffer)
+        .await
     }
 }
 
@@ -285,7 +237,6 @@ pub struct PostgresSinkWriter {
     pk_indices: Vec<usize>,
     is_append_only: bool,
     client: tokio_postgres::Client,
-    buffer: Buffer,
     schema_types: Vec<PgType>,
     schema: Schema,
 }
@@ -340,32 +291,12 @@ impl PostgresSinkWriter {
             }
             schema_types
         };
-        //
-        // let delete_statement = if is_append_only {
-        //     None
-        // } else {
-        //     let delete_types = pk_indices
-        //         .iter()
-        //         .map(|i| schema_types[*i].clone())
-        //         .collect_vec();
-        //     let delete_sql = create_delete_sql(&schema, &config.table, &pk_indices);
-        //     Some(
-        //         client
-        //             .prepare_typed(&delete_sql, &delete_types)
-        //             .await
-        //             .context(format!(
-        //                 "Failed to prepare delete statement, {:?}",
-        //                 &delete_sql
-        //             ))?,
-        //     )
-        // };
 
         let writer = Self {
             config,
             pk_indices,
             is_append_only,
             client,
-            buffer: Buffer::new(),
             schema_types,
             schema,
         };
@@ -399,18 +330,16 @@ impl PostgresSinkWriter {
                     }
                 }
             }
-            let insert_statement = create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
-            transaction
-                .execute_raw(
-                    &insert_statement,
-                    rows,
-                )
-                .await?;
+            let insert_statement =
+                create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
+            transaction.execute_raw(&insert_statement, rows).await?;
         } else {
             // 1d flattened array of parameters to be inserted.
-            let mut insert_parameters = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
+            let mut insert_parameters =
+                Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
             let mut insert_row_count = 0;
-            let mut delete_parameters = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
+            let mut delete_parameters =
+                Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
             let mut delete_row_count = 0;
             for (op, row) in chunk.rows() {
                 match op {
@@ -452,22 +381,22 @@ impl PostgresSinkWriter {
                 }
             }
             if insert_row_count > 0 {
-                let insert_statement = create_insert_sql(&self.schema, &self.config.table, insert_row_count);
+                let insert_statement =
+                    create_insert_sql(&self.schema, &self.config.table, insert_row_count);
                 transaction
-                    .execute_raw(
-                        &insert_statement,
-                        insert_parameters,
-                    )
+                    .execute_raw(&insert_statement, insert_parameters)
                     .await?;
             }
 
             if delete_row_count > 0 {
-                let delete_statement = create_delete_sql(&self.schema, &self.config.table, &self.pk_indices, delete_row_count);
+                let delete_statement = create_delete_sql(
+                    &self.schema,
+                    &self.config.table,
+                    &self.pk_indices,
+                    delete_row_count,
+                );
                 transaction
-                    .execute_raw(
-                        &delete_statement,
-                        delete_parameters,
-                    )
+                    .execute_raw(&delete_statement, delete_parameters)
                     .await?;
             }
         }
@@ -518,13 +447,24 @@ fn create_insert_sql(schema: &Schema, table_name: &str, number_of_rows: usize) -
     format!("INSERT INTO {table_name} ({columns}) VALUES {parameters}")
 }
 
-fn create_delete_sql(schema: &Schema, table_name: &str, pk_indices: &[usize], number_of_rows: usize) -> String {
+fn create_delete_sql(
+    schema: &Schema,
+    table_name: &str,
+    pk_indices: &[usize],
+    number_of_rows: usize,
+) -> String {
     let number_of_pk = pk_indices.len();
     let parameters: String = (0..number_of_rows)
         .map(|i| {
             let row_parameters: String = pk_indices
                 .iter()
-                .map(|j| format!("{} = ${}", schema.fields()[*j].name, i * number_of_pk + j + 1))
+                .map(|j| {
+                    format!(
+                        "{} = ${}",
+                        schema.fields()[*j].name,
+                        i * number_of_pk + j + 1
+                    )
+                })
                 .collect_vec()
                 .join(" AND ");
             format!("({row_parameters})")
