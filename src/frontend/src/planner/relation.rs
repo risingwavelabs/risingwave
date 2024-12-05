@@ -110,7 +110,7 @@ impl Planner {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let mut source_catalog = None;
                 for schema in catalog_reader.iter_schemas(db_name).unwrap() {
-                    if let Some(_) = schema.get_table_by_id(&base_table.table_catalog.id) {
+                    if schema.get_table_by_id(&base_table.table_catalog.id).is_some() {
                         source_catalog = schema.get_source_by_name(
                             &base_table.table_catalog.iceberg_source_name().unwrap(),
                         );
@@ -129,7 +129,7 @@ impl Planner {
                         .table_catalog()
                         .column_schema()
                         .fields()
-                        .into_iter()
+                        .iter()
                         .map(|field| {
                             let source_filed_name = if field.name == ROWID_PREFIX {
                                 RISINGWAVE_ICEBERG_ROW_ID
@@ -171,7 +171,7 @@ impl Planner {
                         self.ctx(),
                         as_of,
                     )?;
-                    return Ok(LogicalProject::new(logical_source.into(), exprs).into());
+                    Ok(LogicalProject::new(logical_source.into(), exprs).into())
                 } else {
                     bail!(
                         "failed to plan a iceberg engine table: {}. Can't find the corresponding iceberg source. Maybe you need to recreate the table",
