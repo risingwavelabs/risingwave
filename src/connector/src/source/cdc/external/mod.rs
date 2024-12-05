@@ -49,10 +49,9 @@ use crate::source::cdc::external::sql_server::{
 use crate::source::cdc::CdcSourceType;
 use crate::WithPropertiesExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CdcTableType {
     Undefined,
-    Mock,
     MySql,
     Postgres,
     SqlServer,
@@ -102,7 +101,6 @@ impl CdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
-            Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
     }
@@ -220,7 +218,7 @@ pub enum ExternalTableReaderImpl {
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ExternalTableConfig {
     pub connector: String,
 
