@@ -18,7 +18,9 @@ use std::rc::Rc;
 
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, Engine, Field, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, Engine, Field, Schema, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
+};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::AsOf;
@@ -129,7 +131,12 @@ impl Planner {
                         .fields()
                         .into_iter()
                         .map(|field| {
-                            if let Some((i, source_column)) = column_map.get(&field.name) {
+                            let source_filed_name = if field.name == ROWID_PREFIX {
+                                RISINGWAVE_ICEBERG_ROW_ID
+                            } else {
+                                &field.name
+                            };
+                            if let Some((i, source_column)) = column_map.get(source_filed_name) {
                                 if source_column.column_desc.data_type == field.data_type {
                                     ExprImpl::InputRef(
                                         InputRef::new(*i, field.data_type.clone()).into(),
