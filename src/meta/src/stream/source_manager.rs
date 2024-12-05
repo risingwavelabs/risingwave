@@ -719,7 +719,7 @@ where
 /// Assign splits to a new set of actors, according to existing assignment.
 ///
 /// illustration:
-/// ```
+/// ```text
 /// upstream                               new
 /// actor x1 [split 1, split2]      ->     actor y1 [split 1, split2]
 /// actor x2 [split 3]              ->     actor y2 [split 3]
