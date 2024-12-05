@@ -75,7 +75,6 @@ pub mod additional_columns;
 mod avro;
 mod bytes_parser;
 mod canal;
-mod common;
 mod csv_parser;
 mod debezium;
 mod json_parser;
