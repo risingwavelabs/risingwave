@@ -1,0 +1,32 @@
+statement ok
+create table t(v1 int);
+
+statement ok
+alter table t set parallelism to 1;
+
+# Pause data stream.
+statement ok
+alter table t set dml_rate_limit to 0;
+
+include ./inserts.slt.part
+
+sleep 3s
+
+query I
+select count(*) from t;
+----
+0
+
+# Resume data stream.
+statement ok
+alter table t set dml_rate_limit to 1;
+
+sleep 3s
+
+query II
+select case when count(*) between 1 and 5 then 3 else 0 end from t;
+----
+3
+
+statement ok
+drop table t;
