@@ -71,6 +71,7 @@ message IcebergScanNode {
     ICEBERG_SCAN_TYPE_UNSPECIFIED = 0;
     ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
     ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
+    ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
   }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
