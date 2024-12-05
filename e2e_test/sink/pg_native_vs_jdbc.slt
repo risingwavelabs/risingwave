@@ -22,15 +22,13 @@ system ok
 psql -c 'CREATE TABLE datagen_source_jdbc (id INT PRIMARY KEY, v1 varchar);'
 
 statement ok
-CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar) WITH (
-  connector = 'datagen',
-  fields.id.kind = 'sequence',
-  fields.id.start = '1',
-  fields.id.end = '1000000',
-  fields.v1.type = 'random',
-  datagen.rows.per.second = '10000',
-  datagen.split.num = '1'
-) FORMAT PLAIN ENCODE JSON
+CREATE TABLE datagen_source (id INT PRIMARY KEY, v1 varchar);
+
+statement ok
+INSERT INTO datagen_source SELECT key, 'asjdkk2kbdk2uk2ubek2' FROM generate_series(1, 1000000) t(key);
+
+statement ok
+flush;
 
 statement ok
 CREATE SINK pg_sink FROM datagen_source WITH (
@@ -45,6 +43,8 @@ CREATE SINK pg_sink FROM datagen_source WITH (
     primary_key='id',
 );
 
+sleep 10s
+
 statement ok
 CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
     connector='jdbc',
@@ -53,8 +53,6 @@ CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
     primary_key='id',
     type='upsert'
 );
-
-sleep 1200s
 
 statement ok
 DROP SINK IF EXISTS pg_sink;
