@@ -2,15 +2,13 @@ statement ok
 set sink_decouple = false;
 
 statement ok
-create table t(id int primary key, xxname varchar) engine = iceberg;
+create table t(id int primary key, name varchar) engine = iceberg;
 
 statement ok
 insert into t values(1, 'xxx');
 
 statement ok
 FLUSH;
-
-sleep 5s
 
 query ??
 select * from t;
@@ -19,3 +17,54 @@ select * from t;
 
 statement ok
 DROP TABLE t;
+
+statement ok
+CREATE TABLE full_type_t (
+id bigint primary key,
+v_small_int smallint,
+v_int int,
+v_long bigint,
+v_float real,
+v_double double,
+v_varchar varchar,
+v_bool boolean,
+v_date date,
+v_timestamp timestamptz,
+v_ts_ntz timestamp,
+v_decimal decimal,
+v_map map(int, int),
+v_array int[],
+v_struct struct<a int,b int>,
+v_json jsonb,
+v_one_layer_struct struct<id bigint, v_small_int smallint, v_int int, v_long bigint, v_float real, v_double double, v_varchar varchar, v_bool boolean, v_date date, v_timestamp timestamptz, v_ts_ntz timestamp, v_decimal decimal, v_json jsonb>
+)
+
+statement ok
+INSERT INTO full_type_t VALUES
+(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, map {1:100,2:200}, array[1,2,3], row(1,2), '{"a":"foo", "b":"bar"}', row(1, 1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11, '{"a":"foo", "b":"bar"}')),
+(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, map {3:300}, array[1,null,3], row(3,null), '{"k2":[2,true,4]}', row(2, 2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00',2.22, '{"k2":[2,true,4]}')),
+(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', null, null, null, '1', row(3, 3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00','inf', '1')),
+(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', null, null, null, 'true', row(4, 4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00','-inf', 'true'));
+
+
+
+
+
+
+
+statement ok
+FLUSH;
+
+query ???????????????? rowsort
+select * from full_type_t
+----
+1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.11 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.11,"{""a"": ""foo"", ""b"": ""bar""}")
+2 2 2 2000 2.2 2.22 2-2 f 2022-03-12 2022-03-12 02:00:00+00:00 2022-03-12 02:00:00 2.22 {3:300} {1,NULL,3} (3,) {"k2": [2, true, 4]} (2,2,2,2000,2.2,2.22,2-2,f,2022-03-12,"2022-03-12 02:00:00+00:00","2022-03-12 02:00:00",2.22,"{""k2"": [2, true, 4]}")
+3 3 3 3000 3.3 3.33 3-3 t 2022-03-13 2022-03-13 03:00:00+00:00 2022-03-13 03:00:00 Infinity NULL NULL NULL 1 (3,3,3,3000,3.3,3.33,3-3,t,2022-03-13,"2022-03-13 03:00:00+00:00","2022-03-13 03:00:00",Infinity,1)
+4 4 4 4000 4.4 4.44 4-4 f 2022-03-14 2022-03-14 04:00:00+00:00 2022-03-14 04:00:00 -Infinity NULL NULL NULL true (4,4,4,4000,4.4,4.44,4-4,f,2022-03-14,"2022-03-14 04:00:00+00:00","2022-03-14 04:00:00",-Infinity,true)
+
+statement ok
+DROP TABLE full_type_t;
+
+
+
