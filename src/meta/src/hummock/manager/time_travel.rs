@@ -443,7 +443,21 @@ impl HummockManager {
 
         let mut version_sst_ids = None;
         if let Some(version) = version {
-            version_sst_ids = Some(version.get_sst_ids());
+            // `version_sst_ids` is used to update `last_time_travel_snapshot_sst_ids`.
+            version_sst_ids = Some(
+                version
+                    .get_sst_infos()
+                    .filter_map(|s| {
+                        if s.table_ids
+                            .iter()
+                            .any(|tid| time_travel_table_ids.contains(tid))
+                        {
+                            return Some(s.sst_id);
+                        }
+                        None
+                    })
+                    .collect(),
+            );
             write_sstable_infos(
                 version.get_sst_infos().filter(|s| {
                     !skip_sst_ids.contains(&s.sst_id)
