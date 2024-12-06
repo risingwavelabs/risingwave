@@ -62,6 +62,9 @@ const DISABLE_DML_RATE_LIMIT: i32 = -1;
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
 
+/// Default to bypass cluster limits iff in debug mode.
+const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
+
 #[serde_as]
 /// This is the Session Config of RisingWave.
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
