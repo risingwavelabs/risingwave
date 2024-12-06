@@ -44,7 +44,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_meta_model::exactly_once_iceberg_sink::{self, Model};
+use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Model};
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -426,13 +426,32 @@ impl Sink for IcebergSink {
         {
             let metadata_map = self
                 .get_metadata_by_sink_id(&db, self.param.sink_id.sink_id())
-                .await?;
-
-            if self.all_files_in_snapshot(&self.config, &vec![]).await? {
-                // skip
-            } else {
-                // recommit
+                .await.unwrap();
+            for (end_epoch, sealized_bytes) in metadata_map{
+                let write_results_bytes  =deserialize_metadata(sealized_bytes);
+                let mut write_results = vec![];
+                for each in write_results_bytes{
+                    let write_result = WriteResult::try_from_sealized_bytes(&each, &partition_type)?;
+                    write_results.push(write_result);
+                }
+                if self.all_files_in_snapshot(&self.config, &vec![]).await? {
+                    // skip
+                } else {
+                    // recommit
+    
+    
+                    let mut  re_commit_committer = IcebergSinkCommitter {
+                        catalog: catalog.clone(),
+                        table,
+                        partition_type,
+                        last_commit_epoch: 0,
+                        sink_id: self.param.sink_id.sink_id(),
+                        db,
+                    };
+                    re_commit_committer.re_commit(end_epoch, write_results).await?;
+                }
             }
+           
         }
 
         Ok(IcebergSinkCommitter {
@@ -460,29 +479,23 @@ impl IcebergSink {
         Ok(count > 0)
     }
 
-    async fn get_metadata_by_sink_id(
-        &self,
+    pub async fn get_metadata_by_sink_id(
+        &self, 
         db: &DatabaseConnection,
         sink_id: u32,
-    ) -> anyhow::Result<BTreeMap<u64, Vec<Vec<u8>>>> {
-        // 查询所有 sink_id 匹配的记录
-        let rows = exactly_once_iceberg_sink::Entity::find()
-            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+    ) -> anyhow::Result<BTreeMap<u64, Vec<u8>>, Box<dyn std::error::Error>> {
+        let models: Vec<Model> = Entity::find()
+            .filter(Column::SinkId.eq(sink_id))
             .all(db)
             .await?;
-
-        // 创建一个 BTreeMap 以存储 end_epoch 和对应的 metadata
-        let mut metadata_map: BTreeMap<u64, Vec<Vec<u8>>> = BTreeMap::new();
-
-        // 遍历每一行，按 end_epoch 分类 metadata
-        for row in rows {
-            metadata_map
-                .entry(row.end_epoch) // 使用 end_epoch 作为键
-                .or_insert_with(Vec::new) // 如果不存在，插入一个新的 Vec<u8>
-                .push(row.metadata); // 将当前行的 metadata 添加到对应的 Vec<u8> 中
+    
+        let mut result = BTreeMap::new();
+        
+        for model in models {
+            result.insert(model.end_epoch, model.metadata);
         }
-
-        Ok(metadata_map) // 返回包含 end_epoch 和对应 metadata 的 BTreeMap
+    
+        Ok(result)
     }
 
     async fn all_files_in_snapshot(
@@ -905,6 +918,49 @@ impl WriteResult {
             bail!("Can't create iceberg sink write result from empty data!")
         }
     }
+
+    pub fn try_from_sealized_bytes(value: &Vec<u8>, partition_type: &Any) -> Result<Self> {
+            let mut values = if let serde_json::Value::Object(v) =
+                serde_json::from_slice::<serde_json::Value>(&value)
+                    .context("Can't parse iceberg sink metadata")?
+            {
+                v
+            } else {
+                bail!("iceberg sink metadata should be an object");
+            };
+
+            let data_files: Vec<DataFile>;
+            let delete_files: Vec<DataFile>;
+            if let serde_json::Value::Array(values) = values
+                .remove(DATA_FILES)
+                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+            {
+                data_files = values
+                    .into_iter()
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
+                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                    .unwrap();
+            } else {
+                bail!("iceberg sink metadata should have data_files object");
+            }
+            if let serde_json::Value::Array(values) = values
+                .remove(DELETE_FILES)
+                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+            {
+                delete_files = values
+                    .into_iter()
+                    .map(|value| data_file_from_json(value, partition_type.clone()))
+                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                    .context("Failed to parse data file from json")?;
+            } else {
+                bail!("Iceberg sink metadata should have data_files object");
+            }
+            Ok(Self {
+                data_files,
+                delete_files,
+            })
+       
+    }
 }
 
 impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
@@ -946,6 +1002,43 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
     }
 }
 
+
+
+impl TryFrom<WriteResult> for Vec<u8> {
+    type Error = SinkError;
+
+    fn try_from(value: WriteResult) -> std::result::Result<Vec<u8>, Self::Error> {
+        let json_data_files = serde_json::Value::Array(
+            value
+                .data_files
+                .iter()
+                .cloned()
+                .map(data_file_to_json)
+                .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_delete_files = serde_json::Value::Array(
+            value
+                .delete_files
+                .iter()
+                .cloned()
+                .map(data_file_to_json)
+                .collect::<std::result::Result<Vec<serde_json::Value>, icelake::Error>>()
+                .context("Can't serialize data files to json")?,
+        );
+        let json_value = serde_json::Value::Object(
+            vec![
+                (DATA_FILES.to_string(), json_data_files),
+                (DELETE_FILES.to_string(), json_delete_files),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        Ok(serde_json::to_vec(&json_value)
+        .context("Can't serialize iceberg sink metadata")?)
+    }
+}
+
 pub struct IcebergSinkCommitter {
     pub catalog: CatalogRef,
     pub table: Table,
@@ -984,7 +1077,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}.");
-        let write_results = metadata
+        let write_results: Vec<WriteResult> = metadata
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
@@ -997,8 +1090,17 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
+        let mut pre_commit_metadata_bytes = Vec::new();
+
+        for each_parallelism_write_result in write_results.clone() {
+                let each_parallelism_write_result_bytes: Vec<u8> = each_parallelism_write_result.try_into()?;
+                pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            
+        }
+        
+        let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
         // todo: write into meta store
-        self.persist_pre_commit_metadata(self.db.clone(), self.last_commit_epoch, epoch, vec![])
+        self.persist_pre_commit_metadata(self.db.clone(), self.last_commit_epoch, epoch, pre_commit_metadata_bytes)
             .await?;
 
         self.last_commit_epoch = epoch;
@@ -1023,7 +1125,44 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     }
 }
 
+
+
 impl IcebergSinkCommitter {
+
+    // do not pre_commit
+    async fn re_commit(&mut self, epoch: u64, write_results: Vec<WriteResult> ) -> Result<()> {
+        tracing::info!("Starting iceberg re commit in epoch {epoch}.");
+
+        if write_results.is_empty()
+            || write_results
+                .iter()
+                .all(|r| r.data_files.is_empty() && r.delete_files.is_empty())
+        {
+            tracing::debug!(?epoch, "no data to commit");
+            return Ok(());
+        }
+        self.last_commit_epoch = epoch;
+        // Load the latest table to avoid concurrent modification with the best effort.
+        self.table = self
+            .catalog
+            .clone()
+            .load_table(self.table.table_name())
+            .await?;
+        let mut txn = Transaction::new(&mut self.table);
+        write_results.into_iter().for_each(|s| {
+            txn.append_data_file(s.data_files);
+            txn.append_delete_file(s.delete_files);
+        });
+        txn.commit().await.map_err(|err| {
+            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+            SinkError::Iceberg(anyhow!(err))
+        })?;
+
+        tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+        Ok(())
+    }
+
+
     async fn persist_pre_commit_metadata(
         &self,
         db: DatabaseConnection,
@@ -1096,6 +1235,14 @@ pub fn try_matches_arrow_schema(
         }
     }
     Ok(())
+}
+
+pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
+    serde_json::to_vec(&metadata).unwrap() 
+}
+
+pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+    serde_json::from_slice(&bytes).unwrap()
 }
 
 #[cfg(test)]
