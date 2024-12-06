@@ -255,12 +255,22 @@ impl HummockManager {
                         .get(table_id)
                         .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
                 });
+        let time_travel_table_ids: HashSet<_> = self
+            .metadata_manager
+            .catalog_controller
+            .list_time_travel_table_ids()
+            .await
+            .map_err(|e| Error::Internal(e.into()))?
+            .into_iter()
+            .map(|id| id.try_into().unwrap())
+            .collect();
         let mut txn = self.env.meta_store_ref().conn.begin().await?;
         let version_snapshot_sst_ids = self
             .write_time_travel_metadata(
                 &txn,
                 time_travel_version,
                 time_travel_delta,
+                time_travel_table_ids,
                 &versioning.last_time_travel_snapshot_sst_ids,
                 time_travel_tables_to_commit,
             )

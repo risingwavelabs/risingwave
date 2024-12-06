@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
-use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo};
+use risingwave_pb::hummock::{group_delta, PbEpochNewChangeLog, PbLevel, PbSstableInfo};
 
 use crate::change_log::{TableChangeLog, TableChangeLogCommon};
+use crate::compaction_group::StateTableId;
 use crate::level::Level;
 use crate::sstable_info::SstableInfo;
 use crate::version::{
@@ -89,8 +90,9 @@ fn refill_sstable_info(
 }
 
 /// `SStableInfo` will be stripped.
-impl From<&HummockVersion> for IncompleteHummockVersion {
-    fn from(version: &HummockVersion) -> Self {
+impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersion {
+    fn from(p: (&HummockVersion, &HashSet<StateTableId>)) -> Self {
+        let (version, time_travel_table_ids) = p;
         #[expect(deprecated)]
         Self {
             id: version.id,
@@ -98,10 +100,8 @@ impl From<&HummockVersion> for IncompleteHummockVersion {
                 .levels
                 .iter()
                 .map(|(group_id, levels)| {
-                    (
-                        *group_id as CompactionGroupId,
-                        PbLevels::from(levels).into(),
-                    )
+                    let pblevels = rewrite_levels(PbLevels::from(levels), time_travel_table_ids);
+                    (*group_id as CompactionGroupId, pblevels.into())
                 })
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
@@ -109,18 +109,44 @@ impl From<&HummockVersion> for IncompleteHummockVersion {
             table_change_log: version
                 .table_change_log
                 .iter()
-                .map(|(table_id, change_log)| {
+                .filter_map(|(table_id, change_log)| {
+                    if !time_travel_table_ids.contains(&table_id.table_id()) {
+                        return None;
+                    }
+                    // TODO: sst must contains table_id
                     let incomplete_table_change_log = change_log
                         .0
                         .iter()
                         .map(|e| PbEpochNewChangeLog::from(e).into())
                         .collect();
-                    (*table_id, TableChangeLogCommon(incomplete_table_change_log))
+                    Some((*table_id, TableChangeLogCommon(incomplete_table_change_log)))
                 })
                 .collect(),
             state_table_info: version.state_table_info.clone(),
         }
     }
+}
+
+/// Removes SST refs that don't contain any of `time_travel_table_ids`.
+fn rewrite_levels(mut levels: PbLevels, time_travel_table_ids: &HashSet<StateTableId>) -> PbLevels {
+    fn rewrite_level(level: &mut PbLevel, time_travel_table_ids: &HashSet<StateTableId>) {
+        // The stats like `total_file_size` are not updated accordingly since they won't be used in time travel query.
+        level.table_infos.retain(|sst| {
+            sst.table_ids
+                .iter()
+                .any(|tid| time_travel_table_ids.contains(tid))
+        });
+    }
+    for level in &mut levels.levels {
+        rewrite_level(level, time_travel_table_ids);
+    }
+    if let Some(l0) = levels.l0.as_mut() {
+        for sub_level in &mut l0.sub_levels {
+            rewrite_level(sub_level, time_travel_table_ids);
+        }
+        l0.sub_levels.retain(|s| !s.table_infos.is_empty());
+    }
+    levels
 }
 
 /// [`IncompleteHummockVersionDelta`] is incomplete because `SSTableInfo` only has the `sst_id` set in the following fields:
@@ -129,8 +155,9 @@ impl From<&HummockVersion> for IncompleteHummockVersion {
 pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVersion>;
 
 /// `SStableInfo` will be stripped.
-impl From<&HummockVersionDelta> for IncompleteHummockVersionDelta {
-    fn from(delta: &HummockVersionDelta) -> Self {
+impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockVersionDelta {
+    fn from(p: (&HummockVersionDelta, &HashSet<StateTableId>)) -> Self {
+        let (delta, time_travel_table_ids) = p;
         #[expect(deprecated)]
         Self {
             id: delta.id,
@@ -138,7 +165,11 @@ impl From<&HummockVersionDelta> for IncompleteHummockVersionDelta {
             group_deltas: delta
                 .group_deltas
                 .iter()
-                .map(|(cg_id, deltas)| (*cg_id, PbGroupDeltas::from(deltas).into()))
+                .map(|(cg_id, deltas)| {
+                    let pb_group_deltas =
+                        rewrite_group_deltas(PbGroupDeltas::from(deltas), time_travel_table_ids);
+                    (*cg_id, pb_group_deltas.into())
+                })
                 .collect(),
             max_committed_epoch: delta.max_committed_epoch,
             trivial_move: delta.trivial_move,
@@ -147,11 +178,38 @@ impl From<&HummockVersionDelta> for IncompleteHummockVersionDelta {
             change_log_delta: delta
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| (*table_id, PbChangeLogDelta::from(log_delta).into()))
+                .filter_map(|(table_id, log_delta)| {
+                    if !time_travel_table_ids.contains(&table_id.table_id()) {
+                        return None;
+                    }
+                    // TODO: sst must contains table_id
+                    Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
+                })
                 .collect(),
             state_table_info_delta: delta.state_table_info_delta.clone(),
         }
     }
+}
+
+/// Removes SST refs that don't contain any of `time_travel_table_ids`.
+fn rewrite_group_deltas(
+    mut group_deltas: PbGroupDeltas,
+    time_travel_table_ids: &HashSet<StateTableId>,
+) -> PbGroupDeltas {
+    for group_delta in &mut group_deltas.group_deltas {
+        let Some(group_delta::DeltaType::NewL0SubLevel(new_sub_level)) =
+            &mut group_delta.delta_type
+        else {
+            tracing::error!(?group_delta, "unexpected delta type");
+            continue;
+        };
+        new_sub_level.inserted_table_infos.retain(|sst| {
+            sst.table_ids
+                .iter()
+                .any(|tid| time_travel_table_ids.contains(tid))
+        });
+    }
+    group_deltas
 }
 
 pub struct SstableIdInVersion {

@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::time_travel::{
     refill_version, IncompleteHummockVersion, IncompleteHummockVersionDelta,
@@ -380,6 +381,7 @@ impl HummockManager {
         txn: &DatabaseTransaction,
         version: Option<&HummockVersion>,
         delta: HummockVersionDelta,
+        time_travel_table_ids: HashSet<StateTableId>,
         skip_sst_ids: &HashSet<HummockSstableId>,
         tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId, u64)>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
@@ -443,9 +445,12 @@ impl HummockManager {
         if let Some(version) = version {
             version_sst_ids = Some(version.get_sst_ids());
             write_sstable_infos(
-                version
-                    .get_sst_infos()
-                    .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+                version.get_sst_infos().filter(|s| {
+                    !skip_sst_ids.contains(&s.sst_id)
+                        && s.table_ids
+                            .iter()
+                            .any(|tid| time_travel_table_ids.contains(tid))
+                }),
                 txn,
                 self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
             )
@@ -455,7 +460,11 @@ impl HummockManager {
                     version.id.to_u64(),
                 )
                 .unwrap()),
-                version: Set((&IncompleteHummockVersion::from(version).to_protobuf()).into()),
+                version: Set(
+                    (&IncompleteHummockVersion::from((version, &time_travel_table_ids))
+                        .to_protobuf())
+                        .into(),
+                ),
             };
             hummock_time_travel_version::Entity::insert(m)
                 .on_conflict_do_nothing()
@@ -463,9 +472,12 @@ impl HummockManager {
                 .await?;
         }
         let written = write_sstable_infos(
-            delta
-                .newly_added_sst_infos()
-                .filter(|s| !skip_sst_ids.contains(&s.sst_id)),
+            delta.newly_added_sst_infos().filter(|s| {
+                !skip_sst_ids.contains(&s.sst_id)
+                    && s.table_ids
+                        .iter()
+                        .any(|tid| time_travel_table_ids.contains(tid))
+            }),
             txn,
             self.env.opts.hummock_time_travel_sst_info_insert_batch_size,
         )
@@ -477,9 +489,12 @@ impl HummockManager {
                     delta.id.to_u64(),
                 )
                 .unwrap()),
-                version_delta: Set(
-                    (&IncompleteHummockVersionDelta::from(&delta).to_protobuf()).into()
-                ),
+                version_delta: Set((&IncompleteHummockVersionDelta::from((
+                    &delta,
+                    &time_travel_table_ids,
+                ))
+                .to_protobuf())
+                    .into()),
             };
             hummock_time_travel_delta::Entity::insert(m)
                 .on_conflict_do_nothing()
