@@ -420,39 +420,6 @@ impl Sink for IcebergSink {
         let catalog = self.config.create_catalog().await?;
         let table = self.create_and_validate_table().await?;
         let partition_type = table.current_partition_type()?;
-        if self
-            .iceberg_sink_has_pre_commit_metadata(&db, self.param.sink_id.sink_id())
-            .await?
-        {
-            let metadata_map = self
-                .get_metadata_by_sink_id(&db, self.param.sink_id.sink_id())
-                .await.unwrap();
-            for (end_epoch, sealized_bytes) in metadata_map{
-                let write_results_bytes  =deserialize_metadata(sealized_bytes);
-                let mut write_results = vec![];
-                for each in write_results_bytes{
-                    let write_result = WriteResult::try_from_sealized_bytes(&each, &partition_type)?;
-                    write_results.push(write_result);
-                }
-                if self.all_files_in_snapshot(&self.config, &vec![]).await? {
-                    // skip
-                } else {
-                    // recommit
-    
-    
-                    let mut  re_commit_committer = IcebergSinkCommitter {
-                        catalog: catalog.clone(),
-                        table,
-                        partition_type,
-                        last_commit_epoch: 0,
-                        sink_id: self.param.sink_id.sink_id(),
-                        db,
-                    };
-                    re_commit_committer.re_commit(end_epoch, write_results).await?;
-                }
-            }
-           
-        }
 
         Ok(IcebergSinkCommitter {
             catalog,
@@ -460,84 +427,14 @@ impl Sink for IcebergSink {
             partition_type,
             last_commit_epoch: 0,
             sink_id: self.param.sink_id.sink_id(),
+            config: self.config.clone(),
+            param: self.param.clone(),
             db,
         })
     }
 }
 
-impl IcebergSink {
-    async fn iceberg_sink_has_pre_commit_metadata(
-        &self,
-        db: &DatabaseConnection,
-        sink_id: u32,
-    ) -> anyhow::Result<bool> {
-        let count = exactly_once_iceberg_sink::Entity::find()
-            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
-            .count(db)
-            .await?;
-
-        Ok(count > 0)
-    }
-
-    pub async fn get_metadata_by_sink_id(
-        &self, 
-        db: &DatabaseConnection,
-        sink_id: u32,
-    ) -> anyhow::Result<BTreeMap<u64, Vec<u8>>, Box<dyn std::error::Error>> {
-        let models: Vec<Model> = Entity::find()
-            .filter(Column::SinkId.eq(sink_id))
-            .all(db)
-            .await?;
-    
-        let mut result = BTreeMap::new();
-        
-        for model in models {
-            result.insert(model.end_epoch, model.metadata);
-        }
-    
-        Ok(result)
-    }
-
-    async fn all_files_in_snapshot(
-        &self,
-        iceberg_config: &IcebergConfig,
-        file_names: &[String],
-    ) -> anyhow::Result<bool> {
-        let iceberg_common = iceberg_config.common.clone();
-        // todo: handel unwrap
-        let table = iceberg_common
-            .load_table_v2(&iceberg_config.java_catalog_props)
-            .await
-            .unwrap();
-        if let Some(snapshot) = table.metadata().current_snapshot() {
-            let manifest_list: ManifestList = snapshot
-                .load_manifest_list(table.file_io(), table.metadata())
-                .await?;
-
-            let mut files_in_snapshot: Vec<String> = vec![];
-            for entry in manifest_list.entries() {
-                let manifest = entry.load_manifest(table.file_io()).await?;
-
-                let manifest_entries = manifest
-                    .entries()
-                    .iter()
-                    .filter(|e| e.is_alive())
-                    .map(|e| e.data_file().file_path().to_string())
-                    .collect::<Vec<_>>();
-
-                files_in_snapshot.extend(manifest_entries);
-            }
-
-            for file_name in file_names {
-                if !files_in_snapshot.contains(file_name) {
-                    return Ok(false);
-                }
-            }
-        }
-
-        Ok(true)
-    }
-}
+impl IcebergSink {}
 
 pub struct IcebergWriter {
     inner_writer: IcebergWriterEnum,
@@ -920,46 +817,45 @@ impl WriteResult {
     }
 
     pub fn try_from_sealized_bytes(value: &Vec<u8>, partition_type: &Any) -> Result<Self> {
-            let mut values = if let serde_json::Value::Object(v) =
-                serde_json::from_slice::<serde_json::Value>(&value)
-                    .context("Can't parse iceberg sink metadata")?
-            {
-                v
-            } else {
-                bail!("iceberg sink metadata should be an object");
-            };
+        let mut values = if let serde_json::Value::Object(v) =
+            serde_json::from_slice::<serde_json::Value>(&value)
+                .context("Can't parse iceberg sink metadata")?
+        {
+            v
+        } else {
+            bail!("iceberg sink metadata should be an object");
+        };
 
-            let data_files: Vec<DataFile>;
-            let delete_files: Vec<DataFile>;
-            if let serde_json::Value::Array(values) = values
-                .remove(DATA_FILES)
-                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
-            {
-                data_files = values
-                    .into_iter()
-                    .map(|value| data_file_from_json(value, partition_type.clone()))
-                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
-                    .unwrap();
-            } else {
-                bail!("iceberg sink metadata should have data_files object");
-            }
-            if let serde_json::Value::Array(values) = values
-                .remove(DELETE_FILES)
-                .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
-            {
-                delete_files = values
-                    .into_iter()
-                    .map(|value| data_file_from_json(value, partition_type.clone()))
-                    .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
-                    .context("Failed to parse data file from json")?;
-            } else {
-                bail!("Iceberg sink metadata should have data_files object");
-            }
-            Ok(Self {
-                data_files,
-                delete_files,
-            })
-       
+        let data_files: Vec<DataFile>;
+        let delete_files: Vec<DataFile>;
+        if let serde_json::Value::Array(values) = values
+            .remove(DATA_FILES)
+            .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+        {
+            data_files = values
+                .into_iter()
+                .map(|value| data_file_from_json(value, partition_type.clone()))
+                .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                .unwrap();
+        } else {
+            bail!("iceberg sink metadata should have data_files object");
+        }
+        if let serde_json::Value::Array(values) = values
+            .remove(DELETE_FILES)
+            .ok_or_else(|| anyhow!("iceberg sink metadata should have data_files object"))?
+        {
+            delete_files = values
+                .into_iter()
+                .map(|value| data_file_from_json(value, partition_type.clone()))
+                .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
+                .context("Failed to parse data file from json")?;
+        } else {
+            bail!("Iceberg sink metadata should have data_files object");
+        }
+        Ok(Self {
+            data_files,
+            delete_files,
+        })
     }
 }
 
@@ -1002,8 +898,6 @@ impl<'a> TryFrom<&'a WriteResult> for SinkMetadata {
     }
 }
 
-
-
 impl TryFrom<WriteResult> for Vec<u8> {
     type Error = SinkError;
 
@@ -1034,8 +928,7 @@ impl TryFrom<WriteResult> for Vec<u8> {
             .into_iter()
             .collect(),
         );
-        Ok(serde_json::to_vec(&json_value)
-        .context("Can't serialize iceberg sink metadata")?)
+        Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
     }
 }
 
@@ -1046,6 +939,8 @@ pub struct IcebergSinkCommitter {
     pub last_commit_epoch: u64,
 
     pub(crate) sink_id: u32,
+    pub(crate) config: IcebergConfig,
+    pub(crate) param: SinkParam,
     pub(crate) db: DatabaseConnection,
 }
 
@@ -1071,6 +966,38 @@ impl IcebergPreCommitMetadata {
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
+        if self
+            .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
+            .await?
+        {
+            tracing::info!("Re commit");
+            let metadata_map = self
+                .get_metadata_by_sink_id(&self.db, self.param.sink_id.sink_id())
+                .await
+                .unwrap();
+            let partition_type = self.table.current_partition_type()?;
+            for (end_epoch, sealized_bytes) in metadata_map {
+                let write_results_bytes = deserialize_metadata(sealized_bytes);
+                let mut write_results = vec![];
+
+                for each in write_results_bytes {
+                    let write_result =
+                        WriteResult::try_from_sealized_bytes(&each, &partition_type)?;
+                    write_results.push(write_result);
+                }
+                if self
+                    .all_files_in_snapshot(&self.config, &write_results)
+                    .await?
+                {
+                    // skip
+                } else {
+                    // recommit
+
+                    self.re_commit(end_epoch, write_results).await?;
+                }
+            }
+        }
+
         tracing::info!("Iceberg commit coordinator inited.");
         Ok(())
     }
@@ -1093,15 +1020,20 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
         let mut pre_commit_metadata_bytes = Vec::new();
 
         for each_parallelism_write_result in write_results.clone() {
-                let each_parallelism_write_result_bytes: Vec<u8> = each_parallelism_write_result.try_into()?;
-                pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
-            
+            let each_parallelism_write_result_bytes: Vec<u8> =
+                each_parallelism_write_result.try_into()?;
+            pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
         }
-        
+
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
         // todo: write into meta store
-        self.persist_pre_commit_metadata(self.db.clone(), self.last_commit_epoch, epoch, pre_commit_metadata_bytes)
-            .await?;
+        self.persist_pre_commit_metadata(
+            self.db.clone(),
+            self.last_commit_epoch,
+            epoch,
+            pre_commit_metadata_bytes,
+        )
+        .await?;
 
         self.last_commit_epoch = epoch;
         // Load the latest table to avoid concurrent modification with the best effort.
@@ -1125,12 +1057,9 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     }
 }
 
-
-
 impl IcebergSinkCommitter {
-
     // do not pre_commit
-    async fn re_commit(&mut self, epoch: u64, write_results: Vec<WriteResult> ) -> Result<()> {
+    async fn re_commit(&mut self, epoch: u64, write_results: Vec<WriteResult>) -> Result<()> {
         tracing::info!("Starting iceberg re commit in epoch {epoch}.");
 
         if write_results.is_empty()
@@ -1162,7 +1091,6 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-
     async fn persist_pre_commit_metadata(
         &self,
         db: DatabaseConnection,
@@ -1180,6 +1108,88 @@ impl IcebergSinkCommitter {
             .exec(&db)
             .await?;
         Ok(())
+    }
+
+    async fn iceberg_sink_has_pre_commit_metadata(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> anyhow::Result<bool> {
+        let count = exactly_once_iceberg_sink::Entity::find()
+            .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
+            .count(db)
+            .await?;
+
+        Ok(count > 0)
+    }
+
+    pub async fn get_metadata_by_sink_id(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+    ) -> anyhow::Result<BTreeMap<u64, Vec<u8>>, Box<dyn std::error::Error>> {
+        let models: Vec<Model> = Entity::find()
+            .filter(Column::SinkId.eq(sink_id))
+            .all(db)
+            .await?;
+
+        let mut result = BTreeMap::new();
+
+        for model in models {
+            result.insert(model.end_epoch, model.metadata);
+        }
+
+        Ok(result)
+    }
+
+    async fn all_files_in_snapshot(
+        &self,
+        iceberg_config: &IcebergConfig,
+        write_results: &[WriteResult],
+    ) -> anyhow::Result<bool> {
+        let iceberg_common = iceberg_config.common.clone();
+        // todo: handle unwrap
+        let table = iceberg_common
+            .load_table_v2(&iceberg_config.java_catalog_props)
+            .await
+            .unwrap();
+
+        if let Some(snapshot) = table.metadata().current_snapshot() {
+            let manifest_list: ManifestList = snapshot
+                .load_manifest_list(table.file_io(), table.metadata())
+                .await?;
+
+            let mut files_in_snapshot: Vec<String> = vec![];
+            for entry in manifest_list.entries() {
+                let manifest = entry.load_manifest(table.file_io()).await?;
+
+                let manifest_entries = manifest
+                    .entries()
+                    .iter()
+                    .filter(|e| e.is_alive())
+                    .map(|e| e.data_file().file_path().to_string())
+                    .collect::<Vec<_>>();
+
+                files_in_snapshot.extend(manifest_entries);
+            }
+
+            for write_result in write_results {
+                for data_file in &write_result.data_files {
+                    let file_path = data_file.file_path.to_string();
+                    if !files_in_snapshot.contains(&file_path) {
+                        return Ok(false);
+                    }
+                }
+                for delete_file in &write_result.delete_files {
+                    let file_path = delete_file.file_path.to_string();
+                    if files_in_snapshot.contains(&file_path) {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -1238,7 +1248,7 @@ pub fn try_matches_arrow_schema(
 }
 
 pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
-    serde_json::to_vec(&metadata).unwrap() 
+    serde_json::to_vec(&metadata).unwrap()
 }
 
 pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
