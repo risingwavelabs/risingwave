@@ -14,13 +14,11 @@
 
 use std::sync::LazyLock;
 
-use futures::{Future, TryFutureExt};
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{Datum, DatumCow, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
@@ -30,7 +28,7 @@ use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
     extreact_timestamp_from_meta,
 };
-use crate::source::{ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceMeta};
+use crate::source::{SourceColumnDesc, SourceColumnType, SourceMeta};
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {

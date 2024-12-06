@@ -32,7 +32,6 @@ use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{Datum, DatumCow, DatumRef};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
 use thiserror_ext::AsReport;
