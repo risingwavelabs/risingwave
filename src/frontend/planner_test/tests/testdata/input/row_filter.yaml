@@ -1,0 +1,25 @@
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2,v3) > (1,2,3);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2) > (1,2);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v3) > (2,3);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v3,v2,v1) > (1,2,3);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(v1 int, v2 int, v3 int, primary key(v1,v2,v3));
+    select * from t where (v1,v2,v1) > (1,2,3);
+  expected_outputs:
+  - batch_plan
