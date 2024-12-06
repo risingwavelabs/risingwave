@@ -368,6 +368,7 @@ impl Condition {
                     if let Some(left_input) = f.inputs().get(0)
                         && let Some(left_input) = left_input.as_function_call()
                         && matches!(left_input.func_type(), ExprType::Row)
+                        && left_input.inputs().iter().all(|x| x.is_input_ref())
                         && let Some(right_input) = f.inputs().get(1)
                         && right_input.is_literal()
                     {
