@@ -570,6 +570,33 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 )
                                                 .await?;
                                         }
+                                        Mutation::Throttle(actor_to_apply) => {
+                                            if let Some(new_rate_limit) =
+                                                actor_to_apply.get(&self.actor_ctx.id)
+                                                && *new_rate_limit != self.rate_limit_rps
+                                            {
+                                                tracing::info!(
+                                                    "updating rate limit from {:?} to {:?}",
+                                                    self.rate_limit_rps,
+                                                    *new_rate_limit
+                                                );
+                                                self.rate_limit_rps = *new_rate_limit;
+                                                // rebuild reader
+                                                let (reader, _backfill_info) = self
+                                                    .build_stream_source_reader(
+                                                        &source_desc,
+                                                        backfill_stage
+                                                            .get_latest_unfinished_splits()?,
+                                                    )
+                                                    .await?;
+
+                                                backfill_stream = select_with_strategy(
+                                                    input.by_ref().map(Either::Left),
+                                                    reader.map(Either::Right),
+                                                    select_strategy,
+                                                );
+                                            }
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -609,7 +636,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    tracing::debug!("progress finish");
                                     self.progress.finish(
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),

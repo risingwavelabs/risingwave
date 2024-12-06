@@ -138,10 +138,17 @@ impl ReplayRead for GlobalReplayImpl {
 
 #[async_trait::async_trait]
 impl ReplayStateStore for GlobalReplayImpl {
-    async fn sync(&self, id: u64, table_ids: Vec<u32>) -> Result<usize> {
+    async fn sync(&self, sync_table_epochs: Vec<(u64, Vec<u32>)>) -> Result<usize> {
         let result: SyncResult = self
             .store
-            .sync(id, table_ids.into_iter().map(TableId::new).collect())
+            .sync(
+                sync_table_epochs
+                    .into_iter()
+                    .map(|(epoch, table_ids)| {
+                        (epoch, table_ids.into_iter().map(TableId::new).collect())
+                    })
+                    .collect(),
+            )
             .await
             .map_err(|e| TraceError::SyncFailed(format!("{e}")))?;
         Ok(result.sync_size)

@@ -1,0 +1,22 @@
+comment:
+  header: Hi, there.
+  footer: "\
+    ---\n\n\
+    > This is an automated comment created by the [peaceiris/actions-label-commenter]. \
+    Responding to the bot or mentioning it won't have any effect.\n\n\
+    [peaceiris/actions-label-commenter]: https://github.com/peaceiris/actions-label-commenter"
+
+labels:
+  - name: 'user-facing-changes'
+    labeled:
+      pr:
+        body: |
+          :memo: **Telemetry Reminder**:
+          If you're implementing this feature, please consider adding telemetry metrics to track its usage. This helps us understand how the feature is being used and improve it further.
+          You can find the function `report_event` of telemetry reporting in the following files. Feel free to ask questions if you need any guidance!
+          * `src/frontend/src/telemetry.rs`
+          * `src/meta/src/telemetry.rs`
+          * `src/stream/src/telemetry.rs`
+          * `src/storage/compactor/src/telemetry.rs`
+          Or calling `report_event_common` (`src/common/telemetry_event/src/lib.rs`) as if finding it hard to implement.
+          :sparkles: Thank you for your contribution to RisingWave! :sparkles:

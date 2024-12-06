@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
@@ -84,20 +83,21 @@ impl ToDistributedBatch for BatchUpdate {
 
 impl ToBatchPb for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let exprs = self.core.exprs.iter().map(|x| x.to_expr_proto()).collect();
-
-        let update_column_indices = self
-            .core
-            .update_column_indices
+        let old_exprs = (self.core.old_exprs)
             .iter()
-            .map(|i| *i as _)
-            .collect_vec();
+            .map(|x| x.to_expr_proto())
+            .collect();
+        let new_exprs = (self.core.new_exprs)
+            .iter()
+            .map(|x| x.to_expr_proto())
+            .collect();
+
         NodeBody::Update(UpdateNode {
-            exprs,
             table_id: self.core.table_id.table_id(),
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
-            update_column_indices,
+            old_exprs,
+            new_exprs,
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
@@ -125,6 +125,6 @@ impl ExprRewritable for BatchUpdate {
 
 impl ExprVisitable for BatchUpdate {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
+        self.core.visit_exprs(v);
     }
 }

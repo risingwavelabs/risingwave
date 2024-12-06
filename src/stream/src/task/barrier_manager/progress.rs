@@ -19,8 +19,8 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
 use super::LocalBarrierManager;
+use crate::task::barrier_manager::managed_state::DatabaseManagedBarrierState;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::barrier_manager::LocalBarrierWorker;
 use crate::task::ActorId;
 
 type ConsumedEpoch = u64;
@@ -86,16 +86,16 @@ impl Display for BackfillState {
     }
 }
 
-impl LocalBarrierWorker {
+impl DatabaseManagedBarrierState {
     pub(crate) fn update_create_mview_progress(
         &mut self,
         epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
     ) {
-        if let Some(actor_state) = self.state.actor_states.get(&actor)
+        if let Some(actor_state) = self.actor_states.get(&actor)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.state.graph_states.get_mut(partial_graph_id)
+            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
         {
             graph_state
                 .create_mview_progress
@@ -250,6 +250,7 @@ impl CreateMviewProgressReporter {
         if let Some(BackfillState::DoneConsumingUpstreamTableOrSource(_)) = self.state {
             return;
         }
+        tracing::debug!("progress finish");
         self.update_inner(
             epoch,
             BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows),

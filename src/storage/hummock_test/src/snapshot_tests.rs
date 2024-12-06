@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::CacheHint;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
@@ -32,7 +32,7 @@ use risingwave_storage::store::{
 use risingwave_storage::StateStore;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_bytes, with_hummock_storage_v2, TestIngestBatch};
+use crate::test_utils::{gen_key_from_bytes, with_hummock_storage, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
     (
@@ -59,7 +59,7 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(CacheHint::Normal),
                     read_committed: $read_committed,
                     ..Default::default()
                 },
@@ -402,36 +402,36 @@ async fn test_snapshot_range_scan_inner(
 
 #[tokio::test]
 async fn test_snapshot_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, true).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
 }

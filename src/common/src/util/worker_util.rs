@@ -13,3 +13,5 @@
 // limitations under the License.
 
 pub type WorkerNodeId = u32;
+
+pub const DEFAULT_COMPUTE_NODE_LABEL: &str = "default";

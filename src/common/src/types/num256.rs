@@ -165,14 +165,11 @@ macro_rules! impl_common_for_num256 {
         }
 
         impl ToBinary for $scalar_ref<'_> {
-            fn to_binary_with_type(
-                &self,
-                _ty: &DataType,
-            ) -> super::to_binary::Result<Option<Bytes>> {
+            fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Bytes> {
                 let mut output = bytes::BytesMut::new();
                 let buffer = self.to_be_bytes();
                 output.put_slice(&buffer);
-                Ok(Some(output.freeze()))
+                Ok(output.freeze())
             }
         }
 

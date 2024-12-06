@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::types::{DataType, Fields};
 use risingwave_frontend_macro::system_catalog;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
-use crate::expr::cast_map_array;
+use crate::expr::CAST_TABLE;
 
 /// The catalog `pg_cast` stores data type conversion paths.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
@@ -31,12 +32,11 @@ struct PgCast {
 
 #[system_catalog(table, "pg_catalog.pg_cast")]
 fn read_pg_cast(_: &SysCatalogReaderImpl) -> Vec<PgCast> {
-    let mut cast_array = cast_map_array();
-    cast_array.sort();
-    cast_array
+    CAST_TABLE
         .iter()
+        .sorted()
         .enumerate()
-        .map(|(idx, (src, target, ctx))| PgCast {
+        .map(|(idx, ((src, target), ctx))| PgCast {
             oid: idx as i32,
             castsource: DataType::try_from(*src).unwrap().to_oid(),
             casttarget: DataType::try_from(*target).unwrap().to_oid(),

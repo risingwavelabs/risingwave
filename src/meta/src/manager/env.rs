@@ -16,12 +16,12 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use risingwave_common::config::{CompactionConfig, DefaultParallelism, ObjectStoreConfig};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
-use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{
     FrontendClientPool, FrontendClientPoolRef, StreamClientPool, StreamClientPoolRef,
@@ -114,6 +114,7 @@ pub struct MetaOpts {
     pub enable_hummock_data_archive: bool,
     pub hummock_time_travel_snapshot_interval: u64,
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
+    pub hummock_time_travel_sst_info_insert_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -272,6 +273,7 @@ impl MetaOpts {
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
+            hummock_time_travel_sst_info_insert_batch_size: 10,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -329,25 +331,6 @@ impl MetaOpts {
     }
 }
 
-/// This function `is_first_launch_for_sql_backend_cluster` is used to check whether the cluster, which uses SQL as the backend, is a new cluster.
-/// It determines this by inspecting the applied migrations. If the migration `m20230908_072257_init` has been applied,
-/// then it is considered an old cluster.
-///
-/// Note: this check should be performed before `Migrator::up()`.
-pub async fn is_first_launch_for_sql_backend_cluster(
-    sql_meta_store: &SqlMetaStore,
-) -> MetaResult<bool> {
-    let migrations = Migrator::get_applied_migrations(&sql_meta_store.conn).await?;
-    for migration in migrations {
-        if migration.name() == "m20230908_072257_init"
-            && migration.status() == MigrationStatus::Applied
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
@@ -376,12 +359,13 @@ impl MetaSrvEnv {
             );
         }
 
-        let cluster_first_launch =
-            is_first_launch_for_sql_backend_cluster(&meta_store_impl).await?;
-        // Try to upgrade if any new model changes are added.
-        Migrator::up(&meta_store_impl.conn, None)
-            .await
-            .expect("Failed to upgrade models in meta store");
+        let cluster_first_launch = meta_store_impl.up().await.context(
+            "Failed to initialize the meta store, \
+            this may happen if there's existing metadata incompatible with the current version of RisingWave, \
+            e.g., downgrading from a newer release or a nightly build to an older one. \
+            For a single-node deployment, you may want to reset all data by deleting the data directory, \
+            typically located at `~/.risingwave`.",
+        )?;
 
         let notification_manager =
             Arc::new(NotificationManager::new(meta_store_impl.clone()).await);

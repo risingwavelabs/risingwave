@@ -29,7 +29,9 @@ impl Planner {
         } else {
             scan
         };
-        let input = if delete.table.table_catalog.has_generated_column() {
+        let input = if delete.table.table_catalog.has_generated_column()
+            || delete.table.table_catalog.has_rw_timestamp_column()
+        {
             LogicalProject::with_out_col_idx(
                 input,
                 delete
@@ -38,7 +40,7 @@ impl Planner {
                     .columns()
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, c)| (!c.is_generated()).then_some(i)),
+                    .filter_map(|(i, c)| (c.can_dml()).then_some(i)),
             )
             .into()
         } else {

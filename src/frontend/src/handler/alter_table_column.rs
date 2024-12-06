@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Engine};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -180,6 +180,8 @@ pub async fn get_replace_table_plan(
         wildcard_idx,
         cdc_table_info,
         format_encode,
+        include_column_options,
+        engine,
         ..
     } = new_definition
     else {
@@ -189,6 +191,11 @@ pub async fn get_replace_table_plan(
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
+    };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
@@ -206,6 +213,8 @@ pub async fn get_replace_table_plan(
         with_version_column,
         cdc_table_info,
         new_version_columns,
+        include_column_options,
+        engine,
     )
     .await?;
 
@@ -229,6 +238,7 @@ pub async fn get_replace_table_plan(
         .columns
         .iter()
         .map(|col| ColumnCatalog::from(col.clone()))
+        .filter(|col| !col.is_rw_timestamp_column())
         .collect_vec();
 
     for sink in fetch_incoming_sinks(session, &incoming_sink_ids)? {

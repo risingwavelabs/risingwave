@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
@@ -35,15 +35,15 @@ pub struct Update<PlanRef: Eq + Hash> {
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
     pub input: PlanRef,
-    pub exprs: Vec<ExprImpl>,
+    pub old_exprs: Vec<ExprImpl>,
+    pub new_exprs: Vec<ExprImpl>,
     pub returning: bool,
-    pub update_column_indices: Vec<usize>,
 }
 
 impl<PlanRef: GenericPlanRef> Update<PlanRef> {
     pub fn output_len(&self) -> usize {
         if self.returning {
-            self.input.schema().len()
+            self.new_exprs.len()
         } else {
             1
         }
@@ -56,18 +56,19 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Update<PlanRef> {
 
     fn schema(&self) -> Schema {
         if self.returning {
-            self.input.schema().clone()
+            Schema::new(
+                self.new_exprs
+                    .iter()
+                    .map(|e| Field::unnamed(e.return_type()))
+                    .collect(),
+            )
         } else {
             Schema::new(vec![Field::unnamed(DataType::Int64)])
         }
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if self.returning {
-            Some(self.input.stream_key()?.to_vec())
-        } else {
-            Some(vec![])
-        }
+        None
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -81,27 +82,31 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
-        exprs: Vec<ExprImpl>,
+        old_exprs: Vec<ExprImpl>,
+        new_exprs: Vec<ExprImpl>,
         returning: bool,
-        update_column_indices: Vec<usize>,
     ) -> Self {
         Self {
             table_name,
             table_id,
             table_version_id,
             input,
-            exprs,
+            old_exprs,
+            new_exprs,
             returning,
-            update_column_indices,
         }
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        self.exprs = self
-            .exprs
-            .iter()
-            .map(|e| r.rewrite_expr(e.clone()))
-            .collect();
+        for exprs in [&mut self.old_exprs, &mut self.new_exprs] {
+            *exprs = exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect();
+        }
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        for exprs in [&self.old_exprs, &self.new_exprs] {
+            exprs.iter().for_each(|e| v.visit_expr(e));
+        }
     }
 }
 
@@ -109,7 +114,7 @@ impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
         vec.push(("table", Pretty::from(self.table_name.clone())));
-        vec.push(("exprs", Pretty::debug(&self.exprs)));
+        vec.push(("exprs", Pretty::debug(&self.new_exprs)));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }

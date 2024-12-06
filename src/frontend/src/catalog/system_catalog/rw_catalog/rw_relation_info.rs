@@ -53,9 +53,16 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 table_ids.push(t.id.table_id);
             });
 
-            schema_catalog.iter_table().for_each(|t| {
+            schema_catalog.iter_user_table().for_each(|t| {
                 table_ids.push(t.id.table_id);
             });
+
+            schema_catalog
+                .iter_source()
+                .filter(|s| s.info.is_shared())
+                .for_each(|s| {
+                    table_ids.push(s.id);
+                });
 
             schema_catalog.iter_sink().for_each(|t| {
                 table_ids.push(t.id.sink_id);
@@ -63,10 +70,6 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
 
             schema_catalog.iter_index().for_each(|t| {
                 table_ids.push(t.index_table.id.table_id);
-            });
-
-            schema_catalog.iter_subscription().for_each(|t| {
-                table_ids.push(t.id.subscription_id);
             });
         }
     }
@@ -97,7 +100,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
             }
         });
 
-        schema_catalog.iter_table().for_each(|t| {
+        schema_catalog.iter_user_table().for_each(|t| {
             if let Some(fragments) = table_fragments.get(&t.id.table_id) {
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),
@@ -156,6 +159,17 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
 
         // Sources have no fragments.
         schema_catalog.iter_source().for_each(|t| {
+            let (timezone, fragments) = if t.info.is_shared()
+                && let Some(fragments) = table_fragments.get(&t.id)
+            {
+                (
+                    fragments.get_ctx().unwrap().get_timezone().clone(),
+                    Some(json!(fragments.get_fragments()).to_string()),
+                )
+            } else {
+                ("".into(), None)
+            };
+
             rows.push(RwRelationInfo {
                 schemaname: schema.clone(),
                 relationname: t.name.clone(),
@@ -163,8 +177,8 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                 definition: t.definition.clone(),
                 relationtype: "SOURCE".into(),
                 relationid: t.id as i32,
-                relationtimezone: "".into(),
-                fragments: None,
+                relationtimezone: timezone,
+                fragments,
                 initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
                 created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
                 initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
@@ -173,22 +187,20 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         });
 
         schema_catalog.iter_subscription().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.id.subscription_id) {
-                rows.push(RwRelationInfo {
-                    schemaname: schema.clone(),
-                    relationname: t.name.clone(),
-                    relationowner: t.owner.user_id as i32,
-                    definition: t.definition.clone(),
-                    relationtype: "SUBSCRIPTION".into(),
-                    relationid: t.id.subscription_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
-                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: t.created_at_cluster_version.clone(),
-                });
-            }
+            rows.push(RwRelationInfo {
+                schemaname: schema.clone(),
+                relationname: t.name.clone(),
+                relationowner: t.owner.user_id as i32,
+                definition: t.definition.clone(),
+                relationtype: "SUBSCRIPTION".into(),
+                relationid: t.id.subscription_id as i32,
+                relationtimezone: "".into(),
+                fragments: None,
+                initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                created_at_cluster_version: t.created_at_cluster_version.clone(),
+            });
         });
     }
 

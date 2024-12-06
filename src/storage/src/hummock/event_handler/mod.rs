@@ -59,9 +59,8 @@ pub enum HummockEvent {
     /// task on this epoch. Previous concurrent flush task join handle will be returned by the join
     /// handle sender.
     SyncEpoch {
-        new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
-        table_ids: HashSet<TableId>,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
     },
 
     /// Clear shared buffer and reset all states
@@ -117,10 +116,9 @@ impl HummockEvent {
             HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
 
             HummockEvent::SyncEpoch {
-                new_sync_epoch,
                 sync_result_sender: _,
-                table_ids,
-            } => format!("AwaitSyncEpoch epoch {} {:?}", new_sync_epoch, table_ids),
+                sync_table_epochs,
+            } => format!("AwaitSyncEpoch epoch {:?}", sync_table_epochs),
 
             HummockEvent::Clear(_, table_ids) => {
                 format!("Clear {:?}", table_ids)

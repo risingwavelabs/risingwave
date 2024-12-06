@@ -1,0 +1,128 @@
+control substitution on
+
+
+system ok
+rpk topic create avro-ref
+
+
+system ok
+sr_register avro-ref-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Node",
+  "fields": [
+    {
+      "name": "value",
+      "type": "int"
+    },
+    {
+      "name": "next",
+      "type": ["null", "Node"]
+    }
+  ]
+}
+EOF
+
+
+statement error
+create source s WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: circular reference detected in Avro schema: Node -> Node
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+sr_register avro-ref-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "foo",
+      "type": {
+        "type": "record",
+        "name": "Seg",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "type": "record",
+              "name": "Point",
+              "fields": [
+                {
+                  "name": "x",
+                  "type": "int"
+                },
+                {
+                  "name": "y",
+                  "type": "int"
+                }
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": "Point"
+          }
+        ]
+      }
+    },
+    {
+      "name": "bar",
+      "type": "Seg"
+    }
+  ]
+}
+EOF
+
+
+statement ok
+create source s WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+system ok
+rpk topic produce avro-ref --schema-id=topic <<EOF
+{"foo":{"a":{"x":3,"y":4},"b":{"x":5,"y":6}},"bar":{"a":{"x":6,"y":5},"b":{"x":4,"y":3}}}
+EOF
+
+
+query IIIIIIII
+select
+  (foo).a.x,
+  (foo).a.y,
+  (foo).b.x,
+  (foo).b.y,
+  (bar).a.x,
+  (bar).a.y,
+  (bar).b.x,
+  (bar).b.y
+from s;
+----
+3 4 5 6 6 5 4 3
+
+
+statement ok
+drop source s;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+rpk topic delete 'avro-ref'

@@ -31,13 +31,14 @@ use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::{
-    KafkaConnection, KafkaContextCommon, KafkaProperties, RwConsumerContext, KAFKA_ISOLATION_LEVEL,
+    KafkaConnectionProps, KafkaContextCommon, KafkaProperties, RwConsumerContext,
+    KAFKA_ISOLATION_LEVEL,
 };
 use crate::source::SourceEnumeratorContextRef;
 
 type KafkaClientType = BaseConsumer<RwConsumerContext>;
 
-pub static SHARED_KAFKA_CLIENT: LazyLock<MokaCache<KafkaConnection, Weak<KafkaClientType>>> =
+pub static SHARED_KAFKA_CLIENT: LazyLock<MokaCache<KafkaConnectionProps, Weak<KafkaClientType>>> =
     LazyLock::new(|| moka::future::Cache::builder().build());
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -191,7 +192,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
-                hack_seek_to_latest: false,
             })
             .collect();
 
@@ -299,7 +299,6 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
-                    hack_seek_to_latest:false
                 }
             })
             .collect::<Vec<KafkaSplit>>())
@@ -419,7 +418,7 @@ impl KafkaSplitEnumerator {
 
     pub async fn check_reachability(&self) -> bool {
         self.client
-            .fetch_metadata(None, self.sync_call_timeout)
+            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
             .await
             .is_ok()
     }

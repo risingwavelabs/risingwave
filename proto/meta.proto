@@ -36,7 +36,9 @@ service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-// Fragments of a Streaming Job
+// Fragments of a Streaming Job.
+// It's for all kinds of streaming jobs, and ideally should be called `StreamingJobFragments`.
+// It's not the same as a storage table correlated with a `TableCatalog`.
 message TableFragments {
   // The state of the fragments of this table
   enum State {
@@ -96,6 +98,7 @@ message TableFragments {
     // Use `VnodeCountCompat::vnode_count` to access it.
     optional uint32 maybe_vnode_count = 8;
   }
+  // The id of the streaming job.
   uint32 table_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;
@@ -306,6 +309,7 @@ enum ThrottleTarget {
   MV = 2;
   TABLE_WITH_SOURCE = 3;
   CDC_TABLE = 4;
+  TABLE_DML = 5;
 }
 
 message ApplyThrottleRequest {
@@ -335,24 +339,17 @@ service StreamManagerService {
   rpc ListObjectDependencies(ListObjectDependenciesRequest) returns (ListObjectDependenciesResponse);
   rpc ApplyThrottle(ApplyThrottleRequest) returns (ApplyThrottleResponse);
   rpc Recover(RecoverRequest) returns (RecoverResponse);
+  rpc ListRateLimits(ListRateLimitsRequest) returns (ListRateLimitsResponse);
 }
 
 // Below for cluster service.
-
 message AddWorkerNodeRequest {
-  message Property {
-    uint64 worker_node_parallelism = 1;
-    bool is_streaming = 2;
-    bool is_serving = 3;
-    bool is_unschedulable = 4;
-    // This is used for frontend node to register its rpc address
-    string internal_rpc_host_addr = 5;
-  }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
   reserved 3;
-  Property property = 4;
+  reserved 4;
   common.WorkerNode.Resource resource = 5;
+  common.WorkerNode.Property property = 6;
 }
 
 message AddWorkerNodeResponse {
@@ -417,6 +414,12 @@ message GetClusterRecoveryStatusResponse {
   RecoveryStatus status = 1;
 }
 
+message GetMetaStoreInfoRequest {}
+
+message GetMetaStoreInfoResponse {
+  string meta_store_endpoint = 1;
+}
+
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
@@ -424,6 +427,7 @@ service ClusterService {
   rpc UpdateWorkerNodeSchedulability(UpdateWorkerNodeSchedulabilityRequest) returns (UpdateWorkerNodeSchedulabilityResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
   rpc GetClusterRecoveryStatus(GetClusterRecoveryStatusRequest) returns (GetClusterRecoveryStatusResponse);
+  rpc GetMetaStoreInfo(GetMetaStoreInfoRequest) returns (GetMetaStoreInfoResponse);
 }
 
 enum SubscribeType {
@@ -861,4 +865,17 @@ message GetClusterLimitsResponse {
 
 service ClusterLimitService {
   rpc GetClusterLimits(GetClusterLimitsRequest) returns (GetClusterLimitsResponse);
+}
+
+message ListRateLimitsRequest {}
+
+message ListRateLimitsResponse {
+  message RateLimitInfo {
+    uint32 fragment_id = 1;
+    uint32 job_id = 2;
+    uint32 fragment_type_mask = 3;
+    uint32 rate_limit = 4;
+    string node_name = 5;
+  }
+  repeated RateLimitInfo rate_limits = 1;
 }

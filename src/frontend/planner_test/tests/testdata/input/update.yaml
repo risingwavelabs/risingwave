@@ -76,7 +76,7 @@
     update t set v2 = 3;
   expected_outputs:
   - binder_error
-- name: update subquery
+- name: update subquery selection
   sql: |
     create table t (a int, b int);
     update t set a = 777 where b not in (select a from t);
@@ -98,10 +98,27 @@
     update t set a = a + 1;
   expected_outputs:
     - batch_distributed_plan
-- name: update table with subquery in the set clause
+- name: update table to subquery
   sql: |
-    create table t1 (v1 int primary key, v2 int);
-    create table t2 (v1 int primary key, v2 int);
-    update t1 set v1 = (select v1 from t2 where t1.v2 = t2.v2);
+    create table t (v1 int, v2 int);
+    update t set v1 = (select 666);
   expected_outputs:
-    - binder_error
+    - batch_plan
+- name: update table to subquery with runtime cardinality
+  sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = (select generate_series(888, 888));
+  expected_outputs:
+    - batch_plan
+- name: update table to correlated subquery
+  sql: |
+    create table t (v1 int, v2 int);
+    update t set v1 = (select count(*) from t as source where source.v2 = t.v2);
+  expected_outputs:
+    - batch_plan
+- name: update table to subquery with multiple assignments
+  sql: |
+    create table t (v1 int, v2 int);
+    update t set (v1, v2) = (select 666.66, 777);
+  expected_outputs:
+    - batch_plan

@@ -135,7 +135,7 @@ pub async fn rpc_serve(
             ));
             let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await?;
             rpc_serve_with_store(
-                SqlMetaStore::new(conn),
+                SqlMetaStore::new(conn, IN_MEMORY_STORE.to_string()),
                 dummy_election_client,
                 address_info,
                 max_cluster_heartbeat_interval,
@@ -149,7 +149,7 @@ pub async fn rpc_serve(
         }
         MetaStoreBackend::Sql { endpoint, config } => {
             let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-            let mut options = sea_orm::ConnectOptions::new(endpoint);
+            let mut options = sea_orm::ConnectOptions::new(endpoint.clone());
             options
                 .max_connections(config.max_connections)
                 .min_connections(config.min_connections)
@@ -164,7 +164,7 @@ pub async fn rpc_serve(
             }
 
             let conn = sea_orm::Database::connect(options).await?;
-            let meta_store_sql = SqlMetaStore::new(conn);
+            let meta_store_sql = SqlMetaStore::new(conn, endpoint);
 
             // Init election client.
             let id = address_info.advertise_addr.clone();
@@ -578,7 +578,7 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        // compaction_scheduler,
+        backup_manager.clone(),
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(

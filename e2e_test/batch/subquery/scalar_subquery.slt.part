@@ -21,8 +21,10 @@ select (select x from t) x, 1 one;
 statement error Scalar subquery might produce more than one row
 create materialized view mv as select (select x from t) x, 1 one;
 
+# Use a random value here to occasionally make it not in the same shard as `114514`,
+# demonstrating that `BatchMaxOneRow` correctly handles distributed subqueries.
 statement ok
-insert into t values (1919810);
+insert into t values (extract(epoch from now()));
 
 # Cannot query as the cardinality of the subquery is now 2
 query error Scalar subquery produced more than one row

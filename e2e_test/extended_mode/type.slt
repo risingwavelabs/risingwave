@@ -3,10 +3,10 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# RisingWave can't support list and struct now so we skip them.
-# include ../batch/types/array.slt.part
-# include ../batch/types/struct.slt.part
-# include ../batch/types/list.slt.part
+include 1dim_list.slt.part
+
+# RisingWave can't support struct now so we skip it.
+# include ../batch/types/struct/*.slt.part
 
 # Sqllogitest can't support binary format bytea type so we skip it.
 # include ../batch/types/bytea.slt.part

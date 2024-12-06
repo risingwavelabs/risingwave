@@ -118,7 +118,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     }
 }
 
-pub async fn with_hummock_storage_v2(
+pub async fn with_hummock_storage(
     table_id: TableId,
 ) -> (HummockStorage, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store().await;

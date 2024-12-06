@@ -35,7 +35,7 @@ struct RwSource {
     associated_table_id: Option<i32>,
     connection_id: Option<i32>,
     definition: String,
-    acl: String,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,

@@ -22,9 +22,9 @@ use futures::future::{select, Either};
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_meta_model::{ObjectId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSink, PbSource, PbTable};
-use risingwave_pb::common::worker_node::{PbResource, State};
+use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
-use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
+use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::table_fragments::{Fragment, PbFragment};
 use risingwave_pb::stream_plan::{PbDispatchStrategy, StreamActor};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -38,7 +38,7 @@ use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, Wor
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{
-    ActorId, ClusterId, FragmentId, SubscriptionId, TableFragments, TableParallelism,
+    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
 };
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
@@ -224,7 +224,6 @@ impl ActiveStreamingWorkerNodes {
                             id: node.id,
                             r#type: node.r#type,
                             host: node.host.clone(),
-                            parallelism: node.parallelism,
                             property: node.property.clone(),
                             resource: node.resource.clone(),
                             ..Default::default()
@@ -427,7 +426,7 @@ impl MetadataManager {
     ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
-            .get_upstream_root_fragments(
+            .get_root_fragments(
                 upstream_table_ids
                     .iter()
                     .map(|id| id.table_id as _)
@@ -497,7 +496,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_downstream_chain_fragments(
+    pub async fn get_downstream_fragments(
         &self,
         job_id: u32,
     ) -> MetaResult<(
@@ -506,7 +505,7 @@ impl MetadataManager {
     )> {
         let (fragments, actors) = self
             .catalog_controller
-            .get_downstream_chain_fragments(job_id as _)
+            .get_downstream_fragments(job_id as _)
             .await?;
 
         let actors = actors
@@ -550,12 +549,15 @@ impl MetadataManager {
         })
     }
 
-    pub async fn get_job_fragments_by_id(&self, id: &TableId) -> MetaResult<TableFragments> {
+    pub async fn get_job_fragments_by_id(
+        &self,
+        job_id: &TableId,
+    ) -> MetaResult<StreamJobFragments> {
         let pb_table_fragments = self
             .catalog_controller
-            .get_job_fragments_by_id(id.table_id as _)
+            .get_job_fragments_by_id(job_id.table_id as _)
             .await?;
-        Ok(TableFragments::from_protobuf(pb_table_fragments))
+        Ok(StreamJobFragments::from_protobuf(pb_table_fragments))
     }
 
     pub async fn get_running_actors_of_fragment(
@@ -569,40 +571,31 @@ impl MetadataManager {
         Ok(actor_ids.into_iter().map(|id| id as ActorId).collect())
     }
 
-    pub async fn get_running_actors_and_upstream_actors_of_fragment(
+    pub async fn get_running_actors_for_source_backfill(
         &self,
         id: FragmentId,
-    ) -> MetaResult<HashSet<(ActorId, Vec<ActorId>)>> {
+    ) -> MetaResult<HashSet<(ActorId, ActorId)>> {
         let actor_ids = self
             .catalog_controller
-            .get_running_actors_and_upstream_of_fragment(id as _)
+            .get_running_actors_for_source_backfill(id as _)
             .await?;
         Ok(actor_ids
             .into_iter()
-            .map(|(id, actors)| {
-                (
-                    id as ActorId,
-                    actors
-                        .into_inner()
-                        .into_iter()
-                        .flat_map(|(_, ids)| ids.into_iter().map(|id| id as ActorId))
-                        .collect(),
-                )
-            })
+            .map(|(id, upstream)| (id as ActorId, upstream as ActorId))
             .collect())
     }
 
     pub async fn get_job_fragments_by_ids(
         &self,
         ids: &[TableId],
-    ) -> MetaResult<Vec<TableFragments>> {
+    ) -> MetaResult<Vec<StreamJobFragments>> {
         let mut table_fragments = vec![];
         for id in ids {
             let pb_table_fragments = self
                 .catalog_controller
                 .get_job_fragments_by_id(id.table_id as _)
                 .await?;
-            table_fragments.push(TableFragments::from_protobuf(pb_table_fragments));
+            table_fragments.push(StreamJobFragments::from_protobuf(pb_table_fragments));
         }
         Ok(table_fragments)
     }
@@ -611,7 +604,7 @@ impl MetadataManager {
         let table_fragments = self.catalog_controller.table_fragments().await?;
         let mut actor_maps = HashMap::new();
         for (_, fragments) in table_fragments {
-            let tf = TableFragments::from_protobuf(fragments);
+            let tf = StreamJobFragments::from_protobuf(fragments);
             for actor in tf.active_actors() {
                 actor_maps
                     .try_insert(actor.actor_id, actor)
@@ -657,14 +650,29 @@ impl MetadataManager {
             .collect())
     }
 
-    pub async fn update_mv_rate_limit_by_table_id(
+    pub async fn update_backfill_rate_limit_by_table_id(
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
     ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let fragment_actors = self
             .catalog_controller
-            .update_mv_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .update_backfill_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
+    pub async fn update_dml_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_dml_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
             .await?;
         Ok(fragment_actors
             .into_iter()
@@ -683,15 +691,20 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
-            .get_mv_depended_subscriptions()
+            .get_mv_depended_subscriptions(database_id)
             .await?
             .into_iter()
-            .map(|(database_id, mv_depended_subscriptions)| {
+            .map(|(loaded_database_id, mv_depended_subscriptions)| {
+                if let Some(database_id) = database_id {
+                    assert_eq!(loaded_database_id, database_id);
+                }
                 (
-                    DatabaseId::new(database_id as _),
+                    DatabaseId::new(loaded_database_id as _),
                     mv_depended_subscriptions
                         .into_iter()
                         .map(|(table_id, subscriptions)| {
@@ -719,6 +732,11 @@ impl MetadataManager {
 
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
+    }
+
+    pub async fn list_rate_limits(&self) -> MetaResult<Vec<RateLimitInfo>> {
+        let rate_limits = self.catalog_controller.list_rate_limits().await?;
+        Ok(rate_limits)
     }
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
@@ -25,8 +25,9 @@ use async_trait::async_trait;
 use cluster_limit_service_client::ClusterLimitServiceClient;
 use either::Either;
 use futures::stream::BoxStream;
+use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
-use risingwave_common::catalog::{FunctionId, IndexId, SecretId, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::monitor::EndpointExt;
@@ -53,6 +54,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -67,7 +69,6 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -391,11 +392,13 @@ impl MetaClient {
         &self,
         table: PbTable,
         graph: StreamFragmentGraph,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             backfill: PbBackfillType::Regular as _,
+            dependencies: dependencies.into_iter().collect(),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -441,11 +444,13 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         affected_table_change: Option<ReplaceTablePlan>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
             fragment_graph: Some(graph),
             affected_table_change,
+            dependencies: dependencies.into_iter().collect(),
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -580,6 +585,29 @@ impl MetaClient {
             object: Some(object),
         };
         let resp = self.inner.alter_swap_rename(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<WaitVersion> {
+        let request = AlterSecretRequest {
+            secret_id,
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.alter_secret(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -1224,6 +1252,12 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
+    pub async fn get_meta_store_endpoint(&self) -> Result<String> {
+        let req = GetMetaStoreInfoRequest {};
+        let resp = self.inner.get_meta_store_info(req).await?;
+        Ok(resp.meta_store_endpoint)
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
@@ -1493,6 +1527,13 @@ impl MetaClient {
         };
         self.inner.merge_compaction_group(req).await?;
         Ok(())
+    }
+
+    /// List all rate limits for sources and backfills
+    pub async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
+        let request = ListRateLimitsRequest {};
+        let resp = self.inner.list_rate_limits(request).await?;
+        Ok(resp.rate_limits)
     }
 }
 
@@ -2031,6 +2072,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
+            ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -2044,6 +2086,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_actor_splits, ListActorSplitsRequest, ListActorSplitsResponse }
             ,{ stream_client, list_object_dependencies, ListObjectDependenciesRequest, ListObjectDependenciesResponse }
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
+            ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
@@ -2082,6 +2125,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
+            ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

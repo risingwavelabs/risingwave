@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -137,17 +139,20 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
 where
     TopNCache<WITH_TIES>: AppendOnlyTopNCacheTrait,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.limit);
-        let mut res_rows = Vec::with_capacity(self.limit);
+    async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let keys = K::build_many(&self.group_by, chunk.data_chunk());
+        let mut stagings = HashMap::new(); // K -> `TopNStaging`
 
         let data_types = self.schema.data_types();
-        let row_deserializer = RowDeserializer::new(data_types.clone());
+        let deserializer = RowDeserializer::new(data_types.clone());
         for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
             let Some((op, row_ref)) = r else {
                 continue;
             };
+
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
@@ -164,22 +169,33 @@ where
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
+
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
+            let staging = stagings.entry(group_cache_key.clone()).or_default();
 
             debug_assert_eq!(op, Op::Insert);
             cache.insert(
                 cache_key,
                 row_ref,
-                &mut res_ops,
-                &mut res_rows,
+                staging,
                 &mut self.managed_state,
-                &row_deserializer,
+                &deserializer,
             )?;
         }
+
         self.metrics
             .group_top_n_cached_entry_count
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, &self.schema)
+
+        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(chunk.capacity()));
+        for staging in stagings.into_values() {
+            for res in staging.into_deserialized_changes(&deserializer) {
+                let (op, row) = res?;
+                let _none = chunk_builder.append_row(op, row);
+            }
+        }
+
+        Ok(chunk_builder.take())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

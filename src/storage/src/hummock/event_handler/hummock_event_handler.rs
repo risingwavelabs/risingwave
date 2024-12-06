@@ -463,17 +463,12 @@ impl HummockEventHandler {
 
     fn handle_sync_epoch(
         &mut self,
-        new_sync_epoch: HummockEpoch,
+        sync_table_epochs: Vec<(HummockEpoch, HashSet<TableId>)>,
         sync_result_sender: oneshot::Sender<HummockResult<SyncedData>>,
-        table_ids: HashSet<TableId>,
     ) {
-        debug!(
-            new_sync_epoch,
-            ?table_ids,
-            "awaiting for epoch to be synced",
-        );
+        debug!(?sync_table_epochs, "awaiting for epoch to be synced",);
         self.uploader
-            .start_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
+            .start_sync_epoch(sync_result_sender, sync_table_epochs);
     }
 
     fn handle_clear(&mut self, notifier: oneshot::Sender<()>, table_ids: Option<HashSet<TableId>>) {
@@ -641,11 +636,10 @@ impl HummockEventHandler {
                 self.uploader.may_flush();
             }
             HummockEvent::SyncEpoch {
-                new_sync_epoch,
                 sync_result_sender,
-                table_ids,
+                sync_table_epochs,
             } => {
-                self.handle_sync_epoch(new_sync_epoch, sync_result_sender, table_ids);
+                self.handle_sync_epoch(sync_table_epochs, sync_result_sender);
             }
             HummockEvent::Clear(notifier, table_ids) => {
                 self.handle_clear(notifier, table_ids);
@@ -1013,16 +1007,14 @@ mod tests {
 
         let (tx1, mut rx1) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
-            new_sync_epoch: epoch1,
             sync_result_sender: tx1,
-            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+            sync_table_epochs: vec![(epoch1, HashSet::from_iter([TEST_TABLE_ID]))],
         });
         assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
         let (tx2, mut rx2) = oneshot::channel();
         send_event(HummockEvent::SyncEpoch {
-            new_sync_epoch: epoch2,
             sync_result_sender: tx2,
-            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
+            sync_table_epochs: vec![(epoch2, HashSet::from_iter([TEST_TABLE_ID]))],
         });
         assert!(poll_fn(|cx| Poll::Ready(rx2.poll_unpin(cx).is_pending())).await);
 
@@ -1144,9 +1136,8 @@ mod tests {
         let sync_epoch = |table_id, new_sync_epoch| {
             let (tx, rx) = oneshot::channel();
             send_event(HummockEvent::SyncEpoch {
-                new_sync_epoch,
                 sync_result_sender: tx,
-                table_ids: HashSet::from_iter([table_id]),
+                sync_table_epochs: vec![(new_sync_epoch, HashSet::from_iter([table_id]))],
             });
             rx
         };
@@ -1281,9 +1272,8 @@ mod tests {
             vec![imm1_2_2.batch_id()],
         )]));
         send_event(HummockEvent::SyncEpoch {
-            new_sync_epoch: epoch2,
             sync_result_sender: tx2,
-            table_ids: HashSet::from_iter([table_id1]),
+            sync_table_epochs: vec![(epoch2, HashSet::from_iter([table_id1]))],
         });
         wait_task_start.await;
         assert!(poll_fn(|cx| Poll::Ready(sync_rx2.poll_unpin(cx).is_pending())).await);

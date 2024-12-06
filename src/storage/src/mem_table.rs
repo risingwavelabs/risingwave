@@ -427,10 +427,10 @@ impl KeyOp {
     }
 }
 
-#[try_stream(ok = StateStoreIterItem, error = StorageError)]
+#[try_stream(ok = StateStoreKeyedRow, error = StorageError)]
 pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
-    inner_stream: impl Stream<Item = StorageResult<StateStoreIterItem>> + 'static,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreKeyedRow>> + 'static,
     table_id: TableId,
     epoch: u64,
     rev: bool,

@@ -67,10 +67,16 @@ message SourceNode {
 }
 
 message IcebergScanNode {
+  enum IcebergScanType {
+    ICEBERG_SCAN_TYPE_UNSPECIFIED = 0;
+    ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
+    ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
+  }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
   repeated bytes split = 3;
   map<string, secret.SecretRef> secret_refs = 4;
+  IcebergScanType iceberg_scan_type = 5;
 }
 
 message FileScanNode {
@@ -173,11 +179,12 @@ message UpdateNode {
   // Id of the table to perform updating.
   uint32 table_id = 1;
   // Version of the table.
-  uint64 table_version_id = 4;
-  repeated expr.ExprNode exprs = 2;
-  bool returning = 3;
-  // The columns indices in the input schema, representing the columns need to send to streamDML exeuctor.
-  repeated uint32 update_column_indices = 5;
+  uint64 table_version_id = 2;
+  // Expressions to generate `U-` records.
+  repeated expr.ExprNode old_exprs = 3;
+  // Expressions to generate `U+` records.
+  repeated expr.ExprNode new_exprs = 4;
+  bool returning = 5;
 
   // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
   uint32 session_id = 6;

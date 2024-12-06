@@ -70,8 +70,9 @@ impl DiagnoseCommand {
         let mut report = String::new();
         let _ = writeln!(
             report,
-            "report created at: {}",
-            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now())
+            "report created at: {}\nversion: {}",
+            chrono::DateTime::<chrono::offset::Utc>::from(std::time::SystemTime::now()),
+            risingwave_common::current_cluster_version(),
         );
         let _ = writeln!(report);
         self.write_catalog(&mut report).await;
@@ -758,12 +759,12 @@ fn redact_all_sql_options(sql: &str) -> Option<String> {
         };
         if let Some(options) = options.0 {
             for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into());
+                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
             }
         }
         if let Some(options) = options.1 {
             for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into());
+                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
             }
         }
         writeln!(&mut redacted, "{statement}").unwrap();

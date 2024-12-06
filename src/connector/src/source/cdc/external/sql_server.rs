@@ -158,6 +158,16 @@ impl SqlServerExternalTable {
             }
         }
 
+        // The table does not exist
+        if column_descs.is_empty() {
+            bail!(
+                "Sql Server table '{}'.'{}' not found in '{}'",
+                config.schema,
+                config.table,
+                config.database
+            );
+        }
+
         Ok(Self {
             column_descs,
             pk_names,

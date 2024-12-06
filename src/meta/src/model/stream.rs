@@ -18,7 +18,7 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor;
+use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -85,14 +85,15 @@ impl From<TableParallelism> for PbTableParallelism {
     }
 }
 
-/// Fragments of a streaming job.
+/// Fragments of a streaming job. Corresponds to [`PbTableFragments`].
+/// (It was previously called `TableFragments` due to historical reasons.)
 ///
 /// We store whole fragments in a single column family as follow:
-/// `table_id` => `TableFragments`.
+/// `stream_job_id` => `StreamJobFragments`.
 #[derive(Debug, Clone)]
-pub struct TableFragments {
+pub struct StreamJobFragments {
     /// The table id.
-    table_id: TableId,
+    stream_job_id: TableId,
 
     /// The state of the table fragments.
     state: State,
@@ -143,6 +144,7 @@ impl StreamContext {
         PbExprContext {
             // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
             time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
+            strict_mode: false,
         }
     }
 
@@ -157,10 +159,10 @@ impl StreamContext {
     }
 }
 
-impl TableFragments {
+impl StreamJobFragments {
     pub fn to_protobuf(&self) -> PbTableFragments {
         PbTableFragments {
-            table_id: self.table_id.table_id(),
+            table_id: self.stream_job_id.table_id(),
             state: self.state as _,
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
@@ -183,7 +185,7 @@ impl TableFragments {
         let state = prost.state();
 
         Self {
-            table_id: TableId::new(prost.table_id),
+            stream_job_id: TableId::new(prost.table_id),
             state,
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
@@ -197,7 +199,7 @@ impl TableFragments {
     }
 }
 
-impl TableFragments {
+impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self::new(
@@ -213,7 +215,7 @@ impl TableFragments {
     /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
     /// `Inactive` on the given workers.
     pub fn new(
-        table_id: TableId,
+        stream_job_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
         actor_locations: &BTreeMap<ActorId, WorkerSlotId>,
         ctx: StreamContext,
@@ -234,7 +236,7 @@ impl TableFragments {
             .collect();
 
         Self {
-            table_id,
+            stream_job_id,
             state: State::Initial,
             fragments,
             actor_status,
@@ -254,8 +256,8 @@ impl TableFragments {
     }
 
     /// Returns the table id.
-    pub fn table_id(&self) -> TableId {
-        self.table_id
+    pub fn stream_job_id(&self) -> TableId {
+        self.stream_job_id
     }
 
     /// Returns the state of the table fragments.
@@ -276,12 +278,6 @@ impl TableFragments {
     /// Returns whether the table fragments is in `Initial` state.
     pub fn is_initial(&self) -> bool {
         self.state == State::Initial
-    }
-
-    /// Set the table ID.
-    // TODO: remove this workaround for replacing table.
-    pub fn set_table_id(&mut self, table_id: TableId) {
-        self.table_id = table_id;
     }
 
     /// Set the state of the table fragments.
@@ -428,27 +424,60 @@ impl TableFragments {
         source_fragments
     }
 
+    /// Returns (`source_id`, -> (`source_backfill_fragment_id`, `upstream_source_fragment_id`)).
+    ///
+    /// Note: the fragment `source_backfill_fragment_id` may actually have multiple upstream fragments,
+    /// but only one of them is the upstream source fragment, which is what we return.
     pub fn source_backfill_fragments(
         &self,
     ) -> MetadataModelResult<HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>> {
-        let mut source_fragments = HashMap::new();
+        let mut source_backfill_fragments = HashMap::new();
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) = actor.nodes.as_ref().unwrap().find_source_backfill() {
-                    if fragment.upstream_fragment_ids.len() != 1 {
-                        return Err(anyhow::anyhow!("SourceBackfill should have only one upstream fragment, found {:?} for fragment {}", fragment.upstream_fragment_ids, fragment.fragment_id).into());
-                    }
-                    source_fragments
+                if let Some((source_id, upstream_source_fragment_id)) =
+                    actor.nodes.as_ref().unwrap().find_source_backfill()
+                {
+                    source_backfill_fragments
                         .entry(source_id as SourceId)
                         .or_insert(BTreeSet::new())
-                        .insert((fragment.fragment_id, fragment.upstream_fragment_ids[0]));
+                        .insert((fragment.fragment_id, upstream_source_fragment_id));
 
                     break;
                 }
             }
         }
-        Ok(source_fragments)
+        Ok(source_backfill_fragments)
+    }
+
+    /// Find the table job's `Union` fragment.
+    /// Panics if not found.
+    pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
+        let mut union_fragment_id = None;
+        for (fragment_id, fragment) in &mut self.fragments {
+            for actor in &mut fragment.actors {
+                if let Some(node) = &mut actor.nodes {
+                    visit_stream_node(node, |body| {
+                        if let NodeBody::Union(_) = body {
+                            if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                // The union fragment should be unique.
+                                assert_eq!(*union_fragment_id, *fragment_id);
+                            } else {
+                                union_fragment_id = Some(*fragment_id);
+                            }
+                        }
+                    })
+                };
+            }
+        }
+
+        let union_fragment_id =
+            union_fragment_id.expect("fragment of placeholder merger not found");
+        let union_fragment = self
+            .fragments
+            .get_mut(&union_fragment_id)
+            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
+        union_fragment
     }
 
     /// Resolve dependent table
@@ -536,9 +565,9 @@ impl TableFragments {
             .fragments
             .values()
             .flat_map(|f| f.state_table_ids.iter())
-            .any(|table_id| *table_id == self.table_id.table_id)
+            .any(|table_id| *table_id == self.stream_job_id.table_id)
         {
-            Some(self.table_id.table_id)
+            Some(self.stream_job_id.table_id)
         } else {
             None
         }
@@ -580,7 +609,7 @@ impl TableFragments {
         self.fragments
             .values()
             .flat_map(|f| f.state_table_ids.clone())
-            .filter(|&t| t != self.table_id.table_id)
+            .filter(|&t| t != self.stream_job_id.table_id)
             .collect_vec()
     }
 

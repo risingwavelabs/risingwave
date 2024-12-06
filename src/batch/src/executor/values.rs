@@ -167,10 +167,7 @@ mod tests {
                 Some(ScalarImpl::Int64(3)),
             )),
             Box::new(LiteralExpression::new(
-                DataType::new_struct(
-                    vec![DataType::Int32, DataType::Int32, DataType::Int32],
-                    vec![],
-                ),
+                StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
                 Some(ScalarImpl::Struct(value)),
             )) as BoxedExpression,
         ];
@@ -193,10 +190,7 @@ mod tests {
         assert_eq!(fields[2].data_type, DataType::Int64);
         assert_eq!(
             fields[3].data_type,
-            DataType::new_struct(
-                vec![DataType::Int32, DataType::Int32, DataType::Int32],
-                vec![],
-            )
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into()
         );
 
         let mut stream = values_executor.execute();

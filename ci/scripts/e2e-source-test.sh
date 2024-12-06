@@ -32,11 +32,11 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Install dependencies"
-python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema
+python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema nats-py requests psycopg2-binary
 apt-get -y install jq
 
 echo "--- e2e, inline test"
-RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-inline-source-test
 risedev slt './e2e_test/source_inline/**/*.slt' -j16
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
@@ -154,3 +154,22 @@ risedev slt './e2e_test/source_legacy/basic/old_row_format_syntax/*.slt'
 echo "--- Run CH-benCHmark"
 risedev slt './e2e_test/ch_benchmark/batch/ch_benchmark.slt'
 risedev slt './e2e_test/ch_benchmark/streaming/*.slt'
+
+risedev ci-kill
+echo "--- cluster killed "
+
+echo "--- starting risingwave cluster for webhook source test"
+risedev ci-start ci-1cn-1fe-with-recovery
+sleep 5
+# check results
+risedev slt "e2e_test/webhook/webhook_source.slt"
+
+risedev kill
+
+risedev dev ci-1cn-1fe-with-recovery
+echo "--- wait for cluster recovery finish"
+sleep 20
+risedev slt "e2e_test/webhook/webhook_source_recovery.slt"
+
+risedev ci-kill
+echo "--- cluster killed "

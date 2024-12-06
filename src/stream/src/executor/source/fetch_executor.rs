@@ -160,9 +160,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         batch: SplitBatch,
         rate_limit_rps: Option<u32>,
     ) -> StreamExecutorResult<BoxChunkSourceStream> {
-        let stream = source_desc
+        let (stream, _) = source_desc
             .source
-            .build_stream(batch, column_ids, Arc::new(source_ctx))
+            .build_stream(batch, column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok(apply_rate_limit(stream, rate_limit_rps).boxed())

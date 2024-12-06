@@ -36,7 +36,6 @@ impl ExecutorBuilder for NowExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_receiver = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
 

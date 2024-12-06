@@ -32,6 +32,7 @@ use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
@@ -50,13 +51,16 @@ use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str, WithOptionsSecResolved,
+    dispatch_source_prop, dispatch_split_impl, for_all_connections, for_all_sources,
+    impl_connection, impl_connector_properties, impl_split, match_source_name_str,
+    WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
+
+pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
@@ -69,7 +73,7 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
+pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug {
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -108,7 +112,7 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
+pub async fn create_split_reader<P: SourceProperties>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
@@ -375,6 +379,10 @@ pub trait SplitReader: Sized + Send {
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
     }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        Err(anyhow!("seek_to_latest is not supported for this connector").into())
+    }
 }
 
 /// Information used to determine whether we should start and finish source backfill.
@@ -448,9 +456,17 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
+    }
+
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -472,6 +488,7 @@ impl ConnectorProperties {
 }
 
 for_all_sources!(impl_split);
+for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {

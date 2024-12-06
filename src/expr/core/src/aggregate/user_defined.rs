@@ -138,7 +138,6 @@ pub fn new_user_defined(
         arg_names: &udf.arg_names,
         return_type,
         always_retry_on_network_error: false,
-        function_type: udf.function_type.as_deref(),
     })
     .context("failed to build UDF runtime")?;
 

@@ -17,11 +17,9 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -52,23 +50,7 @@ pub struct StreamSourceScan {
 impl_plan_tree_node_for_leaf! { StreamSourceScan }
 
 impl StreamSourceScan {
-    pub fn new(mut core: generic::Source) -> Self {
-        // XXX: do we need to include partition and offset cols here? It's needed by Backfill's input, but maybe not output?
-        // But the source's "schema" contains the hidden columns.
-        if let Some(source_catalog) = &core.catalog
-            && source_catalog.info.is_shared()
-        {
-            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
-                &core.column_catalog,
-                &source_catalog.connector_name(),
-            );
-            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                if !existed {
-                    core.column_catalog.push(ColumnCatalog::hidden(c));
-                }
-            }
-        }
-
+    pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,

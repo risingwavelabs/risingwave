@@ -12,3 +12,20 @@
     StreamProject { exprs: [s.x, Proctime as $expr1, (Proctime - '00:01:00':Interval) as $expr2, null:Serial], output_watermarks: [$expr1, $expr2] }
     └─StreamSink { type: append-only, columns: [x, s._row_id(hidden)] }
       └─StreamTableScan { table: s, columns: [x, _row_id] }
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 from t2;
+  explain_output: |
+    StreamProject { exprs: [t2.a, t2.b] }
+    └─StreamSink { type: upsert, columns: [a, b], downstream_pk: [t2.a] }
+      └─StreamExchange { dist: HashShard(t2.a) }
+        └─StreamTableScan { table: t2, columns: [a, b] }
+- sql: |
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 as select b from t2;
+  explain_output: |
+    StreamProject { exprs: [t2.b, null:Int32] }
+    └─StreamSink { type: upsert, columns: [b], downstream_pk: [t2.b] }
+      └─StreamTableScan { table: t2, columns: [b] }

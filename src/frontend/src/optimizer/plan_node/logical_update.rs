@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableVersionId;
-
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::catalog::TableId;
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -43,25 +40,6 @@ impl From<generic::Update<PlanRef>> for LogicalUpdate {
     fn from(core: generic::Update<PlanRef>) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
-    }
-}
-
-impl LogicalUpdate {
-    #[must_use]
-    pub fn table_id(&self) -> TableId {
-        self.core.table_id
-    }
-
-    pub fn exprs(&self) -> &[ExprImpl] {
-        self.core.exprs.as_ref()
-    }
-
-    pub fn has_returning(&self) -> bool {
-        self.core.returning
-    }
-
-    pub fn table_version_id(&self) -> TableVersionId {
-        self.core.table_version_id
     }
 }
 
@@ -86,15 +64,15 @@ impl ExprRewritable for LogicalUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.core.clone();
-        new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
-        Self::from(new).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::from(core).into()
     }
 }
 
 impl ExprVisitable for LogicalUpdate {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
+        self.core.visit_exprs(v);
     }
 }
 

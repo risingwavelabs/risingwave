@@ -115,7 +115,7 @@ pub trait ReplayWrite {
 #[cfg_attr(test, automock)]
 #[async_trait::async_trait]
 pub trait ReplayStateStore {
-    async fn sync(&self, id: u64, table_ids: Vec<u32>) -> Result<usize>;
+    async fn sync(&self, sync_table_epochs: Vec<(u64, Vec<u32>)>) -> Result<usize>;
     async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64) -> Result<u64>;
     async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;
     async fn try_wait_epoch(
@@ -147,7 +147,7 @@ mock! {
     }
     #[async_trait::async_trait]
     impl ReplayStateStore for GlobalReplayInterface{
-        async fn sync(&self, id: u64, table_ids: Vec<u32>) -> Result<usize>;
+        async fn sync(&self, sync_table_epochs: Vec<(u64, Vec<u32>)>) -> Result<usize>;
         async fn notify_hummock(&self, info: Info, op: RespOperation, version: u64,
         ) -> Result<u64>;
         async fn new_local(&self, opts: TracedNewLocalOptions) -> Box<dyn LocalReplay>;

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::BoxedError;
+use risingwave_common::error::{BoxedError, NotImplemented};
+use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -132,6 +133,16 @@ pub enum MetaErrorInner {
 
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),
+
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
+
+    #[error("Secret error: {0}")]
+    SecretError(
+        #[from]
+        #[backtrace]
+        SecretError,
+    ),
 }
 
 impl MetaError {

@@ -1,0 +1,150 @@
+# Extension to `dml_basic.slt.part` for testing advanced `UPDATE` statements.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 int default 1919, v2 int default 810);
+
+statement ok
+insert into t values (114, 514);
+
+
+# Single assignment, to subquery.
+statement ok
+update t set v1 = (select 666);
+
+query II
+select * from t;
+----
+666 514
+
+# Single assignment, to runtime-cardinality subquery returning 1 row.
+statement ok
+update t set v1 = (select generate_series(888, 888));
+
+query II
+select * from t;
+----
+888 514
+
+# Single assignment, to runtime-cardinality subquery returning 0 rows (set to NULL).
+statement ok
+update t set v1 = (select generate_series(1, 0));
+
+query II
+select * from t;
+----
+NULL 514
+
+# Single assignment, to runtime-cardinality subquery returning multiple rows.
+statement error Scalar subquery produced more than one row
+update t set v1 = (select generate_series(1, 2));
+
+# Single assignment, to correlated subquery.
+statement ok
+update t set v1 = (select count(*) from t as source where source.v2 = t.v2);
+
+query II
+select * from t;
+----
+1 514
+
+# Single assignment, to subquery with mismatched column count.
+statement error must return only one column
+update t set v1 = (select 666, 888);
+
+
+# Multiple assignment clauses.
+statement ok
+update t set v1 = 1919, v2 = 810;
+
+query II
+select * from t;
+----
+1919 810
+
+# Multiple assignments to the same column.
+statement error multiple assignments to the same column
+update t set v1 = 1, v1 = 2;
+
+statement error multiple assignments to the same column
+update t set (v1, v1) = (1, 2);
+
+statement error multiple assignments to the same column
+update t set (v1, v2) = (1, 2), v2 = 2;
+
+# Multiple assignments, to subquery.
+statement ok
+update t set (v1, v2) = (select 666, 888);
+
+query II
+select * from t;
+----
+666 888
+
+# Multiple assignments, to subquery with cast.
+statement ok
+update t set (v1, v2) = (select 888.88, 999);
+
+query II
+select * from t;
+----
+889 999
+
+# Multiple assignments, to subquery with cast failure.
+statement error
+update t set (v1, v2) = (select '888.88', 999);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: cannot cast type "record" to "struct<v1 integer, v2 integer>"
+  2: cannot cast to struct field "v1"
+  3: cannot cast type "character varying" to "integer" in Assign context
+
+
+# Multiple assignments, to subquery (with column name) with cast failure.
+statement error
+update t set (v1, v2) = (select '888.88' s1, 999 s2);
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: cannot cast type "struct<s1 character varying, s2 integer>" to "struct<v1 integer, v2 integer>"
+  2: cannot cast struct field "s1" to struct field "v1"
+  3: cannot cast type "character varying" to "integer" in Assign context
+
+
+# Multiple assignments, to subquery with mismatched column count.
+statement error number of columns does not match number of values
+update t set (v1, v2) = (select 666);
+
+# Multiple assignments, to scalar expression.
+statement error source for a multiple-column UPDATE item must be a sub-SELECT or ROW\(\) expression
+update t set (v1, v2) = v1 + 1;
+
+
+# Assignment to system columns.
+statement error update modifying column `_rw_timestamp` is unsupported
+update t set _rw_timestamp = _rw_timestamp + interval '1 second';
+
+
+# https://github.com/risingwavelabs/risingwave/pull/19402#pullrequestreview-2444427475
+# https://github.com/risingwavelabs/risingwave/pull/19452
+statement ok
+create table y (v1 int, v2 int);
+
+statement ok
+insert into y values (11, 11), (22, 22);
+
+statement error Scalar subquery produced more than one row
+update t set (v1, v2) = (select y.v1, y.v2 from y);
+
+statement ok
+drop table y;
+
+
+# Cleanup.
+statement ok
+drop table t;

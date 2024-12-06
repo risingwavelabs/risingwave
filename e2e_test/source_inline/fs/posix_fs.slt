@@ -14,17 +14,55 @@ CREATE TABLE diamonds (
     source_rate_limit = 0
 ) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
 
+statement ok
+CREATE SOURCE diamonds_source (
+    carat FLOAT,
+    cut TEXT,
+    color TEXT,
+    depth FLOAT,
+) WITH (
+    connector = 'posix_fs',
+    match_pattern = 'data*.csv',
+    posix_fs.root = 'e2e_test/source_inline/fs/data',
+    source_rate_limit = 0
+) FORMAT PLAIN ENCODE CSV ( without_header = 'false', delimiter = ',');
+
+statement ok
+create materialized view diamonds_mv as select * from diamonds_source;
+
 sleep 1s
 
 # no output due to rate limit
-query TTTT rowsort
+statement count 0
 select * from diamonds;
+
+
+statement count 0
+select * from diamonds_mv;
+
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name, node_name;
 ----
+diamonds	FS_FETCH	{FS_FETCH}	0
+diamonds	SOURCE	{SOURCE}	0
+diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
+diamonds_mv	SOURCE	{SOURCE}	0
 
 statement ok
 ALTER TABLE diamonds SET source_rate_limit TO DEFAULT;
 
-sleep 10s
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name, node_name;
+----
+diamonds_mv	FS_FETCH	{MVIEW,FS_FETCH}	0
+diamonds_mv	SOURCE	{SOURCE}	0
+
+
+sleep 3s
 
 query TTTT rowsort
 select * from diamonds;
@@ -40,5 +78,42 @@ select * from diamonds;
 1.28 Good J 63.1
 1.3 Fair E 64.7
 
+
+statement count 0
+select * from diamonds_mv;
+
+
+
+statement ok
+ALTER SOURCE diamonds_source SET source_rate_limit TO DEFAULT;
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name, node_name;
+----
+
+
+sleep 3s
+
+query TTTT rowsort
+select * from diamonds_mv;
+----
+0.22 Premium I 62
+0.23 Very Good H 57.5
+0.25 Ideal E 61.4
+0.28 Good J 63.1
+0.3 Fair E 64.7
+1.22 Premium I 62
+1.23 Very Good H 57.5
+1.25 Ideal E 61.4
+1.28 Good J 63.1
+1.3 Fair E 64.7
+
 statement ok
 DROP TABLE diamonds;
+
+statement ok
+drop materialized view diamonds_mv;
+
+statement ok
+drop source diamonds_source;

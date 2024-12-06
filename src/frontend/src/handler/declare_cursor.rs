@@ -136,6 +136,23 @@ async fn handle_declare_query_cursor(
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
+pub async fn handle_bound_declare_query_cursor(
+    handle_args: HandlerArgs,
+    cursor_name: ObjectName,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session.clone();
+    let (chunk_stream, fields) =
+        create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?;
+
+    handle_args
+        .session
+        .get_cursor_manager()
+        .add_query_cursor(cursor_name, chunk_stream, fields)
+        .await?;
+    Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
+}
+
 pub async fn create_stream_for_cursor_stmt(
     handle_args: HandlerArgs,
     stmt: Statement,

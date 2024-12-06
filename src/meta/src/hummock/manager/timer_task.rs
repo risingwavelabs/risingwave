@@ -20,7 +20,6 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -162,6 +161,7 @@ impl HummockManager {
                 );
                 scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                scheduling_compaction_group_trigger_interval.reset();
                 let group_scheduling_split_trigger =
                     IntervalStream::new(scheduling_compaction_group_trigger_interval)
                         .map(|_| HummockTimerEvent::GroupScheduleSplit);
@@ -179,6 +179,7 @@ impl HummockManager {
                 );
                 scheduling_compaction_group_merge_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                scheduling_compaction_group_merge_trigger_interval.reset();
                 let group_scheduling_merge_trigger =
                     IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
                         .map(|_| HummockTimerEvent::GroupScheduleMerge);
@@ -284,8 +285,11 @@ impl HummockManager {
                                             .compaction_group_count
                                             .set(compaction_group_count as i64);
 
-                                        let tables_throughput =
-                                            hummock_manager.history_table_throughput.read().clone();
+                                        let table_write_throughput_statistic_manager =
+                                            hummock_manager
+                                                .table_write_throughput_statistic_manager
+                                                .read()
+                                                .clone();
 
                                         let current_version_levels = &hummock_manager
                                             .versioning
@@ -304,16 +308,24 @@ impl HummockManager {
                                                 .set(group_info.group_size as _);
                                             // accumulate the throughput of all tables in the group
                                             let mut avg_throuput = 0;
+                                            let max_statistic_expired_time = std::cmp::max(
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_split,
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_merge,
+                                            );
                                             for table_id in group_info.table_statistic.keys() {
-                                                if let Some(throuput) =
-                                                    tables_throughput.get(table_id)
-                                                {
-                                                    let table_avg_throughput =
-                                                        throuput.iter().sum::<u64>()
-                                                            / throuput.len() as u64;
-
-                                                    avg_throuput += table_avg_throughput;
-                                                }
+                                                avg_throuput +=
+                                                    table_write_throughput_statistic_manager
+                                                        .avg_write_throughput(
+                                                            *table_id,
+                                                            max_statistic_expired_time as i64,
+                                                        )
+                                                        as u64;
                                             }
 
                                             hummock_manager
@@ -514,7 +526,7 @@ impl HummockManager {
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
-                        let tasks = level_handler.get_pending_tasks().to_vec();
+                        let tasks = level_handler.pending_tasks().to_vec();
                         if tasks.is_empty() {
                             continue;
                         }
@@ -546,13 +558,7 @@ impl HummockManager {
     /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = std::cmp::max(
-            1,
-            params.checkpoint_frequency() * barrier_interval_ms / 1000,
-        );
-        let table_write_throughput = self.history_table_throughput.read().clone();
+        let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
@@ -563,7 +569,7 @@ impl HummockManager {
                 continue;
             }
 
-            self.try_split_compaction_group(&table_write_throughput, checkpoint_secs, group)
+            self.try_split_compaction_group(&table_write_throughput, group)
                 .await;
         }
     }
@@ -594,7 +600,8 @@ impl HummockManager {
                 return;
             }
         };
-        let table_write_throughput = self.history_table_throughput.read().clone();
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
         group_infos.sort_by_key(|group| {
@@ -611,15 +618,6 @@ impl HummockManager {
             return;
         }
 
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = {
-            std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            )
-        };
-
         let mut left = 0;
         let mut right = left + 1;
 
@@ -628,10 +626,9 @@ impl HummockManager {
             let next_group = &group_infos[right];
             match self
                 .try_merge_compaction_group(
-                    &table_write_throughput,
+                    &table_write_throughput_statistic_manager,
                     group,
                     next_group,
-                    checkpoint_secs,
                     &created_tables,
                 )
                 .await

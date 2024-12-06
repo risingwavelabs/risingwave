@@ -11,11 +11,20 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 <!-- toc -->
 
+## Find Something to Work On
+
+Issues labeled with [ `good first issue` ](https://github.com/risingwavelabs/risingwave/contribute) are suitable for new RisingWave hackers.
+They are relatively easy to begin with and can guide you getting familiar with one module of RisingWave.
+
 ## Tests and miscellaneous checks
 
 Before submitting your code changes, ensure you fully test them and perform necessary checks. The testing instructions and necessary checks are detailed in other sections of the book.
 
 ## Submit a PR
+
+### Ask for Review
+
+To get your PR reviewed and merged sooner, you can find and `@` mention developers who recently worked on the same files. If you're not sure who to ask, feel free to reach out to any active developers to help find relevant reviewers. Don't hesitate to follow up politely if you haven't received a response, or ask for help in the RisingWave Community Slack channel. We welcome you to be proactive in finding reviewers for your PR!
 
 ### Pull Request title
 
@@ -28,7 +37,7 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `style`: A refactoring that improves code style
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
-- `build`: Changes that affect the build system or external dependencies (example scopes: `.config`,  `.cargo`,  `Cargo.toml`)
+- `build`: Changes that affect the build system or external dependencies (example scopes: `.config`,   `.cargo`,   `Cargo.toml`)
 - `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: `.github`,  `ci` (Buildkite))
 - `chore`: Other changes that don't modify src or test files
 - `revert`: Reverts a previous commit

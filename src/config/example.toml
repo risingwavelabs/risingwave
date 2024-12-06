@@ -14,8 +14,8 @@ threshold_auto = 0.8999999761581421
 dir = "./"
 
 [meta]
-min_sst_retention_time_sec = 10800
-full_gc_interval_sec = 600
+min_sst_retention_time_sec = 21600
+full_gc_interval_sec = 3600
 full_gc_object_limit = 100000
 gc_history_retention_time_sec = 21600
 max_inflight_time_travel_query = 1000
@@ -92,6 +92,7 @@ meta_max_get_task_probe_times = 5
 meta_actor_cnt_per_worker_parallelism_soft_limit = 100
 meta_actor_cnt_per_worker_parallelism_hard_limit = 400
 meta_hummock_time_travel_sst_info_fetch_batch_size = 10000
+meta_hummock_time_travel_sst_info_insert_batch_size = 100
 
 [meta.meta_store_config]
 max_connections = 10
@@ -136,6 +137,7 @@ stream_memory_controller_threshold_stable = 0.72
 stream_memory_controller_eviction_factor_aggressive = 2.0
 stream_memory_controller_eviction_factor_graceful = 1.5
 stream_memory_controller_eviction_factor_stable = 1.0
+stream_memory_controller_update_interval_ms = 100
 stream_memory_controller_sequence_tls_step = 128
 stream_memory_controller_sequence_tls_lag = 32
 stream_enable_arrangement_backfill = true
@@ -177,7 +179,7 @@ table_info_statistic_history_times = 240
 mem_table_spill_threshold = 4194304
 compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
-time_travel_version_cache_capacity = 32
+time_travel_version_cache_capacity = 2
 
 [storage.cache.block_cache_eviction]
 algorithm = "Lru"

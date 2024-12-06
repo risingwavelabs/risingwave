@@ -24,6 +24,6 @@ struct PgTablespace {
     oid: i32,
     spcname: String,
     spcowner: i32,
-    spcacl: String,
+    spcacl: Vec<String>,
     spcoptions: String,
 }

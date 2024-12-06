@@ -210,7 +210,7 @@ impl Binder {
                 ("scale", raw_call(ExprType::Scale)),
                 ("min_scale", raw_call(ExprType::MinScale)),
                 ("trim_scale", raw_call(ExprType::TrimScale)),
-
+                // date and time
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -223,8 +223,16 @@ impl Binder {
                 ("make_date", raw_call(ExprType::MakeDate)),
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
-                ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
+                ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.swap(0, 1);
+                        Ok(inputs)
+                    } else {
+                        Err(ErrorCode::ExprError("unexpected arguments number".into()).into())
+                    }
+                })),
+                ("to_date", raw_call(ExprType::CharToDate)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -294,6 +302,8 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
+                ("hmac", raw_call(ExprType::Hmac)),
+                ("secure_compare",raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("inet_aton", raw_call(ExprType::InetAton)),
@@ -661,6 +671,7 @@ impl Binder {
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
+                ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
                 // internal
                 ("rw_vnode", raw_call(ExprType::VnodeUser)),
                 ("rw_test_paid_tier", raw_call(ExprType::TestPaidTier)), // for testing purposes

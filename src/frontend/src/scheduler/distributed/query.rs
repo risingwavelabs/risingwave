@@ -470,7 +470,7 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, StreamJobStatus,
         DEFAULT_SUPER_USER_ID,
     };
     use risingwave_common::hash::{VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping};
@@ -590,6 +590,9 @@ pub(crate) mod tests {
             created_at_cluster_version: None,
             cdc_table_id: None,
             vnode_count: VnodeCount::set(vnode_count),
+            webhook_info: None,
+            job_id: None,
+            engine: Engine::Hummock,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
@@ -669,12 +672,12 @@ pub(crate) mod tests {
                 port: 5687,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(0),
             ..Default::default()
@@ -687,12 +690,12 @@ pub(crate) mod tests {
                 port: 5688,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(1),
             ..Default::default()
@@ -705,12 +708,12 @@ pub(crate) mod tests {
                 port: 5689,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(2),
             ..Default::default()

@@ -16,6 +16,7 @@
 #![expect(clippy::all)]
 #![expect(clippy::doc_markdown)]
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use plan_common::AdditionalColumn;
@@ -23,6 +24,7 @@ pub use prost::Message;
 use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
+use crate::common::WorkerType;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -220,7 +222,11 @@ impl stream_plan::MaterializeNode {
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
     pub fn parallelism(&self) -> usize {
-        self.parallelism as usize
+        assert_eq!(self.r#type(), WorkerType::ComputeNode);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
     }
 }
 
@@ -284,12 +290,27 @@ impl stream_plan::StreamNode {
 
     /// Find the external stream source info inside the stream node, if any.
     ///
-    /// Returns `source_id`.
-    pub fn find_source_backfill(&self) -> Option<u32> {
+    /// Returns (`source_id`, `upstream_source_fragment_id`).
+    ///
+    /// Note: we must get upstream fragment id from the merge node, not from the fragment's
+    /// `upstream_fragment_ids`. e.g., DynamicFilter may have 2 upstream fragments, but only
+    /// one is the upstream source fragment.
+    pub fn find_source_backfill(&self) -> Option<(u32, u32)> {
         if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
             self.node_body.as_ref()
         {
-            return Some(source.upstream_source_id);
+            if let crate::stream_plan::stream_node::NodeBody::Merge(merge) =
+                self.input[0].node_body.as_ref().unwrap()
+            {
+                // Note: avoid using `merge.upstream_actor_id` to prevent misuse.
+                // See comments there for details.
+                return Some((source.upstream_source_id, merge.upstream_fragment_id));
+            } else {
+                unreachable!(
+                    "source backfill must have a merge node as its input: {:?}",
+                    self
+                );
+            }
         }
 
         for child in &self.input {
@@ -299,6 +320,53 @@ impl stream_plan::StreamNode {
         }
 
         None
+    }
+}
+
+impl stream_plan::FragmentTypeFlag {
+    /// Fragments that may be affected by `BACKFILL_RATE_LIMIT`.
+    pub fn backfill_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::SourceScan as i32
+            | stream_plan::FragmentTypeFlag::StreamScan as i32
+    }
+
+    /// Fragments that may be affected by `SOURCE_RATE_LIMIT`.
+    /// Note: for `FsFetch`, old fragments don't have this flag set, so don't use this to check.
+    pub fn source_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Source as i32 | stream_plan::FragmentTypeFlag::FsFetch as i32
+    }
+
+    /// Note: this doesn't include `FsFetch` created in old versions.
+    pub fn rate_limit_fragments() -> i32 {
+        Self::backfill_rate_limit_fragments() | Self::source_rate_limit_fragments()
+    }
+
+    pub fn dml_rate_limit_fragments() -> i32 {
+        stream_plan::FragmentTypeFlag::Dml as i32
+    }
+}
+
+impl stream_plan::Dispatcher {
+    pub fn as_strategy(&self) -> stream_plan::DispatchStrategy {
+        stream_plan::DispatchStrategy {
+            r#type: self.r#type,
+            dist_key_indices: self.dist_key_indices.clone(),
+            output_indices: self.output_indices.clone(),
+        }
+    }
+}
+
+impl meta::table_fragments::Fragment {
+    pub fn dispatches(&self) -> HashMap<i32, stream_plan::DispatchStrategy> {
+        self.actors[0]
+            .dispatcher
+            .iter()
+            .map(|d| {
+                let fragment_id = d.dispatcher_id as _;
+                let strategy = d.as_strategy();
+                (fragment_id, strategy)
+            })
+            .collect()
     }
 }
 

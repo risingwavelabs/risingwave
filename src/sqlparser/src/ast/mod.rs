@@ -38,8 +38,8 @@ use winnow::PResult;
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
-    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption,
+    ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{
     get_delimiter, AvroSchema, CompatibleFormatEncode, DebeziumAvroSchema, ProtobufSchema,
@@ -52,8 +52,8 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{
-    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, SecretRef,
-    SecretRefAsType, TrimWhereField, Value,
+    ConnectionRefValue, CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType,
+    SecretRefAsType, SecretRefValue, TrimWhereField, Value,
 };
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterSubscriptionOperation,
@@ -1139,6 +1139,9 @@ impl fmt::Display for ExplainType {
 pub enum ExplainFormat {
     Text,
     Json,
+    Xml,
+    Yaml,
+    Dot,
 }
 
 impl fmt::Display for ExplainFormat {
@@ -1146,6 +1149,9 @@ impl fmt::Display for ExplainFormat {
         match self {
             ExplainFormat::Text => f.write_str("TEXT"),
             ExplainFormat::Json => f.write_str("JSON"),
+            ExplainFormat::Xml => f.write_str("XML"),
+            ExplainFormat::Yaml => f.write_str("YAML"),
+            ExplainFormat::Dot => f.write_str("DOT"),
         }
     }
 }
@@ -1302,6 +1308,10 @@ pub enum Statement {
         cdc_table_info: Option<CdcTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
         include_column_options: IncludeOption,
+        /// `VALIDATE SECRET secure_secret_name AS secure_compare ()`
+        webhook_info: Option<WebhookSourceInfo>,
+        /// `Engine = [hummock | iceberg]`
+        engine: Engine,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1431,6 +1441,13 @@ pub enum Statement {
         /// Connection name
         name: ObjectName,
         operation: AlterConnectionOperation,
+    },
+    /// ALTER SECRET
+    AlterSecret {
+        /// Secret name
+        name: ObjectName,
+        with_options: Vec<SqlOption>,
+        operation: AlterSecretOperation,
     },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
@@ -1835,6 +1852,8 @@ impl fmt::Display for Statement {
                 query,
                 cdc_table_info,
                 include_column_options,
+                webhook_info,
+                engine,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1883,6 +1902,16 @@ impl fmt::Display for Statement {
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
+                }
+                if let Some(info)= webhook_info {
+                    write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
+                    write!(f, " AS {}", info.signature_expr)?;
+                }
+                match engine {
+                    Engine::Hummock => {},
+                    Engine::Iceberg => {
+                        write!(f, " ENGINE = {}", engine)?;
+                    },
                 }
                 Ok(())
             }
@@ -1960,6 +1989,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
+            }
+            Statement::AlterSecret { name, with_options, operation } => {
+                write!(f, "ALTER SECRET {}", name)?;
+                if !with_options.is_empty() {
+                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
+                }
+                write!(f, " {}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
@@ -2730,7 +2766,7 @@ impl ParseTo for ObjectType {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
     pub name: ObjectName,
-    pub value: Value,
+    pub value: SqlOptionValue,
 }
 
 impl fmt::Display for SqlOption {
@@ -2746,6 +2782,44 @@ impl fmt::Display for SqlOption {
         } else {
             write!(f, "{} = {}", self.name, self.value)
         }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SqlOptionValue {
+    Value(Value),
+    SecretRef(SecretRefValue),
+    ConnectionRef(ConnectionRefValue),
+}
+
+impl fmt::Debug for SqlOptionValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SqlOptionValue::Value(value) => write!(f, "{:?}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {:?}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
+                write!(f, "connection {:?}", connection_ref)
+            }
+        }
+    }
+}
+
+impl fmt::Display for SqlOptionValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SqlOptionValue::Value(value) => write!(f, "{}", value),
+            SqlOptionValue::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
+            SqlOptionValue::ConnectionRef(connection_ref) => {
+                write!(f, "connection {}", connection_ref)
+            }
+        }
+    }
+}
+
+impl From<Value> for SqlOptionValue {
+    fn from(value: Value) -> Self {
+        SqlOptionValue::Value(value)
     }
 }
 
@@ -2779,6 +2853,22 @@ impl fmt::Display for OnConflict {
             OnConflict::UpdateFull => "DO UPDATE FULL",
             OnConflict::Nothing => "DO NOTHING",
             OnConflict::UpdateIfNotNull => "DO UPDATE IF NOT NULL",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Engine {
+    Hummock,
+    Iceberg,
+}
+
+impl fmt::Display for crate::ast::Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            crate::ast::Engine::Hummock => "HUMMOCK",
+            crate::ast::Engine::Iceberg => "ICEBERG",
         })
     }
 }
@@ -3094,8 +3184,6 @@ pub struct CreateFunctionBody {
     pub return_: Option<Expr>,
     /// USING ...
     pub using: Option<CreateFunctionUsing>,
-
-    pub function_type: Option<CreateFunctionType>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -3117,9 +3205,6 @@ impl fmt::Display for CreateFunctionBody {
         }
         if let Some(using) = &self.using {
             write!(f, " {using}")?;
-        }
-        if let Some(function_type) = &self.function_type {
-            write!(f, " {function_type}")?;
         }
         Ok(())
     }
@@ -3147,7 +3232,10 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
         let mut always_retry_on_network_error = None;
         for option in with_options {
             if option.name.to_string().to_lowercase() == "always_retry_on_network_error" {
-                always_retry_on_network_error = Some(option.value == Value::Boolean(true));
+                always_retry_on_network_error = Some(matches!(
+                    option.value,
+                    SqlOptionValue::Value(Value::Boolean(true))
+                ));
             } else {
                 return Err(StrError(format!("Unsupported option: {}", option.name)));
             }
@@ -3189,26 +3277,6 @@ impl fmt::Display for CreateFunctionUsing {
             CreateFunctionUsing::Base64(s) => {
                 write!(f, "BASE64 '{s}'")
             }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CreateFunctionType {
-    Sync,
-    Async,
-    Generator,
-    AsyncGenerator,
-}
-
-impl fmt::Display for CreateFunctionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CreateFunctionType::Sync => write!(f, "SYNC"),
-            CreateFunctionType::Async => write!(f, "ASYNC"),
-            CreateFunctionType::Generator => write!(f, "SYNC GENERATOR"),
-            CreateFunctionType::AsyncGenerator => write!(f, "ASYNC GENERATOR"),
         }
     }
 }
@@ -3456,12 +3524,11 @@ mod tests {
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some(Ident::new_unchecked("python")),
+                runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: None,
-                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
@@ -3479,12 +3546,11 @@ mod tests {
             returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some(Ident::new_unchecked("python")),
+                runtime: None,
                 behavior: Some(FunctionBehavior::Immutable),
                 as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
                 return_: None,
                 using: None,
-                runtime: None,
-                function_type: None,
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
@@ -3492,30 +3558,6 @@ mod tests {
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( ALWAYS_RETRY_NETWORK_ERRORS = true )",
-            format!("{}", create_function)
-        );
-
-        let create_function = Statement::CreateFunction {
-            temporary: false,
-            or_replace: false,
-            name: ObjectName(vec![Ident::new_unchecked("foo")]),
-            args: Some(vec![OperateFunctionArg::unnamed(DataType::Int)]),
-            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
-            params: CreateFunctionBody {
-                language: Some(Ident::new_unchecked("javascript")),
-                behavior: None,
-                as_: Some(FunctionDefinition::SingleQuotedDef("SELECT 1".to_string())),
-                return_: None,
-                using: None,
-                runtime: Some(Ident::new_unchecked("deno")),
-                function_type: Some(CreateFunctionType::AsyncGenerator),
-            },
-            with_options: CreateFunctionWithOptions {
-                always_retry_on_network_error: None,
-            },
-        };
-        assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE javascript RUNTIME deno AS 'SELECT 1' ASYNC GENERATOR",
             format!("{}", create_function)
         );
     }

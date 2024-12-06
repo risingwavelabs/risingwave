@@ -16,13 +16,13 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::PlanRef;
 
 pub struct OverWindowSplitRule;
 
 impl OverWindowSplitRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowSplitRule)
     }
 }

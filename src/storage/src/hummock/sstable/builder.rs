@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -507,7 +507,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let sst_info = SstableInfo {
+        let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sstable_id,
             sst_id: self.sstable_id,
             bloom_filter_kind,
@@ -526,7 +526,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
-        };
+        }
+        .into();
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
             meta.encoded_size(),
@@ -785,12 +786,14 @@ pub(super) mod tests {
 
         // build remote table
         let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
         let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
             opts,
             0,
             (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
             sstable_store.clone(),
             CachePolicy::NotFill,
+            table_id_to_vnode,
         )
         .await;
         let table = sstable_store

@@ -327,7 +327,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
-    use crate::executor::top_n::top_n_cache::TopNCacheTrait;
+    use crate::executor::top_n::top_n_cache::{TopNCacheTrait, TopNStaging};
     use crate::executor::top_n::{create_cache_key_serde, NO_GROUP_KEY};
     use crate::row_nonnull;
 
@@ -496,15 +496,14 @@ mod tests {
         let row1_bytes = serialize_pk_to_cache_key(row1.clone(), &cache_key_serde);
 
         let mut cache = TopNCache::<true>::new(0, 1, data_types);
-        cache.insert(row1_bytes.clone(), row1.clone(), &mut vec![], &mut vec![]);
+        cache.insert(row1_bytes.clone(), row1.clone(), &mut TopNStaging::new());
         cache
             .delete(
                 NO_GROUP_KEY,
                 &mut managed_state,
                 row1_bytes,
                 row1,
-                &mut vec![],
-                &mut vec![],
+                &mut TopNStaging::new(),
             )
             .await
             .unwrap();

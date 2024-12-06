@@ -501,5 +501,5 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v] }
     └─LogicalFilter { predicate: (t.k = 2147483648:Int64) }
-      └─LogicalScan { table: t, columns: [t.k, t.v] }
+      └─LogicalScan { table: t, columns: [t.k, t.v, t._rw_timestamp] }
   batch_plan: 'BatchValues { rows: [] }'

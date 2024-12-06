@@ -32,10 +32,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, 
 use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
-use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
 use risingwave_connector::source::cdc::external::{
-    DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, SchemaTableName,
+    CdcTableType, DebeziumOffset, DebeziumSourceOffset, ExternalTableConfig, SchemaTableName,
 };
 use risingwave_connector::source::cdc::DebeziumCdcSplit;
 use risingwave_connector::source::SplitImpl;
@@ -160,19 +158,6 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         MockOffsetGenExecutor::new(source).boxed(),
     );
 
-    let binlog_file = String::from("1.binlog");
-    // mock binlog watermarks for backfill
-    // initial low watermark: 1.binlog, pos=2 and expected behaviors:
-    // - ignore events before (1.binlog, pos=2);
-    // - apply events in the range of (1.binlog, pos=2, 1.binlog, pos=4) to the snapshot
-    let binlog_watermarks = vec![
-        MySqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
-        MySqlOffset::new(binlog_file.clone(), 4),
-        MySqlOffset::new(binlog_file.clone(), 6),
-        MySqlOffset::new(binlog_file.clone(), 8),
-        MySqlOffset::new(binlog_file.clone(), 10),
-    ];
-
     let table_name = SchemaTableName {
         schema_name: "public".to_string(),
         table_name: "mock_table".to_string(),
@@ -183,11 +168,14 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     ]);
     let table_pk_indices = vec![0];
     let table_pk_order_types = vec![OrderType::ascending()];
+    let config = ExternalTableConfig::default();
+
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
         "mydb".to_string(),
-        ExternalTableReaderImpl::Mock(MockExternalTableReader::new(binlog_watermarks)),
+        config,
+        CdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
         table_pk_indices.clone(),

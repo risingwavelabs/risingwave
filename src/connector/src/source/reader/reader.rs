@@ -37,8 +37,8 @@ use crate::source::filesystem::opendal_source::{
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
     create_split_reader, BackfillInfo, BoxChunkSourceStream, BoxTryStream, Column,
-    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitId, SplitReader,
-    WaitCheckpointTask,
+    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitId, SplitImpl,
+    SplitReader, WaitCheckpointTask,
 };
 use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
@@ -211,14 +211,17 @@ impl SourceReader {
     }
 
     /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    ///
+    /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> ConnectorResult<BoxChunkSourceStream> {
+        seek_to_latest: bool,
+    ) -> ConnectorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
         let Some(splits) = state else {
-            return Ok(pending().boxed());
+            return Ok((pending().boxed(), None));
         };
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -243,7 +246,7 @@ impl SourceReader {
 
         let support_multiple_splits = config.support_multiple_splits();
         dispatch_source_prop!(config, prop, {
-            let readers = if support_multiple_splits {
+            let mut readers = if support_multiple_splits {
                 tracing::debug!(
                     "spawning connector split reader for multiple splits {:?}",
                     splits
@@ -268,7 +271,20 @@ impl SourceReader {
                 .await?
             };
 
-            Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
+            let latest_splits = if seek_to_latest {
+                let mut latest_splits = Vec::new();
+                for reader in &mut readers {
+                    latest_splits.extend(reader.seek_to_latest().await?);
+                }
+                Some(latest_splits)
+            } else {
+                None
+            };
+
+            Ok((
+                select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
+                latest_splits,
+            ))
         })
     }
 }

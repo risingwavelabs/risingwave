@@ -61,19 +61,19 @@ impl CreatingStreamingJobControl {
         initial_mutation: Mutation,
     ) -> Self {
         info!(
-            table_id = info.table_fragments.table_id().table_id,
+            table_id = info.stream_job_fragments.stream_job_id().table_id,
             definition = info.definition,
             "new creating job"
         );
-        let snapshot_backfill_actors = info.table_fragments.snapshot_backfill_actor_ids();
+        let snapshot_backfill_actors = info.stream_job_fragments.snapshot_backfill_actor_ids();
         let mut create_mview_tracker = CreateMviewProgressTracker::default();
         create_mview_tracker.update_tracking_jobs(Some((&info, None)), [], version_stat);
         let fragment_infos: HashMap<_, _> = info.new_fragment_info().collect();
 
-        let table_id = info.table_fragments.table_id();
+        let table_id = info.stream_job_fragments.stream_job_id();
         let table_id_str = format!("{}", table_id.table_id);
 
-        let actors_to_create = info.table_fragments.actors_to_create();
+        let actors_to_create = info.stream_job_fragments.actors_to_create();
         let graph_info = InflightStreamingJobInfo {
             job_id: table_id,
             fragment_infos,
@@ -121,7 +121,7 @@ impl CreatingStreamingJobControl {
                 } else {
                     let progress = create_mview_tracker
                         .gen_ddl_progress()
-                        .remove(&self.info.table_fragments.table_id().table_id)
+                        .remove(&self.info.stream_job_fragments.stream_job_id().table_id)
                         .expect("should exist");
                     format!("Snapshot [{}]", progress.progress)
                 }
@@ -143,7 +143,7 @@ impl CreatingStreamingJobControl {
             }
         };
         DdlProgress {
-            id: self.info.table_fragments.table_id().table_id as u64,
+            id: self.info.stream_job_fragments.stream_job_id().table_id as u64,
             statement: self.info.definition.clone(),
             progress,
         }
@@ -202,7 +202,7 @@ impl CreatingStreamingJobControl {
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<()> {
-        let table_id = self.info.table_fragments.table_id();
+        let table_id = self.info.stream_job_fragments.stream_job_id();
         let start_consume_upstream =
             if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
                 jobs_to_merge.contains_key(&table_id)
@@ -211,7 +211,7 @@ impl CreatingStreamingJobControl {
             };
         if start_consume_upstream {
             info!(
-                table_id = self.info.table_fragments.table_id().table_id,
+                table_id = self.info.stream_job_fragments.stream_job_id().table_id,
                 prev_epoch = barrier_info.prev_epoch(),
                 "start consuming upstream"
             );
@@ -235,7 +235,7 @@ impl CreatingStreamingJobControl {
         {
             Self::inject_barrier(
                 DatabaseId::new(self.info.streaming_job.database_id()),
-                self.info.table_fragments.table_id(),
+                self.info.stream_job_fragments.stream_job_id(),
                 control_stream_manager,
                 &mut self.barrier_control,
                 &self.graph_info,
@@ -260,7 +260,7 @@ impl CreatingStreamingJobControl {
         let prev_barriers_to_inject = self.status.update_progress(&resp.create_mview_progress);
         self.barrier_control.collect(epoch, worker_id, resp);
         if let Some(prev_barriers_to_inject) = prev_barriers_to_inject {
-            let table_id = self.info.table_fragments.table_id();
+            let table_id = self.info.stream_job_fragments.stream_job_id();
             for info in prev_barriers_to_inject {
                 Self::inject_barrier(
                     DatabaseId::new(self.info.streaming_job.database_id()),

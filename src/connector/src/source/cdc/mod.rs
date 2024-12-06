@@ -58,7 +58,7 @@ pub fn build_cdc_table_id(source_id: u32, external_table_name: &str) -> String {
     format!("{}.{}", source_id, external_table_name)
 }
 
-pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
+pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
 }

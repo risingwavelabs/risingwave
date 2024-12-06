@@ -26,7 +26,7 @@ use tokio::sync::oneshot::Sender;
 use self::notifier::Notifier;
 use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, StreamJobFragments};
 use crate::{MetaError, MetaResult};
 
 mod checkpoint;
@@ -44,8 +44,8 @@ mod utils;
 mod worker;
 
 pub use self::command::{
-    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
-    Reschedule, SnapshotBackfillInfo,
+    BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
 };
 pub use self::info::InflightSubscriptionInfo;
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
@@ -105,20 +105,22 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     subscription_infos: HashMap<DatabaseId, InflightSubscriptionInfo>,
     stream_actors: HashMap<ActorId, StreamActor>,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<TableId, (String, TableFragments)>,
+    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
     hummock_version_stats: HummockVersionStats,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
-    fn validate(&self) -> MetaResult<()> {
-        for (database_id, database_info) in &self.database_fragment_infos {
+    fn validate_database_info(
+        database_id: DatabaseId,
+        database_info: &InflightDatabaseInfo,
+        active_streaming_nodes: &ActiveStreamingWorkerNodes,
+        stream_actors: &HashMap<ActorId, StreamActor>,
+        state_table_committed_epochs: &HashMap<TableId, u64>,
+    ) -> MetaResult<()> {
+        {
             for fragment in database_info.fragment_infos() {
                 for (actor_id, worker_id) in &fragment.actors {
-                    if !self
-                        .active_streaming_nodes
-                        .current()
-                        .contains_key(worker_id)
-                    {
+                    if !active_streaming_nodes.current().contains_key(worker_id) {
                         return Err(anyhow!(
                             "worker_id {} of actor {} do not exist",
                             worker_id,
@@ -126,15 +128,12 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                         )
                         .into());
                     }
-                    if !self.stream_actors.contains_key(actor_id) {
+                    if !stream_actors.contains_key(actor_id) {
                         return Err(anyhow!("cannot find StreamActor of actor {}", actor_id).into());
                     }
                 }
                 for state_table_id in &fragment.state_table_ids {
-                    if !self
-                        .state_table_committed_epochs
-                        .contains_key(state_table_id)
-                    {
+                    if !state_table_committed_epochs.contains_key(state_table_id) {
                         return Err(anyhow!(
                             "state table {} is not registered to hummock",
                             state_table_id
@@ -146,8 +145,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
             let mut committed_epochs = database_info.existing_table_ids().map(|table_id| {
                 (
                     table_id,
-                    *self
-                        .state_table_committed_epochs
+                    *state_table_committed_epochs
                         .get(&table_id)
                         .expect("checked exist"),
                 )
@@ -170,5 +168,46 @@ impl BarrierWorkerRuntimeInfoSnapshot {
             }
         }
         Ok(())
+    }
+
+    fn validate(&self) -> MetaResult<()> {
+        for (database_id, database_info) in &self.database_fragment_infos {
+            Self::validate_database_info(
+                *database_id,
+                database_info,
+                &self.active_streaming_nodes,
+                &self.stream_actors,
+                &self.state_table_committed_epochs,
+            )?
+        }
+        Ok(())
+    }
+}
+
+#[expect(dead_code)]
+#[derive(Debug)]
+struct DatabaseRuntimeInfoSnapshot {
+    database_fragment_info: InflightDatabaseInfo,
+    state_table_committed_epochs: HashMap<TableId, u64>,
+    subscription_info: InflightSubscriptionInfo,
+    stream_actors: HashMap<ActorId, StreamActor>,
+    source_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    background_jobs: HashMap<TableId, (String, StreamJobFragments)>,
+}
+
+impl DatabaseRuntimeInfoSnapshot {
+    #[expect(dead_code)]
+    fn validate(
+        &self,
+        database_id: DatabaseId,
+        active_streaming_nodes: &ActiveStreamingWorkerNodes,
+    ) -> MetaResult<()> {
+        BarrierWorkerRuntimeInfoSnapshot::validate_database_info(
+            database_id,
+            &self.database_fragment_info,
+            active_streaming_nodes,
+            &self.stream_actors,
+            &self.state_table_committed_epochs,
+        )
     }
 }

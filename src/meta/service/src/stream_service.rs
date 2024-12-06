@@ -114,12 +114,17 @@ impl StreamManagerService for StreamServiceImpl {
             }
             ThrottleTarget::Mv => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::CdcTable => {
                 self.metadata_manager
-                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .await?
+            }
+            ThrottleTarget::TableDml => {
+                self.metadata_manager
+                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
@@ -432,5 +437,17 @@ impl StreamManagerService for StreamServiceImpl {
             .collect_vec();
 
         Ok(Response::new(ListActorSplitsResponse { actor_splits }))
+    }
+
+    async fn list_rate_limits(
+        &self,
+        _request: Request<ListRateLimitsRequest>,
+    ) -> Result<Response<ListRateLimitsResponse>, Status> {
+        let rate_limits = self
+            .metadata_manager
+            .catalog_controller
+            .list_rate_limits()
+            .await?;
+        Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 }

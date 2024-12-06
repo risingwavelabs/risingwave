@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
 
+use super::top_n_cache::TopNStaging;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::executor::prelude::*;
@@ -126,9 +127,11 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecuto
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.cache.limit);
-        let mut res_rows = Vec::with_capacity(self.cache.limit);
+    async fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let mut staging = TopNStaging::new();
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
@@ -138,8 +141,7 @@ where
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
                     self.managed_state.insert(row_ref);
-                    self.cache
-                        .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
+                    self.cache.insert(cache_key, row_ref, &mut staging)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
@@ -151,14 +153,24 @@ where
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
-                            &mut res_ops,
-                            &mut res_rows,
+                            &mut staging,
                         )
                         .await?
                 }
             }
         }
-        generate_output(res_rows, res_ops, &self.schema)
+
+        let data_types = self.schema.data_types();
+        let deserializer = RowDeserializer::new(data_types.clone());
+        if staging.is_empty() {
+            return Ok(None);
+        }
+        let mut chunk_builder = StreamChunkBuilder::unlimited(data_types, Some(staging.len()));
+        for res in staging.into_deserialized_changes(&deserializer) {
+            let (op, row) = res?;
+            let _none = chunk_builder.append_row(op, row);
+        }
+        Ok(chunk_builder.take())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -184,7 +196,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -200,6 +211,7 @@ mod tests {
         use risingwave_common::util::epoch::test_epoch;
 
         use super::*;
+        use crate::executor::test_utils::StreamExecutorTestExt;
 
         fn create_stream_chunks() -> Vec<StreamChunk> {
             let chunk1 = StreamChunk::from_pretty(
@@ -287,7 +299,7 @@ mod tests {
             .await;
 
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, false>::new(
+            let top_n = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -297,49 +309,38 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     + 10 3
                     +  9 4
                     +  8 5"
                 )
+                .sort_rows(),
             );
             // Barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  7 6
-                    -  7 6
-                    -  8 5
-                    +  8 5
                     -  8 5
                     + 11 8"
                 )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             // (8, 9, 10, 11, 12, 13, 14)
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I  I
                     +  8  5
@@ -347,29 +348,24 @@ mod tests {
                     + 13 11
                     + 14 12"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
             // (10, 12, 13, 14)
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     -  8 5
                     -  9 4
                     - 11 8"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
 
         #[tokio::test]
@@ -382,7 +378,7 @@ mod tests {
             )
             .await;
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, false>::new(
+            let top_n = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -392,76 +388,58 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0
                     +  2 1
                     +  3 2
-                    + 10 3
-                    - 10 3
-                    +  9 4
-                    -  9 4
                     +  8 5"
                 )
+                .sort_rows(),
             );
             // now () -> (1, 2, 3, 8)
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
-                    -  8 5
                     +  7 6
                     -  3 2
-                    +  8 5
                     -  1 0
-                    +  9 4
-                    -  9 4
                     +  5 7
                     -  2 1
                     +  9 4"
                 )
+                .sort_rows(),
             );
 
             // (5, 7, 8, 9)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     -  9 4
                     +  6 9"
                 )
+                .sort_rows(),
             );
             // (5, 6, 7, 8)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     -  5 7
@@ -469,13 +447,11 @@ mod tests {
                     -  6 9
                     + 10 3"
                 )
+                .sort_rows(),
             );
             // (7, 8, 9, 10)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
 
         // Should have the same result as above, since there are no duplicate sort keys.
@@ -489,7 +465,7 @@ mod tests {
             )
             .await;
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, true>::new(
+            let top_n = TopNExecutor::<_, true>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -499,76 +475,58 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     +  1 0
                     +  2 1
                     +  3 2
-                    + 10 3
-                    - 10 3
-                    +  9 4
-                    -  9 4
                     +  8 5"
                 )
+                .sort_rows(),
             );
             // now () -> (1, 2, 3, 8)
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
-                    - 8 5
                     + 7 6
                     - 3 2
-                    + 8 5
                     - 1 0
-                    + 9 4
-                    - 9 4
                     + 5 7
                     - 2 1
                     + 9 4"
                 )
+                .sort_rows(),
             );
 
             // (5, 7, 8, 9)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     -  9 4
                     +  6 9"
                 )
+                .sort_rows(),
             );
             // (5, 6, 7, 8)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     -  5 7
@@ -576,13 +534,11 @@ mod tests {
                     -  6 9
                     + 10 3"
                 )
+                .sort_rows(),
             );
             // (7, 8, 9, 10)
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
 
         #[tokio::test]
@@ -595,7 +551,7 @@ mod tests {
             )
             .await;
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, false>::new(
+            let top_n = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -605,60 +561,46 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
                     + 10 3
                     +  9 4
                     +  8 5"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  7 6
-                    -  7 6
-                    -  8 5
-                    +  8 5
                     -  8 5
                     + 11 8"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I
-                +  8 5"
+                    +  8 5"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I  I
                     -  8  5
@@ -668,12 +610,10 @@ mod tests {
                     - 11  8
                     + 14 12"
                 )
+                .sort_rows(),
             );
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
     }
 
@@ -684,6 +624,7 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
+        use crate::executor::test_utils::StreamExecutorTestExt;
         fn create_source_new() -> Executor {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -812,7 +753,7 @@ mod tests {
             )
             .await;
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, false>::new(
+            let top_n = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -822,55 +763,42 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            // should be empty
             assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty("  I I I I")
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I I I
-                +  5 1 4 1002
-                "
+                    +  5 1 4 1002"
                 )
+                .sort_rows(),
             );
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I I I
-                +  1 9 1 1003
-                +  9 8 1 1004
-                -  9 8 1 1004
-                +  1 1 4 1001",
-                ),
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                -  5 1 4 1002
-                +  1 0 2 1006",
+                    +  1 9 1 1003
+                    +  1 1 4 1001",
                 )
+                .sort_rows(),
+            );
+
+            assert_eq!(
+                top_n.expect_chunk().await.sort_rows(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                    -  5 1 4 1002
+                    +  1 0 2 1006",
+                )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
 
         #[tokio::test]
@@ -890,7 +818,7 @@ mod tests {
             .await;
             let source = create_source_new_before_recovery();
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::<_, false>::new(
+            let top_n = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -900,33 +828,22 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            // should be empty
             assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty("  I I I I")
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I I I
-                +  5 1 4 1002
-                "
+                    +  5 1 4 1002"
                 )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
             let state_table = create_in_memory_state_table_from_state_store(
                 &[
@@ -944,7 +861,7 @@ mod tests {
             // recovery
             let source = create_source_new_after_recovery();
             let schema = source.schema().clone();
-            let top_n_executor_after_recovery = TopNExecutor::<_, false>::new(
+            let top_n_after_recovery = TopNExecutor::<_, false>::new(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -954,41 +871,33 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor_after_recovery.boxed().execute();
+            let mut top_n = top_n_after_recovery.boxed().execute();
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     "  I I I I
-                +  1 9 1 1003
-                +  9 8 1 1004
-                -  9 8 1 1004
-                +  1 1 4 1001",
-                ),
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                -  5 1 4 1002
-                +  1 0 2 1006",
+                    +  1 9 1 1003
+                    +  1 1 4 1001",
                 )
+                .sort_rows(),
+            );
+
+            assert_eq!(
+                top_n.expect_chunk().await.sort_rows(),
+                StreamChunk::from_pretty(
+                    "  I I I I
+                    -  5 1 4 1002
+                    +  1 0 2 1006",
+                )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
     }
 
@@ -999,6 +908,7 @@ mod tests {
 
         use super::*;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
+        use crate::executor::test_utils::StreamExecutorTestExt;
 
         fn create_source() -> Executor {
             let mut chunks = vec![
@@ -1070,7 +980,7 @@ mod tests {
             )
             .await;
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::new_with_ties_for_test(
+            let top_n = TopNExecutor::new_with_ties_for_test(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -1080,64 +990,56 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     + 1 0
                     + 2 1
                     + 3 2"
                 )
+                .sort_rows(),
             );
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 6
-                    + 3 7
-                    - 3 7
-                    - 3 6
                     - 3 2
                     + 1 8
                     + 2 9"
                 )
+                .sort_rows(),
             );
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     - 1 0"
                 )
+                .sort_rows(),
             );
 
             // High cache has only 2 capacity, but we need to trigger 3 inserts here!
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     - 1 8
                     + 3 2
                     + 3 6
-                    + 3 7
-                    "
+                    + 3 7"
                 )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
 
         fn create_source_before_recovery() -> Executor {
@@ -1149,8 +1051,7 @@ mod tests {
                     +  3 2
                     + 10 3
                     +  9 4
-                    +  8 5
-                    ",
+                    +  8 5",
                 ),
                 StreamChunk::from_pretty(
                     "  I I
@@ -1214,7 +1115,7 @@ mod tests {
             .await;
             let source = create_source_before_recovery();
             let schema = source.schema().clone();
-            let top_n_executor = TopNExecutor::new_with_ties_for_test(
+            let top_n = TopNExecutor::new_with_ties_for_test(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -1224,41 +1125,34 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor.boxed().execute();
+            let mut top_n = top_n.boxed().execute();
 
             // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-            let res = top_n_executor.next().await.unwrap().unwrap();
+            top_n.expect_barrier().await;
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     + 1 0
                     + 2 1
                     + 3 2"
                 )
+                .sort_rows(),
             );
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 6
-                    + 3 7
-                    - 3 7
-                    - 3 6
                     - 3 2
                     + 1 8
                     + 2 9"
                 )
+                .sort_rows(),
             );
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
@@ -1271,7 +1165,7 @@ mod tests {
             // recovery
             let source = create_source_after_recovery();
             let schema = source.schema().clone();
-            let top_n_executor_after_recovery = TopNExecutor::new_with_ties_for_test(
+            let top_n_after_recovery = TopNExecutor::new_with_ties_for_test(
                 source,
                 ActorContext::for_test(0),
                 schema,
@@ -1281,42 +1175,34 @@ mod tests {
                 state_table,
             )
             .unwrap();
-            let mut top_n_executor = top_n_executor_after_recovery.boxed().execute();
+            let mut top_n = top_n_after_recovery.boxed().execute();
 
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
 
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     - 1 0"
                 )
+                .sort_rows(),
             );
 
             // High cache has only 2 capacity, but we need to trigger 3 inserts here!
-            let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
-                *res.as_chunk().unwrap(),
+                top_n.expect_chunk().await.sort_rows(),
                 StreamChunk::from_pretty(
                     " I I
                     - 1 8
                     + 3 2
                     + 3 6
-                    + 3 7
-                    "
+                    + 3 7"
                 )
+                .sort_rows(),
             );
-            println!("hello");
             // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            top_n.expect_barrier().await;
         }
     }
 }

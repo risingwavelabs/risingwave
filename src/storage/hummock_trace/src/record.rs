@@ -146,7 +146,7 @@ pub enum Operation {
     IterNext(RecordId),
 
     /// Sync operation of Hummock.
-    Sync(u64, Vec<u32>),
+    Sync(Vec<(u64, Vec<u32>)>),
 
     /// `MetaMessage` operation of Hummock.
     MetaMessage(Box<TracedSubResp>),

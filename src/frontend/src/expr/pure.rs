@@ -232,6 +232,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Sha256
             | Type::Sha384
             | Type::Sha512
+            | Type::Hmac
+            | Type::SecureCompare
             | Type::Decrypt
             | Type::Encrypt
             | Type::Tand
@@ -262,7 +264,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MapDelete
             | Type::MapInsert
             | Type::MapLength
-            | Type::VnodeUser =>
+            | Type::VnodeUser
+            |Type::RwEpochToTs =>
             // expression output is deterministic(same result for the same input)
             {
                 func_call

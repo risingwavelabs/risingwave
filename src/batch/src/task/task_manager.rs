@@ -148,6 +148,7 @@ impl BatchManager {
             TracingContext::none(),
             ExprContext {
                 time_zone: "UTC".to_string(),
+                strict_mode: false,
             },
         )
         .await

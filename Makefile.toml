@@ -1282,6 +1282,7 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
 command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
@@ -1438,10 +1439,10 @@ script = '''
 UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
-#[tasks.backwards-compat-test]
-#category = "RiseDev - Test - Backwards Compatibility Test"
-#description = "Run backwards compatibility test"
-#script = "./e2e_test/backwards-compat-tests/scripts/run_local.sh"
+[tasks.backwards-compat-test]
+category = "RiseDev - Test - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./e2e_test/backwards-compat-tests/scripts/run_local.sh"
 
 # For debugging.
 # To show the env for a specific task, use `run_task = "show-env"` for that task.

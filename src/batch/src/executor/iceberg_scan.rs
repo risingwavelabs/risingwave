@@ -14,7 +14,7 @@
 
 use core::ops::BitAnd;
 use std::collections::HashMap;
-use std::mem;
+use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
@@ -23,13 +23,15 @@ use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::array::{ArrayImpl, I64Array};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::catalog::{Field, Schema, ICEBERG_SEQUENCE_NUM_COLUMN_NAME};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_connector::source::iceberg::{IcebergProperties, IcebergSplit};
+use risingwave_connector::source::iceberg::{
+    IcebergFileScanTaskJsonStrEnum, IcebergProperties, IcebergSplit,
+};
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -42,18 +44,55 @@ use crate::task::BatchTaskContext;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
 static POSITION_DELETE_FILE_POS: usize = 1;
+
+pub enum IcebergFileScanTaskEnum {
+    // The scan task of the data file and the position delete file
+    DataAndPositionDelete(Vec<FileScanTask>, Vec<FileScanTask>),
+    // The scan task of the equality delete file
+    EqualityDelete(Vec<FileScanTask>),
+}
+
+impl IcebergFileScanTaskEnum {
+    fn from_iceberg_file_scan_task_json_str_enum(
+        iceberg_file_scan_task_json_str_enum: IcebergFileScanTaskJsonStrEnum,
+    ) -> Self {
+        match iceberg_file_scan_task_json_str_enum {
+            IcebergFileScanTaskJsonStrEnum::DataAndPositionDelete(
+                data_file_scan_tasks,
+                position_delete_file_scan_tasks,
+            ) => IcebergFileScanTaskEnum::DataAndPositionDelete(
+                data_file_scan_tasks
+                    .into_iter()
+                    .map(|t| t.deserialize())
+                    .collect(),
+                position_delete_file_scan_tasks
+                    .into_iter()
+                    .map(|t| t.deserialize())
+                    .collect(),
+            ),
+            IcebergFileScanTaskJsonStrEnum::EqualityDelete(equality_delete_file_scan_tasks) => {
+                IcebergFileScanTaskEnum::EqualityDelete(
+                    equality_delete_file_scan_tasks
+                        .into_iter()
+                        .map(|t| t.deserialize())
+                        .collect(),
+                )
+            }
+        }
+    }
+}
+
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,
     #[allow(dead_code)]
     snapshot_id: Option<i64>,
     table_meta: TableMetadata,
-    data_file_scan_tasks: Vec<FileScanTask>,
-    equality_delete_file_scan_tasks: Vec<FileScanTask>,
-    position_delete_file_scan_tasks: Vec<FileScanTask>,
+    file_scan_tasks: Option<IcebergFileScanTaskEnum>,
     batch_size: usize,
     schema: Schema,
     identity: String,
     metrics: Option<BatchMetrics>,
+    need_seq_num: bool,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -75,25 +114,23 @@ impl IcebergScanExecutor {
         iceberg_config: IcebergProperties,
         snapshot_id: Option<i64>,
         table_meta: TableMetadata,
-        data_file_scan_tasks: Vec<FileScanTask>,
-        equality_delete_file_scan_tasks: Vec<FileScanTask>,
-        position_delete_file_scan_tasks: Vec<FileScanTask>,
+        file_scan_tasks: IcebergFileScanTaskEnum,
         batch_size: usize,
         schema: Schema,
         identity: String,
         metrics: Option<BatchMetrics>,
+        need_seq_num: bool,
     ) -> Self {
         Self {
             iceberg_config,
             snapshot_id,
             table_meta,
-            data_file_scan_tasks,
-            equality_delete_file_scan_tasks,
-            position_delete_file_scan_tasks,
             batch_size,
             schema,
+            file_scan_tasks: Some(file_scan_tasks),
             identity,
             metrics,
+            need_seq_num,
         }
     }
 
@@ -104,27 +141,33 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let executor_schema_names = self.schema.names();
         let table_name = table.identifier().name().to_string();
 
-        let data_file_scan_tasks = mem::take(&mut self.data_file_scan_tasks);
+        let (mut position_delete_filter, data_file_scan_tasks) =
+            match Option::take(&mut self.file_scan_tasks) {
+                Some(IcebergFileScanTaskEnum::DataAndPositionDelete(
+                    data_file_scan_tasks,
+                    position_delete_file_scan_tasks,
+                )) => (
+                    Some(
+                        PositionDeleteFilter::new(
+                            position_delete_file_scan_tasks,
+                            &data_file_scan_tasks,
+                            &table,
+                            self.batch_size,
+                        )
+                        .await?,
+                    ),
+                    data_file_scan_tasks,
+                ),
+                Some(IcebergFileScanTaskEnum::EqualityDelete(equality_delete_file_scan_tasks)) => {
+                    (None, equality_delete_file_scan_tasks)
+                }
+                None => {
+                    bail!("file_scan_tasks must be Some")
+                }
+            };
 
-        let mut position_delete_filter = PositionDeleteFilter::new(
-            mem::take(&mut self.position_delete_file_scan_tasks),
-            &data_file_scan_tasks,
-            &table,
-            self.batch_size,
-        )
-        .await?;
-        let mut equality_delete_filter = EqualityDeleteFilter::new(
-            mem::take(&mut self.equality_delete_file_scan_tasks),
-            &table,
-            self.batch_size,
-            executor_schema_names,
-        )
-        .await?;
-
-        // Delete rows in the data file that need to be deleted by map
         let mut read_bytes = 0;
         let _metrics_report_guard = scopeguard::guard(
             (read_bytes, table_name, self.metrics.clone()),
@@ -138,12 +181,9 @@ impl IcebergScanExecutor {
                 }
             },
         );
-
         for data_file_scan_task in data_file_scan_tasks {
             let data_file_path = data_file_scan_task.data_file_path.clone();
             let data_sequence_number = data_file_scan_task.sequence_number;
-
-            equality_delete_filter.apply_data_file_scan_task(&data_file_scan_task);
 
             let reader = table
                 .reader_builder()
@@ -156,16 +196,29 @@ impl IcebergScanExecutor {
             while let Some((index, record_batch)) = record_batch_stream.next().await {
                 let record_batch = record_batch?;
 
-                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                // iceberg_t1_source
+                let mut chunk = if self.need_seq_num {
+                    let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+                    let (mut columns, visibility) = chunk.into_parts();
+                    columns.push(Arc::new(ArrayImpl::Int64(I64Array::from_iter(
+                        vec![data_sequence_number; visibility.len()],
+                    ))));
+                    DataChunk::from_parts(columns.into(), visibility)
+                } else {
+                    IcebergArrowConvert.chunk_from_record_batch(&record_batch)?
+                };
+
                 // position delete
-                let chunk = position_delete_filter.filter(&data_file_path, chunk, index);
-                // equality delete
-                let chunk = equality_delete_filter.filter(chunk, data_sequence_number)?;
+                if let Some(position_delete_filter) = &mut position_delete_filter {
+                    chunk = position_delete_filter.filter(&data_file_path, chunk, index);
+                }
                 assert_eq!(chunk.data_types(), data_types);
                 read_bytes += chunk.estimated_heap_size() as u64;
                 yield chunk;
             }
-            position_delete_filter.remove_file_path(&data_file_path);
+            if let Some(position_delete_filter) = &mut position_delete_filter {
+                position_delete_filter.remove_file_path(&data_file_path);
+            }
         }
     }
 }
@@ -219,25 +272,20 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
         {
             let iceberg_properties: IcebergProperties = *iceberg_properties;
             let split: IcebergSplit = split.clone();
+            let need_seq_num = schema
+                .fields()
+                .iter()
+                .any(|f| f.name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME);
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
-                split.files.into_iter().map(|x| x.deserialize()).collect(),
-                split
-                    .equality_delete_files
-                    .into_iter()
-                    .map(|x| x.deserialize())
-                    .collect(),
-                split
-                    .position_delete_files
-                    .into_iter()
-                    .map(|x| x.deserialize())
-                    .collect(),
+                IcebergFileScanTaskEnum::from_iceberg_file_scan_task_json_str_enum(split.files),
                 source.context.get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),
                 metrics,
+                need_seq_num,
             )))
         } else {
             unreachable!()
@@ -332,151 +380,5 @@ impl PositionDeleteFilter {
 
     fn remove_file_path(&mut self, file_path: &str) {
         self.position_delete_file_path_pos_map.remove(file_path);
-    }
-}
-
-struct EqualityDeleteFilter {
-    // The `seq_num` corresponding to each row in the equality delete file
-    equality_delete_rows_seq_num_map: HashMap<OwnedRow, i64>,
-    // The field ids of the equality delete columns
-    equality_delete_ids: Option<Vec<i32>>,
-    // In chunk, the indexes of the equality delete columns
-    equality_delete_column_idxes: Option<Vec<usize>>,
-    // The schema of the data file, which is the intersection of the output shema and the equality delete columns
-    data_chunk_column_names: Option<Vec<String>>,
-    // Column names for the output schema so that columns can be trimmed after filter
-    executor_schema_names: Vec<String>,
-}
-
-impl EqualityDeleteFilter {
-    async fn new(
-        equality_delete_file_scan_tasks: Vec<FileScanTask>,
-        table: &Table,
-        batch_size: usize,
-        executor_schema_names: Vec<String>,
-    ) -> crate::error::Result<Self> {
-        let mut equality_delete_rows_seq_num_map: HashMap<OwnedRow, i64> = HashMap::default();
-
-        // Build hash map for equality delete files
-        // Currently, all equality delete files have the same schema which is guaranteed by `IcebergSplitEnumerator`.
-        let mut equality_delete_ids: Option<Vec<_>> = None;
-        for equality_delete_file_scan_task in equality_delete_file_scan_tasks {
-            let mut sequence_number = equality_delete_file_scan_task.sequence_number;
-
-            if equality_delete_ids.is_none() {
-                equality_delete_ids =
-                    Some(equality_delete_file_scan_task.project_field_ids.clone());
-            } else {
-                debug_assert_eq!(
-                    equality_delete_ids.as_ref().unwrap(),
-                    &equality_delete_file_scan_task.project_field_ids
-                );
-            }
-
-            let reader = table.reader_builder().with_batch_size(batch_size).build();
-            let delete_file_scan_stream = tokio_stream::once(Ok(equality_delete_file_scan_task));
-
-            let mut delete_record_batch_stream = reader.read(Box::pin(delete_file_scan_stream))?;
-
-            while let Some(record_batch) = delete_record_batch_stream.next().await {
-                let record_batch = record_batch?;
-
-                let chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
-                for row in chunk.rows() {
-                    let entry = equality_delete_rows_seq_num_map
-                        .entry(row.to_owned_row())
-                        .or_default();
-                    *entry = *entry.max(&mut sequence_number);
-                }
-            }
-        }
-        Ok(Self {
-            equality_delete_rows_seq_num_map,
-            equality_delete_ids,
-            equality_delete_column_idxes: None,
-            data_chunk_column_names: None,
-            executor_schema_names,
-        })
-    }
-
-    fn apply_data_file_scan_task(&mut self, data_file_scan_task: &FileScanTask) {
-        if let Some(equality_delete_ids) = &self.equality_delete_ids {
-            self.data_chunk_column_names = Some(
-                data_file_scan_task
-                    .project_field_ids
-                    .iter()
-                    .filter_map(|id| {
-                        data_file_scan_task
-                            .schema
-                            .name_by_field_id(*id)
-                            .map(|name| name.to_string())
-                    })
-                    .collect(),
-            );
-            // eq_delete_column_idxes are used to fetch equality delete columns from data files.
-            self.equality_delete_column_idxes = Some(
-                equality_delete_ids
-                    .iter()
-                    .map(|equality_delete_id| {
-                        data_file_scan_task
-                            .project_field_ids
-                            .iter()
-                            .position(|project_field_id| equality_delete_id == project_field_id)
-                            .expect("equality_delete_id not found in delete_equality_ids")
-                    })
-                    .collect_vec(),
-            );
-        }
-    }
-
-    fn filter(
-        &self,
-        mut chunk: DataChunk,
-        data_sequence_number: i64,
-    ) -> crate::error::Result<DataChunk> {
-        chunk = chunk.compact();
-        match self.equality_delete_column_idxes.as_ref() {
-            Some(delete_column_ids) => {
-                let new_visibility = Bitmap::from_iter(
-                    // Project with the schema of the delete file
-                    chunk.project(delete_column_ids).rows().map(|row_ref| {
-                        let row = row_ref.to_owned_row();
-                        if let Some(delete_sequence_number) =
-                            self.equality_delete_rows_seq_num_map.get(&row)
-                            && delete_sequence_number > &data_sequence_number
-                        {
-                            // delete_sequence_number > data_sequence_number means the delete file is written later than data file,
-                            // so it needs to be deleted
-                            false
-                        } else {
-                            true
-                        }
-                    }),
-                )
-                .clone();
-                let Some(ref data_chunk_column_names) = self.data_chunk_column_names else {
-                    bail!("data_chunk_column_names is not set")
-                };
-
-                // Keep the schema consistent(chunk and executor)
-                // Filter out (equality delete) columns that are not in the executor schema
-                let (data, old_visibility) = chunk.into_parts_v2();
-                let data = data
-                    .iter()
-                    .zip_eq_fast(data_chunk_column_names)
-                    .filter_map(|(array, columns)| {
-                        if self.executor_schema_names.contains(columns) {
-                            Some(array.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec();
-                let chunk = DataChunk::new(data, old_visibility.bitand(new_visibility));
-                Ok(chunk)
-            }
-            // If there is no delete file, the data file is directly output
-            None => Ok(chunk),
-        }
     }
 }

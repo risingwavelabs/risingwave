@@ -24,7 +24,6 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
-use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, warn};
 
@@ -40,7 +39,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::collect_creating_job_commit_epoch_info;
 use crate::barrier::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    SnapshotBackfillInfo, TracedEpoch,
+    InflightSubscriptionInfo, SnapshotBackfillInfo, TracedEpoch,
 };
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -90,7 +89,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
-        let database_id = from_partial_graph_id(resp.partial_graph_id).0;
+        let database_id = DatabaseId::new(resp.database_id);
         self.databases
             .get_mut(&database_id)
             .expect("should exist")
@@ -147,6 +146,7 @@ impl CheckpointControl {
                         } else {
                             new_database.state.in_flight_prev_epoch().clone()
                         };
+                        control_stream_manager.add_partial_graph(database_id, None)?;
                         (entry.insert(new_database), max_prev_epoch)
                     }
                     Command::Flush
@@ -232,7 +232,11 @@ impl CheckpointControl {
                 .values()
             {
                 progress.extend([(
-                    creating_job.info.table_fragments.table_id().table_id,
+                    creating_job
+                        .info
+                        .stream_job_fragments
+                        .stream_job_id()
+                        .table_id,
                     creating_job.gen_ddl_progress(),
                 )]);
             }
@@ -276,10 +280,12 @@ impl CheckpointControl {
             .for_each(|database| database.create_mview_tracker.abort_all());
     }
 
-    pub(crate) fn subscriptions(&self) -> impl Iterator<Item = PbSubscriptionUpstreamInfo> + '_ {
-        self.databases
-            .values()
-            .flat_map(|database| &database.state.inflight_subscription_info)
+    pub(crate) fn subscriptions(
+        &self,
+    ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)> + '_ {
+        self.databases.iter().map(|(database_id, database)| {
+            (*database_id, &database.state.inflight_subscription_info)
+        })
     }
 }
 
@@ -429,8 +435,7 @@ impl DatabaseCheckpointControl {
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
         );
-        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
-        assert_eq!(database_id, self.database_id);
+        let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
@@ -637,7 +642,7 @@ impl DatabaseCheckpointControl {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
                             info,
-                            replace_table_info: None,
+                            replace_stream_job: None,
                         }));
                     });
                 let task = task.get_or_insert_default();
@@ -674,7 +679,7 @@ impl DatabaseCheckpointControl {
                     resps,
                     self.creating_streaming_job_controls[&table_id]
                         .info
-                        .table_fragments
+                        .stream_job_fragments
                         .all_table_ids()
                         .map(TableId::new),
                     is_first_time,
@@ -758,20 +763,26 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        if let Some(table_to_cancel) = command.as_ref().and_then(Command::table_to_cancel)
-            && self
+        for table_to_cancel in command
+            .as_ref()
+            .map(Command::tables_to_drop)
+            .into_iter()
+            .flatten()
+        {
+            if self
                 .creating_streaming_job_controls
                 .contains_key(&table_to_cancel)
-        {
-            warn!(
-                table_id = table_to_cancel.table_id,
-                "ignore cancel command on creating streaming job"
-            );
-            for notifier in notifiers {
-                notifier
-                    .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
+            {
+                warn!(
+                    table_id = table_to_cancel.table_id,
+                    "ignore cancel command on creating streaming job"
+                );
+                for notifier in notifiers {
+                    notifier
+                        .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         if let Some(Command::RescheduleFragment { .. }) = &command {
@@ -822,8 +833,10 @@ impl DatabaseCheckpointControl {
                 .expect("checked Some")
                 .to_mutation(None)
                 .expect("should have some mutation in `CreateStreamingJob` command");
+            let job_id = info.stream_job_fragments.stream_job_id();
+            control_stream_manager.add_partial_graph(self.database_id, Some(job_id))?;
             self.creating_streaming_job_controls.insert(
-                info.table_fragments.table_id(),
+                job_id,
                 CreatingStreamingJobControl::new(
                     info.clone(),
                     snapshot_backfill_info.clone(),

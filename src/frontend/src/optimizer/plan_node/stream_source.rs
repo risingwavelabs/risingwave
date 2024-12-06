@@ -17,9 +17,6 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
@@ -40,24 +37,7 @@ pub struct StreamSource {
 }
 
 impl StreamSource {
-    pub fn new(mut core: generic::Source) -> Self {
-        // For shared sources, we will include partition and offset cols in the *output*, to be used by the SourceBackfillExecutor.
-        // XXX: If we don't add here, these cols are also added in source reader, but pruned in the SourceExecutor's output.
-        // Should we simply add them here for all sources for consistency?
-        if let Some(source_catalog) = &core.catalog
-            && source_catalog.info.is_shared()
-        {
-            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
-                &core.column_catalog,
-                &source_catalog.connector_name(),
-            );
-            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                if !existed {
-                    core.column_catalog.push(ColumnCatalog::hidden(c));
-                }
-            }
-        }
-
+    pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,

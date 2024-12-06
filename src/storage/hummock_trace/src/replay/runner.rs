@@ -196,7 +196,7 @@ mod tests {
 
         let mut non_local: Vec<Result<Record>> = vec![
             (12, Operation::Finish),
-            (13, Operation::Sync(sync_id, vec![1, 2, 3])),
+            (13, Operation::Sync(vec![(sync_id, vec![1, 2, 3])])),
             (
                 13,
                 Operation::Result(OperationResult::Sync(TraceResult::Ok(0))),
@@ -244,9 +244,9 @@ mod tests {
 
         mock_replay
             .expect_sync()
-            .with(predicate::eq(sync_id), predicate::eq(vec![1, 2, 3]))
+            .with(predicate::eq(vec![(sync_id, vec![1, 2, 3])]))
             .times(1)
-            .returning(|_, _| Ok(0));
+            .returning(|_| Ok(0));
 
         let mut replay = HummockReplay::new(mock_reader, mock_replay);
 

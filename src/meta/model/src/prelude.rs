@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use {Source as SourceModel, Table as TableModel};
+
 pub use super::actor::Entity as Actor;
 pub use super::actor_dispatcher::Entity as ActorDispatcher;
 pub use super::catalog_version::Entity as CatalogVersion;

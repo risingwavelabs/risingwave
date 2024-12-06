@@ -15,8 +15,9 @@
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
-use foyer::CacheContext;
+use foyer::CacheHint;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -67,7 +68,7 @@ impl BackwardSstableIterator {
                 .get(
                     &self.sst,
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill(CacheContext::Default),
+                    crate::hummock::CachePolicy::Fill(CacheHint::Normal),
                     &mut self.stats,
                 )
                 .await?;
@@ -162,6 +163,7 @@ impl SstableIteratorType for BackwardSstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         _: Arc<SstableIteratorReadOptions>,
+        _sstable_info_ref: &SstableInfo,
     ) -> Self {
         BackwardSstableIterator::new(sstable, sstable_store)
     }
@@ -188,7 +190,7 @@ mod tests {
     async fn test_backward_sstable_iterator() {
         // build remote sstable
         let sstable_store = mock_sstable_store().await;
-        let handle =
+        let (handle, _sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -213,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_sstable_seek() {
         let sstable_store = mock_sstable_store().await;
-        let sstable =
+        let (sstable, _sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code

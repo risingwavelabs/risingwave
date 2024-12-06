@@ -26,9 +26,6 @@ set STREAMING_ENABLE_DELTA_JOIN to false;
 statement ok
 set RW_STREAMING_ENABLE_DELTA_JOIN to true;
 
-statement error session param query_mode cannot be altered system wide
-alter system set query_mode to auto;
-
 connection other1
 query T
 show RW_STREAMING_ENABLE_DELTA_JOIN;

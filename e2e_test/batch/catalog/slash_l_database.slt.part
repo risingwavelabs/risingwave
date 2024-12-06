@@ -1,0 +1,17 @@
+# wrapped test of `\l` command for better consistency.
+query T
+SELECT count(*) > 0
+FROM
+(SELECT
+  d.datname                                               AS "Name",
+  pg_catalog.pg_get_userbyid (d.datdba)                   AS "Owner",
+  pg_catalog.pg_encoding_to_char (d.encoding)             AS "Encoding",
+  d.datcollate                                            AS "Collate",
+  d.datctype                                              AS "Ctype",
+  pg_catalog.array_to_string (d.datacl, E'\n') AS "Access privileges"
+FROM
+  pg_catalog.pg_database AS d
+ORDER BY
+  1);
+----
+t
