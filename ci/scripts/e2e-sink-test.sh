@@ -54,7 +54,7 @@ psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
 
 echo "--- starting risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
-risedev ci-start ci-1cn-1fe-switch-to-pg-native
+risedev ci-start ci-1cn-1fe-jdbc-to-native
 
 echo "--- test sink: jdbc:postgres switch to postgres native"
 # check sink destination postgres
