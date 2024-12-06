@@ -18,6 +18,7 @@ import com.risingwave.proto.*;
 import com.risingwave.proto.Catalog.Table;
 import com.risingwave.proto.ClusterServiceGrpc.ClusterServiceBlockingStub;
 import com.risingwave.proto.Common.HostAddress;
+import com.risingwave.proto.Common.WorkerNode.Property;
 import com.risingwave.proto.Common.WorkerType;
 import com.risingwave.proto.DdlServiceGrpc.DdlServiceBlockingStub;
 import com.risingwave.proto.DdlServiceOuterClass.GetTableRequest;
@@ -29,7 +30,6 @@ import com.risingwave.proto.Hummock.PinVersionResponse;
 import com.risingwave.proto.Hummock.UnpinVersionBeforeRequest;
 import com.risingwave.proto.HummockManagerServiceGrpc.HummockManagerServiceBlockingStub;
 import com.risingwave.proto.Meta.AddWorkerNodeRequest;
-import com.risingwave.proto.Meta.AddWorkerNodeRequest.Property;
 import com.risingwave.proto.Meta.AddWorkerNodeResponse;
 import com.risingwave.proto.Meta.HeartbeatRequest;
 import io.grpc.Grpc;
@@ -100,7 +100,6 @@ public class MetaClient implements AutoCloseable {
                                 Property.newBuilder()
                                         .setIsStreaming(false)
                                         .setIsServing(false)
-                                        .setWorkerNodeParallelism(0)
                                         .build())
                         .build();
         AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);

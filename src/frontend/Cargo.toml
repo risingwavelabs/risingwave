@@ -21,6 +21,7 @@ async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
@@ -60,6 +61,7 @@ pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
+quick-xml = { version = "0.36", features = ["serialize"] }
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -79,6 +81,7 @@ risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 sha2 = "0.10.7"
 smallvec = { version = "1.13.1", features = ["serde"] }
 speedate = "0.15.0"
@@ -97,7 +100,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.6", features = [
+  "add-extension",
+  "cors",
+  "compression-gzip",
+] }
 tracing = "0.1"
+url = "2.5.0"
 uuid = "1"
 zstd = { version = "0.13", default-features = false }
 

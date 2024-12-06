@@ -947,7 +947,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::store::{
-        FromStreamStateStoreIter, StateStoreIterItem, StateStoreReadIter,
+        FromStreamStateStoreIter, StateStoreKeyedRow, StateStoreReadIter,
     };
     use risingwave_storage::table::SINGLETON_VNODE;
     use tokio::sync::oneshot;
@@ -1168,7 +1168,7 @@ mod tests {
         epoch: u64,
         seq_id: &mut SeqIdType,
     ) -> (
-        impl Stream<Item = StorageResult<StateStoreIterItem>>,
+        impl Stream<Item = StorageResult<StateStoreKeyedRow>>,
         Sender<()>,
     ) {
         let (tx, rx) = oneshot::channel();
@@ -1197,7 +1197,7 @@ mod tests {
         seq_id: &mut SeqIdType,
         base: i64,
     ) -> (
-        impl Stream<Item = StorageResult<StateStoreIterItem>>,
+        impl Stream<Item = StorageResult<StateStoreKeyedRow>>,
         oneshot::Sender<()>,
         oneshot::Sender<()>,
         Vec<Op>,

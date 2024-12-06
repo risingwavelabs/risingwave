@@ -29,7 +29,7 @@ public abstract class JdbcUtils {
     static final int SOCKET_TIMEOUT = 300;
 
     public static Optional<JdbcDialectFactory> getDialectFactory(String jdbcUrl) {
-        if (jdbcUrl.startsWith("jdbc:mysql")) {
+        if (jdbcUrl.startsWith("jdbc:mysql") || jdbcUrl.startsWith("jdbc:mariadb")) {
             return Optional.of(new MySqlDialectFactory());
         } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
             return Optional.of(new PostgresDialectFactory());

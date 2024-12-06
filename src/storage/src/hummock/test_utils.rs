@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use foyer::{
-    CacheContext, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
+    CacheHint, Engine, HybridCache, HybridCacheBuilder, StorageKey as HybridKey,
     StorageValue as HybridValue,
 };
 use itertools::Itertools;
@@ -25,9 +25,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::EvictionConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -108,7 +109,7 @@ pub fn gen_dummy_sst_info(
         }
         file_size += batch.size() as u64;
     }
-    SstableInfo {
+    SstableInfoInner {
         object_id: id,
         sst_id: id,
         key_range: KeyRange {
@@ -124,6 +125,7 @@ pub fn gen_dummy_sst_info(
         sst_size: file_size,
         ..Default::default()
     }
+    .into()
 }
 
 /// Number of keys in table generated in `generate_table`.
@@ -203,7 +205,7 @@ pub async fn put_sst(
 
     meta.meta_offset = writer.data_len() as u64;
     meta.bloom_filter = bloom_filter;
-    let sst = SstableInfo {
+    let sst = SstableInfoInner {
         object_id: sst_object_id,
         sst_id: sst_object_id,
         key_range: KeyRange {
@@ -216,7 +218,8 @@ pub async fn put_sst(
         uncompressed_file_size: meta.estimated_size as u64,
         table_ids,
         ..Default::default()
-    };
+    }
+    .into();
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
     Ok(sst)
@@ -229,6 +232,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
+    table_id_to_vnode: HashMap<u32, usize>,
 ) -> SstableInfo {
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
@@ -239,10 +243,6 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         .clone()
         .create_sst_writer(object_id, writer_opts);
 
-    let table_id_to_vnode = HashMap::from_iter(vec![(
-        TableId::default().table_id(),
-        VirtualNode::COUNT_FOR_TEST,
-    )]);
     let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
         FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
         table_id_to_vnode,
@@ -278,19 +278,59 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store.clone(),
         CachePolicy::NotFill,
+        table_id_to_vnode,
     )
     .await;
-    sstable_store
-        .sstable(&sst_info, &mut StoreLocalStatistic::default())
-        .await
-        .unwrap()
+
+    (
+        sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap(),
+        sst_info,
+    )
+}
+
+pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + Eq>(
+    opts: SstableBuilderOptions,
+    object_id: HummockSstableObjectId,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
+    sstable_store: SstableStoreRef,
+    table_ids: Vec<StateTableId>,
+) -> (TableHolder, SstableInfo) {
+    let table_id_to_vnode = table_ids
+        .into_iter()
+        .map(|table_id| (table_id, VirtualNode::COUNT_FOR_TEST))
+        .collect();
+
+    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+        opts,
+        object_id,
+        kv_iter,
+        sstable_store.clone(),
+        CachePolicy::NotFill,
+        table_id_to_vnode,
+    )
+    .await;
+
+    (
+        sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap(),
+        sst_info,
+    )
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -300,12 +340,17 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl IntoIterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store,
         CachePolicy::NotFill,
+        table_id_to_vnode,
     )
     .await
 }
@@ -317,12 +362,17 @@ pub async fn gen_test_sstable_with_range_tombstone(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> SstableInfo {
+    let table_id_to_vnode = HashMap::from_iter(vec![(
+        TableId::default().table_id(),
+        VirtualNode::COUNT_FOR_TEST,
+    )]);
     gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         sstable_store.clone(),
-        CachePolicy::Fill(CacheContext::Default),
+        CachePolicy::Fill(CacheHint::Normal),
+        table_id_to_vnode,
     )
     .await
 }
@@ -365,7 +415,7 @@ pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     sstable_store: SstableStoreRef,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,

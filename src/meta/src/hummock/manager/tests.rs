@@ -29,17 +29,17 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compactio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
     LocalSstableInfo, SyncResult, FIRST_VERSION_ID,
 };
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::HummockPinnedVersion;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
@@ -76,6 +76,10 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
 }
 
 fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+    gen_sstable_info_impl(sst_id, table_ids, epoch).into()
+}
+
+fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
     let table_key_l = gen_key_from_str(VirtualNode::ZERO, "1");
     let table_key_r = gen_key_from_str(VirtualNode::MAX_FOR_TEST, "1");
     let full_key_l = FullKey::for_test(
@@ -87,7 +91,7 @@ fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo
     let full_key_r =
         FullKey::for_test(TableId::new(*table_ids.last().unwrap()), table_key_r, epoch).encode();
 
-    SstableInfo {
+    SstableInfoInner {
         sst_id,
         key_range: KeyRange {
             left: full_key_l.into(),
@@ -381,11 +385,11 @@ async fn test_release_context_resource() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )
@@ -464,11 +468,11 @@ async fn test_hummock_manager_basic() {
             WorkerType::ComputeNode,
             fake_host_address_2,
             Property {
-                worker_node_parallelism: fake_parallelism,
+                parallelism: fake_parallelism,
                 is_streaming: true,
                 is_serving: true,
                 is_unschedulable: false,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             },
             Default::default(),
         )
@@ -567,8 +571,6 @@ async fn test_hummock_manager_basic() {
             init_version_id + commit_log_count + register_log_count,
         );
     }
-    // objects_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -580,7 +582,6 @@ async fn test_hummock_manager_basic() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -953,7 +954,8 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
+    let (join_handle, shutdown_tx) =
+        HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1082,7 +1084,8 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id);
 
-    let (join_handle, shutdown_tx) = HummockManager::hummock_timer_task(hummock_manager.clone());
+    let (join_handle, shutdown_tx) =
+        HummockManager::hummock_timer_task(hummock_manager.clone(), None);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1181,24 +1184,20 @@ async fn test_extend_objects_to_delete() {
         })
         .max()
         .unwrap();
-    let orphan_sst_num = 10;
+    let orphan_sst_num: usize = 10;
     let all_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.object_id)
-        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
+        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num as u64)
         .collect_vec();
-    assert!(hummock_manager.get_objects_to_delete().is_empty());
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
-    );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
 
     // Checkpoint
@@ -1206,50 +1205,30 @@ async fn test_extend_objects_to_delete() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
-    assert_eq!(
-        hummock_manager.get_objects_to_delete().len(),
-        orphan_sst_num as usize
-    );
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let pinned_version2: HummockVersion = hummock_manager.pin_version(context_id).await.unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     hummock_manager
         .unpin_version_before(context_id, pinned_version2.id)
         .await
         .unwrap();
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(
-        objects_to_delete.len(),
-        orphan_sst_num as usize,
-        "{:?}",
-        objects_to_delete
-    );
     // version1 is unpin, but version2 is pinned, and version2 is the checkpoint version.
     // stale objects are combined in the checkpoint of version2, so no sst to reclaim
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize
+            .unwrap()
+            .len(),
+        orphan_sst_num
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize);
     let new_epoch = version_max_committed_epoch(&pinned_version2).next_epoch();
     hummock_meta_client
         .commit_epoch(
@@ -1272,13 +1251,12 @@ async fn test_extend_objects_to_delete() {
     // in the stale objects of version2 checkpoint
     assert_eq!(
         hummock_manager
-            .extend_objects_to_delete_from_scan(&all_object_ids)
+            .finalize_objects_to_delete(all_object_ids.clone().into_iter())
             .await
-            .unwrap(),
-        orphan_sst_num as usize + 3
+            .unwrap()
+            .len(),
+        orphan_sst_num + 3
     );
-    let objects_to_delete = hummock_manager.get_objects_to_delete();
-    assert_eq!(objects_to_delete.len(), orphan_sst_num as usize + 3);
 }
 
 #[tokio::test]
@@ -1313,7 +1291,7 @@ async fn test_version_stats() {
         .into_iter()
         .enumerate()
         .map(|(idx, table_ids)| LocalSstableInfo {
-            sst_info: SstableInfo {
+            sst_info: SstableInfoInner {
                 object_id: sst_ids[idx],
                 sst_id: sst_ids[idx],
                 key_range: KeyRange {
@@ -1325,7 +1303,8 @@ async fn test_version_stats() {
                 table_ids: table_ids.clone(),
                 sst_size: 1024 * 1024 * 1024,
                 ..Default::default()
-            },
+            }
+            .into(),
             table_stats: table_ids
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
@@ -1699,12 +1678,24 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         table_stats: Default::default(),
         created_at: u64::MAX,
     };
-    let mut sst_3 = sst_2.clone();
-    let mut sst_4 = sst_1.clone();
-    sst_3.sst_info.sst_id = 8;
-    sst_3.sst_info.object_id = 8;
-    sst_4.sst_info.sst_id = 9;
-    sst_4.sst_info.object_id = 9;
+    let sst_3 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 8,
+            object_id: 8,
+            ..sst_2.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_2.clone()
+    };
+    let sst_4 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 9,
+            object_id: 9,
+            ..sst_1.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_1.clone()
+    };
     hummock_meta_client
         .commit_epoch(
             30,
@@ -1771,7 +1762,7 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfo {
+            vec![SstableInfoInner {
                 object_id: 12,
                 sst_id: 12,
                 key_range: KeyRange::default(),
@@ -1781,7 +1772,8 @@ async fn test_move_state_tables_to_dedicated_compaction_group_trivial_expired() 
                 file_size: 100,
                 sst_size: 100,
                 ..Default::default()
-            }],
+            }
+            .into()],
             None,
             HashMap::default(),
         )
@@ -2248,10 +2240,15 @@ async fn test_partition_level() {
     const MB: u64 = 1024 * 1024;
     let mut selector = default_compaction_selector();
     for epoch in 31..100 {
-        let mut sst = gen_local_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
-        sst.sst_info.file_size = 10 * MB;
-        sst.sst_info.sst_size = 10 * MB;
-        sst.sst_info.uncompressed_file_size = 10 * MB;
+        let mut sst = gen_sstable_info_impl(global_sst_id, vec![100], test_epoch(epoch));
+        sst.file_size = 10 * MB;
+        sst.sst_size = 10 * MB;
+        sst.uncompressed_file_size = 10 * MB;
+        let sst = LocalSstableInfo {
+            sst_info: sst.into(),
+            table_stats: Default::default(),
+            created_at: u64::MAX,
+        };
 
         hummock_meta_client
             .commit_epoch(
@@ -2271,7 +2268,7 @@ async fn test_partition_level() {
             .await
             .unwrap()
         {
-            let mut sst = gen_sstable_info(global_sst_id, vec![100], test_epoch(epoch));
+            let mut sst = gen_sstable_info_impl(global_sst_id, vec![100], test_epoch(epoch));
             sst.file_size = task
                 .input_ssts
                 .iter()
@@ -2289,7 +2286,7 @@ async fn test_partition_level() {
                 .report_compact_task(
                     task.task_id,
                     TaskStatus::Success,
-                    vec![sst],
+                    vec![sst.into()],
                     None,
                     HashMap::default(),
                 )
@@ -2452,12 +2449,24 @@ async fn test_merge_compaction_group_task_expired() {
         table_stats: Default::default(),
         created_at: u64::MAX,
     };
-    let mut sst_3 = sst_2.clone();
-    let mut sst_4 = sst_1.clone();
-    sst_3.sst_info.sst_id = 3;
-    sst_3.sst_info.object_id = 3;
-    sst_4.sst_info.sst_id = 4;
-    sst_4.sst_info.object_id = 4;
+    let sst_3 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 3,
+            object_id: 3,
+            ..sst_2.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_2.clone()
+    };
+    let sst_4 = LocalSstableInfo {
+        sst_info: SstableInfoInner {
+            sst_id: 4,
+            object_id: 4,
+            ..sst_1.sst_info.get_inner()
+        }
+        .into(),
+        ..sst_1.clone()
+    };
     hummock_meta_client
         .commit_epoch(
             30,
@@ -2547,7 +2556,7 @@ async fn test_merge_compaction_group_task_expired() {
         .report_compact_task(
             task2.task_id,
             TaskStatus::Success,
-            vec![SstableInfo {
+            vec![SstableInfoInner {
                 object_id: report_sst_id,
                 sst_id: report_sst_id,
                 key_range: KeyRange::default(),
@@ -2557,7 +2566,8 @@ async fn test_merge_compaction_group_task_expired() {
                 file_size: 100,
                 sst_size: 100,
                 ..Default::default()
-            }],
+            }
+            .into()],
             None,
             HashMap::default(),
         )
@@ -2572,4 +2582,44 @@ async fn test_merge_compaction_group_task_expired() {
         .collect::<HashSet<_>>();
     // task 2 report failed due to the compaction group is merged
     assert!(!sst_ids.contains(&report_sst_id));
+}
+
+#[tokio::test]
+async fn test_vacuum() {
+    let (_env, hummock_manager, _cluster_manager, worker_id) = setup_compute_env(80).await;
+    let context_id = worker_id as _;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        context_id,
+    ));
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    hummock_manager.pin_version(context_id).await.unwrap();
+    let compaction_group_id = StaticCompactionGroupId::StateDefault.into();
+    let sst_infos = add_test_tables(
+        hummock_manager.as_ref(),
+        hummock_meta_client.clone(),
+        compaction_group_id,
+    )
+    .await;
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+    hummock_manager.create_version_checkpoint(1).await.unwrap();
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 6);
+    assert_eq!(hummock_manager.delete_metadata().await.unwrap(), 0);
+
+    hummock_manager
+        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .await
+        .unwrap();
+    hummock_manager.create_version_checkpoint(0).await.unwrap();
+    let deleted = hummock_manager
+        .complete_gc_batch(
+            sst_infos
+                .iter()
+                .flat_map(|ssts| ssts.iter().map(|s| s.object_id))
+                .collect(),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted, 3);
 }

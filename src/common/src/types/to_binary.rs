@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
+use rw_iter_util::ZipEqFast;
 
 use super::{
     DataType, Date, Decimal, Interval, ScalarRefImpl, Serial, Time, Timestamp, Timestamptz, F32,
     F64,
 };
+use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;
 
 /// Error type for [`ToBinary`] trait.
@@ -38,19 +40,19 @@ pub type Result<T> = std::result::Result<T, ToBinaryError>;
 /// [`postgres_types::ToSql`] has similar functionality, and most of our types implement
 /// that trait and forward `ToBinary` to it directly.
 pub trait ToBinary {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes>;
 }
 macro_rules! implement_using_to_sql {
     ($({ $scalar_type:ty, $data_type:ident, $accessor:expr } ),* $(,)?) => {
         $(
             impl ToBinary for $scalar_type {
-                fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+                fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
                             #[allow(clippy::redundant_closure_call)]
                             $accessor(self).to_sql(&Type::ANY, &mut output).map_err(ToBinaryError::ToSql)?;
-                            Ok(Some(output.freeze()))
+                            Ok(output.freeze())
                         },
                         _ => unreachable!(),
                     }
@@ -78,8 +80,68 @@ implement_using_to_sql! {
     { Timestamptz, Timestamptz, |x: &Timestamptz| x.to_datetime_utc() }
 }
 
+impl ToBinary for ListRef<'_> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+        // Reference: Postgres code `src/backend/utils/adt/arrayfuncs.c`
+        // https://github.com/postgres/postgres/blob/c1c09007e219ae68d1f8428a54baf68ccc1f8683/src/backend/utils/adt/arrayfuncs.c#L1548
+        use crate::row::Row;
+        let element_ty = match ty {
+            DataType::List(ty) => ty.as_ref(),
+            _ => unreachable!(),
+        };
+        if matches!(element_ty, DataType::List(_)) {
+            bail_not_implemented!(
+                issue = 7949,
+                "list with 2 or more dimensions is not supported"
+            )
+        }
+        let mut buf = BytesMut::new();
+        buf.put_i32(1); // Number of dimensions (must be 1)
+        buf.put_i32(1); // Has nulls?
+        buf.put_i32(element_ty.to_oid()); // Element type
+        buf.put_i32(self.len() as i32); // Length of 1st dimension
+        buf.put_i32(1); // Offset of 1st dimension, starting from 1
+        for element in self.iter() {
+            match element {
+                None => {
+                    buf.put_i32(-1); // -1 length means a NULL
+                }
+                Some(value) => {
+                    let data = value.to_binary_with_type(element_ty)?;
+                    buf.put_i32(data.len() as i32); // Length of element
+                    buf.put(data);
+                }
+            }
+        }
+        Ok(buf.into())
+    }
+}
+
+impl ToBinary for StructRef<'_> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
+        // Reference: Postgres code `src/backend/utils/adt/rowtypes.c`
+        // https://github.com/postgres/postgres/blob/a3699daea2026de324ed7cc7115c36d3499010d3/src/backend/utils/adt/rowtypes.c#L687
+        let mut buf = BytesMut::new();
+        buf.put_i32(ty.as_struct().len() as i32); // number of columns
+        for (datum, field_ty) in self.iter_fields_ref().zip_eq_fast(ty.as_struct().types()) {
+            buf.put_i32(field_ty.to_oid()); // column type
+            match datum {
+                None => {
+                    buf.put_i32(-1); // -1 length means a NULL
+                }
+                Some(value) => {
+                    let data = value.to_binary_with_type(field_ty)?;
+                    buf.put_i32(data.len() as i32); // Length of element
+                    buf.put(data);
+                }
+            }
+        }
+        Ok(buf.into())
+    }
+}
+
 impl ToBinary for ScalarRefImpl<'_> {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> Result<Bytes> {
         match self {
             ScalarRefImpl::Int16(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int32(v) => v.to_binary_with_type(ty),
@@ -98,11 +160,14 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => bail_not_implemented!(
-                issue = 7949,
-                "the pgwire extended-mode encoding for {ty} is unsupported"
-            ),
-            ScalarRefImpl::Map(_) => todo!(),
+            ScalarRefImpl::List(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Struct(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Map(_) => {
+                bail_not_implemented!(
+                    issue = 7949,
+                    "the pgwire extended-mode encoding for {ty} is unsupported"
+                )
+            }
         }
     }
 }

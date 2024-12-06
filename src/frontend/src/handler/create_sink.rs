@@ -18,23 +18,29 @@ use std::sync::{Arc, LazyLock};
 use anyhow::Context;
 use either::Either;
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
+use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowDataType;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Schema, SchemaId, TableId, UserId};
+use risingwave_common::bail;
+use risingwave_common::catalog::{
+    ColumnCatalog, ConnectionId, DatabaseId, ObjectId, Schema, SchemaId, UserId,
+};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
-use risingwave_common::{bail, catalog};
-use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
+use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::iceberg::{IcebergConfig, ICEBERG_SINK};
+use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_WITHOUT_BACKFILL,
 };
+use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
 use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
+use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, EmitMode, Encode, ExplainOptions, Format, FormatEncodeOptions,
     Query, Statement,
@@ -46,9 +52,6 @@ use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::CatalogReadGuard;
-use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SinkId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{rewrite_now_to_proctime, ExprImpl, InputRef};
@@ -56,7 +59,9 @@ use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
 use crate::handler::create_table::{generate_stream_graph_for_replace_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
-use crate::handler::util::SourceSchemaCompatExt;
+use crate::handler::util::{
+    check_connector_match_connection_type, ensure_connection_type_allowed, SourceSchemaCompatExt,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{
     generic, IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamProject,
@@ -65,8 +70,24 @@ use crate::optimizer::{OptimizerContext, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
+use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
+
+static ALLOWED_CONNECTION_CONNECTOR: LazyLock<HashSet<PbConnectionType>> = LazyLock::new(|| {
+    hashset! {
+        PbConnectionType::Unspecified,
+        PbConnectionType::Kafka,
+        PbConnectionType::Iceberg,
+    }
+});
+
+static ALLOWED_CONNECTION_SCHEMA_REGISTRY: LazyLock<HashSet<PbConnectionType>> =
+    LazyLock::new(|| {
+        hashset! {
+            PbConnectionType::Unspecified,
+            PbConnectionType::SchemaRegistry,
+        }
+    });
 
 // used to store result of `gen_sink_plan`
 pub struct SinkPlanContext {
@@ -74,6 +95,7 @@ pub struct SinkPlanContext {
     pub sink_plan: PlanRef,
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
+    pub dependencies: HashSet<ObjectId>,
 }
 
 pub async fn gen_sink_plan(
@@ -91,7 +113,19 @@ pub async fn gen_sink_plan(
     let mut with_options = handler_args.with_options.clone();
 
     resolve_privatelink_in_with_option(&mut with_options)?;
-    let mut resolved_with_options = resolve_secret_ref_in_with_options(with_options, session)?;
+    let (mut resolved_with_options, connection_type, connector_conn_ref) =
+        resolve_connection_ref_and_secret_ref(
+            with_options,
+            session,
+            TelemetryDatabaseObject::Sink,
+        )?;
+    ensure_connection_type_allowed(connection_type, &ALLOWED_CONNECTION_CONNECTOR)?;
+
+    // if not using connection, we don't need to check connector match connection type
+    if !matches!(connection_type, PbConnectionType::Unspecified) {
+        let connector = resolved_with_options.get_connector().unwrap();
+        check_connector_match_connection_type(connector.as_str(), &connection_type)?;
+    }
 
     let partition_info = get_partition_compute_info(&resolved_with_options).await?;
 
@@ -124,10 +158,14 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound) = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(*query.clone())?;
-        (binder.included_relations(), bound)
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound,
+        )
     };
 
     let check_items = resolve_query_privileges(&bound);
@@ -226,8 +264,6 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let target_table = target_table_catalog.as_ref().map(|catalog| catalog.id());
-
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -237,8 +273,9 @@ pub async fn gen_sink_plan(
         sink_from_table_name,
         format_desc,
         without_backfill,
-        target_table,
+        target_table_catalog.clone(),
         partition_info,
+        user_specified_columns,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -252,44 +289,38 @@ pub async fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string());
     }
 
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
+            .into_iter()
+            .map(|id| id.table_id() as ObjectId)
+            .chain(
+                dependent_udfs
+                    .into_iter()
+                    .map(|id| id.function_id() as ObjectId),
+            )
+            .collect();
 
     let sink_catalog = sink_desc.into_catalog(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        None, // deprecated: private link connection id
-        dependent_relations.into_iter().collect_vec(),
+        connector_conn_ref.map(ConnectionId::from),
     );
 
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {
-            if column.is_generated() {
-                unreachable!("can not derive generated columns in a sink's catalog, but meet one");
+            if !column.can_dml() {
+                unreachable!("can not derive generated columns and system column `_rw_timestamp` in a sink's catalog, but meet one");
             }
         }
 
-        let user_defined_primary_key_table = table_catalog.row_id_index.is_none();
-        let sink_is_append_only = sink_catalog.sink_type == SinkType::AppendOnly
-            || sink_catalog.sink_type == SinkType::ForceAppendOnly;
-
-        if !user_defined_primary_key_table && !sink_is_append_only {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
-            )));
-        }
-
-        if table_catalog.append_only && !sink_is_append_only {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
-            )));
-        }
-
+        let table_columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         let exprs = derive_default_column_project_for_sink(
             &sink_catalog,
             sink_plan.schema(),
-            table_catalog.columns(),
+            &table_columns_without_rw_timestamp,
             user_specified_columns,
         )?;
 
@@ -297,8 +328,9 @@ pub async fn gen_sink_plan(
 
         sink_plan = StreamProject::new(logical_project).into();
 
-        let exprs =
-            LogicalSource::derive_output_exprs_from_generated_columns(table_catalog.columns())?;
+        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(
+            &table_columns_without_rw_timestamp,
+        )?;
 
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, sink_plan);
@@ -311,6 +343,7 @@ pub async fn gen_sink_plan(
         sink_plan,
         sink_catalog,
         target_table_catalog,
+        dependencies,
     })
 }
 
@@ -336,77 +369,85 @@ pub async fn get_partition_compute_info(
 }
 
 async fn get_partition_compute_info_for_iceberg(
-    iceberg_config: &IcebergConfig,
+    _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
-    // TODO: check table if exists
-    if iceberg_config.create_table_if_not_exists {
-        return Ok(None);
+    // TODO: enable partition compute for iceberg after fixing the issue of sink decoupling.
+    return Ok(None);
+
+    #[allow(unreachable_code)]
+    {
+        // TODO: check table if exists
+        if _iceberg_config.create_table_if_not_exists {
+            return Ok(None);
+        }
+        let table = _iceberg_config.load_table().await?;
+        let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok()
+        else {
+            return Ok(None);
+        };
+
+        if partition_spec.is_unpartitioned() {
+            return Ok(None);
+        }
+
+        // Separate the partition spec into two parts: sparse partition and range partition.
+        // Sparse partition means that the data distribution is more sparse at a given time.
+        // Range partition means that the data distribution is likely same at a given time.
+        // Only compute the partition and shuffle by them for the sparse partition.
+        let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
+            // Sparse partition
+            icelake::types::Transform::Identity
+            | icelake::types::Transform::Truncate(_)
+            | icelake::types::Transform::Bucket(_) => true,
+            // Range partition
+            icelake::types::Transform::Year
+            | icelake::types::Transform::Month
+            | icelake::types::Transform::Day
+            | icelake::types::Transform::Hour
+            | icelake::types::Transform::Void => false,
+        });
+
+        if !has_sparse_partition {
+            return Ok(None);
+        }
+
+        let arrow_type: ArrowDataType = table
+            .current_partition_type()
+            .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?
+            .try_into()
+            .map_err(|_| {
+                RwError::from(ErrorCode::SinkError(
+                    "Fail to convert iceberg partition type to arrow type".into(),
+                ))
+            })?;
+        let Some(schema) = table.current_table_metadata().current_schema().ok() else {
+            return Ok(None);
+        };
+        let partition_fields = partition_spec
+            .fields
+            .iter()
+            .map(|f| {
+                let source_f =
+                    schema
+                        .look_up_field_by_id(f.source_column_id)
+                        .ok_or(RwError::from(ErrorCode::SinkError(
+                            "Fail to look up iceberg partition field".into(),
+                        )))?;
+                Ok((source_f.name.clone(), f.transform))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let ArrowDataType::Struct(partition_type) = arrow_type else {
+            return Err(RwError::from(ErrorCode::SinkError(
+                "Partition type of iceberg should be a struct type".into(),
+            )));
+        };
+
+        Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
+            partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
+            partition_fields,
+        })))
     }
-    let table = iceberg_config.load_table().await?;
-    let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok() else {
-        return Ok(None);
-    };
-
-    if partition_spec.is_unpartitioned() {
-        return Ok(None);
-    }
-
-    // Separate the partition spec into two parts: sparse partition and range partition.
-    // Sparse partition means that the data distribution is more sparse at a given time.
-    // Range partition means that the data distribution is likely same at a given time.
-    // Only compute the partition and shuffle by them for the sparse partition.
-    let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
-        // Sparse partition
-        icelake::types::Transform::Identity
-        | icelake::types::Transform::Truncate(_)
-        | icelake::types::Transform::Bucket(_) => true,
-        // Range partition
-        icelake::types::Transform::Year
-        | icelake::types::Transform::Month
-        | icelake::types::Transform::Day
-        | icelake::types::Transform::Hour
-        | icelake::types::Transform::Void => false,
-    });
-
-    if !has_sparse_partition {
-        return Ok(None);
-    }
-
-    let arrow_type: ArrowDataType = table
-        .current_partition_type()
-        .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?
-        .try_into()
-        .map_err(|_| {
-            RwError::from(ErrorCode::SinkError(
-                "Fail to convert iceberg partition type to arrow type".into(),
-            ))
-        })?;
-    let Some(schema) = table.current_table_metadata().current_schema().ok() else {
-        return Ok(None);
-    };
-    let partition_fields = partition_spec
-        .fields
-        .iter()
-        .map(|f| {
-            let source_f = schema
-                .look_up_field_by_id(f.source_column_id)
-                .ok_or(RwError::from(ErrorCode::SinkError(
-                    "Fail to look up iceberg partition field".into(),
-                )))?;
-            Ok((source_f.name.clone(), f.transform))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    let ArrowDataType::Struct(partition_type) = arrow_type else {
-        return Err(RwError::from(ErrorCode::SinkError(
-            "Partition type of iceberg should be a struct type".into(),
-        )));
-    };
-
-    Ok(Some(PartitionComputeInfo::Iceberg(IcebergPartitionInfo {
-        partition_type: IcebergArrowConvert.struct_from_fields(&partition_type)?,
-        partition_fields,
-    })))
 }
 
 pub async fn handle_create_sink(
@@ -425,12 +466,13 @@ pub async fn handle_create_sink(
         return Ok(resp);
     }
 
-    let (mut sink, graph, target_table_catalog) = {
+    let (mut sink, graph, target_table_catalog, dependencies) = {
         let SinkPlanContext {
             query,
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
+            dependencies,
         } = gen_sink_plan(handle_args, stmt, None).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -443,14 +485,12 @@ pub async fn handle_create_sink(
 
         let graph = build_graph(plan)?;
 
-        (sink, graph, target_table_catalog)
+        (sink, graph, target_table_catalog, dependencies)
     };
 
     let mut target_table_replace_plan = None;
     if let Some(table_catalog) = target_table_catalog {
         use crate::handler::alter_table_column::hijack_merger_for_target_table;
-
-        check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())?;
 
         let (mut graph, mut table, source) =
             reparse_table_for_sink(&session, &table_catalog).await?;
@@ -468,17 +508,18 @@ pub async fn handle_create_sink(
         let incoming_sink_ids: HashSet<_> = table_catalog.incoming_sinks.iter().copied().collect();
         let incoming_sinks = fetch_incoming_sinks(&session, &incoming_sink_ids)?;
 
+        let columns_without_rw_timestamp = table_catalog.columns_without_rw_timestamp();
         for existing_sink in incoming_sinks {
             hijack_merger_for_target_table(
                 &mut graph,
-                table_catalog.columns(),
+                &columns_without_rw_timestamp,
                 &existing_sink,
                 Some(&existing_sink.unique_identity()),
             )?;
         }
 
         // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
-        hijack_merger_for_target_table(&mut graph, table_catalog.columns(), &sink, None)?;
+        hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
 
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
@@ -502,7 +543,12 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(sink.to_proto(), graph, target_table_replace_plan)
+        .create_sink(
+            sink.to_proto(),
+            graph,
+            target_table_replace_plan,
+            dependencies,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
@@ -524,112 +570,6 @@ pub fn fetch_incoming_sinks(
     }
 
     Ok(sinks)
-}
-
-fn check_cycle_for_sink(
-    session: &SessionImpl,
-    sink_catalog: SinkCatalog,
-    table_id: catalog::TableId,
-) -> Result<()> {
-    let reader = session.env().catalog_reader().read_guard();
-
-    let mut sinks = HashMap::new();
-    let mut sources = HashMap::new();
-    let mut views = HashMap::new();
-    let db_name = session.database();
-    for schema in reader.iter_schemas(db_name)? {
-        for sink in schema.iter_sink() {
-            sinks.insert(sink.id.sink_id, sink.as_ref());
-        }
-
-        for source in schema.iter_source() {
-            sources.insert(source.id, source.as_ref());
-        }
-
-        for view in schema.iter_view() {
-            views.insert(view.id, view.as_ref());
-        }
-    }
-
-    struct Context<'a> {
-        reader: &'a CatalogReadGuard,
-        sink_index: &'a HashMap<u32, &'a SinkCatalog>,
-        source_index: &'a HashMap<u32, &'a SourceCatalog>,
-        view_index: &'a HashMap<u32, &'a ViewCatalog>,
-    }
-
-    impl Context<'_> {
-        fn visit_table(
-            &self,
-            table: &TableCatalog,
-            target_table_id: catalog::TableId,
-            path: &mut Vec<String>,
-        ) -> Result<()> {
-            if table.id == target_table_id {
-                path.reverse();
-                path.push(table.name.clone());
-                return Err(RwError::from(ErrorCode::BindError(
-                    format!(
-                        "Creating such a sink will result in circular dependency, path = [{}]",
-                        path.join(", ")
-                    )
-                    .to_string(),
-                )));
-            }
-
-            for sink_id in &table.incoming_sinks {
-                if let Some(sink) = self.sink_index.get(sink_id) {
-                    path.push(sink.name.clone());
-                    self.visit_dependent_jobs(&sink.dependent_relations, target_table_id, path)?;
-                    path.pop();
-                } else {
-                    bail!("sink not found: {:?}", sink_id);
-                }
-            }
-
-            self.visit_dependent_jobs(&table.dependent_relations, target_table_id, path)?;
-
-            Ok(())
-        }
-
-        fn visit_dependent_jobs(
-            &self,
-            dependent_jobs: &[TableId],
-            target_table_id: TableId,
-            path: &mut Vec<String>,
-        ) -> Result<()> {
-            for table_id in dependent_jobs {
-                if let Ok(table) = self.reader.get_any_table_by_id(table_id) {
-                    path.push(table.name.clone());
-                    self.visit_table(table.as_ref(), target_table_id, path)?;
-                    path.pop();
-                } else if self.source_index.contains_key(&table_id.table_id)
-                    || self.view_index.contains_key(&table_id.table_id)
-                {
-                    continue;
-                } else {
-                    bail!("streaming job not found: {:?}", table_id);
-                }
-            }
-
-            Ok(())
-        }
-    }
-
-    let mut path = vec![];
-
-    path.push(sink_catalog.name.clone());
-
-    let ctx = Context {
-        reader: &reader,
-        sink_index: &sinks,
-        source_index: &sources,
-        view_index: &views,
-    };
-
-    ctx.visit_dependent_jobs(&sink_catalog.dependent_relations, table_id, &mut path)?;
-
-    Ok(())
 }
 
 pub(crate) async fn reparse_table_for_sink(
@@ -666,10 +606,17 @@ pub(crate) async fn reparse_table_for_sink(
         append_only,
         on_conflict,
         with_version_column,
+        include_column_options,
+        engine,
         ..
     } = definition
     else {
         panic!("unexpected statement type: {:?}", definition);
+    };
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
     };
 
     let (graph, table, source, _) = generate_stream_graph_for_replace_table(
@@ -688,6 +635,8 @@ pub(crate) async fn reparse_table_for_sink(
         with_version_column,
         None,
         None,
+        include_column_options,
+        engine,
     )
     .await?;
 
@@ -772,7 +721,7 @@ pub(crate) fn derive_default_column_project_for_sink(
         .collect::<BTreeMap<_, _>>();
 
     for (idx, column) in columns.iter().enumerate() {
-        if column.is_generated() {
+        if !column.can_dml() {
             continue;
         }
 
@@ -836,21 +785,26 @@ fn bind_sink_format_desc(
 
     let mut key_encode = None;
     if let Some(encode) = value.key_encode {
-        if encode == E::Text {
-            key_encode = Some(SinkEncode::Text);
-        } else {
-            return Err(ErrorCode::BindError(format!(
-                "sink key encode unsupported: {encode}, only TEXT supported"
-            ))
-            .into());
+        match encode {
+            E::Text => key_encode = Some(SinkEncode::Text),
+            E::Bytes => key_encode = Some(SinkEncode::Bytes),
+            _ => {
+                return Err(ErrorCode::BindError(format!(
+                    "sink key encode unsupported: {encode}, only TEXT and BYTES supported"
+                ))
+                .into())
+            }
         }
     }
 
-    let (mut options, secret_refs) = resolve_secret_ref_in_with_options(
-        WithOptions::try_from(value.row_options.as_slice())?,
-        session,
-    )?
-    .into_parts();
+    let (props, connection_type_flag, schema_registry_conn_ref) =
+        resolve_connection_ref_and_secret_ref(
+            WithOptions::try_from(value.row_options.as_slice())?,
+            session,
+            TelemetryDatabaseObject::Sink,
+        )?;
+    ensure_connection_type_allowed(connection_type_flag, &ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    let (mut options, secret_refs) = props.into_parts();
 
     options
         .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
@@ -862,6 +816,7 @@ fn bind_sink_format_desc(
         options,
         secret_refs,
         key_encode,
+        connection_id: schema_registry_conn_ref,
     })
 }
 
@@ -950,6 +905,19 @@ pub fn validate_compatibility(connector: &str, format_desc: &FormatEncodeOptions
         ))
         .into());
     }
+
+    // only allow Kafka connector work with `bytes` as key encode
+    if let Some(encode) = &format_desc.key_encode
+        && connector != KAFKA_SINK
+        && matches!(encode, Encode::Bytes)
+    {
+        return Err(ErrorCode::BindError(format!(
+            "key encode bytes only works with kafka connector, but found {}",
+            connector
+        ))
+        .into());
+    }
+
     Ok(())
 }
 

@@ -140,9 +140,13 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut paused = first_barrier.is_pause_on_startup();
+        let first_epoch = first_barrier.epoch;
         let init_epoch = first_barrier.epoch.prev;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+
         if let Some(state_table) = self.state_table.as_mut() {
-            state_table.init_epoch(first_barrier.epoch);
+            state_table.init_epoch(first_epoch).await?;
         }
 
         let BackfillState {
@@ -161,9 +165,6 @@ where
         // Use this buffer to construct state,
         // which will then be persisted.
         let mut current_state: Vec<Datum> = vec![None; state_len];
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,

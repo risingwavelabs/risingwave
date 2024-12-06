@@ -20,6 +20,7 @@ mod bit_or;
 mod bit_xor;
 mod bool_and;
 mod bool_or;
+mod first_last_value;
 mod general;
 mod jsonb_agg;
 mod mode;

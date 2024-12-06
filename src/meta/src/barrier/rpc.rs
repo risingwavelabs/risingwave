@@ -23,14 +23,22 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo};
-use risingwave_pb::stream_service::streaming_control_stream_request::RemovePartialGraphRequest;
+use risingwave_pb::stream_plan::{
+    AddMutation, Barrier, BarrierMutation, StreamActor, SubscriptionUpstreamInfo,
+};
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    CreatePartialGraphRequest, PbDatabaseInitialPartialGraph, PbInitRequest, PbInitialPartialGraph,
+    RemovePartialGraphRequest,
+};
 use risingwave_pb::stream_service::{
     streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
     InjectBarrierRequest, StreamingControlStreamRequest,
@@ -40,19 +48,38 @@ use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::time::{sleep, timeout};
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::{
-    Command, GlobalBarrierWorker, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
-    InflightSubscriptionInfo,
-};
-use crate::barrier::info::{BarrierInfo, InflightGraphInfo};
+use super::{BarrierKind, Command, InflightSubscriptionInfo, TracedEpoch};
+use crate::barrier::checkpoint::{BarrierWorkerState, DatabaseCheckpointControl};
+use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::info::{BarrierInfo, InflightDatabaseInfo};
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
+use crate::model::{ActorId, StreamJobFragments};
+use crate::stream::build_actor_connector_splits;
 use crate::{MetaError, MetaResult};
 
 const COLLECT_ERROR_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn to_partial_graph_id(job_id: Option<TableId>) -> u32 {
+    job_id
+        .map(|table| {
+            assert_ne!(table.table_id, u32::MAX);
+            table.table_id
+        })
+        .unwrap_or(u32::MAX)
+}
+
+pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<TableId> {
+    if partial_graph_id == u32::MAX {
+        None
+    } else {
+        Some(TableId::new(partial_graph_id))
+    }
+}
 
 struct ControlStreamNode {
     worker: WorkerNode,
@@ -75,7 +102,7 @@ impl ControlStreamManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        subscription: &InflightSubscriptionInfo,
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
         context: &impl GlobalBarrierWorkerContext,
     ) {
         let node_id = node.id as WorkerId;
@@ -87,12 +114,10 @@ impl ControlStreamManager {
         let mut backoff = ExponentialBackoff::from_millis(100)
             .max_delay(Duration::from_secs(3))
             .factor(5);
+        let init_request = Self::collect_init_request(initial_subscriptions);
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
-            match context
-                .new_control_stream(&node, &subscription.mv_depended_subscriptions)
-                .await
-            {
+            match context.new_control_stream(&node, &init_request).await {
                 Ok(handle) => {
                     assert!(self
                         .nodes
@@ -121,14 +146,14 @@ impl ControlStreamManager {
 
     pub(super) async fn reset(
         &mut self,
-        subscriptions: &InflightSubscriptionInfo,
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
         nodes: &HashMap<WorkerId, WorkerNode>,
         context: &impl GlobalBarrierWorkerContext,
     ) -> MetaResult<()> {
+        let init_request = Self::collect_init_request(initial_subscriptions);
+        let init_request = &init_request;
         let nodes = try_join_all(nodes.iter().map(|(worker_id, node)| async move {
-            let handle = context
-                .new_control_stream(node, &subscriptions.mv_depended_subscriptions)
-                .await?;
+            let handle = context.new_control_stream(node, init_request).await?;
             Result::<_, MetaError>::Ok((
                 *worker_id,
                 ControlStreamNode {
@@ -248,16 +273,135 @@ impl ControlStreamManager {
         tracing::debug!(?errors, "collected stream errors");
         errors
     }
+
+    fn collect_init_request(
+        initial_subscriptions: impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)>,
+    ) -> PbInitRequest {
+        PbInitRequest {
+            databases: initial_subscriptions
+                .map(|(database_id, info)| PbDatabaseInitialPartialGraph {
+                    database_id: database_id.database_id,
+                    graphs: vec![PbInitialPartialGraph {
+                        partial_graph_id: to_partial_graph_id(None),
+                        subscriptions: info.into_iter().collect_vec(),
+                    }],
+                })
+                .collect(),
+        }
+    }
 }
 
 impl ControlStreamManager {
+    /// Extract information from the loaded runtime barrier worker snapshot info, and inject the initial barrier.
+    ///
+    /// Return:
+    ///  - the worker nodes that need to wait for initial barrier collection
+    ///  - the extracted database information
+    ///  - the `prev_epoch` of the initial barrier
+    pub(super) fn inject_database_initial_barrier(
+        &mut self,
+        database_id: DatabaseId,
+        info: InflightDatabaseInfo,
+        state_table_committed_epochs: &mut HashMap<TableId, u64>,
+        stream_actors: &mut HashMap<ActorId, StreamActor>,
+        source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
+        background_jobs: &mut HashMap<TableId, (String, StreamJobFragments)>,
+        subscription_info: InflightSubscriptionInfo,
+        paused_reason: Option<PausedReason>,
+        hummock_version_stats: &HummockVersionStats,
+    ) -> MetaResult<(HashSet<WorkerId>, DatabaseCheckpointControl, u64)> {
+        let source_split_assignments = info
+            .fragment_infos()
+            .flat_map(|info| info.actors.keys())
+            .filter_map(|actor_id| {
+                let actor_id = *actor_id as ActorId;
+                source_splits
+                    .remove(&actor_id)
+                    .map(|splits| (actor_id, splits))
+            })
+            .collect();
+        let mutation = Mutation::Add(AddMutation {
+            // Actors built during recovery is not treated as newly added actors.
+            actor_dispatchers: Default::default(),
+            added_actors: Default::default(),
+            actor_splits: build_actor_connector_splits(&source_split_assignments),
+            pause: paused_reason.is_some(),
+            subscriptions_to_add: Default::default(),
+        });
+
+        let mut epochs = info.existing_table_ids().map(|table_id| {
+            (
+                table_id,
+                state_table_committed_epochs
+                    .remove(&table_id)
+                    .expect("should exist"),
+            )
+        });
+        let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
+        for (table_id, epoch) in epochs {
+            assert_eq!(
+                prev_epoch, epoch,
+                "{} has different committed epoch to {}",
+                first_table_id, table_id
+            );
+        }
+        let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
+        // Use a different `curr_epoch` for each recovery attempt.
+        let curr_epoch = prev_epoch.next();
+        let barrier_info = BarrierInfo {
+            prev_epoch,
+            curr_epoch,
+            kind: BarrierKind::Initial,
+        };
+
+        let mut node_actors: HashMap<_, Vec<_>> = HashMap::new();
+        for (actor_id, worker_id) in info.fragment_infos().flat_map(|info| info.actors.iter()) {
+            let worker_id = *worker_id as WorkerId;
+            let actor_id = *actor_id as ActorId;
+            let stream_actor = stream_actors.remove(&actor_id).expect("should exist");
+            node_actors.entry(worker_id).or_default().push(stream_actor);
+        }
+
+        let background_mviews = info
+            .job_ids()
+            .filter_map(|job_id| background_jobs.remove(&job_id).map(|mview| (job_id, mview)))
+            .collect();
+        let tracker = CreateMviewProgressTracker::recover(background_mviews, hummock_version_stats);
+
+        let node_to_collect = self.inject_barrier(
+            database_id,
+            None,
+            Some(mutation),
+            &barrier_info,
+            info.fragment_infos(),
+            info.fragment_infos(),
+            Some(node_actors),
+            vec![],
+            vec![],
+        )?;
+        debug!(
+            ?node_to_collect,
+            database_id = database_id.database_id,
+            "inject initial barrier"
+        );
+
+        let new_epoch = barrier_info.curr_epoch;
+        let state = BarrierWorkerState::recovery(new_epoch, info, subscription_info, paused_reason);
+        Ok((
+            node_to_collect,
+            DatabaseCheckpointControl::recovery(database_id, tracker, state),
+            barrier_info.prev_epoch.value().0,
+        ))
+    }
+
     pub(super) fn inject_command_ctx_barrier(
         &mut self,
+        database_id: DatabaseId,
         command: Option<&Command>,
         barrier_info: &BarrierInfo,
         prev_paused_reason: Option<PausedReason>,
-        pre_applied_graph_info: &InflightGraphInfo,
-        applied_graph_info: &InflightGraphInfo,
+        pre_applied_graph_info: &InflightDatabaseInfo,
+        applied_graph_info: &InflightDatabaseInfo,
     ) -> MetaResult<HashSet<WorkerId>> {
         let mutation = command.and_then(|c| c.to_mutation(prev_paused_reason));
         let subscriptions_to_add = if let Some(Mutation::Add(add)) = &mutation {
@@ -271,6 +415,7 @@ impl ControlStreamManager {
             vec![]
         };
         self.inject_barrier(
+            database_id,
             None,
             mutation,
             barrier_info,
@@ -287,6 +432,7 @@ impl ControlStreamManager {
 
     pub(super) fn inject_barrier<'a>(
         &mut self,
+        database_id: DatabaseId,
         creating_table_id: Option<TableId>,
         mutation: Option<Mutation>,
         barrier_info: &BarrierInfo,
@@ -300,9 +446,7 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = creating_table_id
-            .map(|table_id| table_id.table_id)
-            .unwrap_or(u32::MAX);
+        let partial_graph_id = to_partial_graph_id(creating_table_id);
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(pre_applied_graph_info);
 
@@ -366,6 +510,7 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
+                                        database_id: database_id.database_id,
                                         actor_ids_to_collect,
                                         table_ids_to_sync: table_ids_to_sync
                                             .iter()
@@ -413,7 +558,42 @@ impl ControlStreamManager {
         Ok(node_need_collect)
     }
 
-    pub(super) fn remove_partial_graph(&mut self, partial_graph_ids: Vec<u32>) {
+    pub(super) fn add_partial_graph(
+        &mut self,
+        database_id: DatabaseId,
+        creating_job_id: Option<TableId>,
+    ) -> MetaResult<()> {
+        let partial_graph_id = to_partial_graph_id(creating_job_id);
+        self.nodes.iter().try_for_each(|(_, node)| {
+            node.handle
+                .request_sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::CreatePartialGraph(
+                            CreatePartialGraphRequest {
+                                database_id: database_id.database_id,
+                                partial_graph_id,
+                            },
+                        ),
+                    ),
+                })
+                .map_err(|_| anyhow!("failed to add partial graph"))
+        })?;
+        Ok(())
+    }
+
+    pub(super) fn remove_partial_graph(
+        &mut self,
+        database_id: DatabaseId,
+        creating_job_ids: Vec<TableId>,
+    ) {
+        if creating_job_ids.is_empty() {
+            return;
+        }
+        let partial_graph_ids = creating_job_ids
+            .into_iter()
+            .map(|job_id| to_partial_graph_id(Some(job_id)))
+            .collect_vec();
         self.nodes.iter().for_each(|(_, node)| {
             if node.handle
                 .request_sender
@@ -422,6 +602,7 @@ impl ControlStreamManager {
                         streaming_control_stream_request::Request::RemovePartialGraph(
                             RemovePartialGraphRequest {
                                 partial_graph_ids: partial_graph_ids.clone(),
+                                database_id: database_id.database_id,
                             },
                         ),
                     ),
@@ -438,36 +619,16 @@ impl GlobalBarrierWorkerContextImpl {
     pub(super) async fn new_control_stream_impl(
         &self,
         node: &WorkerNode,
-        mv_depended_subscriptions: &HashMap<TableId, HashMap<u32, u64>>,
+        init_request: &PbInitRequest,
     ) -> MetaResult<StreamingControlHandle> {
-        let initial_version_id = self
-            .hummock_manager
-            .on_current_version(|version| version.id)
-            .await;
         let handle = self
             .env
             .stream_client_pool()
             .get(node)
             .await?
-            .start_streaming_control(initial_version_id, mv_depended_subscriptions)
+            .start_streaming_control(init_request.clone())
             .await?;
         Ok(handle)
-    }
-}
-
-impl<C> GlobalBarrierWorker<C> {
-    /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, barrier_info: &BarrierInfo, error: &MetaError) {
-        // Record failure in event log.
-        use risingwave_pb::meta::event_log;
-        let event = event_log::EventCollectBarrierFail {
-            prev_epoch: barrier_info.prev_epoch(),
-            cur_epoch: barrier_info.curr_epoch.value().0,
-            error: error.to_report_string(),
-        };
-        self.env
-            .event_log_manager_ref()
-            .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
 }
 

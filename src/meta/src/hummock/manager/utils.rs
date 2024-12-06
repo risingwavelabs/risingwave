@@ -70,7 +70,6 @@ impl HummockManager {
         let mut compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
         let mut context_info_guard = self.context_info.write().await;
-        let objects_to_delete = self.delete_object_tracker.current();
         // We don't check `checkpoint` because it's allowed to update its in memory state without
         // persisting to object store.
         let get_state = |compaction_guard: &mut Compaction,
@@ -110,9 +109,6 @@ impl HummockManager {
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
         );
-        self.delete_object_tracker.clear();
-        self.delete_object_tracker
-            .add(objects_to_delete.into_iter());
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {

@@ -105,7 +105,6 @@ pub struct UdfOptions<'a> {
     pub arg_names: &'a [String],
     pub return_type: &'a DataType,
     pub always_retry_on_network_error: bool,
-    pub function_type: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]

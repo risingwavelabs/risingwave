@@ -1,0 +1,50 @@
+- name: test dot output format (logical)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (logical, format dot) SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output
+- name: test dot output format (batch)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (physical, format dot) SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output
+- name: test dot output format (stream)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (physical, format dot) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output
+- name: test long dot output format (stream)
+  sql: |
+    create table t1(a int, b int);
+    create table t2(c int primary key, d int);
+    explain (physical, format dot) create materialized view m1 as SELECT
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col1,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col2,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col3,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col4,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col5,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col6,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col7,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col8,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col9,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col10,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col11,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col12,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col13,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col14,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col15,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col16,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col17,
+    COALESCE((SELECT b FROM t2 WHERE t1.a = t2.c), 0) col18
+    from t1;
+  expected_outputs:
+    - explain_output
+- name: test dot output format (distsql, stream)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (distsql, format dot) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output

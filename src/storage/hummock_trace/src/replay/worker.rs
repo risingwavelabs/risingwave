@@ -257,9 +257,9 @@ impl ReplayWorker {
                     panic!("expect iter result, but got {:?}", res);
                 }
             }
-            Operation::Sync(epoch_id, table_ids) => {
+            Operation::Sync(sync_table_epochs) => {
                 assert_eq!(storage_type, StorageType::Global);
-                let sync_result = replay.sync(epoch_id, table_ids).await.unwrap();
+                let sync_result = replay.sync(sync_table_epochs).await.unwrap();
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Sync(expected) = res {
                     assert_eq!(TraceResult::Ok(sync_result), expected, "sync failed");

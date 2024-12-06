@@ -26,6 +26,8 @@ pub struct Model {
     pub job_id: ObjectId,
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
+    /// Note: the `StreamNode` is different from the final plan node used by actors.
+    /// Specifically, `Merge` nodes' `upstream_actor_id` will be filled. (See `compose_fragment`)
     pub stream_node: StreamNode,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,

@@ -30,6 +30,7 @@ use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
+use rw_iter_util::ZipEqFast as _;
 use serde::{Deserialize, Serialize, Serializer};
 use strum_macros::EnumDiscriminants;
 use thiserror_ext::AsReport;
@@ -241,7 +242,11 @@ impl From<&PbDataType> for DataType {
             PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
-                DataType::new_struct(fields, field_names)
+                if proto.field_names.is_empty() {
+                    StructType::unnamed(fields).into()
+                } else {
+                    StructType::new(field_names.into_iter().zip_eq_fast(fields)).into()
+                }
             }
             PbTypeName::List => DataType::List(
                 // The first (and only) item is the list element type.
@@ -405,14 +410,6 @@ impl DataType {
         }
     }
 
-    pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
-        Self::Struct(StructType::from_parts(field_names, fields))
-    }
-
-    pub fn new_unnamed_struct(fields: Vec<DataType>) -> Self {
-        Self::Struct(StructType::unnamed(fields))
-    }
-
     pub fn as_struct(&self) -> &StructType {
         match self {
             DataType::Struct(t) => t,
@@ -481,6 +478,12 @@ impl DataType {
             (Self::List(d1), Self::List(d2)) => d1.equals_datatype(d2),
             _ => self == other,
         }
+    }
+}
+
+impl From<StructType> for DataType {
+    fn from(value: StructType) -> Self {
+        Self::Struct(value)
     }
 }
 
@@ -987,7 +990,7 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     pub fn binary_format(&self, data_type: &DataType) -> to_binary::Result<Bytes> {
         use self::to_binary::ToBinary;
-        self.to_binary_with_type(data_type).transpose().unwrap()
+        self.to_binary_with_type(data_type)
     }
 
     pub fn text_format(&self, data_type: &DataType) -> String {
@@ -1156,10 +1159,8 @@ mod tests {
 
     #[test]
     fn test_data_type_display() {
-        let d: DataType = DataType::new_struct(
-            vec![DataType::Int32, DataType::Varchar],
-            vec!["i".to_string(), "j".to_string()],
-        );
+        let d: DataType =
+            StructType::new(vec![("i", DataType::Int32), ("j", DataType::Varchar)]).into();
         assert_eq!(
             format!("{}", d),
             "struct<i integer, j character varying>".to_string()

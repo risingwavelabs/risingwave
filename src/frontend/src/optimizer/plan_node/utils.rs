@@ -22,7 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
     StreamJobStatus, OBJECT_ID_PLACEHOLDER,
 };
 use risingwave_common::constants::log_store::v2::{
@@ -199,6 +199,9 @@ impl TableCatalogBuilder {
             retention_seconds: None,
             cdc_table_id: None,
             vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            webhook_info: None,
+            job_id: None,
+            engine: Engine::Hummock,
         }
     }
 
@@ -481,9 +484,20 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
                 None => format!("{} IS NULL", name),
             })
             .collect_vec();
+
+        let len = scan_range.eq_conds.len();
         if !is_full_range(&scan_range.range) {
-            let i = scan_range.eq_conds.len();
-            range_str.push(range_to_string(&order_names[i], &scan_range.range))
+            let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
+                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+                (Bound::Unbounded, ub) => ub_to_string(&order_names[len..], ub),
+                (lb, Bound::Unbounded) => lb_to_string(&order_names[len..], lb),
+                (lb, ub) => format!(
+                    "{} AND {}",
+                    lb_to_string(&order_names[len..], lb),
+                    ub_to_string(&order_names[len..], ub)
+                ),
+            };
+            range_str.push(bound_range_str);
         }
         range_strs.push(range_str.join(" AND "));
     }
@@ -493,30 +507,54 @@ pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange
     range_strs
 }
 
-pub fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-    match (&range.0, &range.1) {
-        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-        (Bound::Unbounded, ub) => ub_to_string(name, ub),
-        (lb, Bound::Unbounded) => lb_to_string(name, lb),
-        (lb, ub) => {
-            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
+pub fn ub_to_string(order_names: &[String], ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match ub {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} <= {}", name, value)
         }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} < {}", name, value)
+        }
+        Bound::Unbounded => unreachable!(),
     }
 }
 
-fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-    let (op, v) = match lb {
-        Bound::Included(v) => (">=", v),
-        Bound::Excluded(v) => (">", v),
+pub fn lb_to_string(order_names: &[String], lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match lb {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} >= {}", name, value)
+        }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} > {}", name, value)
+        }
         Bound::Unbounded => unreachable!(),
-    };
-    format!("{} {} {:?}", name, op, v)
+    }
 }
-fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-    let (op, v) = match ub {
-        Bound::Included(v) => ("<=", v),
-        Bound::Excluded(v) => ("<", v),
-        Bound::Unbounded => unreachable!(),
-    };
-    format!("{} {} {:?}", name, op, v)
+
+pub fn row_to_string(
+    order_names: &[String],
+    struct_values: &Vec<Option<ScalarImpl>>,
+) -> (String, String) {
+    let mut names = vec![];
+    let mut values = vec![];
+    #[expect(clippy::disallowed_methods)]
+    for (name, value) in order_names.iter().zip(struct_values.iter()) {
+        names.push(name);
+        match value {
+            Some(v) => values.push(format!("{:?}", v)),
+            None => values.push("null".to_string()),
+        }
+    }
+    if names.len() == 1 {
+        (names[0].clone(), values[0].clone())
+    } else {
+        (
+            format!("({})", names.iter().join(", ")),
+            format!("({})", values.iter().join(", ")),
+        )
+    }
 }

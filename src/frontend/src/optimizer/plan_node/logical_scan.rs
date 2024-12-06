@@ -40,6 +40,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
+use crate::optimizer::ApplyResult;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 use crate::TableCatalog;
 
@@ -494,7 +495,7 @@ impl ToBatch for LogicalScan {
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
+            if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch()?);

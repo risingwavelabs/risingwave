@@ -811,19 +811,29 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    let barrier_epoch = barrier.epoch;
                     if !APPEND_ONLY {
                         if wait_first_barrier {
                             wait_first_barrier = false;
-                            self.memo_table.as_mut().unwrap().init_epoch(barrier.epoch);
+                            yield Message::Barrier(barrier);
+                            self.memo_table
+                                .as_mut()
+                                .unwrap()
+                                .init_epoch(barrier_epoch)
+                                .await?;
                         } else {
                             self.memo_table
                                 .as_mut()
                                 .unwrap()
                                 .commit(barrier.epoch)
                                 .await?;
+                            yield Message::Barrier(barrier);
                         }
+                    } else {
+                        yield Message::Barrier(barrier);
                     }
-                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                    if let Some(vnodes) = update_vnode_bitmap {
                         let prev_vnodes =
                             self.right_table.source.update_vnode_bitmap(vnodes.clone());
                         if cache_may_stale(&prev_vnodes, &vnodes) {
@@ -835,8 +845,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         &self.right_join_keys,
                         &right_stream_key_indices,
                     )?;
-                    prev_epoch = Some(barrier.epoch.curr);
-                    yield Message::Barrier(barrier)
+                    prev_epoch = Some(barrier_epoch.curr);
                 }
             }
         }

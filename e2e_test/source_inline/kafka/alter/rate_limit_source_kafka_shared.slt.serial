@@ -1,0 +1,166 @@
+control substitution on
+
+############## Create kafka seed data
+
+statement ok
+create table kafka_seed_data (v1 int);
+
+statement ok
+insert into kafka_seed_data select * from generate_series(1, 1000);
+
+############## Sink into kafka
+
+statement ok
+create sink kafka_sink
+from
+  kafka_seed_data with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_rate_limit_shared',
+    type = 'append-only',
+    force_append_only='true'
+);
+
+############## Source from kafka (rate_limit = 0)
+
+# Wait for the topic to create
+skipif in-memory
+sleep 5s
+
+statement ok
+create source kafka_source (v1 int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rate_limit_shared',
+  source_rate_limit = 0,
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
+flush;
+
+############## Check data
+
+skipif in-memory
+sleep 3s
+
+############## Create MV on source
+
+statement ok
+create materialized view rl_mv1 as select count(*) from kafka_source;
+
+############## Although source is rate limited, the MV's SourceBackfill is not.
+
+statement ok
+flush;
+
+query I
+select * from rl_mv1;
+----
+1000
+
+############## Insert more data. They will not go into the MV.
+
+statement ok
+insert into kafka_seed_data select * from generate_series(1, 1000);
+
+sleep 3s
+
+query I
+select * from rl_mv1;
+----
+1000
+
+statement ok
+SET BACKGROUND_DDL=true;
+
+statement ok
+SET BACKFILL_RATE_LIMIT=0;
+
+statement ok
+create materialized view rl_mv2 as select count(*) from kafka_source;
+
+sleep 1s
+
+query T
+SELECT progress from rw_ddl_progress;
+----
+0 rows consumed
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	0
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
+
+
+############## Alter Source (rate_limit = 0 --> rate_limit = 1000)
+
+statement ok
+alter source kafka_source set source_rate_limit to 1000;
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
+
+sleep 3s
+
+query I
+select * from rl_mv1;
+----
+2000
+
+query T
+SELECT progress from rw_ddl_progress;
+----
+0 rows consumed
+
+
+
+statement error
+alter materialized view rl_mv2 set source_rate_limit = 1000;
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET, found: source_rate_limit
+LINE 1: alter materialized view rl_mv2 set source_rate_limit = 1000;
+                                           ^
+
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
+
+
+statement ok
+alter materialized view rl_mv2 set backfill_rate_limit = 2000;
+
+
+query T
+select name, node_name, fragment_type, rate_limit from rw_rate_limit join rw_relations on table_id=id
+order by name;
+----
+kafka_source	SOURCE	{SOURCE}	1000
+rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
+
+sleep 3s
+
+query T
+select * from rl_mv2;
+----
+2000
+
+
+
+############## Cleanup
+
+statement ok
+drop source kafka_source cascade;
+
+statement ok
+drop table kafka_seed_data cascade;

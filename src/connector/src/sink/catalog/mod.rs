@@ -124,6 +124,7 @@ pub struct SinkFormatDesc {
     pub options: BTreeMap<String, String>,
     pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
+    pub connection_id: Option<u32>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -149,6 +150,7 @@ pub enum SinkEncode {
     Template,
     Parquet,
     Text,
+    Bytes,
 }
 
 impl Display for SinkEncode {
@@ -187,6 +189,7 @@ impl SinkFormatDesc {
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }))
     }
 
@@ -205,6 +208,7 @@ impl SinkFormatDesc {
             SinkEncode::Template => E::Template,
             SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
+            SinkEncode::Bytes => E::Bytes,
         };
 
         let encode = mapping_encode(&self.encode);
@@ -221,6 +225,7 @@ impl SinkFormatDesc {
             options,
             key_encode,
             secret_refs: self.secret_refs.clone(),
+            connection_id: self.connection_id,
         }
     }
 
@@ -233,6 +238,7 @@ impl SinkFormatDesc {
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }
     }
 }
@@ -273,10 +279,10 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
@@ -297,6 +303,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             options: value.options,
             key_encode,
             secret_refs: value.secret_refs,
+            connection_id: value.connection_id,
         })
     }
 }
@@ -341,9 +348,6 @@ pub struct SinkCatalog {
     /// Owner of the sink.
     pub owner: UserId,
 
-    // Relations on which the sink depends.
-    pub dependent_relations: Vec<TableId>,
-
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
@@ -380,6 +384,7 @@ pub struct SinkCatalog {
 
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
+        #[allow(deprecated)] // for `dependent_relations`
         PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
@@ -393,11 +398,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|id| id.table_id)
-                .collect_vec(),
+            dependent_relations: vec![],
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -505,11 +506,6 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             properties: pb.properties,
             owner: pb.owner.into(),
-            dependent_relations: pb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
             format_desc,
             connection_id: pb.connection_id.map(ConnectionId),

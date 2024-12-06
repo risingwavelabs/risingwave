@@ -133,8 +133,8 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
-        Ok(Some(self.value_serialize().into()))
+    ) -> super::to_binary::Result<bytes::Bytes> {
+        Ok(self.value_serialize().into())
     }
 }
 
@@ -617,5 +617,24 @@ impl<'a> FromSql<'a> for JsonbVal {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::JSONB)
+    }
+}
+
+impl ToSql for JsonbRef<'_> {
+    accepts!(JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        out.put_u8(1);
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
     }
 }

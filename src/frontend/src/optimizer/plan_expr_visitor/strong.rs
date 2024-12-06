@@ -221,6 +221,8 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::Hmac
+            | ExprType::SecureCompare
             | ExprType::Left
             | ExprType::Right
             | ExprType::Format
@@ -326,7 +328,8 @@ impl Strong {
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
-            | ExprType::InetNtoa => false,
+            | ExprType::InetNtoa
+            | ExprType::RwEpochToTs => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

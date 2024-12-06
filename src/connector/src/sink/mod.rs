@@ -34,6 +34,7 @@ pub mod mock_coordination_client;
 pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
+pub mod postgres;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -133,6 +134,8 @@ macro_rules! for_all_sinks {
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
                 { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink },
+                { Postgres, $crate::sink::postgres::PostgresSink },
+
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -866,6 +869,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("Postgres error: {0}")]
+    Postgres(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
     Connector(
         #[from]
@@ -949,5 +958,11 @@ impl From<::elasticsearch::Error> for SinkError {
 impl From<::opensearch::Error> for SinkError {
     fn from(err: ::opensearch::Error) -> Self {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<tokio_postgres::Error> for SinkError {
+    fn from(err: tokio_postgres::Error) -> Self {
+        SinkError::Postgres(anyhow!(err))
     }
 }

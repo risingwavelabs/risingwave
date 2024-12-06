@@ -410,7 +410,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         {
             let chunk = create_chunk(
@@ -516,7 +516,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         {
             let chunk = create_chunk(
@@ -619,8 +619,8 @@ mod tests {
         .await;
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table_1.init_epoch(epoch);
-        table_2.init_epoch(epoch);
+        table_1.init_epoch(epoch).await.unwrap();
+        table_2.init_epoch(epoch).await.unwrap();
 
         let order_columns_1 = vec![
             ColumnOrder::new(0, OrderType::ascending()), // a ASC for AggKind::Min
@@ -741,7 +741,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         {
             let chunk = create_chunk(
@@ -830,7 +830,7 @@ mod tests {
         .await;
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         let order_columns = vec![
             ColumnOrder::new(0, OrderType::ascending()), // a ASC for AggKind::Min
@@ -956,7 +956,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         {
             let chunk = create_chunk(
@@ -1075,7 +1075,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
 
         {
             let chunk = create_chunk(
@@ -1164,7 +1164,7 @@ mod tests {
         .unwrap();
 
         let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-        table.init_epoch(epoch);
+        table.init_epoch(epoch).await.unwrap();
         {
             let chunk = create_chunk(
                 " T i i I

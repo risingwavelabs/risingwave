@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -35,16 +33,16 @@ pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
     type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
-    type Iter = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
-    async fn get(
+    async fn get_keyed_row(
         &self,
         _key: TableKey<Bytes>,
         _epoch: u64,
         _read_options: ReadOptions,
-    ) -> StorageResult<Option<Bytes>> {
+    ) -> StorageResult<Option<StateStoreKeyedRow>> {
         panic!("should not read from the state store!");
     }
 
@@ -90,8 +88,8 @@ impl StateStoreWrite for PanicStateStore {
 }
 
 impl LocalStateStore for PanicStateStore {
-    type Iter<'a> = PanicStateStoreIter<StateStoreIterItem>;
-    type RevIter<'a> = PanicStateStoreIter<StateStoreIterItem>;
+    type Iter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
+    type RevIter<'a> = PanicStateStoreIter<StateStoreKeyedRow>;
 
     #[allow(clippy::unused_async)]
     async fn get(
@@ -179,11 +177,6 @@ impl StateStore for PanicStateStore {
         _options: TryWaitEpochOptions,
     ) -> StorageResult<()> {
         panic!("should not wait epoch from the panic state store!");
-    }
-
-    #[allow(clippy::unused_async)]
-    fn sync(&self, _epoch: u64, _table_ids: HashSet<TableId>) -> impl SyncFuture {
-        async { panic!("should not await sync epoch from the panic state store!") }
     }
 
     #[allow(clippy::unused_async)]

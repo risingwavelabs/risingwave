@@ -664,8 +664,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 return val == Data.DataType.TypeName.INT64_VALUE;
             case "float":
             case "real":
-                return val == Data.DataType.TypeName.FLOAT_VALUE
-                        || val == Data.DataType.TypeName.DOUBLE_VALUE;
+                return val == Data.DataType.TypeName.FLOAT_VALUE;
             case "boolean":
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
             case "double":
@@ -680,7 +679,25 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         || val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "varchar":
             case "character varying":
+            case "uuid":
+            case "enum":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "bytea":
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "date":
+                return val == Data.DataType.TypeName.DATE_VALUE;
+            case "time":
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "timestamp":
+            case "timestamp without time zone":
+                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
+            case "timestamptz":
+            case "timestamp with time zone":
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
+            case "interval":
+                return val == Data.DataType.TypeName.INTERVAL_VALUE;
+            case "jsonb":
+                return val == Data.DataType.TypeName.JSONB_VALUE;
             default:
                 return true; // true for other uncovered types
         }

@@ -137,7 +137,11 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let mut paused = first_barrier.is_pause_on_startup();
         let first_epoch = first_barrier.epoch;
-        self.state_table.init_epoch(first_barrier.epoch);
+        let is_newly_added = first_barrier.is_newly_added(self.actor_id);
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+
+        self.state_table.init_epoch(first_epoch).await?;
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
@@ -148,11 +152,9 @@ where
             )
         });
         if is_completely_finished {
-            assert!(!first_barrier.is_newly_added(self.actor_id));
+            assert!(!is_newly_added);
         }
 
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
         upstream_table.init_epoch(first_epoch).await?;
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();

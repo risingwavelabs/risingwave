@@ -18,7 +18,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
+use risingwave_expr::expr::{build_batch_expr_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
@@ -89,7 +89,7 @@ impl BoxedExecutorBuilder for ProjectExecutor {
         let project_exprs: Vec<_> = project_node
             .get_select_list()
             .iter()
-            .map(build_from_prost)
+            .map(build_batch_expr_from_prost)
             .try_collect()?;
 
         let fields = project_exprs

@@ -21,15 +21,11 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry,
+    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
-use itertools::Itertools;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::{
-    HummockSstableObjectId, HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH, OBJECT_SUFFIX,
-};
+use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
@@ -70,7 +66,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -87,14 +83,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheContext),
+    Fill(CacheHint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheContext::Default)
+        CachePolicy::Fill(CacheHint::Normal)
     }
 }
 
@@ -234,27 +230,6 @@ impl SstableStore {
         Ok(())
     }
 
-    /// Deletes all SSTs specified in the given list of IDs from storage and cache.
-    pub async fn delete_list(
-        &self,
-        object_id_list: &[HummockSstableObjectId],
-    ) -> HummockResult<()> {
-        let mut paths = Vec::with_capacity(object_id_list.len() * 2);
-
-        for &object_id in object_id_list {
-            paths.push(self.get_sst_data_path(object_id));
-        }
-        // Delete from storage.
-        self.store.delete_objects(&paths).await?;
-
-        // Delete from cache.
-        for object_id in object_id_list {
-            self.meta_cache.remove(object_id);
-        }
-
-        Ok(())
-    }
-
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
         self.meta_cache.remove(&object_id);
         Ok(())
@@ -378,9 +353,9 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CacheContext::LowPriority
+                    CacheHint::Low
                 };
-                let entry = self.block_cache.insert_with_context(
+                let entry = self.block_cache.insert_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
@@ -464,7 +439,7 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_context(
+                let entry = self.block_cache.fetch_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
@@ -522,30 +497,11 @@ impl SstableStore {
         let obj_prefix = self
             .store
             .get_object_prefix(object_id, self.use_new_object_prefix_strategy);
-        let mut path = String::with_capacity(
-            self.path.len()
-                + "/".len()
-                + obj_prefix.len()
-                + HUMMOCK_SSTABLE_OBJECT_ID_MAX_DECIMAL_LENGTH
-                + ".".len()
-                + OBJECT_SUFFIX.len(),
-        );
-        path.push_str(&self.path);
-        path.push('/');
-        path.push_str(&obj_prefix);
-        path.push_str(&object_id.to_string());
-        path.push('.');
-        path.push_str(OBJECT_SUFFIX);
-        path
+        risingwave_hummock_sdk::get_sst_data_path(&obj_prefix, &self.path, object_id)
     }
 
     pub fn get_object_id_from_path(path: &str) -> HummockSstableObjectId {
-        let split = path.split(&['/', '.']).collect_vec();
-        assert!(split.len() > 2);
-        assert_eq!(split[split.len() - 1], OBJECT_SUFFIX);
-        split[split.len() - 2]
-            .parse::<HummockSstableObjectId>()
-            .expect("valid sst id")
+        risingwave_hummock_sdk::get_object_id_from_path(path)
     }
 
     pub fn store(&self) -> ObjectStoreRef {
@@ -581,16 +537,16 @@ impl SstableStore {
     /// Returns `table_holder`
     pub fn sstable(
         &self,
-        sst: &SstableInfo,
+        sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.object_id;
+        let object_id = sstable_info_ref.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..;
+            let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;
@@ -759,6 +715,7 @@ mod tests {
             holder,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            info,
         );
         iter.rewind().await.unwrap();
         for i in x_range {
@@ -792,7 +749,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
-            vec![SST_ID as u32],
+            vec![0],
         )
         .await
         .unwrap();
@@ -823,7 +780,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
-            vec![SST_ID as u32],
+            vec![0],
         )
         .await
         .unwrap();

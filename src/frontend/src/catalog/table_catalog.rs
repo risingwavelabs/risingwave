@@ -18,14 +18,16 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -35,14 +37,12 @@ use crate::expr::ExprImpl;
 use crate::optimizer::property::Cardinality;
 use crate::user::UserId;
 
-/// Includes full information about a table.
+/// `TableCatalog` Includes full information about a table.
 ///
-/// Currently, it can be either:
-/// - a table or a source
-/// - a materialized view
-/// - an index
+/// Here `Table` is an internal concept, corresponding to _a table in storage_, all of which can be `SELECT`ed.
+/// It is not the same as a user-side table created by `CREATE TABLE`.
 ///
-/// Use `self.table_type()` to determine the type of the table.
+/// Use [`Self::table_type()`] to determine the [`TableType`] of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -182,7 +182,16 @@ pub struct TableCatalog {
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
     pub vnode_count: VnodeCount,
+
+    pub webhook_info: Option<PbWebhookSourceInfo>,
+
+    pub job_id: Option<TableId>,
+
+    pub engine: Engine,
 }
+
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
@@ -191,6 +200,7 @@ pub enum TableType {
     /// Tables created by `CREATE MATERIALIZED VIEW`.
     MaterializedView,
     /// Tables serving as index for `TableType::Table` or `TableType::MaterializedView`.
+    /// An index has both a `TableCatalog` and an `IndexCatalog`.
     Index,
     /// Internal tables for executors.
     Internal,
@@ -282,7 +292,25 @@ impl TableCatalog {
         self.table_type
     }
 
-    pub fn is_table(&self) -> bool {
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+
+    pub fn iceberg_source_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SOURCE_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
+    pub fn iceberg_sink_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SINK_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
+    pub fn is_user_table(&self) -> bool {
         self.table_type == TableType::Table
     }
 
@@ -326,6 +354,14 @@ impl TableCatalog {
     /// Get a reference to the table catalog's columns.
     pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
+    }
+
+    pub fn columns_without_rw_timestamp(&self) -> Vec<ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_rw_timestamp_column())
+            .cloned()
+            .collect()
     }
 
     /// Get a reference to the table catalog's pk desc.
@@ -412,7 +448,12 @@ impl TableCatalog {
             schema_id,
             database_id,
             name: self.name.clone(),
-            columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            // ignore `_rw_timestamp` when serializing
+            columns: self
+                .columns_without_rw_timestamp()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
@@ -452,6 +493,9 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            webhook_info: self.webhook_info.clone(),
+            job_id: self.job_id.map(|id| id.table_id),
+            engine: Some(self.engine.to_protobuf().into()),
         }
     }
 
@@ -530,6 +574,10 @@ impl TableCatalog {
         self.columns.iter().any(|c| c.is_generated())
     }
 
+    pub fn has_rw_timestamp_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_rw_timestamp_column())
+    }
+
     pub fn column_schema(&self) -> Schema {
         Schema::new(
             self.columns
@@ -542,12 +590,20 @@ impl TableCatalog {
     pub fn is_created(&self) -> bool {
         self.stream_job_status == StreamJobStatus::Created
     }
+
+    pub fn is_iceberg_engine_table(&self) -> bool {
+        self.engine == Engine::Iceberg
+    }
 }
 
 impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
+        let tb_engine = tb
+            .get_engine()
+            .map(|engine| PbEngine::try_from(*engine).expect("Invalid engine"))
+            .unwrap_or(PbEngine::Hummock);
         let table_type = tb.get_table_type().unwrap();
         let stream_job_status = tb
             .get_stream_job_status()
@@ -570,7 +626,12 @@ impl From<PbTable> for TableCatalog {
 
         let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let version_column_index = tb.version_column_index.map(|value| value as usize);
-        let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        let mut columns: Vec<ColumnCatalog> =
+            tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        if columns.iter().all(|c| !c.is_rw_timestamp_column()) {
+            // Add system column `_rw_timestamp` to every table, but notice that this column is never persisted.
+            columns.push(ColumnCatalog::rw_timestamp_column());
+        }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
             if !col_names.insert(col_name.to_string()) {
@@ -586,6 +647,7 @@ impl From<PbTable> for TableCatalog {
         for idx in &tb.watermark_indices {
             watermark_columns.insert(*idx as _);
         }
+        let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
             id: id.into(),
@@ -635,6 +697,9 @@ impl From<PbTable> for TableCatalog {
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
+            webhook_info: tb.webhook_info,
+            job_id: tb.job_id.map(TableId::from),
+            engine,
         }
     }
 }
@@ -658,6 +723,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::PbEngine;
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
@@ -726,6 +792,9 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            webhook_info: None,
+            job_id: None,
+            engine: Some(PbEngine::Hummock as i32),
         }
         .into();
 
@@ -740,10 +809,11 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::new_struct(
-                                vec![DataType::Varchar, DataType::Varchar],
-                                vec!["address".to_string(), "zipcode".to_string()]
-                            ),
+                            data_type: StructType::new(vec![
+                                ("address", DataType::Varchar),
+                                ("zipcode", DataType::Varchar)
+                            ],)
+                            .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
@@ -755,9 +825,11 @@ mod tests {
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
                             version: ColumnDescVersion::Pr13707,
+                            system_column: None,
                         },
                         is_hidden: false
-                    }
+                    },
+                    ColumnCatalog::rw_timestamp_column(),
                 ],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
@@ -774,7 +846,7 @@ mod tests {
                 conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
-                watermark_columns: FixedBitSet::with_capacity(2),
+                watermark_columns: FixedBitSet::with_capacity(3),
                 dist_key_in_pk: vec![],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
@@ -790,6 +862,9 @@ mod tests {
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
+                webhook_info: None,
+                job_id: None,
+                engine: Engine::Hummock,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -140,22 +140,20 @@ pub struct ScanRange {
     pub pk_prefix: OwnedRow,
 
     /// The range bounds of the next column.
-    pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
+    pub next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>),
 }
-
 impl ScanRange {
     /// Create a scan range from the prost representation.
-    pub fn new(
-        scan_range: PbScanRange,
-        mut pk_types: impl Iterator<Item = DataType>,
-    ) -> Result<Self> {
+    pub fn new(scan_range: PbScanRange, pk_types: Vec<DataType>) -> Result<Self> {
+        let mut index = 0;
         let pk_prefix = OwnedRow::new(
             scan_range
                 .eq_conds
                 .iter()
                 .map(|v| {
-                    let ty = pk_types.next().unwrap();
-                    deserialize_datum(v.as_slice(), &ty)
+                    let ty = pk_types.get(index).unwrap();
+                    index += 1;
+                    deserialize_datum(v.as_slice(), ty)
                 })
                 .try_collect()?,
         );
@@ -166,26 +164,34 @@ impl ScanRange {
             });
         }
 
-        let bound_ty = pk_types.next().unwrap();
-        let build_bound = |bound: &scan_range::Bound| -> Bound<Datum> {
-            let datum = deserialize_datum(bound.value.as_slice(), &bound_ty).unwrap();
+        let build_bound = |bound: &scan_range::Bound, mut index| -> Result<Bound<OwnedRow>> {
+            let next_col_bounds = OwnedRow::new(
+                bound
+                    .value
+                    .iter()
+                    .map(|v| {
+                        let ty = pk_types.get(index).unwrap();
+                        index += 1;
+                        deserialize_datum(v.as_slice(), ty)
+                    })
+                    .try_collect()?,
+            );
             if bound.inclusive {
-                Bound::Included(datum)
+                Ok(Bound::Included(next_col_bounds))
             } else {
-                Bound::Excluded(datum)
+                Ok(Bound::Excluded(next_col_bounds))
             }
         };
 
-        let next_col_bounds: (Bound<Datum>, Bound<Datum>) = match (
+        let next_col_bounds: (Bound<OwnedRow>, Bound<OwnedRow>) = match (
             scan_range.lower_bound.as_ref(),
             scan_range.upper_bound.as_ref(),
         ) {
-            (Some(lb), Some(ub)) => (build_bound(lb), build_bound(ub)),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub)),
-            (Some(lb), None) => (build_bound(lb), Bound::Unbounded),
+            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
             (None, None) => unreachable!(),
         };
-
         Ok(Self {
             pk_prefix,
             next_col_bounds,
@@ -219,10 +225,10 @@ impl ScanRange {
         let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
         let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
 
-        (
-            match start_bound {
+        let build_bound = |other_bound_is_bounded: bool, bound, order_type_nulls| {
+            match bound {
                 Bound::Unbounded => {
-                    if end_bound_is_bounded && order_type.nulls_are_first() {
+                    if other_bound_is_bounded && order_type_nulls {
                         // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
                         Bound::Excluded(OwnedRow::new(vec![None]))
                     } else {
@@ -230,22 +236,20 @@ impl ScanRange {
                         Bound::Unbounded
                     }
                 }
-                Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-            },
-            match end_bound {
-                Bound::Unbounded => {
-                    if start_bound_is_bounded && order_type.nulls_are_last() {
-                        // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
-                        Bound::Excluded(OwnedRow::new(vec![None]))
-                    } else {
-                        // Both start and end are unbounded, so we need to select all rows.
-                        Bound::Unbounded
-                    }
-                }
-                Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
-                Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
-            },
-        )
+                Bound::Included(x) => Bound::Included(x),
+                Bound::Excluded(x) => Bound::Excluded(x),
+            }
+        };
+        let start_bound = build_bound(
+            end_bound_is_bounded,
+            start_bound,
+            order_type.nulls_are_first(),
+        );
+        let end_bound = build_bound(
+            start_bound_is_bounded,
+            end_bound,
+            order_type.nulls_are_last(),
+        );
+        (start_bound, end_bound)
     }
 }

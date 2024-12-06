@@ -48,10 +48,11 @@ struct StructTypeInner {
 
 impl StructType {
     /// Creates a struct type with named fields.
-    pub fn new(named_fields: Vec<(impl Into<String>, DataType)>) -> Self {
-        let mut field_types = Vec::with_capacity(named_fields.len());
-        let mut field_names = Vec::with_capacity(named_fields.len());
-        for (name, ty) in named_fields {
+    pub fn new(named_fields: impl IntoIterator<Item = (impl Into<String>, DataType)>) -> Self {
+        let iter = named_fields.into_iter();
+        let mut field_types = Vec::with_capacity(iter.size_hint().0);
+        let mut field_names = Vec::with_capacity(iter.size_hint().0);
+        for (name, ty) in iter {
             field_names.push(name.into());
             field_types.push(ty);
         }
@@ -67,15 +68,6 @@ impl StructType {
         Self(Arc::new(StructTypeInner {
             field_types: Box::new([]),
             field_names: Box::new([]),
-        }))
-    }
-
-    pub(super) fn from_parts(field_names: Vec<String>, field_types: Vec<DataType>) -> Self {
-        // TODO: enable this assertion
-        // debug_assert!(field_names.len() == field_types.len());
-        Self(Arc::new(StructTypeInner {
-            field_types: field_types.into(),
-            field_names: field_names.into(),
         }))
     }
 

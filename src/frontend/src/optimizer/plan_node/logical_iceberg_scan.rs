@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
@@ -37,10 +38,11 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
+    iceberg_scan_type: IcebergScanType,
 }
 
 impl LogicalIcebergScan {
-    pub fn new(logical_source: &LogicalSource) -> Self {
+    pub fn new(logical_source: &LogicalSource, iceberg_scan_type: IcebergScanType) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
 
         let core = logical_source.core.clone();
@@ -48,7 +50,11 @@ impl LogicalIcebergScan {
 
         assert!(logical_source.output_exprs.is_none());
 
-        LogicalIcebergScan { base, core }
+        LogicalIcebergScan {
+            base,
+            core,
+            iceberg_scan_type,
+        }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
@@ -64,7 +70,11 @@ impl LogicalIcebergScan {
             .collect();
         let base = PlanBase::new_logical_with_core(&core);
 
-        LogicalIcebergScan { base, core }
+        LogicalIcebergScan {
+            base,
+            core,
+            iceberg_scan_type: self.iceberg_scan_type,
+        }
     }
 }
 
@@ -76,6 +86,7 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
+                ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
             ]
         } else {
             vec![]
@@ -114,7 +125,7 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<PlanRef> {
-        let plan: PlanRef = BatchIcebergScan::new(self.core.clone()).into();
+        let plan: PlanRef = BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type).into();
         Ok(plan)
     }
 }

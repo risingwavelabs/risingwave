@@ -321,8 +321,11 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch);
-        self.left_table.init_epoch(barrier.epoch);
+        let first_epoch = barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
+        self.right_table.init_epoch(first_epoch).await?;
+        self.left_table.init_epoch(first_epoch).await?;
 
         let recovered_rhs = self.recover_rhs().await?;
         let recovered_rhs_value = recovered_rhs.as_ref().map(|r| r[0].clone());
@@ -332,9 +335,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // This is only required to be some if the row arrived during this epoch.
         let mut committed_rhs_row = recovered_rhs.clone();
         let mut staging_rhs_row = recovered_rhs;
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
             StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());

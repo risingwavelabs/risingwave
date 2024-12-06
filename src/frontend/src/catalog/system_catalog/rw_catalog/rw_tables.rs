@@ -28,7 +28,7 @@ struct RwTable {
     owner: i32,
     definition: String,
     append_only: bool,
-    acl: String,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
@@ -45,7 +45,7 @@ fn read_rw_table_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwTable>> {
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_table().map(|table| RwTable {
+            schema.iter_user_table().map(|table| RwTable {
                 id: table.id.table_id as i32,
                 name: table.name().to_string(),
                 schema_id: schema.id() as i32,

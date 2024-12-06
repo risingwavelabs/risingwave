@@ -1,0 +1,118 @@
+control substitution on
+
+statement ok
+CREATE SOURCE supplier (
+        s_suppkey  INTEGER,
+        s_name VARCHAR,
+        s_address VARCHAR,
+        s_nationkey INTEGER,
+        s_phone VARCHAR,
+        s_acctbal NUMERIC,
+        s_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-supplier'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE part (
+        p_partkey INTEGER,
+        p_name VARCHAR,
+        p_mfgr VARCHAR,
+        p_brand VARCHAR,
+        p_type VARCHAR,
+        p_size INTEGER,
+        p_container VARCHAR,
+        p_retailprice NUMERIC,
+        p_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-part'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE partsupp (
+        ps_partkey INTEGER,
+        ps_suppkey INTEGER,
+        ps_availqty INTEGER,
+        ps_supplycost NUMERIC,
+        ps_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-partsupp'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE customer (
+        c_custkey INTEGER,
+        c_name VARCHAR,
+        c_address VARCHAR,
+        c_nationkey INTEGER,
+        c_phone VARCHAR,
+        c_acctbal NUMERIC,
+        c_mktsegment VARCHAR,
+        c_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-customer'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE orders (
+        o_orderkey BIGINT,
+        o_custkey INTEGER,
+        o_orderstatus VARCHAR,
+        o_totalprice NUMERIC,
+        o_orderdate DATE,
+        o_orderpriority VARCHAR,
+        o_clerk VARCHAR,
+        o_shippriority INTEGER,
+        o_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-orders'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE lineitem (
+        l_orderkey BIGINT,
+        l_partkey INTEGER,
+        l_suppkey INTEGER,
+        l_linenumber INTEGER,
+        l_quantity NUMERIC,
+        l_extendedprice NUMERIC,
+        l_discount NUMERIC,
+        l_tax NUMERIC,
+        l_returnflag VARCHAR,
+        l_linestatus VARCHAR,
+        l_shipdate DATE,
+        l_commitdate DATE,
+        l_receiptdate DATE,
+        l_shipinstruct VARCHAR,
+        l_shipmode VARCHAR,
+        l_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-lineitem'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE nation (
+        n_nationkey INTEGER,
+        n_name VARCHAR,
+        n_regionkey INTEGER,
+        n_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-nation'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE region (
+        r_regionkey INTEGER,
+        r_name VARCHAR,
+        r_comment VARCHAR
+) WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-region'
+) FORMAT PLAIN ENCODE JSON;

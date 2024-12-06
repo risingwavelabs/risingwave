@@ -65,7 +65,7 @@ async fn test_state_table_update_insert() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(6_i32.into()),
@@ -258,7 +258,7 @@ async fn test_state_table_iter_with_prefix() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -393,7 +393,7 @@ async fn test_state_table_iter_with_pk_range() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -532,7 +532,7 @@ async fn test_mem_table_assertion() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(11_i32.into()),
@@ -578,7 +578,7 @@ async fn test_state_table_iter_with_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -751,7 +751,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -998,7 +998,7 @@ async fn test_state_table_write_chunk() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let chunk = StreamChunk::from_rows(
         &[
@@ -1130,7 +1130,7 @@ async fn test_state_table_write_chunk_visibility() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let chunk = StreamChunk::from_rows(
         &[
@@ -1257,7 +1257,7 @@ async fn test_state_table_write_chunk_value_indices() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let chunk = StreamChunk::from_rows(
         &[
@@ -1354,7 +1354,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let rows = vec![
         (
@@ -1480,7 +1480,7 @@ async fn test_state_table_watermark_cache_write_chunk() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let cache = state_table.get_watermark_cache();
     assert_eq!(cache.len(), 0);
@@ -1655,7 +1655,7 @@ async fn test_state_table_watermark_cache_refill() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     let rows = vec![
         OwnedRow::new(vec![
@@ -1751,7 +1751,7 @@ async fn test_state_table_iter_prefix_and_sub_range() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -1952,7 +1952,7 @@ async fn test_replicated_state_table_replication() {
     test_env
         .storage
         .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     replicated_state_table.init_epoch(epoch).await.unwrap();
 
     // Insert first record into base state table

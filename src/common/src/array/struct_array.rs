@@ -679,19 +679,17 @@ mod tests {
         let fields = [
             DataType::Float32,
             DataType::Varchar,
-            DataType::new_struct(
-                vec![
-                    DataType::Float64,
-                    DataType::Varchar,
-                    DataType::Varchar,
-                    DataType::new_struct(vec![], vec![]),
-                ],
-                vec![],
-            ),
+            StructType::unnamed(vec![
+                DataType::Float64,
+                DataType::Varchar,
+                DataType::Varchar,
+                StructType::unnamed(vec![]).into(),
+            ])
+            .into(),
             DataType::Int64,
             DataType::Varchar,
             DataType::Int16,
-            DataType::new_struct(vec![], vec![]),
+            StructType::unnamed(vec![]).into(),
             DataType::Int32,
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
@@ -763,7 +761,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::new_struct(vec![DataType::Varchar], vec![]),
+                    StructType::unnamed(vec![DataType::Varchar]).into(),
                 ],
                 Ordering::Greater,
             ),
@@ -778,7 +776,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::new_struct(vec![DataType::Varchar], vec![]),
+                    StructType::unnamed(vec![DataType::Varchar]).into(),
                 ],
                 Ordering::Equal,
             ),

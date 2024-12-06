@@ -116,7 +116,7 @@ message BarrierMutation {
     // Stop a set of actors, used for dropping materialized views. Empty dispatchers will be
     // automatically removed.
     StopMutation stop = 4;
-    // Update outputs and hash mappings for some dispatchers, used for scaling.
+    // Update outputs and hash mappings for some dispatchers, used for scaling and replace table.
     UpdateMutation update = 5;
     // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
@@ -124,11 +124,12 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or chain exec.
+    // Throttle specific source exec or backfill exec.
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;
     // Combined mutation.
+    // Currently, it can only be Add & Update, which is for sink into table.
     CombinedMutation combined = 100;
   }
 }
@@ -189,7 +190,7 @@ message StreamSource {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Streaming rate limit
+  // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
 }
@@ -205,7 +206,7 @@ message StreamFsFetch {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Streaming rate limit
+  // Source rate limit
   optional uint32 rate_limit = 9;
   map<string, secret.SecretRef> secret_refs = 10;
 }
@@ -224,6 +225,8 @@ message StreamFsFetchNode {
   StreamFsFetch node_inner = 1;
 }
 
+/// It's input must be a `MergeNode`, which connects to the upstream source job.
+/// See `StreamSourceScan::adhoc_to_stream_prost` for the plan.
 message SourceBackfillNode {
   uint32 upstream_source_id = 1;
   optional uint32 row_id_index = 2;
@@ -231,7 +234,7 @@ message SourceBackfillNode {
   catalog.StreamSourceInfo info = 4;
   string source_name = 5;
   map<string, string> with_properties = 6;
-  // Streaming rate limit
+  // Backfill rate limit
   optional uint32 rate_limit = 7;
 
   // fields above are the same as StreamSource
@@ -541,6 +544,10 @@ message HopWindowNode {
 }
 
 message MergeNode {
+  // **WARNING**: Use this field with caution.
+  //
+  // `upstream_actor_id` stored in the plan node in `Fragment` meta model cannot be directly used.
+  // See `compose_fragment`.
   repeated uint32 upstream_actor_id = 1;
   uint32 upstream_fragment_id = 2;
   // Type of the upstream dispatcher. If there's always one upstream according to this
@@ -609,7 +616,7 @@ message StreamScanNode {
   // Used iff `ChainType::Backfill`.
   plan_common.StorageTableDesc table_desc = 7;
 
-  // The rate limit for the stream scan node.
+  // The backfill rate limit for the stream scan node.
   optional uint32 rate_limit = 8;
 
   // Snapshot read every N barriers
@@ -646,7 +653,7 @@ message StreamCdcScanNode {
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
 
-  // The rate limit for the stream cdc scan node.
+  // The backfill rate limit for the stream cdc scan node.
   optional uint32 rate_limit = 6;
 
   // Whether skip the backfill and only consume from upstream.
@@ -761,6 +768,7 @@ message DmlNode {
   uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
+  optional uint32 rate_limit = 4;
 }
 
 message RowIdGenNode {
@@ -985,6 +993,8 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
   FRAGMENT_TYPE_FLAG_SOURCE_SCAN = 1024;
   FRAGMENT_TYPE_FLAG_SNAPSHOT_BACKFILL_STREAM_SCAN = 2048;
+  // Note: this flag is not available in old fragments, so only suitable for debugging purpose.
+  FRAGMENT_TYPE_FLAG_FS_FETCH = 4096;
 }
 
 // The streaming context associated with a stream plan

@@ -31,7 +31,7 @@ struct RwFunction {
     return_type_id: i32,
     language: String,
     link: Option<String>,
-    acl: String,
+    acl: Vec<String>,
     always_retry_on_network_error: bool,
 }
 

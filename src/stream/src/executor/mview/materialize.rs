@@ -170,10 +170,10 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.state_table.init_epoch(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.state_table.init_epoch(first_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -297,6 +297,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
+
+                    self.metrics
+                        .materialize_current_epoch
+                        .set(b.epoch.curr as i64);
+
                     Message::Barrier(b)
                 }
             }

@@ -97,10 +97,19 @@ impl TaskManager {
         }
     }
 
-    pub(super) fn abort(self) {
+    pub(super) fn abort_all_tasks(self) {
         for task in self.tasks.into_values() {
             task.task.join_handle.abort();
         }
+    }
+
+    pub(super) fn abort_task(&mut self, task_id: UploadingTaskId) -> Option<UploadingTaskStatus> {
+        self.tasks.remove(&task_id).map(|entry| {
+            entry.task.join_handle.abort();
+            self.task_order
+                .retain(|inflight_task_id| *inflight_task_id != task_id);
+            entry.status
+        })
     }
 
     pub(super) fn spill(

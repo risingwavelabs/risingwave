@@ -11,6 +11,7 @@ from time import sleep
 from minio import Minio
 from random import uniform
 from time import sleep
+import numpy as np
 import time
 
 def gen_data(file_num, item_num_per_file):
@@ -23,14 +24,26 @@ def gen_data(file_num, item_num_per_file):
             'sex': item_id % 2,
             'mark': (-1) ** (item_id % 2),
             'test_int': pa.scalar(1, type=pa.int32()),
+            'test_int8': pa.scalar(1, type=pa.int8()),
+            'test_uint8': pa.scalar(item_id % 256, type=pa.uint8()),  # UInt8
+            'test_uint16': pa.scalar(item_id % 65536, type=pa.uint16()),  # UInt16
+            'test_uint32': pa.scalar(item_id % (2**32), type=pa.uint32()),  # UInt32
+            'test_uint64': pa.scalar(item_id % (2**64), type=pa.uint64()),  # UInt64
+            'test_float_16': pa.scalar(np.float16(4.0), type=pa.float16()),
             'test_real': pa.scalar(4.0, type=pa.float32()),
             'test_double_precision': pa.scalar(5.0, type=pa.float64()),
             'test_varchar': pa.scalar('7', type=pa.string()),
             'test_bytea': pa.scalar(b'\xDe00BeEf', type=pa.binary()),
             'test_date': pa.scalar(datetime.now().date(), type=pa.date32()),
             'test_time': pa.scalar(datetime.now().time(), type=pa.time64('us')),
-            'test_timestamp': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
-            'test_timestamptz': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamp_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s')),
+            'test_timestamp_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms')),
+            'test_timestamp_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us')),
+            'test_timestamp_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns')),
+            'test_timestamptz_s': pa.scalar(datetime.now().timestamp(), type=pa.timestamp('s', tz='+00:00')),
+            'test_timestamptz_ms': pa.scalar(datetime.now().timestamp() * 1000, type=pa.timestamp('ms', tz='+00:00')),
+            'test_timestamptz_us': pa.scalar(datetime.now().timestamp() * 1000000, type=pa.timestamp('us', tz='+00:00')),
+            'test_timestamptz_ns': pa.scalar(datetime.now().timestamp() * 1000000000, type=pa.timestamp('ns', tz='+00:00')),
         } for item_id in range(item_num_per_file)]
         for file_id in range(file_num)
     ]
@@ -56,14 +69,27 @@ def do_test(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
+
     ) WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -124,14 +150,26 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_int8,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
         test_bytea,
         test_date,
         test_time,
-        test_timestamp,
-        test_timestamptz
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
         from {_table()} WITH (
         connector = 's3',
         match_pattern = '*.parquet',
@@ -148,19 +186,31 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     print('Sink into s3 in parquet encode...')
     # Execute a SELECT statement
     cur.execute(f'''CREATE TABLE test_parquet_sink_table(
-        id bigint primary key,
+        id bigint primary key,\
         name TEXT,
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_parquet_sink/*.parquet',
@@ -184,7 +234,7 @@ def do_sink(config, file_num, item_num_per_file, prefix):
     stmt = f'select count(*), sum(id) from test_parquet_sink_table'
     print(f'Execute reading sink files: {stmt}')
 
-    print(f'Create snowflake s3 sink ')
+    print(f'Create s3 sink json format')
     # Execute a SELECT statement
     cur.execute(f'''CREATE sink test_file_sink_json as select
         id,
@@ -192,14 +242,26 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex,
         mark,
         test_int,
+        test_int8,
+        test_uint8,
+        test_uint16,
+        test_uint32,
+        test_uint64,
+        test_float_16,
         test_real,
         test_double_precision,
         test_varchar,
         test_bytea,
         test_date,
         test_time,
-        test_timestamp,
-        test_timestamptz
+        test_timestamp_s,
+        test_timestamp_ms,
+        test_timestamp_us,
+        test_timestamp_ns,
+        test_timestamptz_s,
+        test_timestamptz_ms,
+        test_timestamptz_us,
+        test_timestamptz_ns
         from {_table()} WITH (
         connector = 'snowflake',
         match_pattern = '*.parquet',
@@ -221,14 +283,26 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         sex bigint,
         mark bigint,
         test_int int,
+        test_int8 smallint,
+        test_uint8 smallint,
+        test_uint16 int,
+        test_uint32 bigint,
+        test_uint64 decimal,
+        test_float_16 real,
         test_real real,
         test_double_precision double precision,
         test_varchar varchar,
         test_bytea bytea,
         test_date date,
         test_time time,
-        test_timestamp timestamp,
-        test_timestamptz timestamptz,
+        test_timestamp_s timestamp,
+        test_timestamp_ms timestamp,
+        test_timestamp_us timestamp,
+        test_timestamp_ns timestamp,
+        test_timestamptz_s timestamptz,
+        test_timestamptz_ms timestamptz,
+        test_timestamptz_us timestamptz,
+        test_timestamptz_ns timestamptz
     ) WITH (
         connector = 's3',
         match_pattern = 'test_json_sink/*.json',

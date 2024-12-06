@@ -1,0 +1,28 @@
+# Simulation test for table with webhook source
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SECRET test_secret WITH ( backend = 'meta') AS 'TEST_WEBHOOK';
+
+include ./create_table.slt.part
+
+# insert once
+system ok
+python3 e2e_test/webhook/sender.py --secret TEST_WEBHOOK
+
+sleep 3s
+
+# TODO(kexiang): will use a script to take place of check_1, check_2, check_3
+include ./check_1.slt.part
+
+# insert again
+system ok
+python3 e2e_test/webhook/sender.py --secret TEST_WEBHOOK
+
+sleep 3s
+
+include ./check_2.slt.part

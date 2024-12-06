@@ -18,6 +18,7 @@ use std::sync::Arc;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
+use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
@@ -152,14 +153,18 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
                 scan_ranges
                     .iter()
                     .map(|scan_range| {
-                        let pk_types = table_desc.pk.iter().map(|order| {
-                            DataType::from(
-                                table_desc.columns[order.column_index as usize]
-                                    .column_type
-                                    .as_ref()
-                                    .unwrap(),
-                            )
-                        });
+                        let pk_types = table_desc
+                            .pk
+                            .iter()
+                            .map(|order| {
+                                DataType::from(
+                                    table_desc.columns[order.column_index as usize]
+                                        .column_type
+                                        .as_ref()
+                                        .unwrap(),
+                                )
+                            })
+                            .collect_vec();
                         ScanRange::new(scan_range.clone(), pk_types)
                     })
                     .try_collect()?

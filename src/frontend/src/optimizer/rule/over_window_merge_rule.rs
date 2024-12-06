@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
 use crate::PlanRef;
 
@@ -21,7 +21,7 @@ use crate::PlanRef;
 pub struct OverWindowMergeRule;
 
 impl OverWindowMergeRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowMergeRule)
     }
 }

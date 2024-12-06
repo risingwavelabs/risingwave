@@ -34,6 +34,8 @@ pub type DispatcherId = u64;
 /// A global, unique identifier of a fragment
 pub type FragmentId = u32;
 
+pub type SubscriptionId = u32;
+
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);
 

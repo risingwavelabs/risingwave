@@ -40,8 +40,8 @@ impl<S: StateStore> BackfillStateTableHandler<S> {
         }
     }
 
-    pub fn init_epoch(&mut self, epoch: EpochPair) {
-        self.state_store.init_epoch(epoch);
+    pub async fn init_epoch(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_store.init_epoch(epoch).await
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {

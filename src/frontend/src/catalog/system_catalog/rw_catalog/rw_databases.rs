@@ -26,7 +26,7 @@ struct RwDatabases {
     id: i32,
     name: String,
     owner: i32,
-    acl: String,
+    acl: Vec<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_databases")]

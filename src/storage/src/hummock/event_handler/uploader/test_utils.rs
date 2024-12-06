@@ -32,7 +32,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
@@ -45,8 +45,9 @@ use tokio::task::yield_now;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::uploader::uploader_imm::UploaderImm;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, TableUnsyncData, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload,
-    UploaderContext, UploaderData, UploaderState, UploadingTask, UploadingTaskId,
+    HummockUploader, SpawnUploadTask, TableUnsyncData, UploadTaskInfo, UploadTaskOutput,
+    UploadTaskPayload, UploaderContext, UploaderData, UploaderState, UploadingTask,
+    UploadingTaskId,
 };
 use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -121,7 +122,7 @@ pub(super) async fn gen_imm_with_limiter(
     gen_imm_inner(TEST_TABLE_ID, epoch, 0, limiter).await
 }
 
-pub(super) async fn gen_imm_inner(
+pub(crate) async fn gen_imm_inner(
     table_id: TableId,
     epoch: HummockEpoch,
     spill_offset: u16,
@@ -158,17 +159,20 @@ pub(super) fn gen_sstable_info(
     let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
     let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
     let gen_sst_object_id = (start_epoch << 8) + end_epoch;
-    vec![LocalSstableInfo::for_test(SstableInfo {
-        object_id: gen_sst_object_id,
-        sst_id: gen_sst_object_id,
-        key_range: KeyRange {
-            left: start_full_key.encode().into(),
-            right: end_full_key.encode().into(),
-            right_exclusive: true,
-        },
-        table_ids: vec![TEST_TABLE_ID.table_id],
-        ..Default::default()
-    })]
+    vec![LocalSstableInfo::for_test(
+        SstableInfoInner {
+            object_id: gen_sst_object_id,
+            sst_id: gen_sst_object_id,
+            key_range: KeyRange {
+                left: start_full_key.encode().into(),
+                right: end_full_key.encode().into(),
+                right_exclusive: true,
+            },
+            table_ids: vec![TEST_TABLE_ID.table_id],
+            ..Default::default()
+        }
+        .into(),
+    )]
 }
 
 pub(super) fn test_uploader_context<F, Fut>(upload_fn: F) -> UploaderContext
@@ -176,12 +180,10 @@ where
     Fut: UploadOutputFuture,
     F: UploadFn<Fut>,
 {
-    let config = StorageOpts::default();
     UploaderContext::new(
         initial_pinned_version(),
         Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
         BufferTracker::for_test(),
-        &config,
         Arc::new(HummockStateStoreMetrics::unused()),
     )
 }
@@ -191,15 +193,11 @@ where
     Fut: UploadOutputFuture,
     F: UploadFn<Fut>,
 {
-    let config = StorageOpts {
-        ..Default::default()
-    };
     HummockUploader::new(
         Arc::new(HummockStateStoreMetrics::unused()),
         initial_pinned_version(),
         Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
         BufferTracker::for_test(),
-        &config,
     )
 }
 
@@ -272,16 +270,12 @@ impl HummockUploader {
 }
 
 #[expect(clippy::type_complexity)]
-pub(crate) fn prepare_uploader_order_test(
-    config: &StorageOpts,
+pub(crate) fn prepare_uploader_order_test_spawn_task_fn(
     skip_schedule: bool,
 ) -> (
-    BufferTracker,
-    HummockUploader,
+    SpawnUploadTask,
     impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
 ) {
-    let gauge = GenericGauge::new("test", "test").unwrap();
-    let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
     // (the started task send the imm ids of payload, the started task wait for finish notify)
     #[allow(clippy::type_complexity)]
     let task_notifier_holder: Arc<
@@ -304,35 +298,51 @@ pub(crate) fn prepare_uploader_order_test(
             (await_start_future, finish_tx)
         }
     };
+    let spawn_fn = Arc::new({
+        move |_, task_info: UploadTaskInfo| {
+            let task_notifier_holder = task_notifier_holder.clone();
+            let task_item = task_notifier_holder.lock().pop_back();
+            let start_epoch = *task_info.epochs.last().unwrap();
+            let end_epoch = *task_info.epochs.first().unwrap();
+            assert!(end_epoch >= start_epoch);
+            spawn(async move {
+                let ssts = gen_sstable_info(start_epoch, end_epoch);
+                if !skip_schedule {
+                    let (start_tx, finish_rx) = task_item.unwrap();
+                    start_tx.send(task_info).unwrap();
+                    finish_rx
+                        .await
+                        .map_err(|_| HummockError::other("failed to receive rx"))?;
+                }
+                Ok(UploadTaskOutput {
+                    new_value_ssts: ssts,
+                    old_value_ssts: vec![],
+                    wait_poll_timer: None,
+                })
+            })
+        }
+    });
+    (spawn_fn, new_task_notifier)
+}
 
-    let config = StorageOpts::default();
+#[expect(clippy::type_complexity)]
+pub(crate) fn prepare_uploader_order_test(
+    config: &StorageOpts,
+    skip_schedule: bool,
+) -> (
+    BufferTracker,
+    HummockUploader,
+    impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
+) {
+    let (spawn_fn, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(skip_schedule);
+    let gauge = GenericGauge::new("test", "test").unwrap();
+    let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
+
     let uploader = HummockUploader::new(
         Arc::new(HummockStateStoreMetrics::unused()),
         initial_pinned_version(),
-        Arc::new({
-            move |_, task_info: UploadTaskInfo| {
-                let task_notifier_holder = task_notifier_holder.clone();
-                let task_item = task_notifier_holder.lock().pop_back();
-                let start_epoch = *task_info.epochs.last().unwrap();
-                let end_epoch = *task_info.epochs.first().unwrap();
-                assert!(end_epoch >= start_epoch);
-                spawn(async move {
-                    let ssts = gen_sstable_info(start_epoch, end_epoch);
-                    if !skip_schedule {
-                        let (start_tx, finish_rx) = task_item.unwrap();
-                        start_tx.send(task_info).unwrap();
-                        finish_rx.await.unwrap();
-                    }
-                    Ok(UploadTaskOutput {
-                        new_value_ssts: ssts,
-                        old_value_ssts: vec![],
-                        wait_poll_timer: None,
-                    })
-                })
-            }
-        }),
+        spawn_fn,
         buffer_tracker.clone(),
-        &config,
     );
     (buffer_tracker, uploader, new_task_notifier)
 }

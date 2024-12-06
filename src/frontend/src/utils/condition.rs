@@ -22,6 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::error::Result;
@@ -357,6 +358,105 @@ impl Condition {
         }
     }
 
+    fn split_row_cmp_to_scan_ranges(
+        &self,
+        table_desc: Rc<TableDesc>,
+    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+        let (mut row_conjunctions, row_conjunctions_without_struct): (Vec<_>, Vec<_>) =
+            self.conjunctions.clone().into_iter().partition(|expr| {
+                if let Some(f) = expr.as_function_call() {
+                    if let Some(left_input) = f.inputs().get(0)
+                        && let Some(left_input) = left_input.as_function_call()
+                        && matches!(left_input.func_type(), ExprType::Row)
+                        && left_input.inputs().iter().all(|x| x.is_input_ref())
+                        && let Some(right_input) = f.inputs().get(1)
+                        && right_input.is_literal()
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
+
+        // optimize for single row conjunctions. More optimisations may come later
+        // For example, (v1,v2,v3) > (1, 2, 3) means all data from (1, 2, 3).
+        // Suppose v1 v2 v3 are both pk, we can push (v1,v2,v3）> (1,2,3) down to scan
+        // Suppose v1 v2 are both pk, we can push (v1,v2）> (1,2) down to scan and add (v1,v2,v3) > (1,2,3) in filter, it is still possible to reduce the value of scan
+        if row_conjunctions.len() == 1 {
+            let row_conjunction = row_conjunctions.pop().unwrap();
+            let row_left_inputs = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(0)
+                .unwrap()
+                .as_function_call()
+                .unwrap()
+                .inputs();
+            let row_right_literal = row_conjunction
+                .as_function_call()
+                .unwrap()
+                .inputs()
+                .get(1)
+                .unwrap()
+                .as_literal()
+                .unwrap();
+            if !matches!(row_right_literal.get_data(), Some(ScalarImpl::Struct(_))) {
+                return Ok(None);
+            }
+            let row_right_literal_data = row_right_literal.get_data().clone().unwrap();
+            let right_iter = row_right_literal_data.as_struct().fields();
+            let func_type = row_conjunction.as_function_call().unwrap().func_type();
+            if row_left_inputs.len() > 1
+                && (matches!(func_type, ExprType::LessThan)
+                    || matches!(func_type, ExprType::GreaterThan))
+            {
+                let mut pk_struct = vec![];
+                let mut all_added = true;
+                let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
+                for i in 0..table_desc.order_column_indices().len() {
+                    if let Some((left_expr, right_expr)) = iter.next() {
+                        if left_expr.as_input_ref().unwrap().index != i {
+                            all_added = false;
+                            break;
+                        }
+                        pk_struct.push(right_expr.clone());
+                    }
+                }
+
+                if !pk_struct.is_empty() {
+                    let scan_range = ScanRange {
+                        eq_conds: vec![],
+                        range: match func_type {
+                            ExprType::GreaterThan => (Bound::Excluded(pk_struct), Bound::Unbounded),
+                            ExprType::LessThan => (Bound::Unbounded, Bound::Excluded(pk_struct)),
+                            _ => unreachable!(),
+                        },
+                    };
+                    if !all_added {
+                        return Ok(Some((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: self.conjunctions.clone(),
+                            },
+                        )));
+                    } else {
+                        return Ok(Some((
+                            vec![scan_range],
+                            Condition {
+                                conjunctions: row_conjunctions_without_struct,
+                            },
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
     pub fn split_to_scan_ranges(
         self,
@@ -381,12 +481,17 @@ impl Condition {
                 }
             }
         }
+        if let Some((scan_ranges, other_condition)) =
+            self.split_row_cmp_to_scan_ranges(table_desc.clone())?
+        {
+            return Ok((scan_ranges, other_condition));
+        }
 
         let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
+        let mut other_conds = groups.pop().unwrap();
 
         // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
-        let mut other_conds = groups.pop().unwrap();
         for i in 0..table_desc.order_column_indices().len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
@@ -432,7 +537,12 @@ impl Condition {
                     scan_range.eq_conds.extend(eq_conds.into_iter());
                 }
                 0 => {
-                    scan_range.range = (lower_bound, upper_bound);
+                    let convert = |bound| match bound {
+                        Bound::Included(l) => Bound::Included(vec![Some(l)]),
+                        Bound::Excluded(l) => Bound::Excluded(vec![Some(l)]),
+                        Bound::Unbounded => Bound::Unbounded,
+                    };
+                    scan_range.range = (convert(lower_bound), convert(upper_bound));
                     other_conds.extend(groups[i + 1..].iter().flatten().cloned());
                     break;
                 }

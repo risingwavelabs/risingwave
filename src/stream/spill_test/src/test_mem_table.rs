@@ -65,7 +65,7 @@ async fn test_mem_table_spill_in_streaming() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -195,7 +195,7 @@ async fn test_mem_table_spill_in_streaming_multiple_times() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

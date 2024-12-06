@@ -787,6 +787,10 @@ impl Dispatcher for HashDataDispatcher {
             }
 
             if !visible {
+                assert!(
+                    last_vnode_when_update_delete.is_none(),
+                    "invisible row between U- and U+, op = {op:?}",
+                );
                 new_ops.push(op);
                 continue;
             }
@@ -797,7 +801,11 @@ impl Dispatcher for HashDataDispatcher {
             if op == Op::UpdateDelete {
                 last_vnode_when_update_delete = Some(vnode);
             } else if op == Op::UpdateInsert {
-                if vnode != last_vnode_when_update_delete.unwrap() {
+                if vnode
+                    != last_vnode_when_update_delete
+                        .take()
+                        .expect("missing U- before U+")
+                {
                     new_ops.push(Op::Delete);
                     new_ops.push(Op::Insert);
                 } else {
@@ -808,6 +816,10 @@ impl Dispatcher for HashDataDispatcher {
                 new_ops.push(op);
             }
         }
+        assert!(
+            last_vnode_when_update_delete.is_none(),
+            "missing U+ after U-"
+        );
 
         let ops = new_ops;
 
@@ -1242,16 +1254,17 @@ mod tests {
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .flush_all_events()
-            .await;
+        barrier_test_env.flush_all_events().await;
 
         let input = Executor::new(
             Default::default(),
-            ReceiverExecutor::for_test(actor_id, rx, barrier_test_env.shared_context.clone())
-                .boxed(),
+            ReceiverExecutor::for_test(
+                actor_id,
+                rx,
+                barrier_test_env.shared_context.clone(),
+                barrier_test_env.local_barrier_manager.clone(),
+            )
+            .boxed(),
         );
         let executor = Box::new(DispatchExecutor::new(
             input,

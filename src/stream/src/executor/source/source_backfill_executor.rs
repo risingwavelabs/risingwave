@@ -326,6 +326,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         // Poll the upstream to get the first barrier.
         let barrier = expect_first_barrier(&mut input).await?;
+        let first_epoch = barrier.epoch;
+        let owned_splits = barrier
+            .initial_split_assignment(self.actor_ctx.id)
+            .unwrap_or(&[])
+            .to_vec();
+        let is_pause_on_startup = barrier.is_pause_on_startup();
+        yield Message::Barrier(barrier);
 
         let mut core = self.stream_source_core;
 
@@ -338,12 +345,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut owned_splits = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            owned_splits = splits.to_vec();
-        }
-
-        self.backfill_state_store.init_epoch(barrier.epoch);
+        self.backfill_state_store.init_epoch(first_epoch).await?;
 
         let mut backfill_states: BackfillStates = HashMap::new();
         for split in &owned_splits {
@@ -422,7 +424,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
 
         // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        if is_pause_on_startup {
             command_paused = true;
             pause_reader!();
         }
@@ -433,7 +435,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         tokio::spawn(async move {
             // This is for self.backfill_finished() to be safe.
             // We wait for 1st epoch's curr, i.e., the 2nd epoch's prev.
-            let epoch = barrier.epoch.curr;
+            let epoch = first_epoch.curr;
             tracing::info!("waiting for epoch: {}", epoch);
             state_store
                 .try_wait_epoch(
@@ -445,7 +447,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             STATE_TABLE_INITIALIZED.call_once(|| ());
             tracing::info!("finished waiting for epoch: {}", epoch);
         });
-        yield Message::Barrier(barrier);
 
         {
             let source_backfill_row_count = self
@@ -569,6 +570,33 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 )
                                                 .await?;
                                         }
+                                        Mutation::Throttle(actor_to_apply) => {
+                                            if let Some(new_rate_limit) =
+                                                actor_to_apply.get(&self.actor_ctx.id)
+                                                && *new_rate_limit != self.rate_limit_rps
+                                            {
+                                                tracing::info!(
+                                                    "updating rate limit from {:?} to {:?}",
+                                                    self.rate_limit_rps,
+                                                    *new_rate_limit
+                                                );
+                                                self.rate_limit_rps = *new_rate_limit;
+                                                // rebuild reader
+                                                let (reader, _backfill_info) = self
+                                                    .build_stream_source_reader(
+                                                        &source_desc,
+                                                        backfill_stage
+                                                            .get_latest_unfinished_splits()?,
+                                                    )
+                                                    .await?;
+
+                                                backfill_stream = select_with_strategy(
+                                                    input.by_ref().map(Either::Left),
+                                                    reader.map(Either::Right),
+                                                    select_strategy,
+                                                );
+                                            }
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -608,7 +636,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     .await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    tracing::debug!("progress finish");
                                     self.progress.finish(
                                         barrier.epoch,
                                         backfill_stage.total_backfilled_rows(),

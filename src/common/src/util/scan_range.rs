@@ -18,27 +18,39 @@ use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as PbBound;
 use risingwave_pb::batch_plan::ScanRange as PbScanRange;
 
-use super::value_encoding::serialize_datum;
 use crate::hash::table_distribution::TableDistribution;
 use crate::hash::VirtualNode;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
 
-/// See also [`PbScanRange`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
-    pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
+    pub range: (Bound<Vec<Datum>>, Bound<Vec<Datum>>),
 }
 
-fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<PbBound> {
+fn bound_vec_datum_to_proto(bound: &Bound<Vec<Datum>>) -> Option<PbBound> {
     match bound {
         Bound::Included(literal) => Some(PbBound {
-            value: serialize_datum(Some(literal)),
+            value: literal
+                .iter()
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum_into(datum, &mut encoded);
+                    encoded
+                })
+                .collect(),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(PbBound {
-            value: serialize_datum(Some(literal)),
+            value: literal
+                .iter()
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum_into(datum, &mut encoded);
+                    encoded
+                })
+                .collect(),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -57,8 +69,8 @@ impl ScanRange {
                     encoded
                 })
                 .collect(),
-            lower_bound: bound_to_proto(&self.range.0),
-            upper_bound: bound_to_proto(&self.range.1),
+            lower_bound: bound_vec_datum_to_proto(&self.range.0),
+            upper_bound: bound_vec_datum_to_proto(&self.range.1),
         }
     }
 
@@ -76,15 +88,15 @@ impl ScanRange {
             && !matches!(bounds.end_bound(), Bound::Unbounded)
     }
 
+    pub fn try_compute_vnode(&self, table_distribution: &TableDistribution) -> Option<VirtualNode> {
+        table_distribution.try_compute_vnode_by_pk_prefix(self.eq_conds.as_slice())
+    }
+
     pub const fn full_table_scan() -> Self {
         Self {
             eq_conds: vec![],
             range: full_range(),
         }
-    }
-
-    pub fn try_compute_vnode(&self, table_distribution: &TableDistribution) -> Option<VirtualNode> {
-        table_distribution.try_compute_vnode_by_pk_prefix(self.eq_conds.as_slice())
     }
 }
 
@@ -114,27 +126,30 @@ macro_rules! impl_split_small_range {
                 /// `Precondition`: make sure the first order key is int type if you call this method.
                 /// Optimize small range scan. It turns x between 0 and 5 into x in (0, 1, 2, 3, 4, 5).s
                 pub fn split_small_range(&self, max_gap: u64) -> Option<Vec<Self>> {
-                     if self.eq_conds.is_empty() {
-                        match self.range {
-                            $(
-                                (
-                                    Bound::Included(ScalarImpl::$type_name(ref left)),
-                                    Bound::Included(ScalarImpl::$type_name(ref right)),
-                                ) => {
-                                    if (right - left + 1) as u64 <= max_gap {
-                                        return Some(
-                                            (*left..=*right)
-                                                .into_iter()
-                                                .map(|i| ScanRange {
-                                                    eq_conds: vec![Some(ScalarImpl::$type_name(i))],
-                                                    range: full_range(),
-                                                })
-                                                .collect(),
-                                        );
+                    if self.eq_conds.is_empty() {
+                        if let (Bound::Included(left),Bound::Included(right)) = (&self.range.0, &self.range.1){
+                            match (left.get(0),right.get(0)) {
+                                $(
+                                    (
+                                        Some(Some(ScalarImpl::$type_name(ref left))),
+                                        Some(Some(ScalarImpl::$type_name(ref right))),
+                                    ) => {
+
+                                        if (right - left + 1) as u64 <= max_gap {
+                                            return Some(
+                                                (*left..=*right)
+                                                    .into_iter()
+                                                    .map(|i| ScanRange {
+                                                        eq_conds: vec![Some(ScalarImpl::$type_name(i))],
+                                                        range: full_range(),
+                                                    })
+                                                    .collect(),
+                                            );
+                                        }
                                     }
-                                }
-                            )*
-                            _ => {}
+                                )*
+                                _ => {}
+                            }
                         }
                     }
 
@@ -151,7 +166,6 @@ for_all_scalar_int_variants! { impl_split_small_range }
 mod tests {
     use super::*;
     use crate::row::OwnedRow;
-
     // dist_key is prefix of pk
     #[test]
     fn test_vnode_prefix() {

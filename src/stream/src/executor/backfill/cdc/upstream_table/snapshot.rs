@@ -26,7 +26,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalTableReader, SchemaTableName,
+    CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
 };
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
@@ -81,16 +81,13 @@ impl SnapshotReadArgs {
 /// because we need to customize the snapshot read for managed upstream table (e.g. mv, index)
 /// and external upstream table.
 pub struct UpstreamTableReader<T> {
-    inner: T,
+    table: T,
+    pub(crate) reader: ExternalTableReaderImpl,
 }
 
 impl<T> UpstreamTableReader<T> {
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
-
-    pub fn new(table: T) -> Self {
-        Self { inner: table }
+    pub fn new(table: T, reader: ExternalTableReaderImpl) -> Self {
+        Self { table, reader }
     }
 }
 
@@ -142,11 +139,11 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read_full_table(&self, args: SnapshotReadArgs, batch_size: u32) {
         let primary_keys = self
-            .inner
+            .table
             .pk_indices()
             .iter()
             .map(|idx| {
-                let f = &self.inner.schema().fields[*idx];
+                let f = &self.table.schema().fields[*idx];
                 f.name.clone()
             })
             .collect_vec();
@@ -179,8 +176,8 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             );
 
             let mut read_count: usize = 0;
-            let row_stream = self.inner.table_reader().snapshot_read(
-                self.inner.schema_table_name(),
+            let row_stream = self.reader.snapshot_read(
+                self.table.schema_table_name(),
                 read_args.current_pos.clone(),
                 primary_keys.clone(),
                 batch_size,
@@ -188,7 +185,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
 
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
-                self.inner.schema().data_types(),
+                self.table.schema().data_types(),
                 limited_chunk_size(read_args.rate_limit_rps),
             );
             let chunk_stream = iter_chunks(row_stream, &mut builder);
@@ -247,7 +244,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
     }
 
     async fn current_cdc_offset(&self) -> StreamExecutorResult<Option<CdcOffset>> {
-        let binlog = self.inner.table_reader().current_cdc_offset();
+        let binlog = self.reader.current_cdc_offset();
         let binlog = binlog.await?;
         Ok(Some(binlog))
     }

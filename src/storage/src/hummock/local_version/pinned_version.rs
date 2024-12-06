@@ -131,7 +131,16 @@ impl PinnedVersion {
     }
 
     fn levels_by_compaction_groups_id(&self, compaction_group_id: CompactionGroupId) -> &Levels {
-        self.version.levels.get(&compaction_group_id).unwrap()
+        self.version
+            .levels
+            .get(&compaction_group_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "levels for compaction group {} not found in version {}",
+                    compaction_group_id,
+                    self.id()
+                )
+            })
     }
 
     pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {

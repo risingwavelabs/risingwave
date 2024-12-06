@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -82,11 +82,11 @@ impl Binder {
             over,
         }: Function,
     ) -> Result<ExprImpl> {
-        let func_name = match name.0.as_slice() {
-            [name] => name.real_value(),
+        let (schema_name, func_name) = match name.0.as_slice() {
+            [name] => (None, name.real_value()),
             [schema, name] => {
                 let schema_name = schema.real_value();
-                if schema_name == PG_CATALOG_SCHEMA_NAME {
+                let func_name = if schema_name == PG_CATALOG_SCHEMA_NAME {
                     // pg_catalog is always effectively part of the search path, so we can always bind the function.
                     // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
                     name.real_value()
@@ -109,7 +109,8 @@ impl Binder {
                         "Unsupported function name under schema: {}",
                         schema_name
                     );
-                }
+                };
+                (Some(schema_name), func_name)
             }
             _ => bail_not_implemented!(issue = 112, "qualified function {}", name),
         };
@@ -154,6 +155,8 @@ impl Binder {
             .flatten_ok()
             .try_collect()?;
 
+        let mut referred_udfs = HashSet::new();
+
         let wrapped_agg_type = if scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
             // We will reject functions that are not able to be wrapped as aggregate function.
@@ -164,15 +167,23 @@ impl Binder {
                     InputRef::new(i, DataType::List(Box::new(expr.return_type()))).into()
                 })
                 .collect_vec();
-            let scalar_func_expr = if let Ok(schema) = self.first_valid_schema()
-                && let Some(func) = schema.get_function_by_name_inputs(&func_name, &mut array_args)
-            {
+            let schema_path = self.bind_schema_path(schema_name.as_deref());
+            let scalar_func_expr = if let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
+                &self.db_name,
+                schema_path,
+                &func_name,
+                &mut array_args,
+            ) {
+                // record the dependency upon the UDF
+                referred_udfs.insert(func.id);
+
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
                         "expect a scalar function after `AGGREGATE:`".to_string(),
                     )
                     .into());
                 }
+
                 if func.language == "sql" {
                     self.bind_sql_udf(func.clone(), array_args)?
                 } else {
@@ -188,12 +199,17 @@ impl Binder {
             None
         };
 
+        let schema_path = self.bind_schema_path(schema_name.as_deref());
         let udf = if wrapped_agg_type.is_none()
-            && let Ok(schema) = self.first_valid_schema()
-            && let Some(func) = schema
-                .get_function_by_name_inputs(&func_name, &mut args)
-                .cloned()
-        {
+            && let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
+                &self.db_name,
+                schema_path,
+                &func_name,
+                &mut args,
+            ) {
+            // record the dependency upon the UDF
+            referred_udfs.insert(func.id);
+
             if func.language == "sql" {
                 let name = format!("SQL user-defined function `{}`", func.name);
                 reject_syntax!(
@@ -219,14 +235,16 @@ impl Binder {
                     over.is_some(),
                     format!("`OVER` is not allowed in {} call", name)
                 );
-                return self.bind_sql_udf(func, args);
+                return self.bind_sql_udf(func.clone(), args);
             }
 
             // now `func` is a non-SQL user-defined scalar/aggregate/table function
-            Some(func)
+            Some(func.clone())
         } else {
             None
         };
+
+        self.included_udfs.extend(referred_udfs);
 
         let agg_type = if wrapped_agg_type.is_some() {
             wrapped_agg_type

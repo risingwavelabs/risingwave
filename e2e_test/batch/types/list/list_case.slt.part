@@ -20,7 +20,7 @@ SELECT case when i%2=0 then ARRAY[i] else ARRAY[-i] end from (select generate_se
 {-3}
 {4}
 
-query I
+query T
 SELECT case when i%2=0 then NULL else ARRAY[i] end from (select generate_series as i from generate_series(0,9,1)) as t;
 ----
 NULL
@@ -34,7 +34,7 @@ NULL
 NULL
 {9}
 
-query I
+query T
 with a as (
     SELECT (case when i%2=0 then NULL else ARRAY[i] end) as i from (select generate_series as i from generate_series(0,9,1)) as t
 )

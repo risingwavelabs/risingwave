@@ -22,11 +22,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::CacheHint;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
 };
@@ -123,6 +124,7 @@ where
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
     user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
+    table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
     let start_table_idx = match user_key_range.0 {
@@ -133,7 +135,9 @@ pub fn prune_nonoverlapping_ssts<'a>(
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => ssts.len().saturating_sub(1),
     };
-    ssts[start_table_idx..=end_table_idx].iter()
+    ssts[start_table_idx..=end_table_idx]
+        .iter()
+        .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())
 }
 
 type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
@@ -387,7 +391,7 @@ pub(crate) async fn do_insert_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
@@ -423,7 +427,7 @@ pub(crate) async fn do_delete_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -469,7 +473,7 @@ pub(crate) async fn do_update_sanity_check(
     let read_options = ReadOptions {
         retention_seconds: table_option.retention_seconds,
         table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(CacheHint::Normal),
         ..Default::default()
     };
 

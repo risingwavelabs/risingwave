@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::array::{Array, DataChunk, PrimitiveArray};
 use crate::bitmap::Bitmap;
-use crate::hash::{IsSingleton, VirtualNode};
+use crate::hash::{VirtualNode, VnodeCountCompat};
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;
 
@@ -66,7 +66,12 @@ impl TableDistribution {
         let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
 
         let this = Self::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
-        assert_eq!(this.is_singleton(), table_desc.is_singleton());
+        assert_eq!(
+            this.vnode_count(),
+            table_desc.vnode_count(),
+            "vnode count mismatch, scanning table {} under wrong distribution?",
+            table_desc.table_id
+        );
         this
     }
 
@@ -140,6 +145,11 @@ impl TableDistribution {
             ComputeVnode::VnodeColumnIndex { vnodes, .. } => vnodes,
             ComputeVnode::Singleton => Bitmap::singleton_arc(),
         }
+    }
+
+    /// Get vnode count (1 if singleton). Equivalent to `self.vnodes().len()`.
+    pub fn vnode_count(&self) -> usize {
+        self.vnodes().len()
     }
 
     /// Get vnode value with given primary key.
@@ -258,9 +268,14 @@ impl TableDistribution {
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     let is_set = vnodes.is_set(vnode.to_index());
-    assert!(
-        is_set,
-        "vnode {} should not be accessed by this table",
-        vnode
-    );
+
+    if !is_set {
+        let high_ranges = vnodes.high_ranges().map(|r| format!("{r:?}")).join(", ");
+        panic!(
+            "vnode {} should not be accessed by this table\nvnode count: {}\nallowed vnodes: {}",
+            vnode,
+            vnodes.len(),
+            high_ranges
+        );
+    }
 }

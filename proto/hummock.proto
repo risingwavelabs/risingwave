@@ -498,9 +498,9 @@ message SubscribeCompactionEventResponse {
 
   oneof event {
     CompactTask compact_task = 1;
-    VacuumTask vacuum_task = 2;
-    FullScanTask full_scan_task = 3;
-    ValidationTask validation_task = 4;
+    VacuumTask vacuum_task = 2 [deprecated = true];
+    FullScanTask full_scan_task = 3 [deprecated = true];
+    ValidationTask validation_task = 4 [deprecated = true];
     CancelCompactTask cancel_compact_task = 5;
 
     PullTaskAck pull_task_ack = 6;
@@ -554,14 +554,6 @@ message CancelCompactTask {
   uint64 task_id = 2;
 }
 
-message ReportVacuumTaskRequest {
-  VacuumTask vacuum_task = 1;
-}
-
-message ReportVacuumTaskResponse {
-  common.Status status = 1;
-}
-
 message TriggerManualCompactionRequest {
   uint64 compaction_group_id = 1;
   KeyRange key_range = 2;
@@ -571,23 +563,6 @@ message TriggerManualCompactionRequest {
 }
 
 message TriggerManualCompactionResponse {
-  common.Status status = 1;
-}
-
-message ReportFullScanTaskRequest {
-  // Object ids that satisfying conditions specified by FullScanTask.
-  repeated uint64 object_ids = 1;
-  // Total count of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_count = 2;
-  // Total size of objects before filtered by conditions specified by FullScanTask.
-  uint64 total_object_size = 3;
-  // Start key of the next page.
-  optional string next_start_after = 4;
-  // Start key of this page.
-  optional string start_after = 5;
-}
-
-message ReportFullScanTaskResponse {
   common.Status status = 1;
 }
 
@@ -685,6 +660,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 sst_allowed_trivial_move_min_size = 19;
       uint32 split_weight_by_vnode = 20;
       bool disable_auto_group_scheduling = 21;
+      uint64 max_overlapping_level_size = 22;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -819,9 +795,7 @@ service HummockManagerService {
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
-  rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
-  rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);
   rpc RiseCtlGetPinnedVersionsSummary(RiseCtlGetPinnedVersionsSummaryRequest) returns (RiseCtlGetPinnedVersionsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
@@ -885,6 +859,10 @@ message CompactionConfig {
 
   // The limitation of auto group scheduling
   optional bool disable_auto_group_scheduling = 23;
+
+  // The limitation of the max size of the overlapping-level for the compaction
+  // hummock will reorg the commit-sstables to the multi overlapping-level if the size of the commit-sstables is larger than `max_overlapping_level_size`
+  optional uint64 max_overlapping_level_size = 24;
 }
 
 message TableStats {

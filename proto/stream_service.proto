@@ -12,6 +12,7 @@ option optimize_for = SPEED;
 message InjectBarrierRequest {
   string request_id = 1;
   stream_plan.Barrier barrier = 2;
+  uint32 database_id = 3;
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
   uint32 partial_graph_id = 6;
@@ -51,6 +52,7 @@ message BarrierCompleteResponse {
   uint32 partial_graph_id = 8;
   // prev_epoch of barrier
   uint64 epoch = 9;
+  uint32 database_id = 10;
 }
 
 message WaitEpochCommitRequest {
@@ -63,19 +65,35 @@ message WaitEpochCommitResponse {
 }
 
 message StreamingControlStreamRequest {
-  message InitRequest {
-    uint64 version_id = 1;
+  message InitialPartialGraph {
+    uint32 partial_graph_id = 1;
     repeated stream_plan.SubscriptionUpstreamInfo subscriptions = 2;
+  }
+
+  message DatabaseInitialPartialGraph {
+    uint32 database_id = 1;
+    repeated InitialPartialGraph graphs = 2;
+  }
+
+  message InitRequest {
+    repeated DatabaseInitialPartialGraph databases = 1;
+  }
+
+  message CreatePartialGraphRequest {
+    uint32 partial_graph_id = 1;
+    uint32 database_id = 2;
   }
 
   message RemovePartialGraphRequest {
     repeated uint32 partial_graph_ids = 1;
+    uint32 database_id = 2;
   }
 
   oneof request {
     InitRequest init = 1;
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
+    CreatePartialGraphRequest create_partial_graph = 4;
   }
 }
 

@@ -11,6 +11,7 @@ rpk topic create test-rw-sink-upsert-schema
 rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
 rpk topic create test-rw-sink-text-key-id
+rpk topic create test-rw-sink-bytes-key-id
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2

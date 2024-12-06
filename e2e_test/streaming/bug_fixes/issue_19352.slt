@@ -1,0 +1,11 @@
+# https://github.com/risingwavelabs/risingwave/issues/11915
+# https://github.com/risingwavelabs/risingwave/pull/17156
+# https://github.com/risingwavelabs/risingwave/issues/19352
+
+statement ok
+set streaming_parallelism to 1;
+
+include ./issue_11915.slt
+
+statement ok
+set streaming_parallelism to default;

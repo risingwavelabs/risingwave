@@ -57,7 +57,6 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     limit: Option<u64>,
     as_of: Option<AsOf>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsOf {
     pub timestamp: i64,
@@ -153,14 +152,18 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges
                     .iter()
                     .map(|scan_range| {
-                        let pk_types = table_desc.pk.iter().map(|order| {
-                            DataType::from(
-                                table_desc.columns[order.column_index as usize]
-                                    .column_type
-                                    .as_ref()
-                                    .unwrap(),
-                            )
-                        });
+                        let pk_types = table_desc
+                            .pk
+                            .iter()
+                            .map(|order| {
+                                DataType::from(
+                                    table_desc.columns[order.column_index as usize]
+                                        .column_type
+                                        .as_ref()
+                                        .unwrap(),
+                                )
+                            })
+                            .collect_vec();
                         ScanRange::new(scan_range.clone(), pk_types)
                     })
                     .try_collect()?

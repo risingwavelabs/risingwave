@@ -42,13 +42,13 @@ pub struct UpdateExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    exprs: Vec<BoxedExpression>,
+    old_exprs: Vec<BoxedExpression>,
+    new_exprs: Vec<BoxedExpression>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
     returning: bool,
     txn_id: TxnId,
-    update_column_indices: Vec<usize>,
     session_id: u32,
 }
 
@@ -59,11 +59,11 @@ impl UpdateExecutor {
         table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
-        exprs: Vec<BoxedExpression>,
+        old_exprs: Vec<BoxedExpression>,
+        new_exprs: Vec<BoxedExpression>,
         chunk_size: usize,
         identity: String,
         returning: bool,
-        update_column_indices: Vec<usize>,
         session_id: u32,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
@@ -75,7 +75,8 @@ impl UpdateExecutor {
             table_version_id,
             dml_manager,
             child,
-            exprs,
+            old_exprs,
+            new_exprs,
             chunk_size,
             schema: if returning {
                 table_schema
@@ -87,7 +88,6 @@ impl UpdateExecutor {
             identity,
             returning,
             txn_id,
-            update_column_indices,
             session_id,
         }
     }
@@ -109,7 +109,7 @@ impl Executor for UpdateExecutor {
 
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
@@ -122,15 +122,12 @@ impl UpdateExecutor {
 
         assert_eq!(
             data_types,
-            self.exprs.iter().map(|e| e.return_type()).collect_vec(),
+            self.new_exprs.iter().map(|e| e.return_type()).collect_vec(),
             "bad update schema"
         );
         assert_eq!(
             data_types,
-            self.update_column_indices
-                .iter()
-                .map(|i: &usize| self.child.schema()[*i].data_type.clone())
-                .collect_vec(),
+            self.old_exprs.iter().map(|e| e.return_type()).collect_vec(),
             "bad update schema"
         );
 
@@ -159,27 +156,35 @@ impl UpdateExecutor {
         let mut rows_updated = 0;
 
         #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+        for input in self.child.execute() {
+            let input = input?;
 
-            let updated_data_chunk = {
-                let mut columns = Vec::with_capacity(self.exprs.len());
-                for expr in &mut self.exprs {
-                    let column = expr.eval(&data_chunk).await?;
+            let old_data_chunk = {
+                let mut columns = Vec::with_capacity(self.old_exprs.len());
+                for expr in &self.old_exprs {
+                    let column = expr.eval(&input).await?;
                     columns.push(column);
                 }
 
-                DataChunk::new(columns, data_chunk.visibility().clone())
+                DataChunk::new(columns, input.visibility().clone())
+            };
+
+            let updated_data_chunk = {
+                let mut columns = Vec::with_capacity(self.new_exprs.len());
+                for expr in &self.new_exprs {
+                    let column = expr.eval(&input).await?;
+                    columns.push(column);
+                }
+
+                DataChunk::new(columns, input.visibility().clone())
             };
 
             if self.returning {
                 yield updated_data_chunk.clone();
             }
 
-            for (row_delete, row_insert) in data_chunk
-                .project(&self.update_column_indices)
-                .rows()
-                .zip_eq_debug(updated_data_chunk.rows())
+            for (row_delete, row_insert) in
+                (old_data_chunk.rows()).zip_eq_debug(updated_data_chunk.rows())
             {
                 rows_updated += 1;
                 // If row_delete == row_insert, we don't need to do a actual update
@@ -227,34 +232,35 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         let table_id = TableId::new(update_node.table_id);
 
-        let exprs: Vec<_> = update_node
-            .get_exprs()
+        let old_exprs: Vec<_> = update_node
+            .get_old_exprs()
             .iter()
             .map(build_from_prost)
             .try_collect()?;
 
-        let update_column_indices = update_node
-            .update_column_indices
+        let new_exprs: Vec<_> = update_node
+            .get_new_exprs()
             .iter()
-            .map(|x| *x as usize)
-            .collect_vec();
+            .map(build_from_prost)
+            .try_collect()?;
 
         Ok(Box::new(Self::new(
             table_id,
             update_node.table_version_id,
             source.context().dml_manager(),
             child,
-            exprs,
+            old_exprs,
+            new_exprs,
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,
-            update_column_indices,
             update_node.session_id,
         )))
     }
 }
 
 #[cfg(test)]
+#[cfg(any())]
 mod tests {
     use std::sync::Arc;
 

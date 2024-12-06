@@ -287,21 +287,6 @@ impl CacheRefiller {
     pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
-
-    /// Clear the queue for cache refill and return an event that merges all pending cache refill events
-    /// into a single event that takes the earliest and latest version.
-    pub(crate) fn clear(&mut self) -> Option<CacheRefillerEvent> {
-        let last_item = self.queue.pop_back()?;
-        let mut event = last_item.event;
-        while let Some(item) = self.queue.pop_back() {
-            assert_eq!(
-                event.pinned_version.id(),
-                item.event.new_pinned_version.id()
-            );
-            event.pinned_version = item.event.pinned_version;
-        }
-        Some(event)
-    }
 }
 
 impl CacheRefiller {

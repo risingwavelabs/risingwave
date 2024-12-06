@@ -235,7 +235,6 @@ impl HummockManager {
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
         if !sstables.is_empty() {
             // Sanity check to ensure SSTs to commit have not been full GCed yet.
-            // TODO: since HummockManager::complete_full_gc have already filtered out SSTs by min uncommitted SST id, this sanity check can be removed.
             let now = self.now().await?;
             check_sst_retention(
                 now,

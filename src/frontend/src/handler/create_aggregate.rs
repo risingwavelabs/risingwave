@@ -52,6 +52,16 @@ pub async fn handle_create_aggregate(
         None => return Err(ErrorCode::InvalidParameterValue("no language".into()).into()),
     };
 
+    let runtime = match params.runtime {
+        Some(_) => {
+            return Err(ErrorCode::InvalidParameterValue(
+                "runtime selection is currently not supported".to_string(),
+            )
+            .into());
+        }
+        None => None,
+    };
+
     let return_type = bind_data_type(&returns)?;
 
     let mut arg_names = vec![];
@@ -94,13 +104,6 @@ pub async fn handle_create_aggregate(
         }
         _ => None,
     };
-    let function_type = match params.function_type {
-        Some(CreateFunctionType::Sync) => Some("sync".to_string()),
-        Some(CreateFunctionType::Async) => Some("async".to_string()),
-        Some(CreateFunctionType::Generator) => Some("generator".to_string()),
-        Some(CreateFunctionType::AsyncGenerator) => Some("async_generator".to_string()),
-        None => None,
-    };
 
     let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
     let output = create_fn(CreateFunctionOptions {
@@ -124,14 +127,13 @@ pub async fn handle_create_aggregate(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(return_type.into()),
         language,
+        runtime,
         identifier: Some(output.identifier),
         link: link.map(|s| s.to_string()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error: false,
-        runtime: None,
-        function_type,
     };
 
     let catalog_writer = session.catalog_writer()?;

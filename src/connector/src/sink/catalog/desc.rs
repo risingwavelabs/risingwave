@@ -91,7 +91,6 @@ impl SinkDesc {
         database_id: DatabaseId,
         owner: UserId,
         connection_id: Option<ConnectionId>,
-        dependent_relations: Vec<TableId>,
     ) -> SinkCatalog {
         SinkCatalog {
             id: self.id,
@@ -104,7 +103,6 @@ impl SinkDesc {
             downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
-            dependent_relations,
             properties: self.properties,
             secret_refs: self.secret_refs,
             sink_type: self.sink_type,

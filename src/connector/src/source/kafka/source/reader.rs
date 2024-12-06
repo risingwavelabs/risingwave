@@ -37,13 +37,15 @@ use crate::source::kafka::{
 };
 use crate::source::{
     into_chunk_stream, BackfillInfo, BoxChunkSourceStream, Column, SourceContextRef, SplitId,
-    SplitMetaData, SplitReader,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
+    splits: Vec<KafkaSplit>,
+    sync_call_timeout: Duration,
     bytes_per_second: usize,
     max_num_messages: usize,
     parser_config: ParserConfig,
@@ -110,12 +112,10 @@ impl SplitReader for KafkaSplitReader {
 
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
-        for split in splits {
+        for split in splits.clone() {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
-            if split.hack_seek_to_latest {
-                tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::End)?;
-            } else if let Some(offset) = split.start_offset {
+            if let Some(offset) = split.start_offset {
                 tpl.add_partition_offset(
                     split.topic.as_str(),
                     split.partition,
@@ -168,8 +168,10 @@ impl SplitReader for KafkaSplitReader {
         Ok(Self {
             consumer,
             offsets,
+            splits,
             backfill_info,
             bytes_per_second,
+            sync_call_timeout: properties.common.sync_call_timeout,
             max_num_messages,
             parser_config,
             source_ctx,
@@ -184,6 +186,28 @@ impl SplitReader for KafkaSplitReader {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         self.backfill_info.clone()
+    }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        let mut latest_splits: Vec<SplitImpl> = Vec::new();
+        let mut tpl = TopicPartitionList::with_capacity(self.splits.len());
+        for mut split in self.splits.clone() {
+            // we can't get latest offset if we use Offset::End, so we just fetch watermark here.
+            let (_low, high) = self
+                .consumer
+                .fetch_watermarks(
+                    split.topic.as_str(),
+                    split.partition,
+                    self.sync_call_timeout,
+                )
+                .await?;
+            tpl.add_partition_offset(split.topic.as_str(), split.partition, Offset::Offset(high))?;
+            split.start_offset = Some(high - 1);
+            latest_splits.push(split.into());
+        }
+        // replace the previous assignment
+        self.consumer.assign(&tpl)?;
+        Ok(latest_splits)
     }
 }
 
