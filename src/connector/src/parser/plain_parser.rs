@@ -451,7 +451,7 @@ mod tests {
             _ => panic!("unexpected parse result: {:?}", res),
         }
 
-        let output = builder.take(10);
+        let output = builder.take_and_reserve(10);
         assert_eq!(0, output.cardinality());
     }
 
