@@ -52,6 +52,20 @@ psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);
 psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
 psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
+
+echo "--- starting risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
+risedev ci-start ci-1cn-1fe-switch-to-pg-native
+
+echo "--- test sink: jdbc:postgres switch to postgres native"
+# check sink destination postgres
+sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+sleep 1
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sleep 1
+
+echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
+risedev ci-kill
+
 echo "--- starting risingwave cluster"
 risedev ci-start ci-1cn-1fe
 
