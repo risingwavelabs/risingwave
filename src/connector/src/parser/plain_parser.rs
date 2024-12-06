@@ -94,7 +94,7 @@ impl PlainParser {
     ) -> ConnectorResult<ParseResult> {
         // plain parser also used in the shared cdc source,
         // we need to handle transaction metadata and schema change messages here
-        if let Some(msg_meta) = writer.row_meta
+        if let Some(msg_meta) = writer.row_meta()
             && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
             && let Some(data) = payload
         {

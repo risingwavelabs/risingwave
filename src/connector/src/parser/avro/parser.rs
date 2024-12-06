@@ -27,7 +27,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::bytes_from_url;
+use crate::parser::utils::bytes_from_url;
 use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };

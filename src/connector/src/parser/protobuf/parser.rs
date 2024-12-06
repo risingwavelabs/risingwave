@@ -21,7 +21,7 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::bytes_from_url;
+use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties};
 use crate::schema::schema_registry::{extract_schema_id, handle_sr_list, Client, WireFormatError};
 use crate::schema::SchemaLoader;
