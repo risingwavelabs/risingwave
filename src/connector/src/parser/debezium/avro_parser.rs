@@ -15,12 +15,13 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::Context;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
-    avro_extract_field_schema, avro_schema_skip_nullable_union, avro_schema_to_column_descs,
-    AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    avro_schema_to_column_descs, get_nullable_union_inner, AvroAccess, AvroParseOptions,
+    ResolvedAvroSchema,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -162,18 +163,31 @@ impl DebeziumAvroParserConfig {
         // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
 
         avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(avro_extract_field_schema(
-                // FIXME: use resolved schema here.
-                // Currently it works because "after" refers to a subtree in "before",
-                // but in theory, inside "before" there could also be a reference.
-                &self.outer_schema,
-                Some("before"),
-            )?)?,
+            // This assumes no external `Ref`s (e.g. "before" referring to "after" or "source").
+            // Internal `Ref`s inside the "before" tree are allowed.
+            extract_debezium_table_schema(&self.outer_schema)?,
             // TODO: do we need to support map type here?
             None,
         )
         .map_err(Into::into)
     }
+}
+
+fn extract_debezium_table_schema(root: &Schema) -> anyhow::Result<&Schema> {
+    let Schema::Record(root_record) = root else {
+        anyhow::bail!("Root schema of debezium shall be a record but got: {root:?}");
+    };
+    let idx = (root_record.lookup.get("before"))
+        .context("Root schema of debezium shall contain \"before\" field.")?;
+    let schema = &root_record.fields[*idx].schema;
+    // It is wrapped inside a union to allow null, so we look inside.
+    let Schema::Union(union_schema) = schema else {
+        return Ok(schema);
+    };
+    get_nullable_union_inner(union_schema).context(format!(
+        "illegal avro union schema, expected [null, T], got {:?}",
+        union_schema
+    ))
 }
 
 #[cfg(test)]
@@ -264,10 +278,7 @@ mod tests {
 
         let outer_schema = get_outer_schema();
         let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema = avro_schema_skip_nullable_union(
-            avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-        )
-        .unwrap();
+        let extracted_inner_schema = extract_debezium_table_schema(&outer_schema).unwrap();
         assert_eq!(&expected_inner_schema, extracted_inner_schema);
     }
 
@@ -355,10 +366,7 @@ mod tests {
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
         let columns = avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(
-                avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-            )
-            .unwrap(),
+            extract_debezium_table_schema(&outer_schema).unwrap(),
             None,
         )
         .unwrap()
