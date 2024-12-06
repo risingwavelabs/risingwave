@@ -113,7 +113,13 @@ impl From<(&HummockVersion, &HashSet<StateTableId>)> for IncompleteHummockVersio
                     if !time_travel_table_ids.contains(&table_id.table_id()) {
                         return None;
                     }
-                    // TODO: sst must contains table_id
+                    debug_assert!(change_log.0.iter().all(|d| {
+                        d.new_value.iter().chain(d.old_value.iter()).all(|s| {
+                            s.table_ids
+                                .iter()
+                                .any(|tid| time_travel_table_ids.contains(tid))
+                        })
+                    }));
                     let incomplete_table_change_log = change_log
                         .0
                         .iter()
@@ -182,7 +188,17 @@ impl From<(&HummockVersionDelta, &HashSet<StateTableId>)> for IncompleteHummockV
                     if !time_travel_table_ids.contains(&table_id.table_id()) {
                         return None;
                     }
-                    // TODO: sst must contains table_id
+                    debug_assert!(log_delta
+                        .new_log
+                        .as_ref()
+                        .map(|d| {
+                            d.new_value.iter().chain(d.old_value.iter()).all(|s| {
+                                s.table_ids
+                                    .iter()
+                                    .any(|tid| time_travel_table_ids.contains(tid))
+                            })
+                        })
+                        .unwrap_or(true));
                     Some((*table_id, PbChangeLogDelta::from(log_delta).into()))
                 })
                 .collect(),
