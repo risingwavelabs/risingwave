@@ -284,10 +284,13 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             continue;
         }
 
-        if batch.iter().all(|msg| msg.is_empty()) {
-            // There is no data message in the batch, just emit the latest heartbeat message.
-            // Note that all messages in `batch` should belong to the same split, so we don't
-            // have to do a split to heartbeats mapping here.
+        if batch.iter().all(|msg| msg.is_cdc_heartbeat()) {
+            // This `.iter().all(...)` will short-circuit after seeing the first `false`, so in
+            // normal cases, this should only involve a constant time cost.
+
+            // Now we know that there is no data message in the batch, let's just emit the latest
+            // heartbeat message. Note that all messages in `batch` should belong to the same
+            // split, so we don't have to do a split to heartbeats mapping here.
 
             if let Some(Transaction { id, len }) = &mut current_transaction {
                 // if there's an ongoing transaction, something may be wrong
@@ -332,7 +335,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
         let process_time_ms = chrono::Utc::now().timestamp_millis();
 
         for (i, msg) in batch.into_iter().enumerate() {
-            if msg.is_empty() {
+            if msg.is_cdc_heartbeat() {
                 // ignore heartbeat messages
                 continue;
             }
