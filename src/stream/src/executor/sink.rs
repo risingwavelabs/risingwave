@@ -483,12 +483,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let log_store_read_rows = GLOBAL_SINK_METRICS
             .log_store_read_rows
             .with_guarded_label_values(&labels);
+        let log_store_read_size = GLOBAL_SINK_METRICS
+            .log_store_read_size
+            .with_guarded_label_values(&labels);
         let log_store_latest_read_epoch = GLOBAL_SINK_METRICS
             .log_store_latest_read_epoch
             .with_guarded_label_values(&labels);
         let metrics = LogReaderMetrics {
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_read_size,
             log_store_reader_wait_new_future_duration_ns,
         };
 

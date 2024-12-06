@@ -951,7 +951,7 @@ def section_streaming(outer_panels):
                 # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
                 # Let's remove them when all sinks are migrated to Log Store
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) *",
+                    "Sink Throughput(rows/s)",
                     "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
@@ -961,7 +961,7 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) per Partition *",
+                    "Sink Throughput(rows/s) per Partition",
                     "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
@@ -981,7 +981,7 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Sink Throughput(MB/s) per Partition *",
+                    "Sink Throughput(MB/s) per Partition",
                     "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
@@ -4424,6 +4424,27 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Log Store Consume Throughput(MB/s)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_size')}[$__rate_interval])) by (connector, sink_id, sink_name) / (1000*1000)",
+                            "{{sink_id}} {{sink_name}} ({{connector}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Executor Log Store Consume Throughput(MB/s)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_size')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name) / (1000*1000)",
                             "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
