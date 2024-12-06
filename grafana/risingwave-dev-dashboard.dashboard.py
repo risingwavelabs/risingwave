@@ -975,7 +975,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes written each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
-                            f"(sum(rate({metric('stream_sink_input_size')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}}",
                         ),
                     ],
@@ -985,7 +985,7 @@ def section_streaming(outer_panels):
                     "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
-                            f"(sum(rate({metric('stream_sink_input_size')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
@@ -4434,7 +4434,7 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_read_size')}[$__rate_interval])) by (connector, sink_id, sink_name) / (1000*1000)",
+                            f"sum(rate({metric('log_store_read_bytes')}[$__rate_interval])) by (connector, sink_id, sink_name) / (1000*1000)",
                             "{{sink_id}} {{sink_name}} ({{connector}})",
                         ),
                     ],
@@ -4444,7 +4444,7 @@ def section_sink_metrics(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('log_store_read_size')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name) / (1000*1000)",
+                            f"sum(rate({metric('log_store_read_bytes')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name) / (1000*1000)",
                             "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),

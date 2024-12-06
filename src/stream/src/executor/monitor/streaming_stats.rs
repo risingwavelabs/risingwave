@@ -73,7 +73,7 @@ pub struct StreamingMetrics {
 
     // Sink
     sink_input_row_count: LabelGuardedIntCounterVec<3>,
-    sink_input_size: LabelGuardedIntCounterVec<3>,
+    sink_input_bytes: LabelGuardedIntCounterVec<3>,
     sink_chunk_buffer_size: LabelGuardedIntGaugeVec<3>,
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
@@ -245,8 +245,8 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let sink_input_size = register_guarded_int_counter_vec_with_registry!(
-            "stream_sink_input_size",
+        let sink_input_bytes = register_guarded_int_counter_vec_with_registry!(
+            "stream_sink_input_bytes",
             "Total size of chunks streamed into sink executors",
             &["sink_id", "actor_id", "fragment_id"],
             registry
@@ -1065,7 +1065,7 @@ impl StreamingMetrics {
             source_split_change_count,
             source_backfill_row_count,
             sink_input_row_count,
-            sink_input_size,
+            sink_input_bytes,
             sink_chunk_buffer_size,
             exchange_frag_recv_size,
             merge_barrier_align_duration,
@@ -1239,7 +1239,7 @@ impl StreamingMetrics {
             sink_input_row_count: self
                 .sink_input_row_count
                 .with_guarded_label_values(label_list),
-            sink_input_size: self.sink_input_size.with_guarded_label_values(label_list),
+            sink_input_bytes: self.sink_input_bytes.with_guarded_label_values(label_list),
             sink_chunk_buffer_size: self
                 .sink_chunk_buffer_size
                 .with_guarded_label_values(label_list),
@@ -1531,7 +1531,7 @@ pub struct ActorMetrics {
 
 pub struct SinkExecutorMetrics {
     pub sink_input_row_count: LabelGuardedIntCounter<3>,
-    pub sink_input_size: LabelGuardedIntCounter<3>,
+    pub sink_input_bytes: LabelGuardedIntCounter<3>,
     pub sink_chunk_buffer_size: LabelGuardedIntGauge<3>,
 }
 

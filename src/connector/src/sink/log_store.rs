@@ -273,7 +273,7 @@ pub struct MonitoredLogReader<R: LogReader> {
 pub struct LogReaderMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
     pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    pub log_store_read_size: LabelGuardedIntCounter<4>,
+    pub log_store_read_bytes: LabelGuardedIntCounter<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
 }
 
@@ -306,7 +306,9 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
                     self.metrics
                         .log_store_read_rows
                         .inc_by(chunk.cardinality() as _);
-                    self.metrics.log_store_read_size.inc_by(chunk.estimated_size() as u64);
+                    self.metrics
+                        .log_store_read_bytes
+                        .inc_by(chunk.estimated_size() as u64);
                 }
             })
     }

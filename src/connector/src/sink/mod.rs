@@ -314,7 +314,7 @@ pub struct SinkMetrics {
     // Log store reader metrics
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
-    pub log_store_read_size: LabelGuardedIntCounterVec<4>,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
 
     // Iceberg metrics
@@ -384,8 +384,8 @@ impl SinkMetrics {
         )
         .unwrap();
 
-        let log_store_read_size = register_guarded_int_counter_vec_with_registry!(
-            "log_store_read_size",
+        let log_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "log_store_read_bytes",
             "Total size of chunks read by log reader",
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
@@ -457,7 +457,7 @@ impl SinkMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
-            log_store_read_size,
+            log_store_read_bytes,
             log_store_reader_wait_new_future_duration_ns,
             iceberg_write_qps,
             iceberg_write_latency,
