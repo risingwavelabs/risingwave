@@ -208,8 +208,9 @@ impl WorkerNodeManager {
         let mut guard = self.inner.write().unwrap();
         guard
             .streaming_fragment_vnode_mapping
-            .insert(fragment_id, vnode_mapping)
-            .unwrap();
+            .insert(fragment_id, vnode_mapping);
+        // todo
+            //.unwrap();
     }
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {
