@@ -247,12 +247,6 @@ impl HummockManager {
                 .time_travel_snapshot_interval_counter
                 .saturating_add(1);
         }
-        let group_parents = version
-            .latest_version()
-            .levels
-            .values()
-            .map(|g| (g.group_id, g.parent_group_id))
-            .collect();
         let time_travel_tables_to_commit =
             table_compaction_group_mapping
                 .iter()
@@ -267,7 +261,6 @@ impl HummockManager {
                 &txn,
                 time_travel_version,
                 time_travel_delta,
-                &group_parents,
                 &versioning.last_time_travel_snapshot_sst_ids,
                 time_travel_tables_to_commit,
             )

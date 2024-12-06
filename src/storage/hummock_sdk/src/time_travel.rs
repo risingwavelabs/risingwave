@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::hummock_version_delta::{PbChangeLogDelta, PbGroupDeltas};
@@ -89,29 +89,23 @@ fn refill_sstable_info(
 }
 
 /// `SStableInfo` will be stripped.
-impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockVersion {
-    fn from(p: (&HummockVersion, &HashSet<CompactionGroupId>)) -> Self {
-        let (version, select_group) = p;
+impl From<&HummockVersion> for IncompleteHummockVersion {
+    fn from(version: &HummockVersion) -> Self {
         #[expect(deprecated)]
         Self {
             id: version.id,
             levels: version
                 .levels
                 .iter()
-                .filter_map(|(group_id, levels)| {
-                    if select_group.contains(group_id) {
-                        Some((
-                            *group_id as CompactionGroupId,
-                            PbLevels::from(levels).into(),
-                        ))
-                    } else {
-                        None
-                    }
+                .map(|(group_id, levels)| {
+                    (
+                        *group_id as CompactionGroupId,
+                        PbLevels::from(levels).into(),
+                    )
                 })
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version.table_watermarks.clone(),
-            // TODO: optimization: strip table change log based on select_group
             table_change_log: version
                 .table_change_log
                 .iter()
@@ -135,9 +129,8 @@ impl From<(&HummockVersion, &HashSet<CompactionGroupId>)> for IncompleteHummockV
 pub type IncompleteHummockVersionDelta = HummockVersionDeltaCommon<SstableIdInVersion>;
 
 /// `SStableInfo` will be stripped.
-impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHummockVersionDelta {
-    fn from(p: (&HummockVersionDelta, &HashSet<CompactionGroupId>)) -> Self {
-        let (delta, select_group) = p;
+impl From<&HummockVersionDelta> for IncompleteHummockVersionDelta {
+    fn from(delta: &HummockVersionDelta) -> Self {
         #[expect(deprecated)]
         Self {
             id: delta.id,
@@ -145,19 +138,12 @@ impl From<(&HummockVersionDelta, &HashSet<CompactionGroupId>)> for IncompleteHum
             group_deltas: delta
                 .group_deltas
                 .iter()
-                .filter_map(|(cg_id, deltas)| {
-                    if select_group.contains(cg_id) {
-                        Some((*cg_id, PbGroupDeltas::from(deltas).into()))
-                    } else {
-                        None
-                    }
-                })
+                .map(|(cg_id, deltas)| (*cg_id, PbGroupDeltas::from(deltas).into()))
                 .collect(),
             max_committed_epoch: delta.max_committed_epoch,
             trivial_move: delta.trivial_move,
             new_table_watermarks: delta.new_table_watermarks.clone(),
             removed_table_ids: delta.removed_table_ids.clone(),
-            // TODO: optimization: strip table change log based on select_group
             change_log_delta: delta
                 .change_log_delta
                 .iter()
