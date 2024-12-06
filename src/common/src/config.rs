@@ -1145,6 +1145,10 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
+    /// When true, all jdbc sinks for pg will be switched to native pg sinks.
+    pub switch_jdbc_pg_to_native: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2103,6 +2107,10 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn switch_jdbc_pg_to_native() -> bool {
+            false
         }
     }
 
