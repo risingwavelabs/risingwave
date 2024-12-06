@@ -302,7 +302,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 // for the sake of simplicity, let's force emit the partial transaction chunk
                 if *len > 0 {
                     *len = 0; // reset `len` while keeping `id`
-                    yield chunk_builder.take(1); // next chunk will only contain the heartbeat
+                    yield chunk_builder.take_and_reserve(1); // next chunk will only contain the heartbeat
                 }
             }
 
@@ -323,7 +323,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     offset: &heartbeat_msg.offset,
                 },
             ));
-            yield chunk_builder.take(batch_len);
+            yield chunk_builder.take_and_reserve(batch_len);
 
             continue;
         }
@@ -420,7 +420,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         current_transaction = None;
 
                         if txn_started_in_last_batch {
-                            yield chunk_builder.take(batch_len - (i + 1));
+                            yield chunk_builder.take_and_reserve(batch_len - (i + 1));
                             txn_started_in_last_batch = false;
                         }
                     }
@@ -460,12 +460,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     "transaction is larger than {MAX_TRANSACTION_SIZE} rows, force commit"
                 );
                 *len = 0; // reset `len` while keeping `id`
-                yield chunk_builder.take(batch_len); // use curr batch len as next capacity, just a hint
+                yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
             }
             // TODO(rc): we will have better chunk size control later
         } else if !chunk_builder.is_empty() {
             // not in transaction, yield the chunk now
-            yield chunk_builder.take(batch_len); // use curr batch len as next capacity, just a hint
+            yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
         }
     }
 }

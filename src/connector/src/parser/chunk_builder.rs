@@ -79,7 +79,7 @@ impl SourceStreamChunkBuilder {
     /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
     /// the builders of the next [`StreamChunk`].
     #[must_use]
-    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
+    pub fn take_and_reserve(&mut self, next_cap: usize) -> StreamChunk {
         let descs = std::mem::take(&mut self.descs); // we don't use `descs` in `finish`
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
