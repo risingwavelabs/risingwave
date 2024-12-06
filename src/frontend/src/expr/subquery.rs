@@ -14,10 +14,10 @@
 
 use std::hash::Hash;
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 
 use super::{Expr, ExprImpl, ExprType};
-use crate::binder::BoundQuery;
+use crate::binder::{BoundQuery, UNNAMED_COLUMN};
 use crate::expr::{CorrelatedId, Depth};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +91,17 @@ impl Expr for Subquery {
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
             }
-            SubqueryKind::UpdateSet => DataType::new_unnamed_struct(self.query.data_types()),
+            SubqueryKind::UpdateSet => {
+                let schema = self.query.schema();
+                let struct_type = if schema.fields().iter().any(|f| f.name == UNNAMED_COLUMN) {
+                    StructType::unnamed(self.query.data_types())
+                } else {
+                    StructType::new(
+                        (schema.fields().iter().cloned()).map(|f| (f.name, f.data_type)),
+                    )
+                };
+                DataType::Struct(struct_type)
+            }
             SubqueryKind::Array => {
                 let types = self.query.data_types();
                 assert_eq!(types.len(), 1, "Subquery with more than one column");

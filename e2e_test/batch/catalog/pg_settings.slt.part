@@ -23,6 +23,7 @@ user background_ddl
 user batch_enable_distributed_dml
 user batch_enable_lookup_join
 user batch_enable_sort_agg
+user batch_expr_strict_mode
 user batch_parallelism
 user bypass_cluster_limits
 user bytea_output
@@ -31,6 +32,7 @@ user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
 user datestyle
+user dml_rate_limit
 user enable_join_ordering
 user enable_share_plan
 user enable_two_phase_agg

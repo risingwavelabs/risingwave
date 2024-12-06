@@ -481,6 +481,9 @@ impl FrontendObserverNode {
             Operation::Delete => {
                 LocalSecretManager::global().remove_secret(secret.id);
             }
+            Operation::Update => {
+                LocalSecretManager::global().update_secret(secret.id, secret.value);
+            }
             _ => {
                 panic!("error type notification");
             }

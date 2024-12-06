@@ -57,7 +57,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_table().flat_map(|table| {
+            schema.iter_user_table().flat_map(|table| {
                 iter::once(build_row(
                     table.id.table_id as _,
                     rw_tables_id,

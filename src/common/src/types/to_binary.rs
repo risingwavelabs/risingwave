@@ -100,7 +100,7 @@ impl ToBinary for ListRef<'_> {
         buf.put_i32(1); // Has nulls?
         buf.put_i32(element_ty.to_oid()); // Element type
         buf.put_i32(self.len() as i32); // Length of 1st dimension
-        buf.put_i32(0); // Offset of 1st dimension
+        buf.put_i32(1); // Offset of 1st dimension, starting from 1
         for element in self.iter() {
             match element {
                 None => {

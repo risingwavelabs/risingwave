@@ -1150,6 +1150,18 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_epoch(
+                    "Current Epoch of Materialize Views",
+                    "The current epoch that the Materialize Executors are processing. If an MV's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
+                            f"min({metric('stream_mview_current_epoch')} != 0) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "{{table_id}} {{table_name}}",
+                            ),
+                    ]
+                ),
                 panels.timeseries_latency(
                     "Snapshot Backfill Lag",
                     "",
@@ -1737,6 +1749,18 @@ def section_streaming_actors(outer_panels: Panels):
                             "{{executor_identity}} actor {{actor_id}}",
                         ),
                     ],
+                ),
+                panels.timeseries_epoch(
+                    "Current Epoch of Actors",
+                    "The current epoch that the actors are processing. If an actor's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled epoches makes sense.
+                            f"min({metric('stream_actor_current_epoch')} != 0) by (fragment_id)",
+                            "fragment {{fragment_id}}",
+                            ),
+                    ]
                 ),
             ],
         )
@@ -3273,7 +3297,7 @@ def section_hummock_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Version Id",
                     "",
                     [
@@ -3295,7 +3319,7 @@ def section_hummock_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Epoch",
                     "",
                     [
@@ -4199,7 +4223,7 @@ def section_iceberg_metrics(outer_panels):
                             "read @ {{table_name}}",
                         ),
                         panels.target(
-                            f"sum({metric('nimtable_read_bytes')})",
+                            f"sum({metric('iceberg_read_bytes')})",
                             "total read",
                         ),
                     ],
@@ -4358,7 +4382,7 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Log Store Read/Write Epoch",
                     "",
                     [

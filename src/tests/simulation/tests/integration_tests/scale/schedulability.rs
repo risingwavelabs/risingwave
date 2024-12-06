@@ -39,7 +39,7 @@ async fn test_cordon_normal() -> Result<()> {
     let rest_worker_slots: HashSet<_> = workers
         .iter()
         .flat_map(|worker| {
-            (0..worker.parallelism).map(|idx| WorkerSlotId::new(worker.id, idx as _))
+            (0..worker.parallelism()).map(|idx| WorkerSlotId::new(worker.id, idx as _))
         })
         .collect();
 

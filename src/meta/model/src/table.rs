@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::OBJECT_ID_PLACEHOLDER;
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbEngine, PbTableType};
 use risingwave_pb::catalog::{PbHandleConflictBehavior, PbTable};
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, FragmentId, I32Array, ObjectId, SourceId,
-    TableId, TableVersion,
+    TableId, TableVersion, WebhookSourceInfo,
 };
 
 #[derive(
@@ -102,6 +102,34 @@ impl From<PbHandleConflictBehavior> for HandleConflictBehavior {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[sea_orm(rs_type = "String", db_type = "string(None)")]
+pub enum Engine {
+    #[sea_orm(string_value = "HUMMOCK")]
+    Hummock,
+    #[sea_orm(string_value = "ICEBERG")]
+    Iceberg,
+}
+
+impl From<Engine> for PbEngine {
+    fn from(engine: Engine) -> Self {
+        match engine {
+            Engine::Hummock => Self::Hummock,
+            Engine::Iceberg => Self::Iceberg,
+        }
+    }
+}
+
+impl From<PbEngine> for Engine {
+    fn from(engine: PbEngine) -> Self {
+        match engine {
+            PbEngine::Hummock => Self::Hummock,
+            PbEngine::Iceberg => Self::Iceberg,
+            PbEngine::Unspecified => Self::Hummock,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
@@ -135,6 +163,8 @@ pub struct Model {
     pub incoming_sinks: I32Array,
     pub cdc_table_id: Option<String>,
     pub vnode_count: i32,
+    pub webhook_info: Option<WebhookSourceInfo>,
+    pub engine: Option<Engine>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -218,7 +248,6 @@ impl From<PbTable> for ActiveModel {
             .value_opt()
             .map(|v| v as _)
             .map_or(NotSet, Set);
-
         let fragment_id = if pb_table.fragment_id == OBJECT_ID_PLACEHOLDER {
             NotSet
         } else {
@@ -242,7 +271,7 @@ impl From<PbTable> for ActiveModel {
             name: Set(pb_table.name),
             optional_associated_source_id,
             table_type: Set(table_type.into()),
-            belongs_to_job_id: Set(None),
+            belongs_to_job_id: Set(pb_table.job_id.map(|x| x as _)),
             columns: Set(pb_table.columns.into()),
             pk: Set(pb_table.pk.into()),
             distribution_key: Set(pb_table.distribution_key.into()),
@@ -267,6 +296,10 @@ impl From<PbTable> for ActiveModel {
             incoming_sinks: Set(pb_table.incoming_sinks.into()),
             cdc_table_id: Set(pb_table.cdc_table_id),
             vnode_count,
+            webhook_info: Set(pb_table.webhook_info.as_ref().map(WebhookSourceInfo::from)),
+            engine: Set(pb_table
+                .engine
+                .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
         }
     }
 }

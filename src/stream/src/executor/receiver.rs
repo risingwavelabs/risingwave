@@ -83,13 +83,12 @@ impl ReceiverExecutor {
         actor_id: ActorId,
         input: super::exchange::permit::Receiver,
         shared_context: Arc<SharedContext>,
+        local_barrier_manager: crate::task::LocalBarrierManager,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
-        let barrier_rx = shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_id);
+        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
 
         Self::new(
             ActorContext::for_test(actor_id),
@@ -260,11 +259,7 @@ mod tests {
         ));
 
         barrier_test_env.inject_barrier(&b1, [actor_id]);
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .flush_all_events()
-            .await;
+        barrier_test_env.flush_all_events().await;
 
         let input = new_input(
             &ctx,
@@ -283,7 +278,9 @@ mod tests {
             input,
             ctx.clone(),
             metrics.clone(),
-            ctx.local_barrier_manager.subscribe_barrier(actor_id),
+            barrier_test_env
+                .local_barrier_manager
+                .subscribe_barrier(actor_id),
         )
         .boxed()
         .execute();

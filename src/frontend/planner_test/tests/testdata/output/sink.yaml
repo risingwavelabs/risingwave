@@ -9,7 +9,7 @@
       table.name='t1sink',
       type='upsert');
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], downstream_pk: [t1.v1, t1.v2] }
     └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
 - id: create_upsert_jdbc_sink_with_downstream_pk2
@@ -22,7 +22,7 @@
       table.name='t1sink',
       type='upsert');
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5], downstream_pk: [t1.v3, t1.v5] }
     └─StreamExchange { dist: HashShard(t1.v3, t1.v5) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5] }
 - id: create_upsert_jdbc_sink_with_downstream_pk1
@@ -36,7 +36,7 @@
       type='upsert');
   explain_output: |+
     Fragment 0
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], downstream_pk: [t1.v1, t1.v2] }
     ├── tables: [ Sink: 0 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5, t1.v4 ]
     ├── stream key: [ t1.v3, t1.v4 ]
@@ -89,7 +89,7 @@
       type='upsert');
   explain_output: |+
     Fragment 0
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5], pk: [t1.v1, t1.v2] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5], downstream_pk: [t1.v3, t1.v5] }
     ├── tables: [ Sink: 0 ]
     ├── output: [ t1.v1, t1.v2, t1.v3, t1.v5 ]
     ├── stream key: [ t1.v1, t1.v2 ]
@@ -152,7 +152,7 @@
       primary_key='v1,v2'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], downstream_pk: [t1.v1, t1.v2] }
     └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
       └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
 - id: downstream_pk_same_with_upstream
@@ -165,7 +165,7 @@
       primary_key='v2,v1'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v2, v1, count], pk: [t1.v1, t1.v2] }
+    StreamSink { type: upsert, columns: [v2, v1, count], downstream_pk: [t1.v2, t1.v1] }
     └─StreamProject { exprs: [t1.v2, t1.v1, count] }
       └─StreamHashAgg { group_key: [t1.v1, t1.v2], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
@@ -175,7 +175,7 @@
     create table t2 (a int, b int, watermark for b as b - 4) append only;
     explain create sink sk1 from t2 emit on window close with (connector='blackhole');
   explain_output: |
-    StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], pk: [t2._row_id] }
+    StreamSink { type: upsert, columns: [a, b, t2._row_id(hidden)], downstream_pk: [] }
     └─StreamEowcSort { sort_column: t2.b }
       └─StreamTableScan { table: t2, columns: [a, b, _row_id] }
 - id: create_mock_iceberg_sink_append_only_with_sparse_partition
@@ -197,9 +197,7 @@
     );
   explain_output: |
     StreamSink { type: append-only, columns: [v1, v2, v3, v4, t1._row_id(hidden)] }
-    └─StreamExchange { dist: HashShard($expr1) }
-      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Int32) as $expr1] }
-        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_mock_iceberg_sink_append_only_with_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
@@ -238,10 +236,8 @@
       primary_key = 'v1'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], pk: [t1._row_id] }
-    └─StreamExchange { dist: HashShard($expr1) }
-      └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Int32) as $expr1] }
-        └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
+    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_mock_iceberg_sink_upsert_with_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
@@ -260,5 +256,5 @@
       primary_key = 'v1'
     );
   explain_output: |
-    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], pk: [t1._row_id] }
+    StreamSink { type: upsert, columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
     └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }

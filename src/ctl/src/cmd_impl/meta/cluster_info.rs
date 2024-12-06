@@ -63,13 +63,14 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
 
             for actor in &fragment.actors {
                 if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
+                    let num_splits = splits.len();
                     let splits = splits
                         .iter()
                         .map(|split| SplitImpl::try_from(split).unwrap())
                         .map(|split| split.id())
                         .collect_vec()
                         .join(",");
-                    actor_splits_map.insert(actor.actor_id, (splits.len(), splits));
+                    actor_splits_map.insert(actor.actor_id, (num_splits, splits));
                 }
             }
         }
@@ -123,12 +124,11 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                         split_count,
                         splits,
                         if !actor.upstream_actor_id.is_empty() {
-                            assert!(
-                                actor.upstream_actor_id.len() == 1,
-                                "should have only one upstream actor, got {actor:?}"
-                            );
-                            let upstream_splits =
-                                actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
+                            let upstream_splits = actor
+                                .upstream_actor_id
+                                .iter()
+                                .find_map(|id| actor_splits_map.get(id))
+                                .expect("should have one upstream source actor");
                             format!(
                                 " <- Upstream Actor{}: [{}]",
                                 if ignore_id {

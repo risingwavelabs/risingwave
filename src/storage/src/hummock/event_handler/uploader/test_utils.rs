@@ -32,7 +32,7 @@ use risingwave_common::util::epoch::{test_epoch, EpochExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
@@ -159,17 +159,20 @@ pub(super) fn gen_sstable_info(
     let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
     let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
     let gen_sst_object_id = (start_epoch << 8) + end_epoch;
-    vec![LocalSstableInfo::for_test(SstableInfo {
-        object_id: gen_sst_object_id,
-        sst_id: gen_sst_object_id,
-        key_range: KeyRange {
-            left: start_full_key.encode().into(),
-            right: end_full_key.encode().into(),
-            right_exclusive: true,
-        },
-        table_ids: vec![TEST_TABLE_ID.table_id],
-        ..Default::default()
-    })]
+    vec![LocalSstableInfo::for_test(
+        SstableInfoInner {
+            object_id: gen_sst_object_id,
+            sst_id: gen_sst_object_id,
+            key_range: KeyRange {
+                left: start_full_key.encode().into(),
+                right: end_full_key.encode().into(),
+                right_exclusive: true,
+            },
+            table_ids: vec![TEST_TABLE_ID.table_id],
+            ..Default::default()
+        }
+        .into(),
+    )]
 }
 
 pub(super) fn test_uploader_context<F, Fut>(upload_fn: F) -> UploaderContext

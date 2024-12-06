@@ -27,9 +27,9 @@ use risingwave_pb::stream_service::PbBarrierCompleteResponse;
 
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
-    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceTablePlan,
+    Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceStreamJobPlan,
 };
-use crate::manager::{DdlType, MetadataManager};
+use crate::manager::{MetadataManager, StreamingJobType};
 use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
 use crate::MetaResult;
 
@@ -229,7 +229,7 @@ impl TrackingJob {
                     .catalog_controller
                     .finish_streaming_job(
                         streaming_job.id() as i32,
-                        command.replace_table_info.clone(),
+                        command.replace_stream_job.clone(),
                     )
                     .await?;
                 Ok(())
@@ -274,7 +274,7 @@ pub struct RecoveredTrackingJob {
 /// The command tracking by the [`CreateMviewProgressTracker`].
 pub(super) struct TrackingCommand {
     pub info: CreateStreamingJobCommandInfo,
-    pub replace_table_info: Option<ReplaceTablePlan>,
+    pub replace_stream_job: Option<ReplaceStreamJobPlan>,
 }
 
 /// Tracking is done as follows:
@@ -379,7 +379,10 @@ impl CreateMviewProgressTracker {
 
     pub(super) fn update_tracking_jobs<'a>(
         &mut self,
-        info: Option<(&CreateStreamingJobCommandInfo, Option<&ReplaceTablePlan>)>,
+        info: Option<(
+            &CreateStreamingJobCommandInfo,
+            Option<&ReplaceStreamJobPlan>,
+        )>,
         create_mview_progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
         version_stats: &HummockVersionStats,
     ) {
@@ -389,9 +392,9 @@ impl CreateMviewProgressTracker {
                 let finished_commands = {
                     let mut commands = vec![];
                     // Add the command to tracker.
-                    if let Some((create_job_info, replace_table)) = info
+                    if let Some((create_job_info, replace_stream_job)) = info
                         && let Some(command) =
-                            self.add(create_job_info, replace_table, version_stats)
+                            self.add(create_job_info, replace_stream_job, version_stats)
                     {
                         // Those with no actors to track can be finished immediately.
                         commands.push(command);
@@ -429,8 +432,8 @@ impl CreateMviewProgressTracker {
             if let Some(Command::CreateStreamingJob { info, job_type }) = command {
                 match job_type {
                     CreateStreamingJobType::Normal => Some((info, None)),
-                    CreateStreamingJobType::SinkIntoTable(replace_table) => {
-                        Some((info, Some(replace_table)))
+                    CreateStreamingJobType::SinkIntoTable(replace_stream_job) => {
+                        Some((info, Some(replace_stream_job)))
                     }
                     CreateStreamingJobType::SnapshotBackfill(_) => {
                         // The progress of SnapshotBackfill won't be tracked here
@@ -494,24 +497,24 @@ impl CreateMviewProgressTracker {
     pub fn add(
         &mut self,
         info: &CreateStreamingJobCommandInfo,
-        replace_table: Option<&ReplaceTablePlan>,
+        replace_stream_job: Option<&ReplaceStreamJobPlan>,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
         tracing::trace!(?info, "add job to track");
         let (info, actors, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
-                stream_job_fragments: table_fragments,
+                stream_job_fragments,
                 ..
             } = info;
-            let actors = table_fragments.tracking_progress_actor_ids();
+            let actors = stream_job_fragments.tracking_progress_actor_ids();
             if actors.is_empty() {
                 // The command can be finished immediately.
                 return Some(TrackingJob::New(TrackingCommand {
                     info: info.clone(),
-                    replace_table_info: replace_table.cloned(),
+                    replace_stream_job: replace_stream_job.cloned(),
                 }));
             }
-            (info.clone(), actors, replace_table.cloned())
+            (info.clone(), actors, replace_stream_job.cloned())
         };
 
         let CreateStreamingJobCommandInfo {
@@ -519,14 +522,14 @@ impl CreateMviewProgressTracker {
             upstream_root_actors,
             dispatchers,
             definition,
-            ddl_type,
+            job_type,
             create_type,
             ..
         } = &info;
 
         let creating_mv_id = table_fragments.stream_job_id();
 
-        let (upstream_mv_count, upstream_total_key_count, ddl_type, create_type) = {
+        let (upstream_mv_count, upstream_total_key_count, job_type, create_type) = {
             // Keep track of how many times each upstream MV appears.
             let mut upstream_mv_count = HashMap::new();
             for (table_id, actors) in upstream_root_actors {
@@ -544,7 +547,7 @@ impl CreateMviewProgressTracker {
             (
                 upstream_mv_count,
                 upstream_total_key_count,
-                ddl_type,
+                job_type,
                 create_type,
             )
         };
@@ -559,7 +562,7 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition.clone(),
         );
-        if *ddl_type == DdlType::Sink && *create_type == CreateType::Background {
+        if *job_type == StreamingJobType::Sink && *create_type == CreateType::Background {
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.
@@ -567,7 +570,7 @@ impl CreateMviewProgressTracker {
             // that the sink job has been created.
             Some(TrackingJob::New(TrackingCommand {
                 info,
-                replace_table_info,
+                replace_stream_job: replace_table_info,
             }))
         } else {
             let old = self.progress_map.insert(
@@ -576,7 +579,7 @@ impl CreateMviewProgressTracker {
                     progress,
                     TrackingJob::New(TrackingCommand {
                         info,
-                        replace_table_info,
+                        replace_stream_job: replace_table_info,
                     }),
                 ),
             );

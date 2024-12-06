@@ -173,10 +173,7 @@ mod tests {
                 Some(ScalarImpl::Int64(3)),
             )),
             Box::new(LiteralExpression::new(
-                DataType::new_struct(
-                    vec![DataType::Int32, DataType::Int32, DataType::Int32],
-                    vec![],
-                ),
+                StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]).into(),
                 Some(ScalarImpl::Struct(value)),
             )),
             Box::new(LiteralExpression::new(

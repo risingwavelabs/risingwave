@@ -1,0 +1,107 @@
+control substitution on
+
+# for non-shared source
+statement ok
+set streaming_use_shared_source to false;
+
+statement ok
+create secret sec_broker with (backend = 'meta') as '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+
+statement error unknown field `foo`
+create connection conn with (type = 'kafka', properties.bootstrap.server = secret sec_broker, foo = 'bar');
+
+statement error Connection type "kinesis" is not supported
+create connection conn with (type = 'kinesis');
+
+statement ok
+create connection conn with (type = 'kafka', properties.bootstrap.server = secret sec_broker, properties.security.protocol = 'plaintext');
+
+query TTT
+select "name", "type_" from rw_catalog.rw_connections;
+----
+conn CONNECTION_TYPE_KAFKA
+
+# unstable test serialization due to iter on hashmap
+# the "connectiond_params" looks like:
+# {"properties.bootstrap.server":"SECRET sec_broker AS TEXT","properties.security.protocol":"plaintext"}
+
+statement error Permission denied: PermissionDenied: secret used by 1 other objects.
+drop secret sec_broker;
+
+statement error Duplicated key in both WITH clause and Connection catalog: properties.security.protocol
+create table t1 (a int, b varchar) with (
+  connector = 'kafka',
+  connection = conn,
+  topic = 'connection_ddl_1',
+  properties.security.protocol = 'plaintext')
+format plain encode json;
+
+statement error connector kinesis and connection type Kafka are not compatible
+create table t1 (a int, b varchar) with (
+  connector = 'kinesis',
+  connection = conn,
+  stream = 'connection_ddl_1',
+  region = 'us-east-1')
+format plain encode json;
+
+system ok
+rpk topic create connection_ddl_1 -p 1
+
+statement ok
+create table t1 (a int, b varchar) with (
+  connector = 'kafka',
+  connection = conn,
+  topic = 'connection_ddl_1')
+format plain encode json;
+
+statement error Permission denied: PermissionDenied: connection used by 1 other objects.
+drop connection conn;
+
+# Connection & Source & Sink will have independent rely on the secret
+statement error Permission denied: PermissionDenied: secret used by 2 other objects.
+drop secret sec_broker;
+
+statement ok
+create table data_table (a int, b varchar);
+
+statement ok
+insert into data_table values (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+flush;
+
+statement ok
+create sink sink_kafka from data_table with (
+  connector = 'kafka',
+  connection = conn,
+  topic = 'connection_ddl_1'
+) format plain encode json (
+  force_append_only='true'
+);
+
+sleep 3s
+
+query IT rowsort
+select a, b from t1;
+----
+1 a
+2 b
+3 c
+
+statement ok
+drop sink sink_kafka
+
+statement ok
+drop table data_table;
+
+statement ok
+drop table t1;
+
+statement ok
+drop connection conn;
+
+statement ok
+drop secret sec_broker;
+
+statement ok
+set streaming_use_shared_source to true;

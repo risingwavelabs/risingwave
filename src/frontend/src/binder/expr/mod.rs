@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::{DataType, MapType};
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
@@ -83,6 +83,24 @@ impl Binder {
                     // we'll not bind it for table columns.
                     if let Some((arg_idx, arg_type)) = lambda_args.get(&ident.real_value()) {
                         Ok(InputRef::new(*arg_idx, arg_type.clone()).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
+                } else if let Some(ctx) = self.secure_compare_context.as_ref() {
+                    // Currently, the generated columns are not supported yet. So the ident here should only be one of the following
+                    // - `headers`
+                    // - secret name
+                    // - the name of the payload column
+                    // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
+                    if ident.real_value() == *"headers" {
+                        Ok(InputRef::new(0, DataType::Jsonb).into())
+                    } else if ident.real_value() == ctx.secret_name {
+                        Ok(InputRef::new(1, DataType::Varchar).into())
+                    } else if ident.real_value() == ctx.column_name {
+                        Ok(InputRef::new(2, DataType::Bytea).into())
                     } else {
                         Err(
                             ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
@@ -1008,13 +1026,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
-        AstDataType::Struct(types) => DataType::new_struct(
+        AstDataType::Struct(types) => StructType::new(
             types
                 .iter()
-                .map(|f| bind_data_type(&f.data_type))
+                .map(|f| Ok((f.name.real_value(), bind_data_type(&f.data_type)?)))
                 .collect::<Result<Vec<_>>>()?,
-            types.iter().map(|f| f.name.real_value()).collect_vec(),
-        ),
+        )
+        .into(),
         AstDataType::Map(kv) => {
             let key = bind_data_type(&kv.0)?;
             let value = bind_data_type(&kv.1)?;

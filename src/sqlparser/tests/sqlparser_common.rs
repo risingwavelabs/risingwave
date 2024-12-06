@@ -1543,11 +1543,11 @@ fn parse_create_table_with_options() {
                 vec![
                     SqlOption {
                         name: vec!["foo".into()].into(),
-                        value: Value::SingleQuotedString("bar".into())
+                        value: Value::SingleQuotedString("bar".into()).into(),
                     },
                     SqlOption {
                         name: vec!["a".into()].into(),
-                        value: number("123")
+                        value: number("123").into(),
                     },
                 ],
                 with_options
@@ -3145,11 +3145,11 @@ fn parse_create_view_with_options() {
                 vec![
                     SqlOption {
                         name: vec!["foo".into()].into(),
-                        value: Value::SingleQuotedString("bar".into())
+                        value: Value::SingleQuotedString("bar".into()).into(),
                     },
                     SqlOption {
                         name: vec!["a".into()].into(),
-                        value: number("123")
+                        value: number("123").into(),
                     },
                 ],
                 with_options

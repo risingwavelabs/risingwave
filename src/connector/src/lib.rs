@@ -49,6 +49,7 @@ pub mod parser;
 pub mod schema;
 pub mod sink;
 pub mod source;
+pub use source::ConnectionImpl;
 
 pub mod connector_common;
 

@@ -118,6 +118,7 @@ impl LocalQueryExecution {
             self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
+
         let executor = executor.build().await?;
 
         #[for_await]
@@ -146,6 +147,7 @@ impl LocalQueryExecution {
         let db_name = self.session.database().to_string();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let strict_mode = self.session.config().batch_expr_strict_mode();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
 
@@ -166,7 +168,7 @@ impl LocalQueryExecution {
             }
         };
 
-        use risingwave_expr::expr_context::TIME_ZONE;
+        use risingwave_expr::expr_context::*;
 
         use crate::expr::function_impl::context::{
             AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
@@ -179,6 +181,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {

@@ -173,7 +173,7 @@ serde_with::with_prefix!(batch_prefix "batch_");
 pub enum MetaBackend {
     #[default]
     Mem,
-    Sql, // keep for backward compatibility
+    Sql, // any database url
     Sqlite,
     Postgres,
     Mysql,
@@ -422,6 +422,7 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
@@ -527,6 +528,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
+    /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    pub hummock_time_travel_sst_info_insert_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -1432,7 +1437,7 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            3600 * 3
+            3600 * 6
         }
 
         pub fn gc_history_retention_time_sec() -> u64 {
@@ -1440,7 +1445,7 @@ pub mod default {
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            600
+            3600
         }
 
         pub fn full_gc_object_limit() -> u64 {
@@ -2035,6 +2040,10 @@ pub mod default {
             10_000
         }
 
+        pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
+            100
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2236,6 +2245,10 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
         }
     }
 

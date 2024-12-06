@@ -19,7 +19,6 @@ use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
@@ -62,24 +61,8 @@ pub async fn handle_drop_schema(
     };
     match mode {
         Some(DropMode::Restrict) | None => {
-            if let Some(table) = schema.iter_table().next() {
-                return Err(CatalogError::NotEmpty(
-                    "schema",
-                    schema_name,
-                    "table",
-                    table.name.clone(),
-                )
-                .into());
-            }
-            if let Some(source) = schema.iter_source().next() {
-                return Err(CatalogError::NotEmpty(
-                    "schema",
-                    schema_name,
-                    "source",
-                    source.name.clone(),
-                )
-                .into());
-            }
+            // Note: we don't check if the schema is empty here.
+            // The check is done in meta `ensure_schema_empty`.
         }
         Some(DropMode::Cascade) => {
             bail_not_implemented!(issue = 6773, "drop schema with cascade mode");
@@ -91,33 +74,4 @@ pub async fn handle_drop_schema(
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_schema(schema.id()).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::test_utils::LocalFrontend;
-
-    #[tokio::test]
-    async fn test_drop_schema() {
-        let frontend = LocalFrontend::new(Default::default()).await;
-        let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
-
-        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
-
-        frontend.run_sql("CREATE TABLE schema.table").await.unwrap();
-
-        assert!(frontend.run_sql("DROP SCHEMA schema").await.is_err());
-
-        frontend.run_sql("DROP TABLE schema.table").await.unwrap();
-
-        frontend.run_sql("DROP SCHEMA schema").await.unwrap();
-
-        let schema = catalog_reader
-            .read_guard()
-            .get_database_by_name("schema")
-            .ok()
-            .cloned();
-        assert!(schema.is_none());
-    }
 }

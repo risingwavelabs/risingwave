@@ -39,7 +39,7 @@ pub struct LogicalDedup {
 
 impl LogicalDedup {
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
-        let core = generic::Dedup { input, dedup_cols };
+        let core = generic::Dedup::new(input, dedup_cols);
         let base = PlanBase::new_logical_with_core(&core);
         LogicalDedup { base, core }
     }
@@ -163,7 +163,12 @@ impl ColPrunable for LogicalDedup {
         );
 
         let new_input = self.input().prune_col(&input_required_cols, ctx);
-        let logical_dedup = Self::new(new_input, self.dedup_cols().to_vec()).into();
+        let new_dedup_cols = self
+            .dedup_cols()
+            .iter()
+            .map(|&idx| mapping.map(idx))
+            .collect_vec();
+        let logical_dedup = Self::new(new_input, new_dedup_cols).into();
 
         if input_required_cols == required_cols {
             logical_dedup

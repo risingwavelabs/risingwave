@@ -14,7 +14,7 @@
 
 use std::cmp::min;
 use std::collections::VecDeque;
-use std::future::{pending, Future};
+use std::future::{pending, ready, Future};
 use std::mem::{replace, take};
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::backfill::utils::{create_builder, mapping_chunk};
+use crate::executor::backfill::utils::{create_builder, mapping_message};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
@@ -77,6 +77,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        assert_eq!(&upstream.info.schema, upstream_table.schema());
         if let Some(rate_limit) = rate_limit {
             debug!(
                 rate_limit,
@@ -137,7 +138,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             self.chunk_size,
                             self.rate_limit,
                             &mut self.barrier_rx,
-                            &self.output_indices,
                             &mut self.progress,
                             first_recv_barrier,
                         );
@@ -263,7 +263,17 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
 
 impl<S: StateStore> Execute for SnapshotBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        let output_indices = self.output_indices.clone();
+        self.execute_inner()
+            .filter_map(move |result| {
+                ready({
+                    match result {
+                        Ok(message) => mapping_message(message, &output_indices).map(Ok),
+                        Err(e) => Some(Err(e)),
+                    }
+                })
+            })
+            .boxed()
     }
 }
 
@@ -487,30 +497,27 @@ async fn receive_next_barrier(
 async fn make_snapshot_stream<'a>(
     row_stream: impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a,
     mut builder: DataChunkBuilder,
-    output_indices: &'a [usize],
 ) {
     pin_mut!(row_stream);
     while let Some(row) = row_stream.try_next().await? {
         if let Some(data_chunk) = builder.append_one_row(row) {
             let ops = vec![Op::Insert; data_chunk.capacity()];
-            yield mapping_chunk(StreamChunk::from_parts(ops, data_chunk), output_indices);
+            yield StreamChunk::from_parts(ops, data_chunk);
         }
     }
     if let Some(data_chunk) = builder.consume_all() {
         let ops = vec![Op::Insert; data_chunk.capacity()];
-        yield mapping_chunk(StreamChunk::from_parts(ops, data_chunk), output_indices);
+        yield StreamChunk::from_parts(ops, data_chunk);
     }
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
-#[expect(clippy::too_many_arguments)]
 async fn make_consume_snapshot_stream<'a, S: StateStore>(
     upstream_table: &'a StorageTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
     rate_limit: Option<usize>,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
-    output_indices: &'a [usize],
     progress: &'a mut CreateMviewProgressReporter,
     first_recv_barrier: Barrier,
 ) {
@@ -531,7 +538,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     );
     let data_types = upstream_table.schema().data_types();
     let builder = create_builder(rate_limit, chunk_size, data_types.clone());
-    let snapshot_stream = make_snapshot_stream(snapshot_row_stream, builder, output_indices);
+    let snapshot_stream = make_snapshot_stream(snapshot_row_stream, builder);
     pin_mut!(snapshot_stream);
 
     async fn select_barrier_and_snapshot_stream(

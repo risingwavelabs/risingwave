@@ -18,7 +18,6 @@
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <parquet.version>1.14.4</parquet.version>
         <maven.javadoc.skip>true</maven.javadoc.skip>
     </properties>
 

@@ -14,7 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl};
+use risingwave_common::types::{
+    DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
+};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 use thiserror_ext::AsReport;
 
@@ -283,7 +285,7 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
-            DataType::new_unnamed_struct(exprs.iter().map(|e| e.return_type()).collect_vec());
+            StructType::unnamed(exprs.iter().map(|e| e.return_type()).collect_vec()).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }

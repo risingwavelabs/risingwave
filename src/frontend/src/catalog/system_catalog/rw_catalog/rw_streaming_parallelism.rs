@@ -26,6 +26,8 @@ use risingwave_frontend_macro::system_catalog;
         SELECT id, name, 'sink' as relation_type FROM rw_sinks
         UNION ALL
         SELECT id, name, 'index' as relation_type FROM rw_indexes
+        UNION ALL
+        SELECT id, name, 'source' as relation_type FROM rw_sources WHERE is_shared = true
     )
     SELECT
         job.id,

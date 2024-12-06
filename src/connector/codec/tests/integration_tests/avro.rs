@@ -56,7 +56,7 @@ fn avro_schema_str_to_risingwave_schema(
         ResolvedAvroSchema::create(avro_schema.into()).context("failed to resolve Avro schema")?;
 
     let rw_schema =
-        avro_schema_to_column_descs(&resolved_schema.resolved_schema, config.map_handling)
+        avro_schema_to_column_descs(&resolved_schema.original_schema, config.map_handling)
             .context("failed to convert Avro schema to RisingWave schema")?
             .iter()
             .map(ColumnDesc::from)

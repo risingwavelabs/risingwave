@@ -149,3 +149,11 @@ INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 
 -- Here we create this publication without `WITH ( publish_via_partition_root = true )` only for tests. Normally, it should be added.
 create publication rw_publication_pubviaroot_false for TABLE partitioned_timestamp_table;
+
+
+CREATE TABLE test_default_value (
+    "id" int,
+    "name" varchar(64),
+    "city" varchar(200) default 'Shanghai',
+    PRIMARY KEY ("id")
+);

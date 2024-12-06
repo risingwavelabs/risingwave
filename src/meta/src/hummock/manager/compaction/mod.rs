@@ -69,6 +69,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::oneshot::{Receiver as OneShotReceiver, Sender};
+use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
@@ -836,8 +837,7 @@ impl HummockManager {
                     self.calculate_vnode_partition(
                         &mut compact_task,
                         group_config.compaction_config.as_ref(),
-                    )
-                    .await;
+                    );
                     compact_task.table_watermarks = version
                         .latest_version()
                         .safe_epoch_table_watermarks(&compact_task.existing_table_ids);
@@ -1100,6 +1100,14 @@ impl HummockManager {
         Ok(rets[0])
     }
 
+    pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
+        let compaction_guard = self.compaction.write().await;
+        let versioning_guard = self.versioning.write().await;
+
+        self.report_compact_tasks_impl(report_tasks, compaction_guard, versioning_guard)
+            .await
+    }
+
     /// Finishes or cancels a compaction task, according to `task_status`.
     ///
     /// If `context_id` is not None, its validity will be checked when writing meta store.
@@ -1107,10 +1115,14 @@ impl HummockManager {
     ///
     /// Return Ok(false) indicates either the task is not found,
     /// or the task is not owned by `context_id` when `context_id` is not None.
-    pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
-        let mut guard = self.compaction.write().await;
+    pub async fn report_compact_tasks_impl(
+        &self,
+        report_tasks: Vec<ReportTask>,
+        mut compaction_guard: RwLockWriteGuard<'_, Compaction>,
+        mut versioning_guard: RwLockWriteGuard<'_, Versioning>,
+    ) -> Result<Vec<bool>> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
-        let compaction: &mut Compaction = &mut guard;
+        let compaction: &mut Compaction = &mut compaction_guard;
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
@@ -1118,7 +1130,6 @@ impl HummockManager {
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
-        let mut versioning_guard = self.versioning.write().await;
         let versioning: &mut Versioning = &mut versioning_guard;
         let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
@@ -1429,7 +1440,7 @@ impl HummockManager {
         }
     }
 
-    pub(crate) async fn calculate_vnode_partition(
+    pub(crate) fn calculate_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
@@ -1473,21 +1484,17 @@ impl HummockManager {
                 .env
                 .opts
                 .compact_task_table_size_partition_threshold_high;
-            use risingwave_common::system_param::reader::SystemParamsRead;
-            let params = self.env.system_params_reader().await;
-            let barrier_interval_ms = params.barrier_interval_ms() as u64;
-            let checkpoint_secs = std::cmp::max(
-                1,
-                params.checkpoint_frequency() * barrier_interval_ms / 1000,
-            );
             // check latest write throughput
-            let history_table_throughput = self.history_table_throughput.read();
+            let table_write_throughput_statistic_manager =
+                self.table_write_throughput_statistic_manager.read();
+            let timestamp = chrono::Utc::now().timestamp();
             for (table_id, compact_table_size) in table_size_info {
-                let write_throughput = history_table_throughput
-                    .get(&table_id)
-                    .map(|que| que.back().cloned().unwrap_or(0))
-                    .unwrap_or(0)
-                    / checkpoint_secs;
+                let write_throughput = table_write_throughput_statistic_manager
+                    .get_table_throughput_descending(table_id, timestamp)
+                    .peekable()
+                    .peek()
+                    .map(|item| item.throughput)
+                    .unwrap_or(0);
                 if compact_table_size > compact_task_table_size_partition_threshold_high
                     && default_partition_count > 0
                 {

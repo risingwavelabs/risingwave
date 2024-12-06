@@ -63,6 +63,7 @@ pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, TableId, ViewId};
 use crate::error::ErrorCode;
@@ -132,6 +133,19 @@ pub struct Binder {
 
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// Information for `secure_compare` function. It's ONLY available when binding the
+    /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
+    secure_compare_context: Option<SecureCompareContext>,
+}
+
+// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
+#[derive(Default, Clone, Debug)]
+pub struct SecureCompareContext {
+    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
+    pub column_name: String,
+    /// The secret (usually a token provided by the webhook source user) to validate the calls
+    pub secret_name: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -332,6 +346,7 @@ impl Binder {
             param_types: ParameterTypes::new(param_types),
             udf_context: UdfContext::new(),
             temporary_source_manager: session.temporary_source_manager(),
+            secure_compare_context: None,
         }
     }
 
@@ -354,6 +369,15 @@ impl Binder {
         Self::new_inner(session, BindFor::Ddl, vec![])
     }
 
+    pub fn new_for_ddl_with_secure_compare(
+        session: &SessionImpl,
+        ctx: SecureCompareContext,
+    ) -> Binder {
+        let mut binder = Self::new_inner(session, BindFor::Ddl, vec![]);
+        binder.secure_compare_context = Some(ctx);
+        binder
+    }
+
     pub fn new_for_system(session: &SessionImpl) -> Binder {
         Self::new_inner(session, BindFor::System, vec![])
     }
@@ -369,7 +393,6 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
-    #[expect(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }
@@ -481,6 +504,10 @@ impl Binder {
             &self.search_path,
             &self.auth_context.user_name,
         )
+    }
+
+    fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {
+        SchemaPath::new(schema_name, &self.search_path, &self.auth_context.user_name)
     }
 
     pub fn set_clause(&mut self, clause: Option<Clause>) {

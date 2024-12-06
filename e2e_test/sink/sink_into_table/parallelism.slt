@@ -8,16 +8,16 @@ statement ok
 SET STREAMING_PARALLELISM TO 2;
 
 statement ok
-create table t_simple (v1 int, v2 int);
+create table t_simple (v1 int, v2 int) append only;
 
 statement ok
-create table m_simple (v1 int primary key, v2 int);
+create table m_simple (v1 int, v2 int) append only;
 
 statement ok
 SET STREAMING_PARALLELISM TO 3;
 
 statement ok
-create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
+create sink s_simple_1 into m_simple as select v1, v2 from t_simple with (type = 'append-only');
 
 query I
 select distinct parallelism from rw_fragment_parallelism where name in ('t_simple', 'm_simple', 's_simple_1');

@@ -45,7 +45,7 @@ pub(crate) struct MergeExecutorInput {
     upstream_fragment_id: UpstreamFragmentId,
     shared_context: Arc<SharedContext>,
     executor_stats: Arc<StreamingMetrics>,
-    info: ExecutorInfo,
+    pub(crate) info: ExecutorInfo,
     chunk_size: usize,
 }
 
@@ -172,14 +172,13 @@ impl MergeExecutor {
         actor_id: ActorId,
         inputs: Vec<super::exchange::permit::Receiver>,
         shared_context: Arc<SharedContext>,
+        local_barrier_manager: crate::task::LocalBarrierManager,
         schema: Schema,
     ) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
-        let barrier_rx = shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_id);
+        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_id);
 
         let metrics = StreamingMetrics::unused();
         let actor_ctx = ActorContext::for_test(actor_id);
@@ -806,11 +805,7 @@ mod tests {
         let b2 = Barrier::with_prev_epoch_for_test(test_epoch(1000), *prev_epoch)
             .with_mutation(Mutation::Stop(HashSet::default()));
         barrier_test_env.inject_barrier(&b2, [actor_id]);
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .flush_all_events()
-            .await;
+        barrier_test_env.flush_all_events().await;
 
         for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
@@ -845,6 +840,7 @@ mod tests {
             actor_id,
             rxs,
             barrier_test_env.shared_context.clone(),
+            barrier_test_env.local_barrier_manager.clone(),
             Schema::new(vec![]),
         );
         let mut merger = merger.boxed().execute();
@@ -942,13 +938,11 @@ mod tests {
             },
         ));
         barrier_test_env.inject_barrier(&b1, [actor_id]);
-        barrier_test_env
-            .shared_context
-            .local_barrier_manager
-            .flush_all_events()
-            .await;
+        barrier_test_env.flush_all_events().await;
 
-        let barrier_rx = ctx.local_barrier_manager.subscribe_barrier(actor_id);
+        let barrier_rx = barrier_test_env
+            .local_barrier_manager
+            .subscribe_barrier(actor_id);
         let actor_ctx = ActorContext::for_test(actor_id);
         let upstream = MergeExecutor::new_select_receiver(inputs, &metrics, &actor_ctx);
 
@@ -1110,6 +1104,7 @@ mod tests {
                 addr.into(),
                 (0, 0),
                 (0, 0),
+                test_env.shared_context.database_id,
                 Arc::new(StreamingMetrics::unused()),
                 BATCHED_PERMITS,
             )

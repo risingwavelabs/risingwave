@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use either::Either;
-use foyer::CacheContext;
+use foyer::CacheHint;
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
@@ -650,7 +650,7 @@ where
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
 
@@ -1221,7 +1221,7 @@ where
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
 
@@ -1239,7 +1239,7 @@ where
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             prefetch_options,
-            cache_policy: CachePolicy::Fill(CacheContext::Default),
+            cache_policy: CachePolicy::Fill(CacheHint::Normal),
             ..Default::default()
         };
 

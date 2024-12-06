@@ -21,8 +21,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
-    CacheContext, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry,
+    CacheHint, Engine, EventListener, FetchState, HybridCache, HybridCacheBuilder, HybridCacheEntry,
 };
 use futures::{future, StreamExt};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -67,7 +66,7 @@ impl EventListener for BlockCacheEventListener {
     type Key = SstableBlockIndex;
     type Value = Box<Block>;
 
-    fn on_memory_release(&self, _key: Self::Key, value: Self::Value)
+    fn on_leave(&self, _reason: foyer::Event, _key: &Self::Key, value: &Self::Value)
     where
         Self::Key: foyer::Key,
         Self::Value: foyer::Value,
@@ -84,14 +83,14 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill(CacheContext),
+    Fill(CacheHint),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        CachePolicy::Fill(CacheContext::Default)
+        CachePolicy::Fill(CacheHint::Normal)
     }
 }
 
@@ -354,9 +353,9 @@ impl SstableStore {
                 let cache_priority = if idx == block_index {
                     priority
                 } else {
-                    CacheContext::LowPriority
+                    CacheHint::Low
                 };
-                let entry = self.block_cache.insert_with_context(
+                let entry = self.block_cache.insert_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: idx as _,
@@ -440,7 +439,7 @@ impl SstableStore {
 
         match policy {
             CachePolicy::Fill(context) => {
-                let entry = self.block_cache.fetch_with_context(
+                let entry = self.block_cache.fetch_with_hint(
                     SstableBlockIndex {
                         sst_id: object_id,
                         block_idx: block_index as _,
@@ -538,16 +537,16 @@ impl SstableStore {
     /// Returns `table_holder`
     pub fn sstable(
         &self,
-        sst: &SstableInfo,
+        sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
-        let object_id = sst.object_id;
+        let object_id = sstable_info_ref.object_id;
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
             let meta_path = self.get_sst_data_path(object_id);
             let stats_ptr = stats.remote_io_time.clone();
-            let range = sst.meta_offset as usize..;
+            let range = sstable_info_ref.meta_offset as usize..;
             async move {
                 let now = Instant::now();
                 let buf = store.read(&meta_path, range).await?;
@@ -716,6 +715,7 @@ mod tests {
             holder,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
+            info,
         );
         iter.rewind().await.unwrap();
         for i in x_range {
@@ -749,7 +749,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
-            vec![SST_ID as u32],
+            vec![0],
         )
         .await
         .unwrap();
@@ -780,7 +780,7 @@ mod tests {
             meta.clone(),
             sstable_store.clone(),
             writer_opts,
-            vec![SST_ID as u32],
+            vec![0],
         )
         .await
         .unwrap();

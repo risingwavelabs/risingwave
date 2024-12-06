@@ -111,13 +111,5 @@
             <artifactId>risingwave-sink-cassandra</artifactId>
             <scope>provided</scope>
         </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-        </dependency>
     </dependencies>
 </project>

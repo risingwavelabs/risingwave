@@ -284,6 +284,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                         CreateTable {
                             or_replace: false,
@@ -332,6 +334,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                         CreateTable {
                             or_replace: false,
@@ -391,6 +395,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                     ],
                 )"#]],
@@ -526,6 +532,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                         CreateTable {
                             or_replace: false,
@@ -581,6 +589,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                         CreateTable {
                             or_replace: false,
@@ -643,6 +653,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                         CreateTable {
                             or_replace: false,
@@ -723,6 +735,8 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                             query: None,
                             cdc_table_info: None,
                             include_column_options: [],
+                            webhook_info: None,
+                            engine: Hummock,
                         },
                     ],
                 )"#]],

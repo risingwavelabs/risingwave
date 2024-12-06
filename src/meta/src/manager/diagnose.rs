@@ -759,12 +759,12 @@ fn redact_all_sql_options(sql: &str) -> Option<String> {
         };
         if let Some(options) = options.0 {
             for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into());
+                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
             }
         }
         if let Some(options) = options.1 {
             for option in options {
-                option.value = Value::SingleQuotedString("[REDACTED]".into());
+                option.value = Value::SingleQuotedString("[REDACTED]".into()).into();
             }
         }
         writeln!(&mut redacted, "{statement}").unwrap();

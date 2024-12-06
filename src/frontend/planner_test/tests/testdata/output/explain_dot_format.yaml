@@ -437,3 +437,32 @@
         176 -> 182 [ ]
         182 -> 183 [ ]
     }
+- name: test dot output format (distsql, stream)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (distsql, format dot) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  explain_output: |
+    digraph {
+        0 [ label = "Fragment 0\l" ]
+        1 [ label = "StreamMaterialize { columns: [approx_percentile], stream_key: [], pk_columns: [], pk_conflict: NoCheck }\ltables: [\"Materialize: 4294967294\"]\l" ]
+        2 [ label = "StreamGlobalApproxPercentile { quantile: 0.5:Float64, relative_error: 0.01:Float64 }\ltables: [\"GlobalApproxPercentileBucketState: 0\",\"GlobalApproxPercentileCountState: 1\"]\l" ]
+        3 [ label = "StreamExchange Single from 1" ]
+        4 [ label = "Fragment 1\l" ]
+        5 [ label = "StreamLocalApproxPercentile { percentile_col: $expr1, quantile: 0.5:Float64, relative_error: 0.01:Float64 }" ]
+        6 [ label = "StreamProject { exprs: [t.v1::Float64 as $expr1, t._row_id] }" ]
+        7 [ label = "StreamTableScan { table: t, columns: [v1, _row_id] }\ltables: [\"StreamScan: 2\"]\l" ]
+        8 [ label = "Upstream" ]
+        9 [ label = "BatchPlanNode" ]
+        10 [ label = "Table 0\lcolumns: [\"sign\",\"bucket_id\",\"count\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\",\"$1 ASC\"]\lvalue indices: [\"0\",\"1\",\"2\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
+        11 [ label = "Table 1\lcolumns: [\"total_count\",\"_rw_timestamp\"]\lprimary key: []\lvalue indices: [\"0\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
+        12 [ label = "Table 2\lcolumns: [\"vnode\",\"_row_id\",\"backfill_finished\",\"row_count\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\",\"2\",\"3\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\lvnode column idx: \"0\"\l" ]
+        13 [ label = "Table 4294967294\lcolumns: [\"approx_percentile\",\"_rw_timestamp\"]\lprimary key: []\lvalue indices: [\"0\"]\ldistribution key: []\lread pk prefix len hint: \"0\"\l" ]
+        0 -> 1 [ label = "" ]
+        1 -> 2 [ label = "" ]
+        2 -> 3 [ label = "" ]
+        4 -> 5 [ label = "" ]
+        5 -> 6 [ label = "" ]
+        6 -> 7 [ label = "" ]
+        7 -> 8 [ label = "" ]
+        7 -> 9 [ label = "" ]
+    }

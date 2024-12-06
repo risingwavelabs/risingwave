@@ -46,6 +46,7 @@ use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 async fn test_merger_sum_aggr() {
     let expr_context = ExprContext {
         time_zone: String::from("UTC"),
+        strict_mode: false,
     };
 
     let barrier_test_env = LocalBarrierTestEnv::for_test().await;
@@ -65,6 +66,7 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let shared_context = barrier_test_env.shared_context.clone();
+        let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         let (tx, rx) = channel_for_test();
         let actor_future = async move {
@@ -74,7 +76,13 @@ async fn test_merger_sum_aggr() {
                     pk_indices: PkIndices::new(),
                     identity: "ReceiverExecutor".to_string(),
                 },
-                ReceiverExecutor::for_test(actor_id, input_rx, shared_context.clone()).boxed(),
+                ReceiverExecutor::for_test(
+                    actor_id,
+                    input_rx,
+                    shared_context.clone(),
+                    local_barrier_manager.clone(),
+                )
+                .boxed(),
             );
             let agg_calls = vec![
                 AggCall::from_pretty("(count:int8)"),
@@ -96,7 +104,7 @@ async fn test_merger_sum_aggr() {
                 StreamingMetrics::unused().into(),
                 actor_ctx,
                 expr_context,
-                shared_context.local_barrier_manager.clone(),
+                local_barrier_manager.clone(),
             );
 
             actor.run().await
@@ -129,6 +137,7 @@ async fn test_merger_sum_aggr() {
     let (input, rx) = channel_for_test();
     let actor_future = {
         let shared_context = barrier_test_env.shared_context.clone();
+        let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         async move {
             let receiver_op = Executor::new(
@@ -138,7 +147,13 @@ async fn test_merger_sum_aggr() {
                     pk_indices: PkIndices::new(),
                     identity: "ReceiverExecutor".to_string(),
                 },
-                ReceiverExecutor::for_test(actor_id, rx, shared_context.clone()).boxed(),
+                ReceiverExecutor::for_test(
+                    actor_id,
+                    rx,
+                    shared_context.clone(),
+                    local_barrier_manager.clone(),
+                )
+                .boxed(),
             );
             let dispatcher = DispatchExecutor::new(
                 receiver_op,
@@ -159,7 +174,7 @@ async fn test_merger_sum_aggr() {
                 StreamingMetrics::unused().into(),
                 ActorContext::for_test(actor_id),
                 expr_context,
-                shared_context.local_barrier_manager.clone(),
+                local_barrier_manager.clone(),
             );
             actor.run().await
         }
@@ -172,6 +187,7 @@ async fn test_merger_sum_aggr() {
     let items = Arc::new(Mutex::new(vec![]));
     let actor_future = {
         let shared_context = barrier_test_env.shared_context.clone();
+        let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let expr_context = expr_context.clone();
         let items = items.clone();
         async move {
@@ -187,8 +203,14 @@ async fn test_merger_sum_aggr() {
                     pk_indices: PkIndices::new(),
                     identity: "MergeExecutor".to_string(),
                 },
-                MergeExecutor::for_test(actor_ctx.id, outputs, shared_context.clone(), schema)
-                    .boxed(),
+                MergeExecutor::for_test(
+                    actor_ctx.id,
+                    outputs,
+                    shared_context.clone(),
+                    local_barrier_manager.clone(),
+                    schema,
+                )
+                .boxed(),
             );
 
             // for global aggregator, we need to sum data and sum row count
@@ -232,7 +254,7 @@ async fn test_merger_sum_aggr() {
                 StreamingMetrics::unused().into(),
                 actor_ctx.clone(),
                 expr_context,
-                shared_context.local_barrier_manager.clone(),
+                local_barrier_manager.clone(),
             );
             actor.run().await
         }
@@ -243,11 +265,7 @@ async fn test_merger_sum_aggr() {
     let mut epoch = test_epoch(1);
     let b1 = Barrier::new_test_barrier(epoch);
     barrier_test_env.inject_barrier(&b1, actors.clone());
-    barrier_test_env
-        .shared_context
-        .local_barrier_manager
-        .flush_all_events()
-        .await;
+    barrier_test_env.flush_all_events().await;
     let handles = actor_futures
         .into_iter()
         .map(|actor_future| tokio::spawn(actor_future))

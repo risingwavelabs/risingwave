@@ -34,6 +34,7 @@
     "d3-selection": "^3.0.0",
     "fabric": "^5.2.1",
     "framer-motion": "^6.5.1",
+    "graphviz-react": "^1.2.5",
     "lodash": "^4.17.21",
     "next": "^14.2.12",
     "nuqs": "^1.14.1",

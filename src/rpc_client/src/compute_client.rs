@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
@@ -115,6 +116,7 @@ impl ComputeClient {
         down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
+        database_id: DatabaseId,
     ) -> Result<(
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
@@ -132,6 +134,7 @@ impl ComputeClient {
                     down_actor_id,
                     up_fragment_id,
                     down_fragment_id,
+                    database_id: database_id.database_id,
                 })),
             },
         ))

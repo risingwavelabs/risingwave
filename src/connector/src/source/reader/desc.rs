@@ -91,7 +91,7 @@ impl SourceDescBuilder {
             .map(|s| s.to_lowercase())
             .unwrap();
         let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name);
+            source_add_partition_offset_cols(&self.columns, &connector_name, false);
 
         let mut columns: Vec<_> = self
             .columns

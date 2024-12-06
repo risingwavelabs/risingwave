@@ -37,12 +37,14 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
+constant_time_eq = "0.3"
 educe = "0.6"
 fancy-regex = "0.14"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 ginepro = "0.8"
 hex = "0.4"
+hmac = "0.12"
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }

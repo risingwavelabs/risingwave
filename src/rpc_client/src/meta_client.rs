@@ -54,6 +54,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -68,7 +69,6 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -585,6 +585,29 @@ impl MetaClient {
             object: Some(object),
         };
         let resp = self.inner.alter_swap_rename(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_secret(
+        &self,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<WaitVersion> {
+        let request = AlterSecretRequest {
+            secret_id,
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.alter_secret(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -1227,6 +1250,12 @@ impl MetaClient {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
+    }
+
+    pub async fn get_meta_store_endpoint(&self) -> Result<String> {
+        let req = GetMetaStoreInfoRequest {};
+        let resp = self.inner.get_meta_store_info(req).await?;
+        Ok(resp.meta_store_endpoint)
     }
 
     pub async fn set_system_param(
@@ -2043,6 +2072,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
+            ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -2095,6 +2125,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
+            ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

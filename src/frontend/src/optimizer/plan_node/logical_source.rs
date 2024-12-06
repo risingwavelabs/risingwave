@@ -248,6 +248,21 @@ impl LogicalSource {
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Result<Self> {
+        let row_id_index = self.core.row_id_index;
+        let kind = self.core.kind.clone();
+        let ctx = self.core.ctx.clone();
+        let as_of = self.core.as_of.clone();
+        Self::new(
+            self.source_catalog(),
+            column_catalog,
+            row_id_index,
+            kind,
+            ctx,
+            as_of,
+        )
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}

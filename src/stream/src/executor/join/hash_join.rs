@@ -197,6 +197,22 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// - Inner: neither side.
     ///
     /// Should be set to `None` if `need_degree_table` was set to `false`.
+    ///
+    /// The degree of each row will tell us if we need to emit `NULL` for the row.
+    /// For instance, given `lhs LEFT JOIN rhs`,
+    /// If the degree of a row in `lhs` is 0, it means the row does not have a match in `rhs`.
+    /// If the degree of a row in `lhs` is 2, it means the row has two matches in `rhs`.
+    /// Now, when emitting the result of the join, we need to emit `NULL` for the row in `lhs` if
+    /// the degree is 0.
+    ///
+    /// Why don't just use a boolean value instead of a degree count?
+    /// Consider the case where we delete a matched record from `rhs`.
+    /// Since we can delete a record,
+    /// there must have been a record in `rhs` that matched the record in `lhs`.
+    /// So this value is `true`.
+    /// But we don't know how many records are matched after removing this record,
+    /// since we only stored a boolean value rather than the count.
+    /// Hence we need to store the count of matched records.
     degree_state: Option<TableInner<S>>,
     /// If degree table is need
     need_degree_table: bool,

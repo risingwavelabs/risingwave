@@ -186,7 +186,7 @@ pub async fn gen_iterator_test_sstable_base(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
     total: usize,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,
@@ -206,7 +206,7 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
     object_id: HummockSstableObjectId,
     kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     gen_test_sstable(
         default_builder_opt_for_test(),
         object_id,
@@ -242,7 +242,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     let sstable_store = mock_sstable_store().await;
     let mut result = vec![];
     for i in 0..count {
-        let table = gen_iterator_test_sstable_base(
+        let (table, sstable_info) = gen_iterator_test_sstable_base(
             i as HummockSstableObjectId,
             default_builder_opt_for_test(),
             |x| x * count + i,
@@ -254,6 +254,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             table,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
+            &sstable_info,
         ));
     }
     result
@@ -266,7 +267,7 @@ pub async fn gen_iterator_test_sstable_with_incr_epoch(
     sstable_store: SstableStoreRef,
     total: usize,
     epoch_base: u64,
-) -> TableHolder {
+) -> (TableHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,

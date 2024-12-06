@@ -18,14 +18,16 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConflictBehavior, CreateType, Field, Schema, StreamJobStatus, TableDesc,
+    ColumnCatalog, ConflictBehavior, CreateType, Engine, Field, Schema, StreamJobStatus, TableDesc,
     TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, PbEngine, PbTableType, PbTableVersion,
+};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable, PbWebhookSourceInfo};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -180,7 +182,16 @@ pub struct TableCatalog {
     /// [`StreamMaterialize::derive_table_catalog`]: crate::optimizer::plan_node::StreamMaterialize::derive_table_catalog
     /// [`TableCatalogBuilder::build`]: crate::optimizer::plan_node::utils::TableCatalogBuilder::build
     pub vnode_count: VnodeCount,
+
+    pub webhook_info: Option<PbWebhookSourceInfo>,
+
+    pub job_id: Option<TableId>,
+
+    pub engine: Engine,
 }
+
+pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
+pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
@@ -281,7 +292,25 @@ impl TableCatalog {
         self.table_type
     }
 
-    pub fn is_table(&self) -> bool {
+    pub fn engine(&self) -> Engine {
+        self.engine
+    }
+
+    pub fn iceberg_source_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SOURCE_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
+    pub fn iceberg_sink_name(&self) -> Option<String> {
+        match self.engine {
+            Engine::Iceberg => Some(format!("{}{}", ICEBERG_SINK_PREFIX, self.name)),
+            Engine::Hummock => None,
+        }
+    }
+
+    pub fn is_user_table(&self) -> bool {
         self.table_type == TableType::Table
     }
 
@@ -464,6 +493,9 @@ impl TableCatalog {
             retention_seconds: self.retention_seconds,
             cdc_table_id: self.cdc_table_id.clone(),
             maybe_vnode_count: self.vnode_count.to_protobuf(),
+            webhook_info: self.webhook_info.clone(),
+            job_id: self.job_id.map(|id| id.table_id),
+            engine: Some(self.engine.to_protobuf().into()),
         }
     }
 
@@ -558,12 +590,20 @@ impl TableCatalog {
     pub fn is_created(&self) -> bool {
         self.stream_job_status == StreamJobStatus::Created
     }
+
+    pub fn is_iceberg_engine_table(&self) -> bool {
+        self.engine == Engine::Iceberg
+    }
 }
 
 impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
+        let tb_engine = tb
+            .get_engine()
+            .map(|engine| PbEngine::try_from(*engine).expect("Invalid engine"))
+            .unwrap_or(PbEngine::Hummock);
         let table_type = tb.get_table_type().unwrap();
         let stream_job_status = tb
             .get_stream_job_status()
@@ -607,6 +647,7 @@ impl From<PbTable> for TableCatalog {
         for idx in &tb.watermark_indices {
             watermark_columns.insert(*idx as _);
         }
+        let engine = Engine::from_protobuf(&tb_engine);
 
         Self {
             id: id.into(),
@@ -656,6 +697,9 @@ impl From<PbTable> for TableCatalog {
                 .collect_vec(),
             cdc_table_id: tb.cdc_table_id,
             vnode_count,
+            webhook_info: tb.webhook_info,
+            job_id: tb.job_id.map(TableId::from),
+            engine,
         }
     }
 }
@@ -679,6 +723,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::PbEngine;
     use risingwave_pb::plan_common::{
         AdditionalColumn, ColumnDescVersion, PbColumnCatalog, PbColumnDesc,
     };
@@ -747,6 +792,9 @@ mod tests {
             version_column_index: None,
             cdc_table_id: None,
             maybe_vnode_count: VnodeCount::set(233).to_protobuf(),
+            webhook_info: None,
+            job_id: None,
+            engine: Some(PbEngine::Hummock as i32),
         }
         .into();
 
@@ -761,10 +809,11 @@ mod tests {
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
-                            data_type: DataType::new_struct(
-                                vec![DataType::Varchar, DataType::Varchar],
-                                vec!["address".to_string(), "zipcode".to_string()]
-                            ),
+                            data_type: StructType::new(vec![
+                                ("address", DataType::Varchar),
+                                ("zipcode", DataType::Varchar)
+                            ],)
+                            .into(),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
@@ -813,6 +862,9 @@ mod tests {
                 version_column_index: None,
                 cdc_table_id: None,
                 vnode_count: VnodeCount::set(233),
+                webhook_info: None,
+                job_id: None,
+                engine: Engine::Hummock,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
