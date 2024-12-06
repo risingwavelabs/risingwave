@@ -240,7 +240,10 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
     }
 }
 
-// Plan like 'select * , pk in table order by pk'
+/// `from_name` is the table name,
+/// `pks` is the primary key columns’ `name` and `is_hidden`
+/// `seek_pk_rows` is the seek pk values for the cursor.
+/// So the query like `SELECT *, except(hidden pk) FROM table_name WHERE (pk1,pk2,pk3..) > (seek_pk1,seek_pk2,seek_pk3...) order by pk1,pk2,pk3..`
 pub fn gen_query_from_table_name_order_by(
     from_name: ObjectName,
     pks: Vec<(String, bool)>,

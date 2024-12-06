@@ -16,14 +16,12 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -36,7 +34,8 @@ use risingwave_storage::{dispatch_state_store, StateStore};
 use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    build_scan_ranges_from_pb, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
@@ -144,31 +143,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
-        let scan_ranges = {
-            let scan_ranges = &seq_scan_node.scan_ranges;
-            if scan_ranges.is_empty() {
-                vec![ScanRange::full()]
-            } else {
-                scan_ranges
-                    .iter()
-                    .map(|scan_range| {
-                        let pk_types = table_desc
-                            .pk
-                            .iter()
-                            .map(|order| {
-                                DataType::from(
-                                    table_desc.columns[order.column_index as usize]
-                                        .column_type
-                                        .as_ref()
-                                        .unwrap(),
-                                )
-                            })
-                            .collect_vec();
-                        ScanRange::new(scan_range.clone(), pk_types)
-                    })
-                    .try_collect()?
-            }
-        };
+        let scan_ranges = build_scan_ranges_from_pb(&seq_scan_node.scan_ranges, table_desc)?;
 
         let ordered = seq_scan_node.ordered;
 
@@ -355,7 +330,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         histogram: Option<impl Deref<Target = Histogram>>,
     ) {
         let pk_prefix = scan_range.pk_prefix.clone();
-        let range_bounds = scan_range.convert_to_range_bounds(table.clone());
+        let range_bounds = scan_range.convert_to_range_bounds(&table);
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table

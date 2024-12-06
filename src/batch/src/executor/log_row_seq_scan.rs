@@ -18,14 +18,13 @@ use std::sync::Arc;
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
-use itertools::Itertools;
 use prometheus::Histogram;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::row::{Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
@@ -38,6 +37,7 @@ use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, ScanRange,
 };
 use crate::error::{BatchError, Result};
+use crate::executor::build_scan_ranges_from_pb;
 use crate::monitor::BatchMetrics;
 use crate::task::BatchTaskContext;
 
@@ -145,31 +145,8 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
         let old_epoch = old_epoch.epoch;
         let new_epoch = new_epoch.epoch;
 
-        let scan_ranges = {
-            let scan_ranges = &log_store_seq_scan_node.scan_ranges;
-            if scan_ranges.is_empty() {
-                vec![ScanRange::full()]
-            } else {
-                scan_ranges
-                    .iter()
-                    .map(|scan_range| {
-                        let pk_types = table_desc
-                            .pk
-                            .iter()
-                            .map(|order| {
-                                DataType::from(
-                                    table_desc.columns[order.column_index as usize]
-                                        .column_type
-                                        .as_ref()
-                                        .unwrap(),
-                                )
-                            })
-                            .collect_vec();
-                        ScanRange::new(scan_range.clone(), pk_types)
-                    })
-                    .try_collect()?
-            }
-        };
+        let scan_ranges =
+            build_scan_ranges_from_pb(&log_store_seq_scan_node.scan_ranges, table_desc)?;
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(state_store, column_ids, vnodes, table_desc);
@@ -258,7 +235,7 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
         scan_range: ScanRange,
     ) {
         let pk_prefix = scan_range.pk_prefix.clone();
-        let range_bounds = scan_range.convert_to_range_bounds(table.clone());
+        let range_bounds = scan_range.convert_to_range_bounds(&table);
         // Range Scan.
         let iter = table
             .batch_iter_log_with_pk_bounds(

@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use core::ops::{Bound, RangeBounds};
-use std::sync::Arc;
 
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
@@ -208,7 +209,7 @@ impl ScanRange {
 
     pub fn convert_to_range_bounds<S: StateStore>(
         self,
-        table: Arc<StorageTable<S>>,
+        table: &StorageTable<S>,
     ) -> impl RangeBounds<OwnedRow> {
         let ScanRange {
             pk_prefix,
@@ -251,5 +252,33 @@ impl ScanRange {
             order_type.nulls_are_last(),
         );
         (start_bound, end_bound)
+    }
+}
+
+pub fn build_scan_ranges_from_pb(
+    scan_ranges: &Vec<PbScanRange>,
+    table_desc: &StorageTableDesc,
+) -> Result<Vec<ScanRange>> {
+    if scan_ranges.is_empty() {
+        Ok(vec![ScanRange::full()])
+    } else {
+        Ok(scan_ranges
+            .iter()
+            .map(|scan_range| {
+                let pk_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|order| {
+                        DataType::from(
+                            table_desc.columns[order.column_index as usize]
+                                .column_type
+                                .as_ref()
+                                .unwrap(),
+                        )
+                    })
+                    .collect_vec();
+                ScanRange::new(scan_range.clone(), pk_types)
+            })
+            .try_collect()?)
     }
 }
