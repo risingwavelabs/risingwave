@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -232,6 +232,67 @@ impl Sink for PostgresSink {
     }
 }
 
+type ParameterColumnLength = usize;
+type ParameterRowLength = usize;
+
+struct ParameterBuffer<'a> {
+    /// A set of parameters to be inserted/deleted.
+    /// Each set is a flattened 2d-array.
+    parameters: Vec<Vec<Option<ScalarAdapter>>>,
+    /// the column dimension (fixed).
+    column_length: usize,
+    /// schema types to serialize into ScalarAdapter
+    schema_types: &'a [PgType],
+    estimated_parameter_size: usize,
+    current_parameter_buffer: Vec<Option<ScalarAdapter>>,
+}
+
+impl ParameterBuffer {
+
+    /// The maximum number of parameters that can be sent in a single query.
+    /// See: <https://www.postgresql.org/docs/current/limits.html>
+    const MAX_PARAMETERS: usize = 65535;
+
+    fn new(schema_types: &[PgType], chunk_size: usize) -> Self {
+        let estimated_parameter_size = usize::min(Self::MAX_PARAMETERS, chunk_size);
+        Self {
+            parameters: vec![],
+            column_length: schema_types.len(),
+            schema_types,
+            estimated_parameter_size,
+            current_parameter_buffer: Vec::with_capacity(estimated_parameter_size),
+        }
+    }
+
+    fn add_row(&mut self, row: impl Row) {
+        if self.current_parameter_buffer.len() + self.column_length >= Self::MAX_PARAMETERS {
+            self.new_buffer();
+        }
+        for (i, datum_ref) in row.iter().enumerate() {
+            let pg_datum = datum_ref.map(|s| {
+                let ty = &self.schema_types[i];
+                match ScalarAdapter::from_scalar(s, ty) {
+                    Ok(scalar) => Some(scalar),
+                    Err(e) => {
+                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
+                        None
+                    }
+                }
+            });
+            self.current_parameter_buffer.push(pg_datum.flatten());
+        }
+    }
+
+    fn new_buffer(&mut self) {
+        let filled_buffer = std::mem::replace(&mut self.current_parameter_buffer, Vec::with_capacity(self.estimated_parameter_size));
+        self.parameters.push(filled_buffer);
+    }
+
+    fn into_parts(self) -> (Vec<Vec<Option<ScalarAdapter>>>, Vec<Option<ScalarAdapter>>) {
+        (self.parameters, self.current_parameter_buffer)
+    }
+}
+
 pub struct PostgresSinkWriter {
     config: PostgresConfig,
     pk_indices: Vec<usize>,
@@ -304,105 +365,104 @@ impl PostgresSinkWriter {
     }
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let transaction = self.client.transaction().await?;
+        // https://www.postgresql.org/docs/current/limits.html
+        // We have a limit of 65,535 parameters in a single query, as restricted by the PostgreSQL protocol.
         if self.is_append_only {
-            // 1d flattened array of parameters to be inserted.
-            let mut rows = Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
-            for (op, row) in chunk.rows() {
-                match op {
-                    Op::Insert => {
-                        for (i, datum_ref) in row.iter().enumerate() {
-                            let pg_datum = datum_ref.map(|s| {
-                                let ty = &self.schema_types[i];
-                                match ScalarAdapter::from_scalar(s, ty) {
-                                    Ok(scalar) => Some(scalar),
-                                    Err(e) => {
-                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
-                                        None
-                                    }
-                                }
-                            });
-                            rows.push(pg_datum.flatten());
-                        }
-                    }
-                    Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
-                        bail!("append-only sink should not receive update insert, update delete and delete operations")
-                    }
-                }
-            }
-            let insert_statement =
-                create_insert_sql(&self.schema, &self.config.table, chunk.cardinality());
-            transaction.execute_raw(&insert_statement, rows).await?;
+            self.write_batch_append_only(chunk).await
         } else {
-            // 1d flattened array of parameters to be inserted.
-            let mut insert_parameters =
-                Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
-            let mut insert_row_count = 0;
-            let mut delete_parameters =
-                Vec::with_capacity(chunk.cardinality() * chunk.columns().len());
-            let mut delete_row_count = 0;
-            for (op, row) in chunk.rows() {
-                match op {
-                    Op::UpdateInsert | Op::UpdateDelete => {
-                        bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
-                    }
-                    Op::Insert => {
-                        insert_row_count += 1;
-                        for (i, datum_ref) in row.iter().enumerate() {
-                            let pg_datum = datum_ref.map(|s| {
-                                let ty = &self.schema_types[i];
-                                match ScalarAdapter::from_scalar(s, ty) {
-                                    Ok(scalar) => Some(scalar),
-                                    Err(e) => {
-                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
-                                        None
-                                    }
-                                }
-                            });
-                            insert_parameters.push(pg_datum.flatten());
-                        }
-                    }
-                    Op::Delete => {
-                        delete_row_count += 1;
-                        for (i, datum_ref) in row.project(&self.pk_indices).iter().enumerate() {
-                            let pg_datum = datum_ref.map(|s| {
-                                let ty = &self.schema_types[i];
-                                match ScalarAdapter::from_scalar(s, ty) {
-                                    Ok(scalar) => Some(scalar),
-                                    Err(e) => {
-                                        tracing::error!(error=%e.as_report(), scalar=?s, "Failed to convert scalar to pg value");
-                                        None
-                                    }
-                                }
-                            });
-                            delete_parameters.push(pg_datum.flatten());
-                        }
-                    }
+            self.write_batch_non_append_only(chunk).await
+        }
+    }
+
+    async fn write_batch_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        let mut transaction = self.client.transaction().await?;
+        // 1d flattened array of parameters to be inserted.
+        let mut parameter_buffer = ParameterBuffer::new(&self.schema_types, chunk.cardinality());
+        for (op, row) in chunk.rows() {
+            match op {
+                Op::Insert => {
+                    parameter_buffer.add_row(row);
+                }
+                Op::UpdateInsert | Op::Delete | Op::UpdateDelete => {
+                    bail!("append-only sink should not receive update insert, update delete and delete operations")
                 }
             }
-            if insert_row_count > 0 {
-                let insert_statement =
-                    create_insert_sql(&self.schema, &self.config.table, insert_row_count);
-                transaction
-                    .execute_raw(&insert_statement, insert_parameters)
-                    .await?;
-            }
+        }
+        let (parameters, current_parameter_buffer) = parameter_buffer.into_parts();
+        self.execute_parameter(&mut transaction, parameters, Op::Insert, current_parameter_buffer).await?;
+        transaction.commit().await?;
+        Ok(())
+    }
 
-            if delete_row_count > 0 {
-                let delete_statement = create_delete_sql(
-                    &self.schema,
-                    &self.config.table,
-                    &self.pk_indices,
-                    delete_row_count,
-                );
-                transaction
-                    .execute_raw(&delete_statement, delete_parameters)
-                    .await?;
+    async fn write_batch_non_append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+        let mut transaction = self.client.transaction().await?;
+        // 1d flattened array of parameters to be inserted.
+        let mut insert_parameter_buffer = ParameterBuffer::new(&self.schema_types, chunk.cardinality());
+        let mut delete_parameter_buffer = ParameterBuffer::new(&self.schema_types, chunk.cardinality());
+        // 1d flattened array of parameters to be deleted.
+        for (op, row) in chunk.rows() {
+            match op {
+                Op::UpdateInsert | Op::UpdateDelete => {
+                    bail!("UpdateInsert and UpdateDelete should have been normalized by the sink executor")
+                }
+                Op::Insert => {
+                    insert_parameter_buffer.add_row(row);
+                }
+                Op::Delete => {
+                    delete_parameter_buffer.add_row(row);
+                }
             }
         }
 
-        transaction.commit().await?;
+        let (delete_parameters, delete_remaining_parameter) = delete_parameter_buffer.into_parts();
+        self.execute_parameter(&mut transaction, delete_parameters, Op::Delete, delete_remaining_parameter).await?;
+        let (insert_parameters, insert_remaining_parameter) = insert_parameter_buffer.into_parts();
+        self.execute_parameter(&mut transaction, insert_parameters, Op::Insert, insert_remaining_parameter).await?;
 
+        transaction.commit().await?;
+    }
+
+    async fn execute_parameter(
+        &self,
+        transaction: &mut tokio_postgres::Transaction,
+        parameters: Vec<Vec<Option<ScalarAdapter>>>,
+        op: Op,
+        remaining_parameter: Vec<Option<ScalarAdapter>>,
+    ) -> Result<()> {
+        let column_length = self.schema.fields().len();
+        if !parameters.is_empty() {
+            let parameter_length = parameters[0].len();
+            let rows_length = parameter_length / column_length;
+            assert_eq!(parameter_length % column_length, 0, "flattened parameters are unaligned");
+            let statement =  match op {
+                Op::Insert => {
+                    create_insert_sql(&self.schema, &self.config.table, rows_length)
+                }
+                Op::Delete => {
+                    create_delete_sql(&self.schema, &self.config.table, &self.pk_indices, rows_length)
+                }
+                _ => unreachable!(),
+            };
+            let statement = transaction.prepare(&statement).await?;
+            for parameter in parameters {
+                transaction.query(&statement, &parameter).await.context(format!("error for sql: {}, number_of_parameters: {}", &statement, parameter.len()))?;
+            }
+        }
+        if !remaining_parameter.is_empty() {
+            let rows_length = remaining_parameter.len() / column_length;
+            assert_eq!(remaining_parameter.len() % column_length, 0, "flattened parameters are unaligned");
+            let statement =  match op {
+                Op::Insert => {
+                    create_insert_sql(&self.schema, &self.config.table, rows_length)
+                }
+                Op::Delete => {
+                    create_delete_sql(&self.schema, &self.config.table, &self.pk_indices, rows_length)
+                }
+                _ => unreachable!(),
+            };
+            let statement = transaction.prepare(&statement).await?;
+            transaction.query(&statement, &remaining_parameter).await.context(format!("error for sql: {}, number_of_parameters: {}", &statement, remaining_parameter.len()))?;
+        }
         Ok(())
     }
 }
