@@ -42,6 +42,7 @@ use crate::executor::{
     StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::CreateMviewProgressReporter;
+use std::collections::HashMap;
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table

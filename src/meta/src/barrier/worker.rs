@@ -249,6 +249,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
 
                 request = self.request_rx.recv() => {
+                    println!("request");
                     if let Some(request) = request {
                         match request {
                             BarrierManagerRequest::GetDdlProgress(result_tx) => {
@@ -302,6 +303,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &self.context,
                         &self.env,
                 ) => {
+                    println!("complete");
                     match complete_result {
                         Ok(output) => {
                             self.checkpoint_control.ack_completed(output);

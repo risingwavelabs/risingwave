@@ -398,16 +398,16 @@ impl DdlController {
             );
             deferred = true;
         }
-
-        if !deferred
-            && !self
-                .metadata_manager
-                .list_background_creating_jobs()
-                .await?
-                .is_empty()
-        {
-            bail!("The system is creating jobs in the background, please try again later")
-        }
+        //
+        // if !deferred
+        //     && !self
+        //         .metadata_manager
+        //         .list_background_creating_jobs()
+        //         .await?
+        //         .is_empty()
+        // {
+        //     bail!("The system is creating jobs in the background, please try again later")
+        // }
 
         self.stream_manager
             .alter_table_parallelism(table_id, parallelism.into(), deferred)
