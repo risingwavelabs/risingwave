@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::AddAssign;
 
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
@@ -368,6 +369,36 @@ impl StreamJobFragments {
         }
         actor_ids
     }
+
+    /// Returns actor ids that need to be tracked when creating MV.
+    pub fn tracking_progress_vnodes(&self) -> Vec<(usize, BackfillUpstreamType)> {
+        let mut vnodes = vec![];
+        for fragment in self.fragments.values() {
+            if fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0 {
+                // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
+                // We don't track any fragments' progress.
+                return vec![];
+            }
+            if (fragment.fragment_type_mask
+                & (FragmentTypeFlag::Values as u32
+                | FragmentTypeFlag::StreamScan as u32
+                | FragmentTypeFlag::SourceScan as u32))
+                != 0
+            {
+
+                let actor = fragment.actors.iter().next().unwrap();
+                let bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
+                vnodes.extend((0..bitmap.len()).map(|vnode| {
+                    (
+                        vnode,
+                        BackfillUpstreamType::from_fragment_type_mask(fragment.fragment_type_mask),
+                    )
+                }));
+            }
+        }
+        vnodes
+    }
+
 
     /// Returns the fragment with the `Mview` type flag.
     pub fn mview_fragment(&self) -> Option<Fragment> {

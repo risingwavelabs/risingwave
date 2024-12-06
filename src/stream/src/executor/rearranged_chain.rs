@@ -19,6 +19,8 @@ use futures::stream::select_with_strategy;
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
 
+use std::collections::HashMap;
+
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
 /// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the

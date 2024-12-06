@@ -199,6 +199,7 @@ pub(super) enum LocalBarrierEvent {
     ReportCreateProgress {
         epoch: EpochPair,
         actor: ActorId,
+        vnodes: Vec<usize>,
         state: BackfillState,
     },
     RegisterBarrierSender {

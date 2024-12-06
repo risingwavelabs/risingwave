@@ -15,6 +15,7 @@
 use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
+use std::collections::HashMap;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
@@ -181,6 +182,8 @@ where
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = row_count;
+
+        // let mut total_snapshot_vnode_processed_rows = HashMap::new();
 
         // Backfill Algorithm:
         //
@@ -450,6 +453,9 @@ where
                         }
                         Mutation::Resume => {
                             paused = false;
+                        }
+                        Mutation::Update(update) => {
+                            self.progress.update_vnodes(vec![]);
                         }
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);

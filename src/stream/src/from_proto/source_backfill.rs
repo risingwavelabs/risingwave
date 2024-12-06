@@ -74,7 +74,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         );
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id);
+            .register_create_mview_progress(params.actor_context.id, vec![]);
 
         let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),
