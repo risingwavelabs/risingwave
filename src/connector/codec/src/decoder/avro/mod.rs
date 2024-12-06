@@ -39,10 +39,10 @@ pub struct AvroParseOptions<'a> {
     ///
     /// FIXME: In theory we should use resolved schema.
     /// e.g., it's possible that a field is a reference to a decimal or a record containing a decimal field.
-    pub schema: &'a Schema,
+    schema: &'a Schema,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
-    pub relax_numeric: bool,
+    relax_numeric: bool,
 }
 
 impl<'a> AvroParseOptions<'a> {
@@ -68,7 +68,7 @@ impl<'a> AvroParseOptions<'a> {
     ///    `type_expected`, converting the value if possible.
     /// - If only value is provided (without schema and `type_expected`),
     ///     the `DataType` will be inferred.
-    pub fn convert_to_datum<'b>(
+    fn convert_to_datum<'b>(
         &self,
         value: &'b Value,
         type_expected: &DataType,
