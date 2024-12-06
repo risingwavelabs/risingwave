@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -383,6 +384,15 @@ impl HummockManager {
         skip_sst_ids: &HashSet<HummockSstableId>,
         tables_to_commit: impl Iterator<Item = (&TableId, &CompactionGroupId, u64)>,
     ) -> Result<Option<HashSet<HummockSstableId>>> {
+        if self
+            .env
+            .system_params_reader()
+            .await
+            .time_travel_retention_ms()
+            == 0
+        {
+            return Ok(None);
+        }
         let select_groups = group_parents
             .iter()
             .filter_map(|(cg_id, _)| {
