@@ -853,20 +853,24 @@ mod tests {
         let struct_type = StructType::unnamed(vec![
             DataType::Int32,
             DataType::Varchar,
-            DataType::new_unnamed_struct(vec![DataType::Int32, DataType::Float64]),
-            DataType::new_unnamed_struct(vec![
+            StructType::unnamed(vec![DataType::Int32, DataType::Float64]).into(),
+            StructType::unnamed(vec![
                 DataType::Int32,
-                DataType::new_unnamed_struct(vec![
+                StructType::unnamed(vec![
                     DataType::Int32,
-                    DataType::new_unnamed_struct(vec![
+                    StructType::unnamed(vec![
                         DataType::Int32,
-                        DataType::new_unnamed_struct(vec![
+                        StructType::unnamed(vec![
                             DataType::Int32,
-                            DataType::new_unnamed_struct(vec![DataType::Int32, DataType::Int32]),
-                        ]),
-                    ]),
-                ]),
-            ]),
+                            StructType::unnamed(vec![DataType::Int32, DataType::Int32]).into(),
+                        ])
+                        .into(),
+                    ])
+                    .into(),
+                ])
+                .into(),
+            ])
+            .into(),
         ]);
         let struct_value = StructValue::from_str(struct_str, &struct_type).unwrap();
         let expected = StructValue::new(vec![
