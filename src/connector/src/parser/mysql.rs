@@ -25,7 +25,7 @@ use risingwave_common::types::{
 use rust_decimal::Decimal as RustDecimal;
 use thiserror_ext::AsReport;
 
-use crate::parser::util::log_error;
+use crate::parser::utils::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
