@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::secret::SecretEncryption;
+use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
@@ -128,7 +128,7 @@ pub enum DdlCommand {
     CreateDatabase(Database),
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
-    DropSchema(SchemaId),
+    DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
     CreateFunction(Function),
@@ -163,7 +163,7 @@ impl DdlCommand {
     fn allow_in_recovery(&self) -> bool {
         match self {
             DdlCommand::DropDatabase(_)
-            | DdlCommand::DropSchema(_)
+            | DdlCommand::DropSchema(_, _)
             | DdlCommand::DropSource(_, _)
             | DdlCommand::DropFunction(_)
             | DdlCommand::DropView(_, _)
@@ -298,7 +298,9 @@ impl DdlController {
                 DdlCommand::CreateDatabase(database) => ctrl.create_database(database).await,
                 DdlCommand::DropDatabase(database_id) => ctrl.drop_database(database_id).await,
                 DdlCommand::CreateSchema(schema) => ctrl.create_schema(schema).await,
-                DdlCommand::DropSchema(schema_id) => ctrl.drop_schema(schema_id).await,
+                DdlCommand::DropSchema(schema_id, drop_mode) => {
+                    ctrl.drop_schema(schema_id, drop_mode).await
+                }
                 DdlCommand::CreateNonSharedSource(source) => {
                     ctrl.create_non_shared_source(source).await
                 }
@@ -431,8 +433,12 @@ impl DdlController {
             .await
     }
 
-    async fn drop_schema(&self, schema_id: SchemaId) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Schema, schema_id as _, DropMode::Restrict, None)
+    async fn drop_schema(
+        &self,
+        schema_id: SchemaId,
+        drop_mode: DropMode,
+    ) -> MetaResult<NotificationVersion> {
+        self.drop_object(ObjectType::Schema, schema_id as _, drop_mode, None)
             .await
     }
 
@@ -621,7 +627,7 @@ impl DdlController {
         let (_, version) = self
             .metadata_manager
             .catalog_controller
-            .drop_relation(ObjectType::Subscription, subscription_id as _, drop_mode)
+            .drop_object(ObjectType::Subscription, subscription_id as _, drop_mode)
             .await?;
         self.stream_manager
             .drop_subscription(database_id, subscription_id as _, table_id)
@@ -1106,19 +1112,6 @@ impl DdlController {
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
         let (release_ctx, mut version) = match object_type {
-            ObjectType::Database => {
-                self.metadata_manager
-                    .catalog_controller
-                    .drop_database(object_id)
-                    .await?
-            }
-            ObjectType::Schema => {
-                return self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_schema(object_id, drop_mode)
-                    .await;
-            }
             ObjectType::Function => {
                 return self
                     .metadata_manager
@@ -1137,7 +1130,7 @@ impl DdlController {
             _ => {
                 self.metadata_manager
                     .catalog_controller
-                    .drop_relation(object_type, object_id, drop_mode)
+                    .drop_object(object_type, object_id, drop_mode)
                     .await?
             }
         };
@@ -1253,16 +1246,21 @@ impl DdlController {
             streaming_job_ids,
             state_table_ids,
             source_ids,
+            secret_ids,
             source_fragments,
             removed_actors,
             removed_fragments,
-            ..
         } = release_ctx;
 
         // unregister sources.
         self.source_manager
             .unregister_sources(source_ids.into_iter().map(|id| id as _).collect())
             .await;
+
+        // remove secrets.
+        for secret in secret_ids {
+            LocalSecretManager::global().remove_secret(secret as _);
+        }
 
         // unregister fragments and actors from source manager.
         self.source_manager
