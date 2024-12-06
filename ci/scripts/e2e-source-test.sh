@@ -144,7 +144,7 @@ risedev ci-kill
 export RISINGWAVE_CI=true
 
 echo "--- e2e, ci-kafka-plus-pubsub, legacy kafka tests"
-export RUST_MIN_STACK=4194304
+export RUST_MIN_STACK=8388608
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-kafka
 ./e2e_test/source_legacy/basic/scripts/prepare_ci_kafka.sh
