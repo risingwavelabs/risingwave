@@ -22,7 +22,7 @@ use super::{
 };
 use crate::error::ConnectorResult;
 
-/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`] from the parsed data.
+/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`](risingwave_connector_codec::decoder::Access) from the parsed data.
 pub trait AccessBuilder {
     async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }
