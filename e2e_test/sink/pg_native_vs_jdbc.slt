@@ -45,6 +45,12 @@ CREATE SINK pg_sink FROM datagen_source WITH (
 
 sleep 240s
 
+system ok
+psql --tuples-only -c 'select count(*) from datagen_source;'
+----
+ 2000000
+
+
 statement ok
 CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
     connector='jdbc',
@@ -55,6 +61,12 @@ CREATE SINK pg_sink_jdbc FROM datagen_source WITH (
 );
 
 sleep 240s
+
+system ok
+psql --tuples-only -c 'select count(*) from datagen_source_jdbc;'
+----
+ 2000000
+
 
 statement ok
 DROP SINK IF EXISTS pg_sink;
