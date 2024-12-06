@@ -450,7 +450,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
 }
 
 /// If the union schema is `[null, T]` or `[T, null]`, returns `Some(T)`; otherwise returns `None`.
-fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
+pub fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
     let variants = union_schema.variants();
     // Note: `[null, null] is invalid`, we don't need to worry about that.
     if variants.len() == 2 && variants.contains(&Schema::Null) {
@@ -461,19 +461,6 @@ fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
         Some(inner_schema)
     } else {
         None
-    }
-}
-
-pub fn avro_schema_skip_nullable_union(schema: &Schema) -> anyhow::Result<&Schema> {
-    match schema {
-        Schema::Union(union_schema) => match get_nullable_union_inner(union_schema) {
-            Some(s) => Ok(s),
-            None => Err(anyhow::format_err!(
-                "illegal avro union schema, expected [null, T], got {:?}",
-                union_schema
-            )),
-        },
-        other => Ok(other),
     }
 }
 

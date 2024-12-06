@@ -20,7 +20,7 @@ use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
-    avro_schema_skip_nullable_union, avro_schema_to_column_descs, AvroAccess, AvroParseOptions,
+    avro_schema_to_column_descs, get_nullable_union_inner, AvroAccess, AvroParseOptions,
     ResolvedAvroSchema,
 };
 use risingwave_pb::plan_common::ColumnDesc;
@@ -179,8 +179,15 @@ fn extract_debezium_table_schema(root: &Schema) -> anyhow::Result<&Schema> {
     };
     let idx = (root_record.lookup.get("before"))
         .context("Root schema of debezium shall contain \"before\" field.")?;
-    // It is always wrapped inside a union to allow null, so we look inside.
-    avro_schema_skip_nullable_union(&root_record.fields[*idx].schema)
+    let schema = &root_record.fields[*idx].schema;
+    // It is wrapped inside a union to allow null, so we look inside.
+    let Schema::Union(union_schema) = schema else {
+        return Ok(schema);
+    };
+    get_nullable_union_inner(union_schema).context(format!(
+        "illegal avro union schema, expected [null, T], got {:?}",
+        union_schema
+    ))
 }
 
 #[cfg(test)]
