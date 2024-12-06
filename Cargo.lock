@@ -1104,7 +1104,7 @@ dependencies = [
  "rand",
  "regex",
  "ring 0.17.5",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "serde",
@@ -2349,9 +2349,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.9.0"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
+checksum = "9ac0150caa2ae65ca5bd83f25c7de183dea78d4d366469f148435e2acfbad0da"
 dependencies = [
  "serde",
 ]
@@ -5105,9 +5105,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21c47fb079b7e98dbe64ba1e25573a37bda50755470654a05407281180e9e32c"
+checksum = "19c63beb108769d28b042829164139a5245359ccfdb4a8face928ac154e2c9ed"
 dependencies = [
  "ahash 0.8.11",
  "anyhow",
@@ -5124,9 +5124,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e3a47ce88e9ebcf215324ac362e01af2ce6cfa5cc77954ca96d1ef696c764ea"
+checksum = "68be583b3f51bcbc6b72f40a5aea6fa6aaff10692649c08b20458bb6703f79f0"
 dependencies = [
  "ahash 0.8.11",
  "bytes",
@@ -5153,9 +5153,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1627a2a766a7171a6dea6ea13c4b62663dec750404a2a4d0d5d065a6b537dc2d"
+checksum = "0a01e64de1452409977219fe014caa427874677aacd647bec9207d98d018bcd8"
 dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
@@ -5178,9 +5178,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.13.0"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70dfacf446e6314c69155eff41d678b79eee21b7e8ad62615047bd5180dbd205"
+checksum = "9fb89bdcdf355e8cb2b29eaa0158839f4f7c6974c6cc86f6e54e4a48a2afa5b8"
 dependencies = [
  "ahash 0.8.11",
  "allocator-api2",
@@ -7136,18 +7136,18 @@ checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linkme"
-version = "0.3.24"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ca16377a6dae364fb00769699ba440899f1a720d4f5abf2667d0a8a95f933dd"
+checksum = "8b53ad6a33de58864705954edb5ad5d571a010f9e296865ed43dc72a5621b430"
 dependencies = [
  "linkme-impl",
 ]
 
 [[package]]
 name = "linkme-impl"
-version = "0.3.24"
+version = "0.3.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e5ac81de04bf8215501c50a436632c3789b22ef1625fe0bf8927dd4ba3696c5"
+checksum = "04e542a18c94a9b6fcc7adb090fa3ba6b79ee220a16404f325672729f32a66ff"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10284,7 +10284,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls 0.22.4",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -12358,7 +12358,7 @@ dependencies = [
  "flume",
  "futures-util",
  "log",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs 0.7.3",
  "rustls-pemfile 2.2.0",
  "rustls-webpki 0.102.2",
  "thiserror 1.0.63",
@@ -12556,9 +12556,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.7.0"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
+checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
 dependencies = [
  "openssl-probe",
  "rustls-pemfile 2.2.0",
