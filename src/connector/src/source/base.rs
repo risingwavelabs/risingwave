@@ -142,7 +142,7 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
