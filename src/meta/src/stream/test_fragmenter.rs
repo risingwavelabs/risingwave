@@ -439,7 +439,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
     ))
     .collect();
     StreamingClusterInfo {
-        worker_nodes,
+        worker_nodes: worker_nodes,
         unschedulable_workers: Default::default(),
     }
 }
@@ -460,6 +460,7 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
+        None,
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),

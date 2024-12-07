@@ -1503,8 +1503,9 @@ impl DdlController {
         specified: Option<NonZeroUsize>,
         max: NonZeroUsize,
         cluster_info: &StreamingClusterInfo,
+        job_label: Option<String>,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism();
+        let available = cluster_info.parallelism(job_label);
         let Some(available) = NonZeroUsize::new(available) else {
             bail_unavailable!("no available slots to schedule");
         };
@@ -1613,16 +1614,22 @@ impl DdlController {
         let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
 
         // 2. Build the actor graph.
-        let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        // refilter workers
-        cluster_info.filter_workers_by_label(&job_label);
+        let parallelism = self.resolve_stream_parallelism(
+            specified_parallelism,
+            max_parallelism,
+            &cluster_info,
+            Some(job_label.clone()),
+        )?;
 
-        let parallelism =
-            self.resolve_stream_parallelism(specified_parallelism, max_parallelism, &cluster_info)?;
-
-        let actor_graph_builder =
-            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            id,
+            Some(job_label),
+            complete_graph,
+            cluster_info,
+            parallelism,
+        )?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1826,13 +1833,16 @@ impl DdlController {
         // 2. Build the actor graph.
         let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        cluster_info.filter_workers_by_label(&job_label);
-
         let parallelism = NonZeroUsize::new(original_table_fragment.get_actors().len())
             .expect("The number of actors in the original table fragment should be greater than 0");
 
-        let actor_graph_builder =
-            ActorGraphBuilder::new(id, complete_graph, cluster_info, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(
+            id,
+            Some(job_label),
+            complete_graph,
+            cluster_info,
+            parallelism,
+        )?;
 
         let ActorGraphBuildResult {
             graph,
