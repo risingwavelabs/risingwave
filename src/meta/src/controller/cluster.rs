@@ -400,16 +400,29 @@ pub struct StreamingClusterInfo {
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self) -> usize {
-        self.worker_nodes
-            .values()
-            .map(|worker| worker.parallelism())
-            .sum()
+    pub fn parallelism(&self, job_label: Option<String>) -> usize {
+        // todo, refactor this
+        if let Some(label) = job_label {
+            let available_worker_ids =
+                Self::filter_workers_by_label_helper(&self.worker_nodes, label.as_str());
+            self.worker_nodes
+                .values()
+                .filter(|worker| available_worker_ids.contains(&worker.id))
+                .map(|worker| worker.parallelism())
+                .sum()
+        } else {
+            self.worker_nodes
+                .values()
+                .map(|worker| worker.parallelism())
+                .sum()
+        }
     }
 
-    pub fn filter_workers_by_label(&mut self, label: &str) {
-        let schedulable_workers = self
-            .worker_nodes
+    pub fn filter_workers_by_label_helper(
+        workers: &HashMap<u32, WorkerNode>,
+        label: &str,
+    ) -> HashSet<u32> {
+        workers
             .iter()
             .filter(|&(_, worker)| {
                 worker
@@ -418,9 +431,16 @@ impl StreamingClusterInfo {
                     .unwrap_or(false)
             })
             .map(|(id, _)| *id)
-            .collect();
+            .collect()
+    }
 
-        self.schedulable_workers = schedulable_workers;
+    pub fn filter_schedulable_workers_by_label(&self, label: &str) -> HashMap<u32, WorkerNode> {
+        let worker_ids = Self::filter_workers_by_label_helper(&self.worker_nodes, label);
+        self.worker_nodes
+            .iter()
+            .filter(|(id, _)| worker_ids.contains(id))
+            .map(|(id, worker)| (*id, worker.clone()))
+            .collect()
     }
 }
 

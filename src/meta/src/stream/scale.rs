@@ -139,8 +139,10 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
 use risingwave_pb::user::grant_privilege::Object;
 
+use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::id::IdCategory;
 
 // The debug implementation is arbitrary. Just used in debug logs.
@@ -1817,11 +1819,6 @@ impl ScaleController {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let schedulable_worker_slots = workers
-            .values()
-            .map(|worker| (worker.id as WorkerId, worker.parallelism()))
-            .collect::<BTreeMap<_, _>>();
-
         // index for no shuffle relation
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
@@ -1941,7 +1938,17 @@ impl ScaleController {
 
             let job_label = job_labels
                 .get(&(table_id as ObjectId))
-                .cloned().expect("job label should exist");
+                .cloned()
+                .expect("job label should exist");
+
+            let schedulable_worker_ids =
+                StreamingClusterInfo::filter_workers_by_label_helper(&workers, job_label.as_str());
+
+            let schedulable_worker_slots = workers
+                .iter()
+                .filter(|(id, _)| schedulable_worker_ids.contains(id))
+                .map(|(_, worker)| (worker.id as WorkerId, worker.parallelism()))
+                .collect::<BTreeMap<_, _>>();
 
             for fragment_id in fragment_map {
                 // Currently, all of our NO_SHUFFLE relation propagations are only transmitted from upstream to downstream.
@@ -2592,9 +2599,12 @@ impl GlobalStreamManager {
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             match prev_worker {
-                                // todo, add label checking in further changes
-                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()  => {
+                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()   => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
+                                    should_trigger = true;
+                                }
+                                Some(prev_worker) if  prev_worker.node_label() != worker.node_label()  => {
+                                    tracing::info!(worker = worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
                                 None => {
