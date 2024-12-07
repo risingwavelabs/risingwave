@@ -30,6 +30,7 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_LABEL;
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{
@@ -1571,8 +1572,14 @@ impl DdlController {
             (&stream_job).into(),
         )?;
 
+        // todo
+        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+
         // 2. Build the actor graph.
-        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+        let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+
+        // refilter workers
+        cluster_info.filter_workers_by_label(&job_label);
 
         let parallelism =
             self.resolve_stream_parallelism(specified_parallelism, max_parallelism, &cluster_info)?;
@@ -1772,8 +1779,12 @@ impl DdlController {
             _ => unreachable!(),
         };
 
+        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+
         // 2. Build the actor graph.
-        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+        let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+
+        cluster_info.filter_workers_by_label(&job_label);
 
         // XXX: what is this parallelism?
         // Is it "assigned parallelism"?

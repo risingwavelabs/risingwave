@@ -672,12 +672,20 @@ impl ActorGraphBuilder {
         let existing_distributions = fragment_graph.existing_distribution();
 
         // Schedule the distribution of all building fragments.
+        let schedulable_workers = cluster_info
+            .worker_nodes
+            .iter()
+            .filter(|&(id, worker)| cluster_info.schedulable_workers.iter().contains(id))
+            .map(|(id, worker)| (*id as u32, worker.clone()))
+            .collect();
+
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,
-            &cluster_info.worker_nodes,
+            &schedulable_workers,
             default_parallelism,
             expected_vnode_count,
         )?;
+
         let distributions = scheduler.schedule(&fragment_graph)?;
 
         // Fill the vnode count for each internal table, based on schedule result.

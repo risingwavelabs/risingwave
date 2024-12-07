@@ -139,6 +139,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_pb::user::grant_privilege::Object;
 
 use crate::controller::id::IdCategory;
 
@@ -1834,6 +1835,8 @@ impl ScaleController {
         // index for fragment_id -> [actor_id]
         let mut fragment_actor_id_map = HashMap::new();
 
+        let mut job_labels = HashMap::new();
+
         async fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
@@ -1844,6 +1847,7 @@ impl ScaleController {
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
+            job_labels: &mut HashMap<ObjectId, String>,
             mgr: &MetadataManager,
             table_ids: Vec<ObjectId>,
         ) -> Result<(), MetaError> {
@@ -1853,7 +1857,7 @@ impl ScaleController {
                 actor_dispatchers: _actor_dispatchers,
                 fragment_downstreams,
                 fragment_upstreams: _fragment_upstreams,
-                related_jobs: _related_jobs,
+                related_jobs,
             } = mgr
                 .catalog_controller
                 .resolve_working_set_for_reschedule_tables(table_ids)
@@ -1893,6 +1897,10 @@ impl ScaleController {
                     .insert(actor_id as ActorId);
             }
 
+            for (id, job) in related_jobs {
+                job_labels.insert(id, job.label.clone());
+            }
+
             Ok(())
         }
 
@@ -1908,6 +1916,7 @@ impl ScaleController {
             &mut actor_location,
             &mut table_fragment_id_map,
             &mut fragment_actor_id_map,
+            &mut job_labels,
             &self.metadata_manager,
             table_ids,
         )
@@ -1921,6 +1930,7 @@ impl ScaleController {
             ?actor_location,
             ?table_fragment_id_map,
             ?fragment_actor_id_map,
+            ?job_labels,
             "generate_table_resize_plan, after build_index"
         );
 
@@ -1928,6 +1938,10 @@ impl ScaleController {
 
         for (table_id, parallelism) in table_parallelisms {
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
+
+            let job_label = job_labels
+                .get(&(table_id as ObjectId))
+                .cloned().expect("job label should exist");
 
             for fragment_id in fragment_map {
                 // Currently, all of our NO_SHUFFLE relation propagations are only transmitted from upstream to downstream.
