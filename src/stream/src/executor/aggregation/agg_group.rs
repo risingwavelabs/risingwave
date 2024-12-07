@@ -507,11 +507,13 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 pub struct AggStateCacheStats {
     pub agg_state_cache_lookup_count: u64,
     pub agg_state_cache_miss_count: u64,
+    pub agg_state_cache_refill_duration_secs: f64,
 }
 
 impl AggStateCacheStats {
     fn merge(&mut self, other: Self) {
         self.agg_state_cache_lookup_count += other.agg_state_cache_lookup_count;
         self.agg_state_cache_miss_count += other.agg_state_cache_miss_count;
+        self.agg_state_cache_refill_duration_secs += other.agg_state_cache_refill_duration_secs;
     }
 }
