@@ -28,8 +28,8 @@ download_and_prepare_rw "$profile" source
 prepare_pg() {
   # set up PG sink destination
   export PGPASSWORD=postgres
+  psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';" || true
   dropdb -h db -U postgres test || true
-  psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
   createdb -h db -U postgres test
   psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
   psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
