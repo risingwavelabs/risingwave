@@ -974,7 +974,7 @@ impl CatalogController {
         tmp_id: ObjectId,
         streaming_job: StreamingJob,
         merge_updates: Vec<PbMergeUpdate>,
-        table_col_index_mapping: Option<ColIndexMapping>,
+        col_index_mapping: Option<ColIndexMapping>,
         sink_into_table_context: SinkIntoTableContext,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
@@ -983,7 +983,7 @@ impl CatalogController {
         let (relations, fragment_mapping) = Self::finish_replace_streaming_job_inner(
             tmp_id,
             merge_updates,
-            table_col_index_mapping,
+            col_index_mapping,
             sink_into_table_context,
             &txn,
             streaming_job,
@@ -1009,12 +1009,10 @@ impl CatalogController {
         Ok(version)
     }
 
-    /// TODO: make it general for other streaming jobs.
-    /// Currently only for replacing table.
     pub async fn finish_replace_streaming_job_inner(
         tmp_id: ObjectId,
         merge_updates: Vec<PbMergeUpdate>,
-        table_col_index_mapping: Option<ColIndexMapping>,
+        col_index_mapping: Option<ColIndexMapping>,
         SinkIntoTableContext {
             creating_sink_id,
             dropping_sink_id,
@@ -1065,7 +1063,11 @@ impl CatalogController {
                 table.incoming_sinks = Set(incoming_sinks.into());
                 table.update(txn).await?;
             }
-            // TODO: support other streaming jobs
+            StreamingJob::Source(source) => {
+                // Update the source catalog with the new one.
+                let source = source::ActiveModel::from(source);
+                source.update(txn).await?;
+            }
             _ => unreachable!(
                 "invalid streaming job type: {:?}",
                 streaming_job.job_type_str()
@@ -1223,9 +1225,21 @@ impl CatalogController {
                     )),
                 })
             }
-            _ => unreachable!("invalid streaming job type: {:?}", job_type),
+            StreamingJobType::Source => {
+                let (source, source_obj) = Source::find_by_id(original_job_id)
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                relations.push(PbRelation {
+                    relation_info: Some(PbRelationInfo::Source(
+                        ObjectModel(source, source_obj.unwrap()).into(),
+                    )),
+                })
+            }
+            _ => unreachable!("invalid streaming job type for replace: {:?}", job_type),
         }
-        if let Some(table_col_index_mapping) = table_col_index_mapping {
+        if let Some(table_col_index_mapping) = col_index_mapping {
             let expr_rewriter = ReplaceTableExprRewriter {
                 table_col_index_mapping,
             };

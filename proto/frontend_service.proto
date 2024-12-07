@@ -15,7 +15,7 @@ message GetTableReplacePlanRequest {
 }
 
 message GetTableReplacePlanResponse {
-  ddl_service.ReplaceTablePlan replace_plan = 1;
+  ddl_service.ReplaceJobPlan replace_plan = 1;
 }
 
 service FrontendService {

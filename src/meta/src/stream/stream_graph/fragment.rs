@@ -689,7 +689,7 @@ pub struct FragmentGraphUpstreamContext {
 }
 
 pub struct FragmentGraphDownstreamContext {
-    original_table_fragment_id: FragmentId,
+    original_root_fragment_id: FragmentId,
     downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     downstream_actor_location: HashMap<ActorId, WorkerId>,
 }
@@ -732,7 +732,7 @@ impl CompleteStreamFragmentGraph {
     /// with the downstream existing `StreamScan`/`StreamSourceScan` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
-        original_table_fragment_id: FragmentId,
+        original_root_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         existing_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
@@ -741,7 +741,7 @@ impl CompleteStreamFragmentGraph {
             graph,
             None,
             Some(FragmentGraphDownstreamContext {
-                original_table_fragment_id,
+                original_root_fragment_id,
                 downstream_fragments,
                 downstream_actor_location: existing_actor_location,
             }),
@@ -754,7 +754,7 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,
         upstream_actor_location: HashMap<ActorId, WorkerId>,
-        original_table_fragment_id: FragmentId,
+        original_root_fragment_id: FragmentId,
         downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
         downstream_actor_location: HashMap<ActorId, WorkerId>,
         job_type: StreamingJobType,
@@ -766,7 +766,7 @@ impl CompleteStreamFragmentGraph {
                 upstream_actor_location,
             }),
             Some(FragmentGraphDownstreamContext {
-                original_table_fragment_id,
+                original_root_fragment_id,
                 downstream_fragments,
                 downstream_actor_location,
             }),
@@ -959,12 +959,12 @@ impl CompleteStreamFragmentGraph {
         }
 
         if let Some(FragmentGraphDownstreamContext {
-            original_table_fragment_id,
+            original_root_fragment_id,
             downstream_fragments,
             downstream_actor_location,
         }) = downstream_ctx
         {
-            let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
+            let original_table_fragment_id = GlobalFragmentId::new(original_root_fragment_id);
             let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
