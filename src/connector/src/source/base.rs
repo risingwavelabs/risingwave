@@ -39,6 +39,7 @@ use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
+use super::nats::source::NatsMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
@@ -652,6 +653,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
