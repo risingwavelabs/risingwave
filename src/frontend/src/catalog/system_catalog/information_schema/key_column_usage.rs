@@ -15,65 +15,34 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// The view `key_column_usage` contains information about all table columns (or view columns) in the
-/// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
-/// current user has access to (by way of being the owner or having some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
-///
-/// In RisingWave, `columns` also contains all materialized views' columns.
+/// The view `key_column_usage` contains all constraints belonging to tables that the current user owns or has some privilege other than SELECT on.
+/// Ref: [`https://www.postgresql.org/docs/current/infoschema-key-column-usage.html`]
+/// Limitation:
+/// This view assume the constraint schema is the same as the table schema, since `pg_clatalog`.`pg_constraint` only support primrary key.
 #[system_catalog(
     view,
     "information_schema.key_column_usage",
-    "SELECT CURRENT_DATABASE() AS constraint_catalog,
-        s.name AS constraint_schema,
-        c.name AS constraint_name,
-        CURRENT_DATABASE() AS table_catalog,
-        s.name AS table_schema,
-        r.name AS table_name,
-        NULL AS column_default,
-        NULL::integer AS character_maximum_length,
-        NULL::integer AS numeric_precision,
-        NULL::integer AS numeric_precision_radix,
-        NULL::integer AS numeric_scale,
-        NULL::integer AS datetime_precision,
-        c.position AS ordinal_position,
-        'YES' AS is_nullable,
-        CASE
-            WHEN c.data_type = 'varchar' THEN 'character varying'
-            ELSE c.data_type
-        END AS data_type,
-        CURRENT_DATABASE() AS udt_catalog,
-        'pg_catalog' AS udt_schema,
-        c.udt_type AS udt_name,
-        NULL AS character_set_catalog,
-        NULL AS character_set_schema,
-        NULL AS character_set_name,
-        NULL AS collation_catalog,
-        NULL AS collation_schema,
-        NULL AS collation_name,
-        NULL AS domain_catalog,
-        NULL AS domain_schema,
-        NULL AS domain_name,
-        NULL AS scope_catalog,
-        NULL AS scope_schema,
-        NULL AS scope_name,
-        'NO' AS is_identity,
-        NULL AS identity_generation,
-        NULL AS identity_start,
-        NULL AS identity_increment,
-        NULL AS identity_maximum,
-        NULL AS identity_minimum,
-        NULL AS identity_cycle,
-        CASE
-            WHEN c.is_generated THEN 'ALWAYS'
-            ELSE 'NEVER'
-        END AS is_generated,
-        c.generation_expression,
-        NULL AS interval_type
-    FROM rw_catalog.rw_columns c
-    LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id
-    JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id
-    WHERE c.is_hidden = false"
+    "WITH key_column_usage_without_name AS (
+        SELECT CURRENT_DATABASE() AS constraint_catalog,
+            pg_namespace.nspname AS constraint_schema,
+            pg_constraint.conname AS constraint_name,
+            CURRENT_DATABASE() AS table_catalog,
+            pg_namespace.nspname AS table_schema,
+            pg_class.relname AS table_name,
+            unnest(conkey) as col_id,
+            conrelid as table_id
+        FROM pg_catalog.pg_constraint
+        JOIN pg_catalog.pg_class ON pg_constraint.conrelid = pg_class.oid
+        JOIN rw_catalog.rw_relations ON rw_relations.id = pg_class.oid
+        JOIN pg_catalog.pg_namespace ON pg_class.relnamespace = pg_namespace.oid
+        WHERE rw_relations.relation_type != 'table' or (rw_relations.relation_type = 'table' and has_table_privilege(pg_constraint.conrelid, 'INSERT, UPDATE, DELETE'))
+        ORDER BY constraint_catalog, constraint_schema, constraint_name)
+    SELECT constraint_catalog, constraint_schema, table_catalog, table_schema, table_name, 
+           name as column_name, position as ordinal_position, NULL::int as position_in_unique_constraint
+    FROM key_column_usage_without_name
+    JOIN rw_catalog.rw_columns ON 
+        rw_columns.position = key_column_usage_without_name.col_id AND 
+        rw_columns.relation_id = key_column_usage_without_name.table_id"
 )]
 #[derive(Fields)]
 struct KeyColumnUsage {
