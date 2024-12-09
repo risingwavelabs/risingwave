@@ -24,11 +24,12 @@ use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, S
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::types::Fields;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_pb::meta::PbThrottleTarget;
 use risingwave_sqlparser::ast::*;
+use util::get_table_catalog_by_table_name;
 
 use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use crate::catalog::table_catalog::TableType;
@@ -247,6 +248,8 @@ pub async fn handle(
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
+    check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
+
     match stmt {
         Statement::Explain {
             statement,
@@ -346,6 +349,7 @@ pub async fn handle(
             cdc_table_info,
             include_column_options,
             webhook_info,
+            engine,
         } => {
             if or_replace {
                 bail_not_implemented!("CREATE OR REPLACE TABLE");
@@ -363,6 +367,7 @@ pub async fn handle(
                     append_only,
                     on_conflict,
                     with_version_column,
+                    engine,
                 )
                 .await;
             }
@@ -382,6 +387,7 @@ pub async fn handle(
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
+                engine,
             )
             .await
         }
@@ -719,6 +725,18 @@ pub async fn handle(
             alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                 handler_args,
                 PbThrottleTarget::TableWithSource,
+                name,
+                rate_limit,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetDmlRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::TableDml,
                 name,
                 rate_limit,
             )
@@ -1109,4 +1127,116 @@ pub async fn handle(
         } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
     }
+}
+
+fn check_ban_ddl_for_iceberg_engine_table(
+    session: Arc<SessionImpl>,
+    stmt: &Statement,
+) -> Result<()> {
+    match stmt {
+        Statement::AlterTable {
+            name,
+            operation:
+                operation @ (AlterTableOperation::AddColumn { .. }
+                | AlterTableOperation::DropColumn { .. }),
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE {} is not supported for iceberg table: {}.{}",
+                    operation,
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RenameTable { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ChangeOwner { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE CHANGE OWNER is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetParallelism { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET PARALLELISM is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSchema { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RefreshSchema,
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSourceRateLimit { .. },
+        } => {
+            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
+            if table.is_iceberg_engine_table() {
+                bail!(
+                    "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                    schema_name,
+                    name
+                );
+            }
+        }
+
+        _ => {}
+    }
+
+    Ok(())
 }
