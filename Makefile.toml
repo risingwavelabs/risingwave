@@ -29,7 +29,6 @@ env_scripts = [
   set_env RW_TELEMETRY_TYPE "test"
   set_env RW_SECRET_STORE_PRIVATE_KEY_HEX "0123456789abcdef0123456789abcdef"
   set_env RW_TEMP_SECRET_FILE_DIR "${PREFIX_SECRET}"
-  set_env RUST_MIN_STACK 8388608
 
   is_sanitizer_enabled = get_env ENABLE_SANITIZER
   is_hdfs_backend = get_env ENABLE_HDFS
@@ -850,6 +849,11 @@ dependencies = ["install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
+
+echo "Running Planner Test requires larger stack size, setting RUST_MIN_STACK to 8388608 (8MB) as default."
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=8388608
+fi
 
 cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
