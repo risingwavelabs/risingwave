@@ -1055,13 +1055,13 @@ impl SourceManager {
         let prev_fragment_id = merge_updates[0].upstream_fragment_id;
         // Here we align the new source executor to backfill executors
         //
-        // old_source           backfill_1            new_source
-        // actor_x1-----┬------>actor_a1 -----┬------>actor_y1
-        // actor_x2-----┼-┬---->actor_a2 -----┼-┬---->actor_y2
-        //              │ │                   │ │
-        //              │ │     backfill_2    │ │
-        //              └-┼---->actor_b1------┘ │
-        //                └---->actor_b2--------┘
+        // old_source => new_source            backfill_1
+        // actor_x1   => actor_y1 -----┬------>actor_a1
+        // actor_x2   => actor_y2 -----┼-┬---->actor_a2
+        //                             │ │
+        //                             │ │     backfill_2
+        //                             └─┼---->actor_b1
+        //                               └---->actor_b2
         //
         // Note: we can choose any backfill actor to align here.
         // We use `HashMap` to dedup.
