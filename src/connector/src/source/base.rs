@@ -41,6 +41,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
+use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
@@ -652,6 +653,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

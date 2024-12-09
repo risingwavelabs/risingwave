@@ -7,7 +7,7 @@ import psycopg2
 
 NATS_SERVER = "nats://nats-server:4222"
 
-async def create_stream(stream_name: str, subject: str):
+async def create_stream(stream_name: str, subjects: str):
     # Create a NATS client
     nc = NATS()
 
@@ -15,11 +15,13 @@ async def create_stream(stream_name: str, subject: str):
         # Connect to the NATS server
         await nc.connect(servers=[NATS_SERVER])
 
+        # split subjects by comma
+        subjects = subjects.split(",")
         # Enable JetStream
         js = nc.jetstream()
         stream_config = StreamConfig(
             name=stream_name,
-            subjects=[subject],
+            subjects=subjects,
             retention="limits",  # Retention policy (limits, interest, or workqueue)
             max_msgs=1000,       # Maximum number of messages to retain
             max_bytes=10 * 1024 * 1024,  # Maximum size of messages in bytes
