@@ -25,7 +25,9 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
-use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
+use risingwave_pb::compute::{
+    ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
+};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
@@ -273,6 +275,16 @@ impl ComputeClient {
             .config_client
             .to_owned()
             .show_config(ShowConfigRequest {})
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn resize_cache(&self, request: ResizeCacheRequest) -> Result<ResizeCacheResponse> {
+        Ok(self
+            .config_client
+            .to_owned()
+            .resize_cache(request)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())
