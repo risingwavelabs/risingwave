@@ -1192,10 +1192,6 @@ where
 
     pub async fn iter_keyed_row_with_vnode(
         &self,
-
-        // Optional vnode that returns an iterator only over the given range under that vnode.
-        // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
