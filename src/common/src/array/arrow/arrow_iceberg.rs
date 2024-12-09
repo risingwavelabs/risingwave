@@ -44,7 +44,44 @@ impl IcebergArrowConvert {
         FromArrow::from_record_batch(self, batch)
     }
 
+    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
+        FromArrow::from_field(self, field)
+    }
+
     pub fn to_arrow_field(
+        &self,
+        name: &str,
+        data_type: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        ToArrow::to_arrow_field(self, name, data_type)
+    }
+
+    pub fn struct_from_fields(
+        &self,
+        fields: &arrow_schema::Fields,
+    ) -> Result<StructType, ArrayError> {
+        FromArrow::from_fields(self, fields)
+    }
+
+    pub fn to_arrow_array(
+        &self,
+        data_type: &arrow_schema::DataType,
+        array: &ArrayImpl,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        ToArrow::to_array(self, data_type, array)
+    }
+
+    pub fn array_from_arrow_array(
+        &self,
+        field: &arrow_schema::Field,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        FromArrow::from_array(self, field, array)
+    }
+}
+
+impl ToArrow for IcebergArrowConvert {
+    fn to_arrow_field(
         &self,
         name: &str,
         data_type: &DataType,
@@ -74,35 +111,6 @@ impl IcebergArrowConvert {
         Ok(arrow_schema::Field::new(name, data_type, true))
     }
 
-    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
-        FromArrow::from_field(self, field)
-    }
-
-    pub fn struct_from_fields(
-        &self,
-        fields: &arrow_schema::Fields,
-    ) -> Result<StructType, ArrayError> {
-        FromArrow::from_fields(self, fields)
-    }
-
-    pub fn to_arrow_array(
-        &self,
-        data_type: &arrow_schema::DataType,
-        array: &ArrayImpl,
-    ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        ToArrow::to_array(self, data_type, array)
-    }
-
-    pub fn array_from_arrow_array(
-        &self,
-        field: &arrow_schema::Field,
-        array: &arrow_array::ArrayRef,
-    ) -> Result<ArrayImpl, ArrayError> {
-        FromArrow::from_array(self, field, array)
-    }
-}
-
-impl ToArrow for IcebergArrowConvert {
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
         // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
