@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -33,16 +34,16 @@ use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
-pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
+pub type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 use crate::monitor::BatchMetrics;
 
-pub struct GenericExchangeExecutor<CS, C> {
+pub struct GenericExchangeExecutor<CS> {
     proto_sources: Vec<PbExchangeSource>,
     /// Mock-able `CreateSource`.
     source_creators: Vec<CS>,
     sequential: bool,
-    context: C,
+    context: Arc<dyn BatchTaskContext>,
 
     schema: Schema,
     #[expect(dead_code)]
@@ -59,7 +60,7 @@ pub struct GenericExchangeExecutor<CS, C> {
 pub trait CreateSource: Send {
     async fn create_source(
         &self,
-        context: impl BatchTaskContext,
+        context: &dyn BatchTaskContext,
         prost_source: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl>;
 }
@@ -79,7 +80,7 @@ impl DefaultCreateSource {
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
         &self,
-        context: impl BatchTaskContext,
+        context: &dyn BatchTaskContext,
         prost_source: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         let peer_addr = prost_source.get_host()?.into();
@@ -148,8 +149,8 @@ pub struct GenericExchangeExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -170,7 +171,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
 
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
-        Ok(Box::new(ExchangeExecutor::<C> {
+        Ok(Box::new(ExchangeExecutor {
             proto_sources,
             source_creators,
             sequential,
@@ -183,9 +184,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     }
 }
 
-impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
-    for GenericExchangeExecutor<CS, C>
-{
+impl<CS: 'static + Send + CreateSource> Executor for GenericExchangeExecutor<CS> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -199,7 +198,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
     }
 }
 
-impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS, C> {
+impl<CS: 'static + Send + CreateSource> GenericExchangeExecutor<CS> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let streams = self
@@ -210,7 +209,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
                 Self::data_chunk_stream(
                     prost_source,
                     source_creator,
-                    self.context.clone(),
+                    &*self.context,
                     self.metrics.clone(),
                 )
             });
@@ -235,12 +234,10 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
     async fn data_chunk_stream(
         prost_source: PbExchangeSource,
         source_creator: CS,
-        context: C,
+        context: &dyn BatchTaskContext,
         metrics: Option<BatchMetrics>,
     ) {
-        let mut source = source_creator
-            .create_source(context.clone(), &prost_source)
-            .await?;
+        let mut source = source_creator.create_source(context, &prost_source).await?;
         // create the collector
         let counter = metrics
             .as_ref()
@@ -290,20 +287,18 @@ mod tests {
             source_creators.push(fake_create_source);
         }
 
-        let executor = Box::new(
-            GenericExchangeExecutor::<FakeCreateSource, ComputeNodeContext> {
-                metrics: None,
-                proto_sources,
-                source_creators,
-                sequential: false,
-                context,
-                schema: Schema {
-                    fields: vec![Field::unnamed(DataType::Int32)],
-                },
-                task_id: TaskId::default(),
-                identity: "GenericExchangeExecutor2".to_string(),
+        let executor = Box::new(GenericExchangeExecutor::<FakeCreateSource> {
+            metrics: None,
+            proto_sources,
+            source_creators,
+            sequential: false,
+            context,
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int32)],
             },
-        );
+            task_id: TaskId::default(),
+            identity: "GenericExchangeExecutor2".to_string(),
+        });
 
         let mut stream = executor.execute();
         let mut chunks: Vec<DataChunk> = vec![];

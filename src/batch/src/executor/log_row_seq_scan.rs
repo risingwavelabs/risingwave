@@ -36,7 +36,6 @@ use risingwave_storage::{dispatch_state_store, StateStore};
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
 use crate::monitor::BatchMetrics;
-use crate::task::BatchTaskContext;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
     chunk_size: usize,
@@ -89,8 +88,8 @@ pub struct LogStoreRowSeqScanExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(

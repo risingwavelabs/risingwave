@@ -48,6 +48,8 @@ mod update;
 mod utils;
 mod values;
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use async_recursion::async_recursion;
 pub use delete::*;
@@ -129,16 +131,16 @@ impl std::fmt::Debug for BoxedExecutor {
 /// from proto and global environment.
 #[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor>;
 }
 
-pub struct ExecutorBuilder<'a, C> {
+pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
-    context: C,
+    context: Arc<dyn BatchTaskContext>,
     epoch: BatchQueryEpoch,
     shutdown_rx: ShutdownToken,
 }
@@ -155,11 +157,11 @@ macro_rules! build_executor {
     }
 }
 
-impl<'a, C: Clone> ExecutorBuilder<'a, C> {
+impl<'a> ExecutorBuilder<'a> {
     pub fn new(
         plan_node: &'a PlanNode,
         task_id: &'a TaskId,
-        context: C,
+        context: Arc<dyn BatchTaskContext>,
         epoch: BatchQueryEpoch,
         shutdown_rx: ShutdownToken,
     ) -> Self {
@@ -187,7 +189,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         self.plan_node
     }
 
-    pub fn context(&self) -> &C {
+    pub fn context(&self) -> &Arc<dyn BatchTaskContext> {
         &self.context
     }
 
@@ -196,7 +198,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
     }
 }
 
-impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
+impl<'a> ExecutorBuilder<'a> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build()
             .await

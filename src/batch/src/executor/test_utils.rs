@@ -277,7 +277,7 @@ impl FakeCreateSource {
 impl CreateSource for FakeCreateSource {
     async fn create_source(
         &self,
-        _: impl BatchTaskContext,
+        _: &dyn BatchTaskContext,
         _: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
@@ -343,8 +343,8 @@ pub struct BlockExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for BlockExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        _source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        _source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         Ok(Box::new(BlockExecutor {}))
@@ -380,8 +380,8 @@ pub struct BusyLoopExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for BusyLoopExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        _source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        _source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         Ok(Box::new(BusyLoopExecutor {}))

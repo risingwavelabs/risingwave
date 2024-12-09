@@ -28,7 +28,7 @@ use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
 /// that the input chunks has already been sorted by group columns.
@@ -49,8 +49,8 @@ pub struct SortAggExecutor {
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

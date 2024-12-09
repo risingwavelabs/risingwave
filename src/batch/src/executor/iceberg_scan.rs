@@ -40,7 +40,6 @@ use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
 use crate::monitor::BatchMetrics;
-use crate::task::BatchTaskContext;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
 static POSITION_DELETE_FILE_POS: usize = 1;
@@ -227,8 +226,8 @@ pub struct IcebergScanExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         ensure!(

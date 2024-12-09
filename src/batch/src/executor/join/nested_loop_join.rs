@@ -33,7 +33,7 @@ use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// Nested loop join executor.
 ///
@@ -155,8 +155,8 @@ impl NestedLoopJoinExecutor {
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Stream;
+use risingwave_batch::task::BatchTaskContext;
 use risingwave_common::array::DataChunk;
 
 use crate::error::Result;
@@ -64,7 +65,7 @@ impl ExecutionContext {
         self.timeout
     }
 
-    pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {
+    pub fn to_batch_task_context(&self) -> Arc<dyn BatchTaskContext> {
         FrontendBatchTaskContext::new(self.session.clone())
     }
 }

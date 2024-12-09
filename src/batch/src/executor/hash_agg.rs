@@ -47,7 +47,7 @@ use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
     SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
-use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
+use crate::task::{ShutdownToken, TaskId};
 
 type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<AggregateState>, PrecomputedBuildHasher, A>;
 
@@ -151,8 +151,8 @@ impl HashAggExecutorBuilder {
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

@@ -25,7 +25,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 /// Limit executor.
 pub struct LimitExecutor {
@@ -40,8 +39,8 @@ pub struct LimitExecutor {
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LimitExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

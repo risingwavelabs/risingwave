@@ -25,7 +25,6 @@ use tokio_postgres;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
-use crate::task::BatchTaskContext;
 
 /// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
@@ -176,8 +175,8 @@ pub struct PostgresQueryExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         let postgres_query_node = try_match_expand!(

@@ -22,7 +22,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
-use crate::task::BatchTaskContext;
 
 #[derive(PartialEq, Debug)]
 pub enum FileFormat {
@@ -103,8 +102,8 @@ pub struct FileScanExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for FileScanExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         let file_scan_node = try_match_expand!(

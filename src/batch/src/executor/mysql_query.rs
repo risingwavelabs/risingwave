@@ -25,7 +25,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, BatchExternalSystemError};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
-use crate::task::BatchTaskContext;
 
 /// `MySqlQuery` executor. Runs a query against a `MySql` database.
 pub struct MySqlQueryExecutor {
@@ -146,8 +145,8 @@ pub struct MySqlQueryExecutorBuilder {}
 
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for MySqlQueryExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         let mysql_query_node = try_match_expand!(
