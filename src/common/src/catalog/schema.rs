@@ -34,6 +34,17 @@ pub struct Field {
     pub type_name: String,
 }
 
+impl Field {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            data_type,
+            name: name.into(),
+            sub_fields: vec![],
+            type_name: String::new(),
+        }
+    }
+}
+
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.name, self.data_type)

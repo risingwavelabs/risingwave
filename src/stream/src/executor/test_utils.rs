@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use criterion::black_box;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -176,6 +177,13 @@ impl MockSource {
 impl Execute for MockSource {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
+    }
+}
+
+pub async fn execute_executor(executor: Executor) {
+    let mut stream = executor.execute();
+    while let Some(ret) = stream.next().await {
+        _ = black_box(ret.unwrap());
     }
 }
 
@@ -645,7 +653,7 @@ pub mod hash_join_executor {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType};
 
-    async fn create_in_memory_state_table(
+    pub async fn create_in_memory_state_table(
         mem_state: MemoryStateStore,
         data_types: &[DataType],
         order_types: &[OrderType],

@@ -148,12 +148,5 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
     ))
 }
 
-pub async fn execute_executor(executor: Executor) {
-    let mut stream = executor.execute();
-    while let Some(ret) = stream.next().await {
-        _ = black_box(ret.unwrap());
-    }
-}
-
 criterion_group!(benches, bench_hash_agg);
 criterion_main!(benches);

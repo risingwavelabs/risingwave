@@ -24,6 +24,7 @@ auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
+criterion = { workspace = true, features = ["async_tokio", "async"] }
 delta_btree_map = { path = "../utils/delta_btree_map" }
 educe = "0.6"
 either = "1"
@@ -89,7 +90,6 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -105,6 +105,10 @@ harness = false
 
 [[bench]]
 name = "bench_state_table"
+harness = false
+
+[[bench]]
+name = "stream_hash_join"
 harness = false
 
 [lints]
