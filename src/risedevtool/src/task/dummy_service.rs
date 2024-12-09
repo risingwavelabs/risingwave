@@ -20,7 +20,7 @@ pub struct DummyService {
 
 impl DummyService {
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string() }
+        Self { id: id.to_owned() }
     }
 }
 

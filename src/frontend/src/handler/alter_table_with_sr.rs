@@ -56,8 +56,8 @@ pub async fn handle_refresh_schema(
             .is_some_and(schema_has_schema_registry)
         {
             return Err(ErrorCode::NotSupported(
-                "tables without schema registry cannot refreshed".to_string(),
-                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_string(),
+                "tables without schema registry cannot refreshed".to_owned(),
+                "try `ALTER TABLE .. ADD/DROP COLUMN ...` instead".to_owned(),
             )
             .into());
         }

@@ -668,7 +668,7 @@ impl ToStream for LogicalOverWindow {
             if order_by.len() != 1 || order_by[0].order_type != OrderType::ascending() {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "Only support window functions order by single column and in ascending order"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -677,7 +677,7 @@ impl ToStream for LogicalOverWindow {
                 .contains(order_by[0].column_index)
             {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "The column ordered by must be a watermark column".to_string(),
+                    "The column ordered by must be a watermark column".to_owned(),
                 )
                 .into());
             }

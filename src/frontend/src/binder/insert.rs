@@ -136,7 +136,7 @@ impl Binder {
         }
         if !generated_column_names.is_empty() && !returning_items.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
             )));
         }
 
@@ -264,7 +264,7 @@ impl Binder {
             }
         };
         if let Some(msg) = err_msg {
-            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+            return Err(RwError::from(ErrorCode::BindError(msg.to_owned())));
         }
 
         let default_columns = default_column_indices
@@ -354,7 +354,7 @@ fn get_col_indices_to_insert(
 
     let mut col_name_to_idx: HashMap<String, usize> = HashMap::new();
     for (col_idx, col) in cols_to_insert_in_table.iter().enumerate() {
-        col_name_to_idx.insert(col.name().to_string(), col_idx);
+        col_name_to_idx.insert(col.name().to_owned(), col_idx);
     }
 
     for col_name in cols_to_insert_by_user {
@@ -363,7 +363,7 @@ fn get_col_indices_to_insert(
             Some(value_ref) => {
                 if *value_ref == usize::MAX {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Column specified more than once".to_string(),
+                        "Column specified more than once".to_owned(),
                     )));
                 }
                 col_indices_to_insert.push(*value_ref);

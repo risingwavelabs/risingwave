@@ -22,7 +22,7 @@ use itertools::Itertools;
 pub fn get_program_name(cmd: &Command) -> String {
     let program_path = cmd.get_program().to_string_lossy();
     match program_path.rsplit_once('/') {
-        Some((_, rest)) => rest.to_string(),
+        Some((_, rest)) => rest.to_owned(),
         None => program_path.to_string(),
     }
 }

@@ -152,7 +152,7 @@ impl MockSource {
             ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "MockSource".to_string(),
+                identity: "MockSource".to_owned(),
             },
             self.boxed(),
         )

@@ -110,13 +110,13 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
     if unix_millis > now {
         return Err(ErrorCode::CatalogError(
             "rw_timestamp is too large, need to be less than the current unix_millis"
-                .to_string()
+                .to_owned()
                 .into(),
         )
         .into());
     }
     if unix_millis < min_unix_millis {
-        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_string().into()).into());
+        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_owned().into()).into());
     }
     Ok(())
 }

@@ -73,7 +73,7 @@ pub fn secret_to_str(value: &Value) -> Result<String> {
     match value {
         Value::DoubleQuotedString(s) | Value::SingleQuotedString(s) => Ok(s.to_string()),
         _ => Err(ErrorCode::InvalidInputSyntax(
-            "secret value should be quoted by ' or \" ".to_string(),
+            "secret value should be quoted by ' or \" ".to_owned(),
         )
         .into()),
     }
@@ -95,7 +95,7 @@ pub(crate) fn get_secret_payload(credential: Value, with_options: WithOptions) -
             SECRET_BACKEND_HASHICORP_VAULT => {
                 if credential != Value::Null {
                     return Err(ErrorCode::InvalidParameterValue(
-                        "credential must be null for hashicorp_vault backend".to_string(),
+                        "credential must be null for hashicorp_vault backend".to_owned(),
                     )
                     .into());
                 }

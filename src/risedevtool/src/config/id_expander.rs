@@ -30,11 +30,11 @@ impl IdExpander {
         for item in yaml {
             if let Some(item) = item.as_hash() {
                 let id = item
-                    .get(&Yaml::String("id".to_string()))
+                    .get(&Yaml::String("id".to_owned()))
                     .ok_or_else(|| anyhow!("Missing id field: {:?}", item))?
                     .as_str()
                     .ok_or_else(|| anyhow!("Id isn't a string: {:?}", item))?;
-                ids.push(id.to_string());
+                ids.push(id.to_owned());
             } else {
                 return Err(anyhow!("Not a hashmap: {:?}", item));
             }
@@ -65,7 +65,7 @@ impl IdExpander {
                             }
                             Yaml::Array(matched_ids)
                         } else {
-                            Yaml::String(v.to_string())
+                            Yaml::String(v.to_owned())
                         }
                     } else {
                         self.visit(v.clone())?

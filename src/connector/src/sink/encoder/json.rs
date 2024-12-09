@@ -330,7 +330,7 @@ fn datum_to_json_object(
                 }
                 CustomJsonType::StarRocks => {
                     return Err(ArrayError::internal(
-                        "starrocks can't support struct".to_string(),
+                        "starrocks can't support struct".to_owned(),
                     ));
                 }
                 CustomJsonType::Es | CustomJsonType::None => {
@@ -364,19 +364,19 @@ fn json_converter_with_schema<'a>(
 ) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(2);
     mapping.insert(
-        "schema".to_string(),
+        "schema".to_owned(),
         json!({
             "type": "struct",
             "fields": fields.map(|field| {
                 let mut mapping = type_as_json_schema(&field.data_type);
-                mapping.insert("field".to_string(), json!(field.name));
+                mapping.insert("field".to_owned(), json!(field.name));
                 mapping
             }).collect_vec(),
             "optional": false,
             "name": name,
         }),
     );
-    mapping.insert("payload".to_string(), object);
+    mapping.insert("payload".to_owned(), object);
     mapping
 }
 
@@ -408,22 +408,22 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
 
 fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
     let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
-    mapping.insert("type".to_string(), json!(schema_type_mapping(rw_type)));
-    mapping.insert("optional".to_string(), json!(true));
+    mapping.insert("type".to_owned(), json!(schema_type_mapping(rw_type)));
+    mapping.insert("optional".to_owned(), json!(true));
     match rw_type {
         DataType::Struct(struct_type) => {
             let sub_fields = struct_type
                 .iter()
                 .map(|(sub_name, sub_type)| {
                     let mut sub_mapping = type_as_json_schema(sub_type);
-                    sub_mapping.insert("field".to_string(), json!(sub_name));
+                    sub_mapping.insert("field".to_owned(), json!(sub_name));
                     sub_mapping
                 })
                 .collect_vec();
-            mapping.insert("fields".to_string(), json!(sub_fields));
+            mapping.insert("fields".to_owned(), json!(sub_fields));
         }
         DataType::List(sub_type) => {
-            mapping.insert("items".to_string(), json!(type_as_json_schema(sub_type)));
+            mapping.insert("items".to_owned(), json!(type_as_json_schema(sub_type)));
         }
         _ => {}
     }
@@ -576,7 +576,7 @@ mod tests {
             &config,
         )
         .unwrap();
-        assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
+        assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_owned()));
 
         // Represents the number of milliseconds past midnigh, org.apache.kafka.connect.data.Time
         let time_value = datum_to_json_object(
@@ -608,7 +608,7 @@ mod tests {
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
 
         let mut map = HashMap::default();
-        map.insert("aaa".to_string(), 5_u8);
+        map.insert("aaa".to_owned(), 5_u8);
         let doris_config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
@@ -620,7 +620,7 @@ mod tests {
         let decimal = datum_to_json_object(
             &Field {
                 data_type: DataType::Decimal,
-                name: "aaa".to_string(),
+                name: "aaa".to_owned(),
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),

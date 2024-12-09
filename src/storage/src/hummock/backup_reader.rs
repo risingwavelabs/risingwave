@@ -80,7 +80,7 @@ impl BackupReader {
         storage_directory: &str,
         object_store_config: &ObjectStoreConfig,
     ) -> StorageResult<BackupReaderRef> {
-        let config = (storage_url.to_string(), storage_directory.to_string());
+        let config = (storage_url.to_owned(), storage_directory.to_owned());
         let store = create_snapshot_store(&config, object_store_config).await?;
         tracing::info!(
             "backup reader is initialized: url={}, dir={}",
@@ -266,8 +266,8 @@ impl BackupReader {
             }
             let p = rx.borrow().load();
             let config = (
-                p.backup_storage_url().to_string(),
-                p.backup_storage_directory().to_string(),
+                p.backup_storage_url().to_owned(),
+                p.backup_storage_directory().to_owned(),
             );
             if config == self.store.load().1 {
                 continue;

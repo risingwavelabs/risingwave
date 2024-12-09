@@ -102,7 +102,7 @@ impl Default for Configuration {
 telemetry_enabled = false
 metrics_level = "Disabled"
 "#
-            .to_string();
+            .to_owned();
             file.write_all(config_data.as_bytes())
                 .expect("failed to write config file");
             file.into_temp_path()

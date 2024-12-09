@@ -113,7 +113,7 @@ pub enum HummockEvent {
 impl HummockEvent {
     fn to_debug_string(&self) -> String {
         match self {
-            HummockEvent::BufferMayFlush => "BufferMayFlush".to_string(),
+            HummockEvent::BufferMayFlush => "BufferMayFlush".to_owned(),
 
             HummockEvent::SyncEpoch {
                 sync_result_sender: _,
@@ -124,7 +124,7 @@ impl HummockEvent {
                 format!("Clear {:?}", table_ids)
             }
 
-            HummockEvent::Shutdown => "Shutdown".to_string(),
+            HummockEvent::Shutdown => "Shutdown".to_owned(),
 
             HummockEvent::StartEpoch { epoch, table_ids } => {
                 format!("StartEpoch {} {:?}", epoch, table_ids)
@@ -167,8 +167,8 @@ impl HummockEvent {
             }
 
             #[cfg(any(test, feature = "test"))]
-            HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),
-            HummockEvent::GetMinUncommittedSstId { .. } => "GetMinSpilledSstId".to_string(),
+            HummockEvent::FlushEvent(_) => "FlushEvent".to_owned(),
+            HummockEvent::GetMinUncommittedSstId { .. } => "GetMinSpilledSstId".to_owned(),
         }
     }
 }

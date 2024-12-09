@@ -135,7 +135,7 @@ impl ColPrunable for LogicalChangeLog {
 
 impl ToBatch for LogicalChangeLog {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(BindError("With changelog cte only support with create mv/sink".to_string()).into())
+        Err(BindError("With changelog cte only support with create mv/sink".to_owned()).into())
     }
 }
 

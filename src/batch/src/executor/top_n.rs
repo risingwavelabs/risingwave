@@ -335,7 +335,7 @@ mod tests {
             1,
             3,
             false,
-            "TopNExecutor".to_string(),
+            "TopNExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
         ));
@@ -393,7 +393,7 @@ mod tests {
             1,
             0,
             false,
-            "TopNExecutor".to_string(),
+            "TopNExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
         ));

@@ -267,7 +267,7 @@ impl Token {
     pub fn make_word(word: &str, quote_style: Option<char>) -> Self {
         let word_uppercase = word.to_uppercase();
         Token::Word(Word {
-            value: word.to_string(),
+            value: word.to_owned(),
             quote_style,
             keyword: if quote_style.is_none() {
                 let keyword = ALL_KEYWORDS.binary_search(&word_uppercase.as_str());
@@ -1073,7 +1073,7 @@ impl<'a> Tokenizer<'a> {
                 res.push(default_char);
                 return Ok(());
             } else if unicode_seq.len() < len && len != 2 {
-                return Err("invalid unicode sequence: must be \\uXXXX or \\UXXXXXXXX".to_string());
+                return Err("invalid unicode sequence: must be \\uXXXX or \\UXXXXXXXX".to_owned());
             }
 
             if len == 2 {
@@ -1135,7 +1135,7 @@ impl<'a> Tokenizer<'a> {
             if c == '\\' {
                 match chars.next() {
                     None => {
-                        return Err("unterminated escape sequence".to_string());
+                        return Err("unterminated escape sequence".to_owned());
                     }
                     Some(next_c) => match next_c {
                         'b' => res.push('\u{08}'),
@@ -1239,7 +1239,7 @@ mod tests {
             message: "test".into(),
             line: 1,
             col: 1,
-            context: "LINE 1:".to_string(),
+            context: "LINE 1:".to_owned(),
         };
         #[cfg(feature = "std")]
         {
@@ -1519,7 +1519,7 @@ mod tests {
         let sql = String::from("'foo\r\nbar\nbaz'");
         let mut tokenizer = Tokenizer::new(&sql);
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
-        let expected = vec![Token::SingleQuotedString("foo\r\nbar\nbaz".to_string())];
+        let expected = vec![Token::SingleQuotedString("foo\r\nbar\nbaz".to_owned())];
         compare(expected, tokens);
     }
 
@@ -1530,10 +1530,10 @@ mod tests {
         assert_eq!(
             tokenizer.tokenize_with_whitespace(),
             Err(TokenizerError {
-                message: "Unterminated string literal".to_string(),
+                message: "Unterminated string literal".to_owned(),
                 line: 1,
                 col: 12,
-                context: "LINE 1: select 'foo\n                   ^".to_string(),
+                context: "LINE 1: select 'foo\n                   ^".to_owned(),
             })
         );
     }
@@ -1604,12 +1604,12 @@ mod tests {
         let mut tokenizer = Tokenizer::new(&sql);
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
-            Token::Number("0".to_string()),
+            Token::Number("0".to_owned()),
             Token::Whitespace(Whitespace::SingleLineComment {
-                prefix: "--".to_string(),
-                comment: "this is a comment\n".to_string(),
+                prefix: "--".to_owned(),
+                comment: "this is a comment\n".to_owned(),
             }),
-            Token::Number("1".to_string()),
+            Token::Number("1".to_owned()),
         ];
         compare(expected, tokens);
     }
@@ -1620,8 +1620,8 @@ mod tests {
         let mut tokenizer = Tokenizer::new(&sql);
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![Token::Whitespace(Whitespace::SingleLineComment {
-            prefix: "--".to_string(),
-            comment: "this is a comment".to_string(),
+            prefix: "--".to_owned(),
+            comment: "this is a comment".to_owned(),
         })];
         compare(expected, tokens);
     }
@@ -1632,11 +1632,11 @@ mod tests {
         let mut tokenizer = Tokenizer::new(&sql);
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
-            Token::Number("0".to_string()),
+            Token::Number("0".to_owned()),
             Token::Whitespace(Whitespace::MultiLineComment(
-                "multi-line\n* /comment".to_string(),
+                "multi-line\n* /comment".to_owned(),
             )),
-            Token::Number("1".to_string()),
+            Token::Number("1".to_owned()),
         ];
         compare(expected, tokens);
     }
@@ -1647,11 +1647,11 @@ mod tests {
         let mut tokenizer = Tokenizer::new(&sql);
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
-            Token::Number("0".to_string()),
+            Token::Number("0".to_owned()),
             Token::Whitespace(Whitespace::MultiLineComment(
-                "multi-line\n* \n/* comment \n /*comment*/*/ */ /comment".to_string(),
+                "multi-line\n* \n/* comment \n /*comment*/*/ */ /comment".to_owned(),
             )),
-            Token::Number("1".to_string()),
+            Token::Number("1".to_owned()),
         ];
         compare(expected, tokens);
     }
@@ -1663,7 +1663,7 @@ mod tests {
         let tokens = tokenizer.tokenize_with_whitespace().unwrap();
         let expected = vec![
             Token::Whitespace(Whitespace::Newline),
-            Token::Whitespace(Whitespace::MultiLineComment("* Comment *".to_string())),
+            Token::Whitespace(Whitespace::MultiLineComment("* Comment *".to_owned())),
             Token::Whitespace(Whitespace::Newline),
         ];
         compare(expected, tokens);
@@ -1676,10 +1676,10 @@ mod tests {
         assert_eq!(
             tokenizer.tokenize_with_whitespace(),
             Err(TokenizerError {
-                message: "Expected close delimiter '\"' before EOF.".to_string(),
+                message: "Expected close delimiter '\"' before EOF.".to_owned(),
                 line: 1,
                 col: 5,
-                context: "LINE 1: \"foo\n            ^".to_string(),
+                context: "LINE 1: \"foo\n            ^".to_owned(),
             })
         );
     }

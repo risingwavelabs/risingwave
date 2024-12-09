@@ -74,7 +74,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                         timestamp_ms: Timestamptz::from_millis(
                             snapshot.timestamp()?.timestamp_millis(),
                         ),
-                        manifest_list: snapshot.manifest_list().to_string(),
+                        manifest_list: snapshot.manifest_list().to_owned(),
                         summary: Value::object(
                             snapshot
                                 .summary()

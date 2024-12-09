@@ -125,7 +125,7 @@ mod tests {
 
         let union_executor = Box::new(UnionExecutor {
             inputs: vec![Box::new(mock_executor1), Box::new(mock_executor2)],
-            identity: "UnionExecutor".to_string(),
+            identity: "UnionExecutor".to_owned(),
         });
         let fields = &union_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

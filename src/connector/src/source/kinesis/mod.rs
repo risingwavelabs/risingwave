@@ -72,10 +72,10 @@ mod test {
     #[test]
     fn test_parse_kinesis_timestamp_offset() {
         let props: HashMap<String, String> = hashmap! {
-            "stream".to_string() => "sample_stream".to_string(),
-            "aws.region".to_string() => "us-east-1".to_string(),
-            "scan_startup_mode".to_string() => "timestamp".to_string(),
-            "scan.startup.timestamp.millis".to_string() => "123456789".to_string(),
+            "stream".to_owned() => "sample_stream".to_owned(),
+            "aws.region".to_owned() => "us-east-1".to_owned(),
+            "scan_startup_mode".to_owned() => "timestamp".to_owned(),
+            "scan.startup.timestamp.millis".to_owned() => "123456789".to_owned(),
         };
 
         let kinesis_props: KinesisProperties =

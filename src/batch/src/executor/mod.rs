@@ -278,7 +278,7 @@ mod tests {
         let task_id = &TaskId {
             task_id: 1,
             stage_id: 1,
-            query_id: "test_query_id".to_string(),
+            query_id: "test_query_id".to_owned(),
         };
         let builder = ExecutorBuilder::new(
             &plan_node,

@@ -294,7 +294,7 @@ mod tests {
                 with_ties: false,
                 group_key: vec![2],
                 group_key_types: vec![DataType::Int32],
-                identity: "GroupTopNExecutor".to_string(),
+                identity: "GroupTopNExecutor".to_owned(),
                 chunk_size: CHUNK_SIZE,
                 mem_ctx,
             })

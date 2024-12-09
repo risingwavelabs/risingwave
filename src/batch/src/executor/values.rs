@@ -180,7 +180,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
-            identity: "ValuesExecutor2".to_string(),
+            identity: "ValuesExecutor2".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
 
@@ -243,7 +243,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor::new(
             rows,
             Schema { fields },
-            "ValuesExecutor2".to_string(),
+            "ValuesExecutor2".to_owned(),
             3,
         ));
         let mut stream = values_executor.execute();
@@ -258,7 +258,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor::new(
             vec![vec![]],
             Schema::default(),
-            "ValuesExecutor2".to_string(),
+            "ValuesExecutor2".to_owned(),
             CHUNK_SIZE,
         ));
         let mut stream = values_executor.execute();

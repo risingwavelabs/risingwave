@@ -62,7 +62,7 @@ async fn proxy(
     uri: Uri,
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
-    let mut path = uri.path().to_string();
+    let mut path = uri.path().to_owned();
     if path.ends_with('/') {
         path += "index.html";
     }

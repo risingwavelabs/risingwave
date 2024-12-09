@@ -106,7 +106,7 @@ impl PsqlCommandBuilder {
 
     pub(crate) fn add_cmd<S: AsRef<str>>(mut self, cmd: S) -> Self {
         let cmd = cmd.as_ref();
-        let mut escaped_cmd = "".to_string();
+        let mut escaped_cmd = "".to_owned();
 
         // Escape any shell double-quote metacharacters
         for c in cmd.chars() {

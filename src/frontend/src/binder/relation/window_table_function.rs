@@ -83,7 +83,7 @@ impl Binder {
         let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
 
         let Some(output_type) = DataType::window_of(&time_col.data_type) else {
-            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_owned()).into());
         };
 
         let base_columns = std::mem::take(&mut self.context.columns);

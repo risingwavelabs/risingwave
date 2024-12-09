@@ -51,7 +51,7 @@ impl DollarExpander {
                         for cap in self.re.captures_iter(v) {
                             let cap = cap.get(1).unwrap();
                             let name = cap.as_str();
-                            let value = if let Some(item) = y.get(&Yaml::String(name.to_string())) {
+                            let value = if let Some(item) = y.get(&Yaml::String(name.to_owned())) {
                                 yaml_to_string(item)?
                             } else if let Some(item) = self.extra_info.get(name) {
                                 item.clone()
@@ -115,7 +115,7 @@ a:
         .unwrap()
         .remove(0);
         let mut visitor = DollarExpander::new(
-            vec![("test:key".to_string(), "value".to_string())]
+            vec![("test:key".to_owned(), "value".to_owned())]
                 .into_iter()
                 .collect(),
         );

@@ -278,7 +278,7 @@ fn configure(chosen: &[Components]) -> Result<Option<Vec<Components>>> {
         .map(|c| {
             let title = c.title();
             let desc = style(
-                ("\n".to_string() + c.description().trim())
+                ("\n".to_owned() + c.description().trim())
                     .split('\n')
                     .join("\n      "),
             )

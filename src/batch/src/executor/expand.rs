@@ -166,7 +166,7 @@ mod tests {
             column_subsets,
             child: Box::new(mock_executor),
             schema: expand_schema,
-            identity: "ExpandExecutor".to_string(),
+            identity: "ExpandExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
         let mut stream = expand_executor.execute();

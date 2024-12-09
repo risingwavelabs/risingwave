@@ -145,7 +145,7 @@ impl Binder {
                                     "`{}` frame with offset of type `{}` is not supported",
                                     unit, t
                                 ),
-                                "Please re-consider the `ORDER BY` column".to_string(),
+                                "Please re-consider the `ORDER BY` column".to_owned(),
                             )
                             .into())
                         }
@@ -206,7 +206,7 @@ impl Binder {
                 .into_int64();
             if offset < 0 {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "offset in window frame bounds must be non-negative".to_string(),
+                    "offset in window frame bounds must be non-negative".to_owned(),
                 )
                 .into());
             }
@@ -270,7 +270,7 @@ impl Binder {
         let mut offset = self.bind_expr(offset)?;
         if !offset.is_const() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset/gap in window frame bounds must be constant".to_string(),
+                "offset/gap in window frame bounds must be constant".to_owned(),
             )
             .into());
         }
@@ -284,7 +284,7 @@ impl Binder {
         let offset = offset.fold_const()?;
         let Some(offset) = offset else {
             return Err(ErrorCode::InvalidInputSyntax(
-                "offset/gap in window frame bounds must not be NULL".to_string(),
+                "offset/gap in window frame bounds must not be NULL".to_owned(),
             )
             .into());
         };

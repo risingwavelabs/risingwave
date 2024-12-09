@@ -328,7 +328,7 @@ mod tests {
                 // put begin message at first
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         if transactional {
                             cdc_message::CdcMessageType::TransactionMeta
@@ -346,7 +346,7 @@ mod tests {
             for data_msg in batch {
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         cdc_message::CdcMessageType::Data,
                     )),
@@ -360,7 +360,7 @@ mod tests {
                 // put commit message at last
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-                        "orders".to_string(),
+                        "orders".to_owned(),
                         0,
                         if transactional {
                             cdc_message::CdcMessageType::TransactionMeta
@@ -413,7 +413,7 @@ mod tests {
         let commit_msg = r#"{"schema":null,"payload":{"status":"END","id":"3E11FA47-71CA-11E1-9E33-C80AA9429562:23","event_count":11,"data_collections":[{"data_collection":"public.orders_tx","event_count":5},{"data_collection":"public.person","event_count":6}],"ts_ms":1704269323180}}"#;
 
         let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-            "orders".to_string(),
+            "orders".to_owned(),
             0,
             cdc_message::CdcMessageType::TransactionMeta,
         ));
@@ -487,7 +487,7 @@ mod tests {
 
         let msg = r#"{"schema":null,"payload": { "databaseName": "mydb", "ddl": "ALTER TABLE test add column v2 varchar(32)", "schemaName": null, "source": { "connector": "mysql", "db": "mydb", "file": "binlog.000065", "gtid": null, "name": "RW_CDC_0", "pos": 234, "query": null, "row": 0, "sequence": null, "server_id": 1, "snapshot": "false", "table": "test", "thread": null, "ts_ms": 1718354727000, "version": "2.4.2.Final" }, "tableChanges": [ { "id": "\"mydb\".\"test\"", "table": { "columns": [ { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 4, "length": null, "name": "id", "nativeType": null, "optional": false, "position": 1, "scale": null, "typeExpression": "INT", "typeName": "INT" }, { "autoIncremented": false, "charsetName": null, "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 2014, "length": null, "name": "v1", "nativeType": null, "optional": true, "position": 2, "scale": null, "typeExpression": "TIMESTAMP", "typeName": "TIMESTAMP" }, { "autoIncremented": false, "charsetName": "utf8mb4", "comment": null, "defaultValueExpression": null, "enumValues": null, "generated": false, "jdbcType": 12, "length": 32, "name": "v2", "nativeType": null, "optional": true, "position": 3, "scale": null, "typeExpression": "VARCHAR", "typeName": "VARCHAR" } ], "comment": null, "defaultCharsetName": "utf8mb4", "primaryKeyColumnNames": [ "id" ] }, "type": "ALTER" } ], "ts_ms": 1718354727594 }}"#;
         let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-            "mydb.test".to_string(),
+            "mydb.test".to_owned(),
             0,
             cdc_message::CdcMessageType::SchemaChange,
         ));

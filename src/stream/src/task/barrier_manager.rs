@@ -669,7 +669,7 @@ impl LocalBarrierWorker {
             {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
-                        request_id: "todo".to_string(),
+                        request_id: "todo".to_owned(),
                         partial_graph_id: partial_graph_id.into(),
                         epoch,
                         status: None,
@@ -1169,7 +1169,7 @@ pub(crate) mod barrier_test_utils {
                 .send(Ok(StreamingControlStreamRequest {
                     request: Some(streaming_control_stream_request::Request::InjectBarrier(
                         InjectBarrierRequest {
-                            request_id: "".to_string(),
+                            request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
                             database_id: TEST_DATABASE_ID.database_id,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),

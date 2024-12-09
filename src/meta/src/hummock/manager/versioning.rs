@@ -397,7 +397,7 @@ mod tests {
             2,
             WriteLimit {
                 table_ids: vec![1, 2, 3],
-                reason: "for test".to_string(),
+                reason: "for test".to_owned(),
             },
         )]
         .into_iter()

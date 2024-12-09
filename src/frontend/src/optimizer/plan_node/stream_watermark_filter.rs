@@ -117,15 +117,15 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
 
     let key = Field {
         data_type: DataType::Int16,
-        name: "vnode".to_string(),
+        name: "vnode".to_owned(),
         sub_fields: vec![],
-        type_name: "".to_string(),
+        type_name: "".to_owned(),
     };
     let value = Field {
         data_type: watermark_type,
-        name: "offset".to_string(),
+        name: "offset".to_owned(),
         sub_fields: vec![],
-        type_name: "".to_string(),
+        type_name: "".to_owned(),
     };
 
     let ordered_col_idx = builder.add_column(&key);

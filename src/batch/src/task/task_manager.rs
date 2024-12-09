@@ -147,7 +147,7 @@ impl BatchManager {
             StateReporter::new_with_test(),
             TracingContext::none(),
             ExprContext {
-                time_zone: "UTC".to_string(),
+                time_zone: "UTC".to_owned(),
                 strict_mode: false,
             },
         )
@@ -175,7 +175,7 @@ impl BatchManager {
                 .send(TaskInfoResponse {
                     task_id: Some(task_id.to_prost()),
                     task_status: TaskStatus::Ping.into(),
-                    error_message: "".to_string(),
+                    error_message: "".to_owned(),
                 })
                 .await
                 .is_err()
@@ -308,7 +308,7 @@ mod tests {
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
-            query_id: "abc".to_string(),
+            query_id: "abc".to_owned(),
         };
 
         let error = manager.check_if_task_running(&task_id).unwrap_err();
@@ -336,7 +336,7 @@ mod tests {
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
-                identity: "".to_string(),
+                identity: "".to_owned(),
                 node_body: Some(NodeBody::Values(ValuesNode {
                     tuples: vec![],
                     fields: vec![],
@@ -348,7 +348,7 @@ mod tests {
             }),
         };
         let task_id = PbTaskId {
-            query_id: "".to_string(),
+            query_id: "".to_owned(),
             stage_id: 0,
             task_id: 0,
         };
@@ -377,7 +377,7 @@ mod tests {
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
-                identity: "".to_string(),
+                identity: "".to_owned(),
                 node_body: Some(NodeBody::BusyLoopExecutor(true)),
             }),
             exchange_info: Some(ExchangeInfo {
@@ -386,7 +386,7 @@ mod tests {
             }),
         };
         let task_id = PbTaskId {
-            query_id: "".to_string(),
+            query_id: "".to_owned(),
             stage_id: 0,
             task_id: 0,
         };
@@ -408,7 +408,7 @@ mod tests {
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
-                identity: "".to_string(),
+                identity: "".to_owned(),
                 node_body: Some(NodeBody::BusyLoopExecutor(true)),
             }),
             exchange_info: Some(ExchangeInfo {
@@ -417,7 +417,7 @@ mod tests {
             }),
         };
         let task_id = PbTaskId {
-            query_id: "".to_string(),
+            query_id: "".to_owned(),
             stage_id: 0,
             task_id: 0,
         };

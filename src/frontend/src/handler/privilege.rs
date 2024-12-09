@@ -153,11 +153,11 @@ impl SessionImpl {
                 }
                 let has_privilege = user.check_privilege(&item.object, item.mode);
                 if !has_privilege {
-                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                    return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
                 }
             }
         } else {
-            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
         }
 
         Ok(())
@@ -203,8 +203,7 @@ impl SessionImpl {
             && !self.is_super_user()
         {
             return Err(PermissionDenied(
-                "Only the relation owner, the schema owner, and superuser can drop or alter a relation."
-                    .to_string(),
+                "Only the relation owner, the schema owner, and superuser can drop or alter a relation.".to_owned(),
             )
             .into());
         }
@@ -227,7 +226,7 @@ impl SessionImpl {
     ) -> Result<()> {
         if self.user_id() != db_schema.owner() && !self.is_super_user() {
             return Err(PermissionDenied(
-                "Only the owner, and superuser can drop or alter a schema or database.".to_string(),
+                "Only the owner, and superuser can drop or alter a schema or database.".to_owned(),
             )
             .into());
         }
@@ -268,8 +267,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let database = DEFAULT_DATABASE_NAME.to_string();
-        let user_name = "user".to_string();
+        let database = DEFAULT_DATABASE_NAME.to_owned();
+        let user_name = "user".to_owned();
         let user_id = {
             let user_reader = session.env().user_info_reader();
             user_reader
