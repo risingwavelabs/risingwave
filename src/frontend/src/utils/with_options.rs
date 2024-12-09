@@ -304,6 +304,22 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
                 ))));
             }
         }
+
+        {
+            // check if not mess up with schema registry connection and glue connection
+            if connection_type == PbConnectionType::SchemaRegistry {
+                // Check no AWS related options when using schema registry connection
+                if options
+                    .keys()
+                    .chain(inner_secret_refs.keys())
+                    .any(|k| k.starts_with("aws"))
+                {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                            "Glue related options/secrets are not allowed when using schema registry connection".to_string()
+                        )));
+                }
+            }
+        }
     }
 
     // connection_params is None means the connection is not retrieved, so the connection type should be unspecified

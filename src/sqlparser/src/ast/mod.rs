@@ -1310,6 +1310,8 @@ pub enum Statement {
         include_column_options: IncludeOption,
         /// `VALIDATE SECRET secure_secret_name AS secure_compare ()`
         webhook_info: Option<WebhookSourceInfo>,
+        /// `Engine = [hummock | iceberg]`
+        engine: Engine,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1851,6 +1853,7 @@ impl fmt::Display for Statement {
                 cdc_table_info,
                 include_column_options,
                 webhook_info,
+                engine,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1903,6 +1906,12 @@ impl fmt::Display for Statement {
                 if let Some(info)= webhook_info {
                     write!(f, " VALIDATE SECRET {}", info.secret_ref.secret_name)?;
                     write!(f, " AS {}", info.signature_expr)?;
+                }
+                match engine {
+                    Engine::Hummock => {},
+                    Engine::Iceberg => {
+                        write!(f, " ENGINE = {}", engine)?;
+                    },
                 }
                 Ok(())
             }
@@ -2844,6 +2853,22 @@ impl fmt::Display for OnConflict {
             OnConflict::UpdateFull => "DO UPDATE FULL",
             OnConflict::Nothing => "DO NOTHING",
             OnConflict::UpdateIfNotNull => "DO UPDATE IF NOT NULL",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Engine {
+    Hummock,
+    Iceberg,
+}
+
+impl fmt::Display for crate::ast::Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            crate::ast::Engine::Hummock => "HUMMOCK",
+            crate::ast::Engine::Iceberg => "ICEBERG",
         })
     }
 }

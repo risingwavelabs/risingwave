@@ -369,6 +369,12 @@ message Table {
     int32 next_column_id = 2;
   }
 
+  enum Engine {
+    ENGINE_UNSPECIFIED = 0;
+    HUMMOCK = 1;
+    ICEBERG = 2;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -472,6 +478,9 @@ message Table {
 
   // This field stores the job ID for internal tables.
   optional uint32 job_id = 42;
+
+  // Table Engine, currently only support hummock and iceberg
+  optional Engine engine = 43;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
