@@ -30,13 +30,13 @@ use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
+use super::split_stream::split_stream;
 use crate::aws_utils::{default_conn_config, s3_client};
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;
-use crate::source::filesystem::nd_streaming;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
@@ -217,7 +217,7 @@ impl S3FileReader {
                 self.source_ctx.clone(),
             );
             let data_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                nd_streaming::split_stream(data_stream)
+                split_stream(data_stream)
             } else {
                 data_stream
             };

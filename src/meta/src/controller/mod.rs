@@ -25,7 +25,7 @@ use risingwave_meta_model_migration::{MigrationStatus, Migrator, MigratorTrait};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
-use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
+use risingwave_pb::catalog::table::{PbEngine, PbOptionalAssociatedSourceId, PbTableType};
 use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbFunction, PbHandleConflictBehavior, PbIndex,
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
@@ -204,6 +204,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             maybe_vnode_count: VnodeCount::set(value.0.vnode_count).to_protobuf(),
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
             job_id: value.0.belongs_to_job_id.map(|id| id as _),
+            engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
         }
     }
 }

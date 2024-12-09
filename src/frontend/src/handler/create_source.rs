@@ -27,6 +27,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     debug_assert_column_ids_distinct, ColumnCatalog, ColumnDesc, ColumnId, Schema, TableId,
     ICEBERG_SEQUENCE_NUM_COLUMN_NAME, INITIAL_SOURCE_VERSION_ID, KAFKA_TIMESTAMP_COLUMN_NAME,
+    ROWID_PREFIX,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -1411,7 +1412,9 @@ pub async fn extract_iceberg_columns(
                 );
                 ColumnCatalog {
                     column_desc,
-                    is_hidden: false,
+                    // hide the _row_id column for iceberg engine table
+                    // This column is auto generated when users define a table without primary key
+                    is_hidden: field.name() == ROWID_PREFIX,
                 }
             })
             .collect();
