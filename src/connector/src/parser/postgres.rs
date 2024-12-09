@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use thiserror_ext::AsReport;
 
 use crate::parser::scalar_adapter::ScalarAdapter;
-use crate::parser::util::log_error;
+use crate::parser::utils::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 
