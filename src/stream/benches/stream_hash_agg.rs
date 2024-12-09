@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
+use futures::StreamExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
@@ -145,6 +146,13 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> Executor {
         false,
         executor_id,
     ))
+}
+
+pub async fn execute_executor(executor: Executor) {
+    let mut stream = executor.execute();
+    while let Some(ret) = stream.next().await {
+        _ = black_box(ret.unwrap());
+    }
 }
 
 criterion_group!(benches, bench_hash_agg);
