@@ -158,7 +158,8 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         } else {
             // Cut the chunk into smaller chunks
             for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(chunk.compute_rate_limit_chunk_permits(limit) as u32).unwrap();
+                let n =
+                    NonZeroU32::new(chunk.compute_rate_limit_chunk_permits(limit) as u32).unwrap();
                 // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;

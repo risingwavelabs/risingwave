@@ -122,9 +122,11 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_backfill_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
             }
-            ThrottleTarget::TableDml => self
-                .metadata_manager
-                .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate),
+            ThrottleTarget::TableDml => {
+                self.metadata_manager
+                    .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .await?
+            }
             ThrottleTarget::Sink => {
                 self.metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)

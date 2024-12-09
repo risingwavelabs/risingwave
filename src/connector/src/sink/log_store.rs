@@ -348,6 +348,7 @@ struct RateLimitedLogReaderCore<R: LogReader> {
 }
 
 impl<R: LogReader> RateLimitedLogReaderCore<R> {
+    // Returns: Left - chunk, Right - Barrier/UpdateVnodeBitmap
     async fn next_item(&mut self) -> LogStoreResult<Either<SplitChunk, (u64, LogStoreReadItem)>> {
         // Get upstream chunk from unconsumed_chunk_queue first.
         // If unconsumed_chunk_queue is empty, get the chunk from the inner log reader.
@@ -371,7 +372,7 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                         self.next_chunk_id = 0;
                         Ok(Either::Right((epoch, item)))
                     }
-                    LogStoreReadItem::UpdateVnodeBitmap(..) => Ok(Either::Right((epoch, item))),
+                    LogStoreReadItem::UpdateVnodeBitmap(_) => Ok(Either::Right((epoch, item))),
                 }
             }
         }
@@ -519,6 +520,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                             return self.apply_rate_limit(split_chunk).await;
                         },
                         Either::Right(item) => {
+                            assert!(matches!(item.1, LogStoreReadItem::Barrier{..} | LogStoreReadItem::UpdateVnodeBitmap(_)));
                             return Ok(item);
                         },
                     }

@@ -409,7 +409,7 @@ async fn apply_dml_rate_limit(
                     // Split the chunk into smaller chunks.
                     for small_chunk in chunk.split(max_permits) {
                         let required_permits =
-                        small_chunk.compute_rate_limit_chunk_permits(max_permits);
+                            small_chunk.compute_rate_limit_chunk_permits(max_permits);
                         let n = NonZeroU32::new(required_permits as u32).unwrap();
                         // Smaller chunks should have effective chunk size <= max_permits.
                         rate_limiter.until_n_ready(n).await.unwrap();
