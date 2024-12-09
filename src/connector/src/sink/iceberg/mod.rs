@@ -48,9 +48,7 @@ use risingwave_meta_model::exactly_once_iceberg_sink::{self, Column, Entity, Mod
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
-use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set,
-};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set};
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
@@ -956,6 +954,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 .await
                 .unwrap();
             let partition_type = self.table.current_partition_type()?;
+            let mut last_recommit_epoch = 0;
             for (end_epoch, sealized_bytes) in metadata_map {
                 let write_results_bytes = deserialize_metadata(sealized_bytes);
                 let mut write_results = vec![];
@@ -976,12 +975,12 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                     self.re_commit(end_epoch, write_results).await?;
 
                     // Think twice, need delete meta store?
-
-                    self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
-                        .await?;
                 }
+                last_recommit_epoch = end_epoch;
             }
         }
+
+        // todo: rewind log store to last_recommit_epoch
 
         tracing::info!("Iceberg commit coordinator inited.");
         Ok(())
@@ -1036,7 +1035,8 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
             SinkError::Iceberg(anyhow!(err))
         })?;
-
+        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+            .await?;
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
     }
@@ -1071,6 +1071,9 @@ impl IcebergSinkCommitter {
             tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
             SinkError::Iceberg(anyhow!(err))
         })?;
+
+        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+            .await?;
 
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
         Ok(())
