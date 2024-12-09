@@ -15,24 +15,22 @@
 #![feature(let_chains)]
 
 use std::env;
-use risingwave_stream::executor::Message;
-use risingwave_stream::executor::JoinParams;
-use risingwave_stream::executor::ExecutorInfo;
-use risingwave_stream::executor::HashJoinExecutor;
-use risingwave_common::hash::Key128;
-use risingwave_stream::executor::JoinType;
-use risingwave_stream::executor::monitor::StreamingMetrics;
-use itertools::Itertools;
-use crate::prelude::*;
+
 use futures::StreamExt;
-use risingwave_common::array::{Op, StreamChunk, I64Array};
+use itertools::Itertools;
+use risingwave_common::array::{I64Array, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::hash::Key128;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 use risingwave_stream::executor::test_utils::*;
+use risingwave_stream::executor::{ExecutorInfo, HashJoinExecutor, JoinParams, JoinType, Message};
+
+use crate::prelude::*;
 
 risingwave_expr_impl::enable!();
 
@@ -40,39 +38,32 @@ risingwave_expr_impl::enable!();
 /// 2. Init executor.
 /// 3. Push data to the probe side.
 /// 4. Check memory utilization.
-async fn setup_bench_stream_hash_join(amp: usize) -> (MessageSender, MessageSender, BoxedMessageStream) {
+async fn setup_bench_stream_hash_join(
+    amp: usize,
+) -> (MessageSender, MessageSender, BoxedMessageStream) {
     let fields = vec![DataType::Int64, DataType::Int64, DataType::Int64];
     let orders = vec![OrderType::ascending(), OrderType::ascending()];
     let state_store = MemoryStateStore::new();
 
     // Probe side
-    let (lhs_state_table, lhs_degree_state_table) = create_in_memory_state_table(
-        state_store.clone(),
-        &fields,
-        &orders,
-        &[0, 1],
-        0,
-    ).await;
+    let (lhs_state_table, lhs_degree_state_table) =
+        create_in_memory_state_table(state_store.clone(), &fields, &orders, &[0, 1], 0).await;
 
     // Build side
-    let (mut rhs_state_table, rhs_degree_state_table) = create_in_memory_state_table(
-        state_store.clone(),
-        &fields,
-        &orders,
-        &[0, 1],
-        2,
-    ).await;
+    let (mut rhs_state_table, rhs_degree_state_table) =
+        create_in_memory_state_table(state_store.clone(), &fields, &orders, &[0, 1], 2).await;
 
     // Insert 100K records into the build side.
     {
         // Create column [0]: join key. Each record has the same value, to trigger join amplification.
         let mut int64_jk_builder = DataType::Int64.create_array_builder(amp);
-        int64_jk_builder.append_array(&I64Array::from_iter(vec![Some(200_000); amp].into_iter()).into());
+        int64_jk_builder
+            .append_array(&I64Array::from_iter(vec![Some(200_000); amp].into_iter()).into());
         let jk = int64_jk_builder.finish();
 
         // Create column [1]: pk. The original pk will be here, it will be unique.
         let mut int64_pk_data_chunk_builder = DataType::Int64.create_array_builder(amp);
-        let seq = I64Array::from_iter((0..amp as i64).map(|i| { Some(i) }));
+        let seq = I64Array::from_iter((0..amp as i64).map(|i| Some(i)));
         int64_pk_data_chunk_builder.append_array(&I64Array::from(seq).into());
         let pk = int64_pk_data_chunk_builder.finish();
 
@@ -88,7 +79,13 @@ async fn setup_bench_stream_hash_join(amp: usize) -> (MessageSender, MessageSend
         rhs_state_table.write_chunk(stream_chunk);
     }
 
-    let schema = Schema::new(fields.iter().cloned().map(|data_type| Field::unnamed(data_type)).collect());
+    let schema = Schema::new(
+        fields
+            .iter()
+            .cloned()
+            .map(|data_type| Field::unnamed(data_type))
+            .collect(),
+    );
 
     let (tx_l, source_l) = MockSource::channel();
     let source_l = source_l.into_executor(schema.clone(), vec![1]);
@@ -122,14 +119,14 @@ async fn setup_bench_stream_hash_join(amp: usize) -> (MessageSender, MessageSend
         params_r,
         vec![false], // null-safe
         (0..schema_len).collect_vec(),
-        None, // condition, it is an eq join, we have no condition
+        None,   // condition, it is an eq join, we have no condition
         vec![], // ineq pairs
         lhs_state_table,
         lhs_degree_state_table,
         rhs_state_table,
         rhs_degree_state_table,
         Arc::new(AtomicU64::new(0)), // watermark epoch
-        false, // is_append_only
+        false,                       // is_append_only
         Arc::new(StreamingMetrics::unused()),
         1024, // chunk_size
         2048, // high_join_amplification_threshold
@@ -143,7 +140,6 @@ async fn handle_streams(
     mut tx_r: MessageSender,
     mut stream: BoxedMessageStream,
 ) {
-
     // Init executors
     tx_l.push_barrier(test_epoch(1), false);
     tx_r.push_barrier(test_epoch(1), false);
@@ -195,7 +191,8 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 async fn main() {
     let args: Vec<_> = env::args().collect();
     let amp = if let Some(raw_arg) = args.get(1)
-        && let Ok(arg) = raw_arg.parse() {
+        && let Ok(arg) = raw_arg.parse()
+    {
         arg
     } else {
         100_000
