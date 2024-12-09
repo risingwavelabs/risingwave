@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use async_nats::jetstream::Message;
-use risingwave_common::types::{ScalarRefImpl, DatumRef};
+use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::source::base::SourceMessage;
 use crate::source::{SourceMeta, SplitId};
@@ -22,7 +22,6 @@ use crate::source::{SourceMeta, SplitId};
 pub struct NatsMeta {
     pub subject: String,
 }
-
 
 impl NatsMeta {
     pub fn extract_subject(&self) -> DatumRef<'_> {
@@ -67,7 +66,7 @@ impl NatsMessage {
                 .message
                 .reply
                 .map(|subject| subject.as_str().to_string()),
-            subject: message.message.subject.as_str().to_string()
+            subject: message.message.subject.as_str().to_string(),
         }
     }
 }
