@@ -64,7 +64,7 @@ pub async fn handle_alter_streaming_rate_limit(
                 {
                     return Err(InvalidInputSyntax(
                         "PAUSE or RESUME is invalid when the stream has pre configured ratelimit."
-                            .to_string(),
+                            .to_owned(),
                     )
                     .into());
                 }

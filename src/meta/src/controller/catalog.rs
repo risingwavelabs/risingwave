@@ -1565,7 +1565,7 @@ impl CatalogController {
                 {
                     pb_connection.info.as_ref().and_then(|info| match info {
                         ConnectionInfo::ConnectionParams(params) => {
-                            Some(params.connection_type().as_str_name().to_string())
+                            Some(params.connection_type().as_str_name().to_owned())
                         }
                         _ => None,
                     })

@@ -64,10 +64,10 @@ impl IcebergProperties {
     pub async fn create_catalog_v2(&self) -> ConnectorResult<Arc<dyn CatalogV2>> {
         let mut java_catalog_props = HashMap::new();
         if let Some(jdbc_user) = self.jdbc_user.clone() {
-            java_catalog_props.insert("jdbc.user".to_string(), jdbc_user);
+            java_catalog_props.insert("jdbc.user".to_owned(), jdbc_user);
         }
         if let Some(jdbc_password) = self.jdbc_password.clone() {
-            java_catalog_props.insert("jdbc.password".to_string(), jdbc_password);
+            java_catalog_props.insert("jdbc.password".to_owned(), jdbc_password);
         }
         // TODO: support path_style_access and java_catalog_props for iceberg source
         self.common.create_catalog_v2(&java_catalog_props).await

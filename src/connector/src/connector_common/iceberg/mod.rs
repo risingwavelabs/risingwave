@@ -199,7 +199,7 @@ impl IcebergCommon {
             let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
                 "iceberg.table.io.disable_config_load".to_owned(),
-                enable_config_load.to_owned(),
+                enable_config_load.to_string(),
             );
 
             load_iceberg_base_catalog_config(&iceberg_configs)?
@@ -227,8 +227,7 @@ impl IcebergCommon {
             java_catalog_configs.insert("init-creation-stacktrace".to_owned(), "false".to_owned());
 
             if let Some(region) = &self.region {
-                java_catalog_configs
-                    .insert("client.region".to_string(), region.clone().to_string());
+                java_catalog_configs.insert("client.region".to_owned(), region.clone());
             }
             if let Some(endpoint) = &self.endpoint {
                 java_catalog_configs.insert("s3.endpoint".to_owned(), endpoint.clone());

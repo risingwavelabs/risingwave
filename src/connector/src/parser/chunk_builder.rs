@@ -216,7 +216,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 )?))
                             } else {
                                 Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_string(),
+                                    message: "CDC metadata not found in the message".to_owned(),
                                 })
                             }
                         }

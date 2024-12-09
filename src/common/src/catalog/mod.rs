@@ -575,8 +575,8 @@ impl Engine {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            Engine::Hummock => "Hummock".to_string(),
-            Engine::Iceberg => "Iceberg".to_string(),
+            Engine::Hummock => "Hummock".to_owned(),
+            Engine::Iceberg => "Iceberg".to_owned(),
         }
     }
 }

@@ -234,7 +234,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
             {
                 connection_params.as_ref().map(|cp| {
                     jsonbb::json!({
-                        "connection_type": cp.connection_type().as_str_name().to_string()
+                        "connection_type": cp.connection_type().as_str_name().to_owned()
                     })
                 })
             },
@@ -314,7 +314,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
                     .any(|k| k.starts_with("aws"))
                 {
                     return Err(RwError::from(ErrorCode::InvalidParameterValue(
-                            "Glue related options/secrets are not allowed when using schema registry connection".to_string()
+                            "Glue related options/secrets are not allowed when using schema registry connection".to_owned()
                         )));
                 }
             }
