@@ -15,7 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
@@ -203,8 +203,10 @@ impl CreateMviewProgressReporter {
         );
     }
 
-    pub fn update_vnodes(&mut self, vnodes: Vec<usize>) {
-        self.vnodes = vnodes;
+    pub fn update_vnodes(&mut self, vnodes: &Bitmap) {
+        println!("updating vnode to {:?}", vnodes);
+        //todo!()
+        //self.vnodes = vnodes;
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
