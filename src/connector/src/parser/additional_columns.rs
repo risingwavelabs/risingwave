@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName, AdditionalSubject
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
