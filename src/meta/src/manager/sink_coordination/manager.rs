@@ -34,7 +34,6 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
 use tracing::{debug, error, info, warn};
 
-use crate::controller::SqlMetaStore;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 use crate::manager::sink_coordination::SinkWriterRequestStream;

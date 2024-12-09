@@ -49,7 +49,7 @@ use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::SinkMetadata;
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set,
+    ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set,
 };
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -70,7 +70,6 @@ use crate::connector_common::IcebergCommon;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
-use crate::source::iceberg::IcebergProperties;
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
@@ -818,7 +817,7 @@ impl WriteResult {
 
     pub fn try_from_sealized_bytes(value: &Vec<u8>, partition_type: &Any) -> Result<Self> {
         let mut values = if let serde_json::Value::Object(v) =
-            serde_json::from_slice::<serde_json::Value>(&value)
+            serde_json::from_slice::<serde_json::Value>(value)
                 .context("Can't parse iceberg sink metadata")?
         {
             v
@@ -944,25 +943,6 @@ pub struct IcebergSinkCommitter {
     pub(crate) db: DatabaseConnection,
 }
 
-#[warn(dead_code)]
-
-struct IcebergPreCommitMetadata {
-    file_info: Vec<WriteResult>,
-
-    start_epoch: u64,
-    end_epoch: u64,
-}
-
-impl IcebergPreCommitMetadata {
-    fn new(file_info: Vec<WriteResult>, start_epoch: u64, end_epoch: u64) -> Self {
-        Self {
-            file_info,
-            start_epoch,
-            end_epoch,
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
@@ -994,6 +974,11 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                     // recommit
 
                     self.re_commit(end_epoch, write_results).await?;
+
+                    // Think twice, need delete meta store?
+
+                    self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, end_epoch)
+                        .await?;
                 }
             }
         }
@@ -1107,6 +1092,28 @@ impl IcebergSinkCommitter {
         exactly_once_iceberg_sink::Entity::insert(m)
             .exec(&db)
             .await?;
+        Ok(())
+    }
+
+    pub async fn delete_row_by_sink_id_and_end_epoch(
+        &self,
+        db: &DatabaseConnection,
+        sink_id: u32,
+        end_epoch: u64,
+    ) -> anyhow::Result<()> {
+        let deleted_count = Entity::delete_many()
+            .filter(Column::SinkId.eq(sink_id))
+            .filter(Column::EndEpoch.eq(end_epoch))
+            .exec(db)
+            .await?
+            .rows_affected;
+
+        if deleted_count == 0 {
+            tracing::info!("No rows deleted.");
+        } else {
+            tracing::info!("Deleted {} row(s).", deleted_count);
+        }
+
         Ok(())
     }
 

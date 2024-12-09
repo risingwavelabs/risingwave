@@ -34,7 +34,6 @@ use tokio::time::sleep;
 use tonic::Status;
 use tracing::{error, warn};
 
-use crate::controller::SqlMetaStore;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 
 async fn run_future_with_periodic_fn<F: Future>(
