@@ -182,10 +182,16 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             // note that the buffer contains the newline character
             debug_assert_eq!(n_read, line_buf.len());
 
+            // FIXME(rc): Here we have to use `offset + n_read`, i.e. the offset of the next line,
+            // as the *message offset*, because we check whether a file is finished by comparing the
+            // message offset with the file size in `FsFetchExecutor::into_stream`. However, we must
+            // understand that this message offset is not semantically consistent with the offset of
+            // other source connectors.
+            let msg_offset = (offset + n_read).to_string();
             batch.push(SourceMessage {
                 key: None,
                 payload: Some(std::mem::take(&mut line_buf).into_bytes()),
-                offset: offset.to_string(),
+                offset: msg_offset,
                 split_id: split.id(),
                 meta: SourceMeta::Empty,
             });
