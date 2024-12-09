@@ -1067,16 +1067,251 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+
     use risingwave_common::array::*;
-    use risingwave_common::util::epoch::{test_epoch, EpochExt};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::expr::build_from_pretty;
-    use crate::executor::test_utils::hash_join_executor::{
-        create_append_only_executor, create_classical_executor, create_executor,
-    };
-    use crate::executor::test_utils::StreamExecutorTestExt;
-    use crate::executor::JoinType;
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+
+    async fn create_in_memory_state_table(
+        mem_state: MemoryStateStore,
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        table_id: u32,
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(table_id),
+                column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
+            mem_state.clone(),
+            None,
+        )
+        .await;
+
+        // Create degree table
+        let mut degree_table_column_descs = vec![];
+        pk_indices.iter().enumerate().for_each(|(pk_id, idx)| {
+            degree_table_column_descs.push(ColumnDesc::unnamed(
+                ColumnId::new(pk_id as i32),
+                data_types[*idx].clone(),
+            ))
+        });
+        degree_table_column_descs.push(ColumnDesc::unnamed(
+            ColumnId::new(pk_indices.len() as i32),
+            DataType::Int64,
+        ));
+        let degree_state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(table_id + 1),
+                degree_table_column_descs,
+                order_types.to_vec(),
+                pk_indices.to_vec(),
+                0,
+            ),
+            mem_state,
+            None,
+        )
+        .await;
+        (state_table, degree_state_table)
+    }
+
+    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
+        build_from_pretty(
+            condition_text
+                .as_deref()
+                .unwrap_or("(less_than:boolean $1:int8 $3:int8)"),
+        )
+    }
+
+    async fn create_executor<const T: JoinTypePrimitive>(
+        with_condition: bool,
+        null_safe: bool,
+        condition_text: Option<String>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64), // join key
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![1]);
+        let params_l = JoinParams::new(vec![0], vec![1]);
+        let params_r = JoinParams::new(vec![0], vec![1]);
+        let cond = with_condition.then(|| create_cond(condition_text));
+
+        let mem_state = MemoryStateStore::new();
+
+        let (state_l, degree_state_l) = create_in_memory_state_table(
+            mem_state.clone(),
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            0,
+        )
+        .await;
+
+        let (state_r, degree_state_r) = create_in_memory_state_table(
+            mem_state,
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            2,
+        )
+        .await;
+
+        let schema = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
+            _ => [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect(),
+        };
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![1],
+            identity: "HashJoinExecutor".to_string(),
+        };
+
+        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
+            ActorContext::for_test(123),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![null_safe],
+            (0..schema_len).collect_vec(),
+            cond,
+            inequality_pairs,
+            state_l,
+            degree_state_l,
+            state_r,
+            degree_state_r,
+            Arc::new(AtomicU64::new(0)),
+            false,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+        );
+        (tx_l, tx_r, executor.boxed().execute())
+    }
+
+    async fn create_classical_executor<const T: JoinTypePrimitive>(
+        with_condition: bool,
+        null_safe: bool,
+        condition_text: Option<String>,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        create_executor::<T>(with_condition, null_safe, condition_text, vec![]).await
+    }
+
+    async fn create_append_only_executor<const T: JoinTypePrimitive>(
+        with_condition: bool,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![0]);
+        let params_l = JoinParams::new(vec![0, 1], vec![]);
+        let params_r = JoinParams::new(vec![0, 1], vec![]);
+        let cond = with_condition.then(|| create_cond(None));
+
+        let mem_state = MemoryStateStore::new();
+
+        let (state_l, degree_state_l) = create_in_memory_state_table(
+            mem_state.clone(),
+            &[DataType::Int64, DataType::Int64, DataType::Int64],
+            &[
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            &[0, 1, 0],
+            0,
+        )
+        .await;
+
+        let (state_r, degree_state_r) = create_in_memory_state_table(
+            mem_state,
+            &[DataType::Int64, DataType::Int64, DataType::Int64],
+            &[
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            &[0, 1, 1],
+            0,
+        )
+        .await;
+
+        let schema = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
+            _ => [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect(),
+        };
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![1],
+            identity: "HashJoinExecutor".to_string(),
+        };
+
+        let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
+            ActorContext::for_test(123),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![false],
+            (0..schema_len).collect_vec(),
+            cond,
+            vec![],
+            state_l,
+            degree_state_l,
+            state_r,
+            degree_state_r,
+            Arc::new(AtomicU64::new(0)),
+            true,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+        );
+        (tx_l, tx_r, executor.boxed().execute())
+    }
 
     #[tokio::test]
     async fn test_interval_join() -> StreamExecutorResult<()> {

@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
-use futures::StreamExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;

@@ -638,18 +638,16 @@ pub mod hash_join_executor {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_common::array::{I64Array, Op, StreamChunkTestExt};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::hash::Key128;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::NonStrictExpression;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::join::JoinTypePrimitive;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
-    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType};
 
@@ -705,183 +703,146 @@ pub mod hash_join_executor {
         (state_table, degree_state_table)
     }
 
-    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
-        build_from_pretty(
-            condition_text
-                .as_deref()
-                .unwrap_or("(less_than:boolean $1:int8 $3:int8)"),
-        )
-    }
-
-    pub async fn create_executor<const T: JoinTypePrimitive>(
-        with_condition: bool,
-        null_safe: bool,
-        condition_text: Option<String>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
+    /// 1. Refill state table of build side.
+    /// 2. Init executor.
+    /// 3. Push data to the probe side.
+    /// 4. Check memory utilization.
+    pub async fn setup_bench_stream_hash_join(
+        amp: usize,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64), // join key
-                Field::unnamed(DataType::Int64),
-            ],
-        };
+        let fields = vec![DataType::Int64, DataType::Int64, DataType::Int64];
+        let orders = vec![OrderType::ascending(), OrderType::ascending()];
+        let state_store = MemoryStateStore::new();
+
+        // Probe side
+        let (lhs_state_table, lhs_degree_state_table) =
+            create_in_memory_state_table(state_store.clone(), &fields, &orders, &[0, 1], 0).await;
+
+        // Build side
+        let (mut rhs_state_table, rhs_degree_state_table) =
+            create_in_memory_state_table(state_store.clone(), &fields, &orders, &[0, 1], 2).await;
+
+        // Insert 100K records into the build side.
+        {
+            // Create column [0]: join key. Each record has the same value, to trigger join amplification.
+            let mut int64_jk_builder = DataType::Int64.create_array_builder(amp);
+            int64_jk_builder
+                .append_array(&I64Array::from_iter(vec![Some(200_000); amp].into_iter()).into());
+            let jk = int64_jk_builder.finish();
+
+            // Create column [1]: pk. The original pk will be here, it will be unique.
+            let mut int64_pk_data_chunk_builder = DataType::Int64.create_array_builder(amp);
+            let seq = I64Array::from_iter((0..amp as i64).map(Some));
+            int64_pk_data_chunk_builder.append_array(&I64Array::from(seq).into());
+            let pk = int64_pk_data_chunk_builder.finish();
+
+            // Create column [2]: value. This can be an arbitrary value, so just clone the pk column.
+            let values = pk.clone();
+
+            // Build the stream chunk.
+            let columns = vec![jk.into(), pk.into(), values.into()];
+            let ops = vec![Op::Insert; amp];
+            let stream_chunk = StreamChunk::new(ops, columns);
+
+            // Write to state table.
+            rhs_state_table.write_chunk(stream_chunk);
+        }
+
+        let schema = Schema::new(fields.iter().cloned().map(Field::unnamed).collect());
+
         let (tx_l, source_l) = MockSource::channel();
         let source_l = source_l.into_executor(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel();
         let source_r = source_r.into_executor(schema, vec![1]);
+
+        // Schema is the concatenation of the two source schemas.
+        // [lhs(jk):0, lhs(pk):1, lhs(value):2, rhs(jk):0, rhs(pk):1, rhs(value):2]
+        // [0,         1,         2,            3,         4,         5           ]
+        let schema: Vec<_> = [source_l.schema().fields(), source_r.schema().fields()]
+            .concat()
+            .into_iter()
+            .collect();
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema: Schema { fields: schema },
+            pk_indices: vec![0, 1, 3, 4],
+            identity: "HashJoinExecutor".to_string(),
+        };
+
+        // join-key is [0], primary-key is [1].
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
-        let cond = with_condition.then(|| create_cond(condition_text));
 
-        let mem_state = MemoryStateStore::new();
-
-        let (state_l, degree_state_l) = create_in_memory_state_table(
-            mem_state.clone(),
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
-            0,
-        )
-        .await;
-
-        let (state_r, degree_state_r) = create_in_memory_state_table(
-            mem_state,
-            &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
-            &[0, 1],
-            2,
-        )
-        .await;
-
-        let schema = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
-            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
-            _ => [source_l.schema().fields(), source_r.schema().fields()]
-                .concat()
-                .into_iter()
-                .collect(),
-        };
-        let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_string(),
-        };
-
-        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
+        let executor = HashJoinExecutor::<Key128, MemoryStateStore, { JoinType::Inner }>::new(
             ActorContext::for_test(123),
             info,
             source_l,
             source_r,
             params_l,
             params_r,
-            vec![null_safe],
+            vec![false], // null-safe
             (0..schema_len).collect_vec(),
-            cond,
-            inequality_pairs,
-            state_l,
-            degree_state_l,
-            state_r,
-            degree_state_r,
-            Arc::new(AtomicU64::new(0)),
-            false,
+            None,   // condition, it is an eq join, we have no condition
+            vec![], // ineq pairs
+            lhs_state_table,
+            lhs_degree_state_table,
+            rhs_state_table,
+            rhs_degree_state_table,
+            Arc::new(AtomicU64::new(0)), // watermark epoch
+            false,                       // is_append_only
             Arc::new(StreamingMetrics::unused()),
-            1024,
-            2048,
+            1024, // chunk_size
+            2048, // high_join_amplification_threshold
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
-    pub async fn create_classical_executor<const T: JoinTypePrimitive>(
-        with_condition: bool,
-        null_safe: bool,
-        condition_text: Option<String>,
-    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        create_executor::<T>(with_condition, null_safe, condition_text, vec![]).await
-    }
-
-    pub async fn create_append_only_executor<const T: JoinTypePrimitive>(
-        with_condition: bool,
-    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let (tx_l, source_l) = MockSource::channel();
-        let source_l = source_l.into_executor(schema.clone(), vec![0]);
-        let (tx_r, source_r) = MockSource::channel();
-        let source_r = source_r.into_executor(schema, vec![0]);
-        let params_l = JoinParams::new(vec![0, 1], vec![]);
-        let params_r = JoinParams::new(vec![0, 1], vec![]);
-        let cond = with_condition.then(|| create_cond(None));
-
-        let mem_state = MemoryStateStore::new();
-
-        let (state_l, degree_state_l) = create_in_memory_state_table(
-            mem_state.clone(),
-            &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[
-                OrderType::ascending(),
-                OrderType::ascending(),
-                OrderType::ascending(),
-            ],
-            &[0, 1, 0],
-            0,
-        )
-        .await;
-
-        let (state_r, degree_state_r) = create_in_memory_state_table(
-            mem_state,
-            &[DataType::Int64, DataType::Int64, DataType::Int64],
-            &[
-                OrderType::ascending(),
-                OrderType::ascending(),
-                OrderType::ascending(),
-            ],
-            &[0, 1, 1],
-            0,
-        )
-        .await;
-
-        let schema = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
-            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
-            _ => [source_l.schema().fields(), source_r.schema().fields()]
-                .concat()
-                .into_iter()
-                .collect(),
-        };
-        let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_string(),
-        };
-
-        let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
-            ActorContext::for_test(123),
-            info,
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            vec![false],
-            (0..schema_len).collect_vec(),
-            cond,
-            vec![],
-            state_l,
-            degree_state_l,
-            state_r,
-            degree_state_r,
-            Arc::new(AtomicU64::new(0)),
-            true,
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-            2048,
+    pub async fn handle_streams(
+        amp: usize,
+        mut tx_l: MessageSender,
+        mut tx_r: MessageSender,
+        mut stream: BoxedMessageStream,
+    ) {
+        // Init executors
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        // Push a single record into tx_l, matches 100K records in the build side.
+        let chunk = StreamChunk::from_pretty(
+            "  I      I I
+         + 200000 0 1",
         );
-        (tx_l, tx_r, executor.boxed().execute())
+        tx_l.push_chunk(chunk);
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(b))) => {
+                assert_eq!(b.epoch.curr, test_epoch(1));
+            }
+            other => {
+                panic!("Expected a barrier, got {:?}", other);
+            }
+        }
+
+        let chunks = amp / 1024;
+        let remainder = amp % 1024;
+
+        for _ in 0..chunks {
+            match stream.next().await {
+                Some(Ok(Message::Chunk(c))) => {
+                    assert_eq!(c.cardinality(), 1024);
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
+            }
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Chunk(c))) => {
+                assert_eq!(c.cardinality(), remainder);
+            }
+            other => {
+                panic!("Expected a barrier, got {:?}", other);
+            }
+        }
     }
 }

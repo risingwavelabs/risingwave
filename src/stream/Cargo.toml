@@ -112,7 +112,11 @@ name = "bench_state_table"
 harness = false
 
 [[bench]]
-name = "stream_hash_join"
+name = "stream_hash_join_rt"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_mem"
 harness = false
 
 [lints]
