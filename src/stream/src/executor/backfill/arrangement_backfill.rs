@@ -30,8 +30,8 @@ use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
+    mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
+    BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -719,8 +719,6 @@ where
                     PrefetchOptions::prefetch_for_small_range_scan(),
                 )
                 .await?;
-
-            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
             let vnode_row_iter = vnode_row_iter.map_ok(move |row| (vnode, row));
 
