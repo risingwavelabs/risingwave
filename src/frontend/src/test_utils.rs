@@ -68,7 +68,7 @@ use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
-
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
@@ -244,12 +244,13 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: UserId, resource_group: &str) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(&PbDatabase {
             name: db_name.to_owned(),
             id: database_id,
             owner,
+            resource_group: resource_group.to_string(),
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
@@ -282,6 +283,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
+        _specific_resource_group: Option<String>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -312,7 +314,7 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph, HashSet::new())
+        self.create_materialized_view(table, graph, HashSet::new(), None)
             .await?;
         Ok(())
     }
@@ -687,6 +689,7 @@ impl MockCatalogWriter {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
+            resource_group: DEFAULT_STREAMING_JOB_RESOURCE_GROUP.to_string(),
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,

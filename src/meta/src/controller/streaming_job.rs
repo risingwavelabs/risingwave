@@ -20,19 +20,19 @@ use itertools::Itertools;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
+    Actor, ActorDispatcher, Database, Fragment, Index, Object, ObjectDependency, Sink, Source,
     StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
+    actor, actor_dispatcher, database, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
     StreamNode, StreamingParallelism, UserId,
@@ -69,7 +69,8 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
+    get_internal_tables_by_id, get_existing_job_resource_group,
+    rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -88,7 +89,7 @@ impl CatalogController {
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
-        job_label: String, // todo: can we move it to StreamContext?
+        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -98,7 +99,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
-            label: Set(job_label),
+            specific_resource_group: Set(specific_resource_group),
         };
         job.insert(txn).await?;
 
@@ -117,6 +118,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -178,8 +180,17 @@ impl CatalogController {
             }
         }
 
-        // todo: should be derived from database;
-        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+        // let database_resource_group: String =
+        //     Database::find_by_id(streaming_job.database_id() as ObjectId)
+        //         .select_only()
+        //         .column(database::Column::ResourceGroup)
+        //         .into_tuple()
+        //         .one(&txn)
+        //         .await?
+        //         .unwrap_or(DEFAULT_STREAMING_JOB_RESOURCE_GROUP.to_string());
+
+        // let specific_resource_group = streaming_job.specific_resource_group();
+        // //.unwrap_or(database_resource_group);
 
         let mut relations = vec![];
 
@@ -195,7 +206,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
-                    job_label,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -229,7 +240,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
-                    job_label,
+                    specific_resource_group,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -247,7 +258,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
-                    job_label,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -284,7 +295,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
-                    job_label,
+                    specific_resource_group,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -316,7 +327,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
-                    job_label,
+                    specific_resource_group,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -754,7 +765,10 @@ impl CatalogController {
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
 
-        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+        // let resource_group =
+        //     get_streaming_job_resource_group(&txn, streaming_job.id() as ObjectId).await?;
+
+        //let specific_resource_group = streaming_job.specific_resource_group();
 
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
@@ -767,7 +781,7 @@ impl CatalogController {
             ctx,
             parallelism,
             max_parallelism,
-            job_label,
+            None,
         )
         .await?;
 

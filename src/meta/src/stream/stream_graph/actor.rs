@@ -664,7 +664,7 @@ impl ActorGraphBuilder {
     /// graph is failed to be scheduled.
     pub fn new(
         streaming_job_id: u32,
-        streaming_job_label: Option<String>,
+        resource_group: String,
         fragment_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
         default_parallelism: NonZeroUsize,
@@ -672,11 +672,8 @@ impl ActorGraphBuilder {
         let expected_vnode_count = fragment_graph.max_parallelism();
         let existing_distributions = fragment_graph.existing_distribution();
 
-        let schedulable_workers = if let Some(label) = streaming_job_label {
-            cluster_info.filter_schedulable_workers_by_label(&label)
-        } else {
-            cluster_info.worker_nodes.clone()
-        };
+        let schedulable_workers =
+            cluster_info.filter_schedulable_workers_by_resource_group(&resource_group);
 
         let scheduler = schedule::Scheduler::new(
             streaming_job_id,

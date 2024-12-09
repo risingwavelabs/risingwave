@@ -43,6 +43,7 @@ use crate::model::{
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
+use crate::rpc::ddl_controller::StreamingJobId;
 
 #[derive(Clone)]
 pub struct MetadataManager {
@@ -718,6 +719,14 @@ impl MetadataManager {
         self.catalog_controller
             .get_max_parallelism_by_id(table_id.table_id as _)
             .await
+    }
+
+    pub async fn get_existing_job_resource_group(&self, streaming_job_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller.get_existing_job_resource_group(streaming_job_id).await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller.get_database_resource_group(database_id).await
     }
 
     pub fn cluster_id(&self) -> &ClusterId {

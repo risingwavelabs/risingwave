@@ -143,6 +143,9 @@ message CreateMaterializedViewRequest {
 
   // The list of object IDs that this materialized view depends on.
   repeated uint32 dependencies = 4;
+
+  // The specific resource group to use for the materialized view. If not set, the database resource group is used.
+  optional string specific_resource_group = 5;
 }
 
 message CreateMaterializedViewResponse {

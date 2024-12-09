@@ -29,7 +29,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
@@ -142,6 +142,7 @@ pub enum DdlCommand {
         CreateType,
         Option<ReplaceStreamJobInfo>,
         HashSet<ObjectId>,
+        Option<String>, // specific resource group
     ),
     DropStreamingJob(StreamingJobId, DropMode, Option<ReplaceStreamJobInfo>),
     AlterName(alter_name_request::Object, String),
@@ -184,7 +185,7 @@ impl DdlCommand {
             | DdlCommand::CreateSecret(_)
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_) => true,
-            DdlCommand::CreateStreamingJob(_, _, _, _, _)
+            DdlCommand::CreateStreamingJob(_, _, _, _, _, _)
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
@@ -318,12 +319,14 @@ impl DdlController {
                     _create_type,
                     affected_table_replace_info,
                     dependencies,
+                    specific_resource_group,
                 ) => {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         affected_table_replace_info,
                         dependencies,
+                        specific_resource_group,
                     )
                     .await
                 }
@@ -909,6 +912,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<NotificationVersion> {
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
         self.metadata_manager
@@ -919,6 +923,7 @@ impl DdlController {
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
                 dependencies,
+                specific_resource_group.clone(),
             )
             .await?;
         let job_id = streaming_job.id();
@@ -951,6 +956,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
+                specific_resource_group,
             )
             .await
         {
@@ -990,6 +996,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         affected_table_replace_info: Option<ReplaceStreamJobInfo>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
@@ -1009,6 +1016,8 @@ impl DdlController {
 
         let affected_table_replace_info = match affected_table_replace_info {
             Some(replace_table_info) => {
+                assert!(specific_resource_group.is_none(), "specific_resource_group is not supported for replace table (alter column or sink into table)");
+
                 let ReplaceStreamJobInfo {
                     mut streaming_job,
                     fragment_graph,
@@ -1043,6 +1052,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 affected_table_replace_info,
+                specific_resource_group,
             )
             .await?;
 
@@ -1466,9 +1476,9 @@ impl DdlController {
         specified: Option<NonZeroUsize>,
         max: NonZeroUsize,
         cluster_info: &StreamingClusterInfo,
-        job_label: Option<String>,
+        resource_group: String,
     ) -> MetaResult<NonZeroUsize> {
-        let available = cluster_info.parallelism(job_label);
+        let available = cluster_info.parallelism(resource_group);
         let Some(available) = NonZeroUsize::new(available) else {
             bail_unavailable!("no available slots to schedule");
         };
@@ -1525,6 +1535,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         affected_table_replace_info: Option<(StreamingJob, StreamFragmentGraph)>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragments)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
@@ -1573,8 +1584,14 @@ impl DdlController {
             (&stream_job).into(),
         )?;
 
-        // todo
-        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+        let resource_group = match specific_resource_group {
+            None => {
+                self.metadata_manager
+                    .get_database_resource_group(stream_job.database_id() as ObjectId)
+                    .await?
+            }
+            Some(resource_group) => resource_group,
+        };
 
         // 2. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
@@ -1583,12 +1600,12 @@ impl DdlController {
             specified_parallelism,
             max_parallelism,
             &cluster_info,
-            Some(job_label.clone()),
+            resource_group.clone(),
         )?;
 
         let actor_graph_builder = ActorGraphBuilder::new(
             id,
-            Some(job_label),
+            resource_group,
             complete_graph,
             cluster_info,
             parallelism,
@@ -1786,10 +1803,13 @@ impl DdlController {
             _ => unreachable!(),
         };
 
-        let job_label = DEFAULT_STREAMING_JOB_LABEL.to_string();
+        let resource_group = self
+            .metadata_manager
+            .get_existing_job_resource_group(id as ObjectId)
+            .await?;
 
         // 2. Build the actor graph.
-        let mut cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
+        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
         // XXX: what is this parallelism?
         // Is it "assigned parallelism"?
@@ -1798,7 +1818,7 @@ impl DdlController {
 
         let actor_graph_builder = ActorGraphBuilder::new(
             id,
-            Some(job_label),
+            resource_group,
             complete_graph,
             cluster_info,
             parallelism,

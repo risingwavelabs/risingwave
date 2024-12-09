@@ -256,7 +256,7 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_materialized_view(table, graph, dependencies)
+        .create_materialized_view(table, graph, dependencies, None)
         .await?;
 
     Ok(PgResponse::empty_result(

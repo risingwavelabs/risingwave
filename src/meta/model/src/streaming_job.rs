@@ -27,7 +27,7 @@ pub struct Model {
     pub timezone: Option<String>,
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
-    pub label: String,
+    pub specific_resource_group: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

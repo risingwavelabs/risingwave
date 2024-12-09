@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::iter;
 use std::mem::take;
 use std::sync::Arc;
+use std::{default, iter};
 
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableOption, DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
@@ -65,10 +66,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::info;
 
-use super::utils::{
-    check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id,
-    rename_relation, rename_relation_refer,
-};
+use super::utils::{check_subscription_name_duplicate, get_fragment_ids_by_jobs, get_internal_tables_by_id, get_existing_job_resource_group, rename_relation, rename_relation_refer, get_database_resource_group};
 use crate::controller::utils::{
     build_relation_group_for_delete, check_connection_name_duplicate,
     check_database_name_duplicate, check_function_signature_duplicate,
@@ -83,7 +81,7 @@ use crate::manager::{
     get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
     NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
-use crate::rpc::ddl_controller::DropMode;
+use crate::rpc::ddl_controller::{DropMode, StreamingJobId};
 use crate::telemetry::{report_event, MetaTelemetryJobDesc};
 use crate::{MetaError, MetaResult};
 
@@ -2522,6 +2520,7 @@ impl CatalogController {
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
             name: Set(name.to_owned()),
+            ..Default::default()
         };
         let database = active_model.update(&txn).await?;
 
@@ -3227,6 +3226,22 @@ impl CatalogController {
             })
             .collect();
         Ok(res)
+    }
+
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        get_existing_job_resource_group(&inner.db, streaming_job_id).await
+    }
+
+    pub async fn get_database_resource_group(
+        &self,
+        database_id: ObjectId,
+    ) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        get_database_resource_group(&inner.db, database_id).await
     }
 }
 

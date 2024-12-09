@@ -37,7 +37,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
-use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -255,7 +255,7 @@ pub fn default_parallelism() -> usize {
 }
 
 pub fn default_node_label() -> String {
-    DEFAULT_COMPUTE_NODE_LABEL.to_owned()
+    DEFAULT_RESOURCE_GROUP.to_owned()
 }
 
 pub fn default_role() -> Role {

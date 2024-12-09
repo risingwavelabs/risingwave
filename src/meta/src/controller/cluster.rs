@@ -24,7 +24,7 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
-use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::RW_VERSION;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
@@ -48,6 +48,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
+use crate::controller::utils::filter_workers_by_resource_group;
 use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
@@ -400,42 +401,19 @@ pub struct StreamingClusterInfo {
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self, job_label: Option<String>) -> usize {
-        // todo, refactor this
-        if let Some(label) = job_label {
-            let available_worker_ids =
-                Self::filter_workers_by_label_helper(&self.worker_nodes, label.as_str());
-            self.worker_nodes
-                .values()
-                .filter(|worker| available_worker_ids.contains(&worker.id))
-                .map(|worker| worker.parallelism())
-                .sum()
-        } else {
-            self.worker_nodes
-                .values()
-                .map(|worker| worker.parallelism())
-                .sum()
-        }
+    pub fn parallelism(&self, resource_group: String) -> usize {
+        let available_worker_ids =
+            filter_workers_by_resource_group(&self.worker_nodes, resource_group.as_str());
+
+        self.worker_nodes
+            .values()
+            .filter(|worker| available_worker_ids.contains(&worker.id))
+            .map(|worker| worker.parallelism())
+            .sum()
     }
 
-    pub fn filter_workers_by_label_helper(
-        workers: &HashMap<u32, WorkerNode>,
-        label: &str,
-    ) -> HashSet<u32> {
-        workers
-            .iter()
-            .filter(|&(_, worker)| {
-                worker
-                    .node_label()
-                    .map(|node_label| node_label.as_str() == label)
-                    .unwrap_or(false)
-            })
-            .map(|(id, _)| *id)
-            .collect()
-    }
-
-    pub fn filter_schedulable_workers_by_label(&self, label: &str) -> HashMap<u32, WorkerNode> {
-        let worker_ids = Self::filter_workers_by_label_helper(&self.worker_nodes, label);
+    pub fn filter_schedulable_workers_by_resource_group(&self, label: &str) -> HashMap<u32, WorkerNode> {
+        let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, label);
         self.worker_nodes
             .iter()
             .filter(|(id, _)| worker_ids.contains(id))
@@ -716,7 +694,7 @@ impl ClusterControllerInner {
                         "node_label is not set for worker {}, fallback to `default`",
                         worker.worker_id
                     );
-                    DEFAULT_COMPUTE_NODE_LABEL.to_owned()
+                    DEFAULT_RESOURCE_GROUP.to_owned()
                 })));
 
                 WorkerProperty::update(property).exec(&txn).await?;
