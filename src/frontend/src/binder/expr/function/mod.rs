@@ -235,7 +235,9 @@ impl Binder {
                     over.is_some(),
                     format!("`OVER` is not allowed in {} call", name)
                 );
-                return self.bind_sql_udf(func.clone(), args);
+                let res = self.bind_sql_udf(func.clone(), args)?;
+                self.included_udfs.extend(referred_udfs);
+                return Ok(res);
             }
 
             // now `func` is a non-SQL user-defined scalar/aggregate/table function
