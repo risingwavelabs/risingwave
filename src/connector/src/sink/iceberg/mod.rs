@@ -101,6 +101,10 @@ pub struct IcebergConfig {
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
+
+    /// Whether it is exactly_once, the default is not.
+    #[serde(default)]
+    pub is_exactly_once: Option<bool>,
 }
 
 impl IcebergConfig {
@@ -422,6 +426,7 @@ impl Sink for IcebergSink {
             catalog,
             table,
             partition_type,
+            is_exactly_once: self.config.is_exactly_once.unwrap_or_default(),
             last_commit_epoch: 0,
             sink_id: self.param.sink_id.sink_id(),
             config: self.config.clone(),
@@ -935,6 +940,7 @@ pub struct IcebergSinkCommitter {
     pub partition_type: Any,
     pub last_commit_epoch: u64,
 
+    pub(crate) is_exactly_once: bool,
     pub(crate) sink_id: u32,
     pub(crate) config: IcebergConfig,
     pub(crate) param: SinkParam,
@@ -944,9 +950,10 @@ pub struct IcebergSinkCommitter {
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
     async fn init(&mut self) -> Result<()> {
-        if self
-            .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
-            .await?
+        if self.is_exactly_once
+            && self
+                .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
+                .await?
         {
             tracing::info!("Re commit");
             let metadata_map = self
@@ -1001,43 +1008,27 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
-        let mut pre_commit_metadata_bytes = Vec::new();
+        if self.is_exactly_once {
+            let mut pre_commit_metadata_bytes = Vec::new();
 
-        for each_parallelism_write_result in write_results.clone() {
-            let each_parallelism_write_result_bytes: Vec<u8> =
-                each_parallelism_write_result.try_into()?;
-            pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            for each_parallelism_write_result in write_results.clone() {
+                let each_parallelism_write_result_bytes: Vec<u8> =
+                    each_parallelism_write_result.try_into()?;
+                pre_commit_metadata_bytes.push(each_parallelism_write_result_bytes);
+            }
+
+            let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
+            // todo: write into meta store
+            self.persist_pre_commit_metadata(
+                self.db.clone(),
+                self.last_commit_epoch,
+                epoch,
+                pre_commit_metadata_bytes,
+            )
+            .await?;
         }
 
-        let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
-        // todo: write into meta store
-        self.persist_pre_commit_metadata(
-            self.db.clone(),
-            self.last_commit_epoch,
-            epoch,
-            pre_commit_metadata_bytes,
-        )
-        .await?;
-
-        self.last_commit_epoch = epoch;
-        // Load the latest table to avoid concurrent modification with the best effort.
-        self.table = self
-            .catalog
-            .clone()
-            .load_table(self.table.table_name())
-            .await?;
-        let mut txn = Transaction::new(&mut self.table);
-        write_results.into_iter().for_each(|s| {
-            txn.append_data_file(s.data_files);
-            txn.append_delete_file(s.delete_files);
-        });
-        txn.commit().await.map_err(|err| {
-            tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-            SinkError::Iceberg(anyhow!(err))
-        })?;
-        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
-            .await?;
-        tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+        self.commit_iceberg_inner(epoch, write_results).await?;
         Ok(())
     }
 }
@@ -1055,6 +1046,16 @@ impl IcebergSinkCommitter {
             tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
+        self.commit_iceberg_inner(epoch, write_results).await?;
+        Ok(())
+    }
+
+    // do not pre_commit
+    async fn commit_iceberg_inner(
+        &mut self,
+        epoch: u64,
+        write_results: Vec<WriteResult>,
+    ) -> Result<()> {
         self.last_commit_epoch = epoch;
         // Load the latest table to avoid concurrent modification with the best effort.
         self.table = self
@@ -1072,10 +1073,13 @@ impl IcebergSinkCommitter {
             SinkError::Iceberg(anyhow!(err))
         })?;
 
-        self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
-            .await?;
-
         tracing::info!("Succeeded to commit to iceberg table in epoch {epoch}.");
+
+        if self.is_exactly_once {
+            self.delete_row_by_sink_id_and_end_epoch(&self.db, self.sink_id, epoch)
+                .await?;
+            tracing::info!("Succeeded delete pre commit metadata in epoch {epoch}.");
+        }
         Ok(())
     }
 
@@ -1192,7 +1196,7 @@ impl IcebergSinkCommitter {
                 }
                 for delete_file in &write_result.delete_files {
                     let file_path = delete_file.file_path.to_string();
-                    if files_in_snapshot.contains(&file_path) {
+                    if !files_in_snapshot.contains(&file_path) {
                         return Ok(false);
                     }
                 }
@@ -1362,6 +1366,7 @@ mod test {
                 .collect(),
             commit_checkpoint_interval: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
             create_table_if_not_exists: false,
+            is_exactly_once: None,
         };
 
         assert_eq!(iceberg_config, expected_iceberg_config);
