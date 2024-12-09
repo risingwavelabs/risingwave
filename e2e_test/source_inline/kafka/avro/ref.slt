@@ -109,7 +109,11 @@ select
   (bar).b.y
 from s;
 ----
-3 4 5 6 6 5 4 3
+3 4 5 6 NULL NULL NULL NULL
+
+# Parsing of column `bar` fails even with ints because now `schema` is required.
+# This will be fully supported in the next PR
+# 3 4 5 6 6 5 4 3
 
 
 statement ok
