@@ -637,6 +637,11 @@ impl SourceMessage {
             meta: SourceMeta::Empty,
         }
     }
+
+    /// Check whether the source message is a CDC heartbeat message.
+    pub fn is_cdc_heartbeat(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
+    }
 }
 
 #[derive(Debug, Clone)]
