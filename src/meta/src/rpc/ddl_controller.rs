@@ -485,10 +485,13 @@ impl DdlController {
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
-            .catalog_controller
-            .drop_function(function_id as _)
-            .await
+        self.drop_object(
+            ObjectType::Function,
+            function_id as _,
+            DropMode::Restrict,
+            None,
+        )
+        .await
     }
 
     async fn create_view(&self, view: View) -> MetaResult<NotificationVersion> {
@@ -562,9 +565,7 @@ impl DdlController {
     }
 
     async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        self.metadata_manager
-            .catalog_controller
-            .drop_secret(secret_id as _)
+        self.drop_object(ObjectType::Secret, secret_id as _, DropMode::Restrict, None)
             .await
     }
 
@@ -1111,29 +1112,11 @@ impl DdlController {
         drop_mode: DropMode,
         target_replace_info: Option<ReplaceStreamJobInfo>,
     ) -> MetaResult<NotificationVersion> {
-        let (release_ctx, mut version) = match object_type {
-            ObjectType::Function => {
-                return self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_function(object_id)
-                    .await;
-            }
-            ObjectType::Connection => {
-                let (version, _conn) = self
-                    .metadata_manager
-                    .catalog_controller
-                    .drop_connection(object_id)
-                    .await?;
-                return Ok(version);
-            }
-            _ => {
-                self.metadata_manager
-                    .catalog_controller
-                    .drop_object(object_type, object_id, drop_mode)
-                    .await?
-            }
-        };
+        let (release_ctx, mut version) = self
+            .metadata_manager
+            .catalog_controller
+            .drop_object(object_type, object_id, drop_mode)
+            .await?;
 
         if let Some(replace_table_info) = target_replace_info {
             let stream_ctx =

@@ -1150,48 +1150,6 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let function_obj = Object::find_by_id(function_id)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("function", function_id))?;
-        ensure_object_not_refer(ObjectType::Function, function_id, &txn).await?;
-
-        // Find affect users with privileges on the function.
-        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
-            .select_only()
-            .distinct()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(function_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let res = Object::delete_by_id(function_id).exec(&txn).await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("function", function_id));
-        }
-        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
-
-        txn.commit().await?;
-
-        self.notify_users_update(user_infos).await;
-        let version = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                NotificationInfo::Function(PbFunction {
-                    id: function_id as _,
-                    schema_id: function_obj.schema_id.unwrap() as _,
-                    database_id: function_obj.database_id.unwrap() as _,
-                    ..Default::default()
-                }),
-            )
-            .await;
-        Ok(version)
-    }
-
     pub async fn create_secret(
         &self,
         mut pb_secret: PbSecret,
@@ -1285,51 +1243,6 @@ impl CatalogController {
         Ok(ObjectModel(secret, obj.unwrap()).into())
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let (secret, secret_obj) = Secret::find_by_id(secret_id)
-            .find_also_related(Object)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
-        ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
-
-        // Find affect users with privileges on the secret.
-        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
-            .select_only()
-            .distinct()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(secret_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let res = Object::delete_by_id(secret_id).exec(&txn).await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("secret", secret_id));
-        }
-        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
-
-        txn.commit().await?;
-
-        let pb_secret: PbSecret = ObjectModel(secret, secret_obj.unwrap()).into();
-
-        self.notify_users_update(user_infos).await;
-
-        LocalSecretManager::global().remove_secret(pb_secret.id);
-        self.env
-            .notification_manager()
-            .notify_compute_without_version(Operation::Delete, Info::Secret(pb_secret.clone()));
-        let version = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                NotificationInfo::Secret(pb_secret),
-            )
-            .await;
-        Ok(version)
-    }
-
     pub async fn create_connection(
         &self,
         mut pb_connection: PbConnection,
@@ -1416,49 +1329,6 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
 
         Ok(ObjectModel(conn, obj.unwrap()).into())
-    }
-
-    pub async fn drop_connection(
-        &self,
-        connection_id: ConnectionId,
-    ) -> MetaResult<(NotificationVersion, PbConnection)> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let (conn, conn_obj) = Connection::find_by_id(connection_id)
-            .find_also_related(Object)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
-        ensure_object_not_refer(ObjectType::Connection, connection_id, &txn).await?;
-
-        // Find affect users with privileges on the connection.
-        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
-            .select_only()
-            .distinct()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Oid.eq(connection_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
-
-        let res = Object::delete_by_id(connection_id).exec(&txn).await?;
-        if res.rows_affected == 0 {
-            return Err(MetaError::catalog_id_not_found("connection", connection_id));
-        }
-        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
-
-        txn.commit().await?;
-
-        let pb_connection: PbConnection = ObjectModel(conn, conn_obj.unwrap()).into();
-
-        self.notify_users_update(user_infos).await;
-        let version = self
-            .notify_frontend(
-                NotificationOperation::Delete,
-                NotificationInfo::Connection(pb_connection.clone()),
-            )
-            .await;
-        Ok((version, pb_connection))
     }
 
     pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {

@@ -349,9 +349,42 @@ impl FrontendObserverNode {
                             Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
-                        ObjectInfo::Function(_) => {}
-                        ObjectInfo::Connection(_) => {}
-                        ObjectInfo::Secret(_) => {}
+                        ObjectInfo::Function(function) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_function(function),
+                            Operation::Delete => catalog_guard.drop_function(
+                                function.database_id,
+                                function.schema_id,
+                                function.id.into(),
+                            ),
+                            Operation::Update => catalog_guard.update_function(function),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        ObjectInfo::Connection(connection) => match resp.operation() {
+                            Operation::Add => catalog_guard.create_connection(connection),
+                            Operation::Delete => catalog_guard.drop_connection(
+                                connection.database_id,
+                                connection.schema_id,
+                                connection.id,
+                            ),
+                            Operation::Update => catalog_guard.update_connection(connection),
+                            _ => panic!("receive an unsupported notify {:?}", resp),
+                        },
+                        ObjectInfo::Secret(secret) => {
+                            let mut secret = secret.clone();
+                            // The secret value should not be revealed to users. So mask it in the frontend catalog.
+                            secret.value =
+                                "SECRET VALUE SHOULD NOT BE REVEALED".as_bytes().to_vec();
+                            match resp.operation() {
+                                Operation::Add => catalog_guard.create_secret(&secret),
+                                Operation::Delete => catalog_guard.drop_secret(
+                                    secret.database_id,
+                                    secret.schema_id,
+                                    SecretId::new(secret.id),
+                                ),
+                                Operation::Update => catalog_guard.update_secret(&secret),
+                                _ => panic!("receive an unsupported notify {:?}", resp),
+                            }
+                        }
                     }
                 }
             }
