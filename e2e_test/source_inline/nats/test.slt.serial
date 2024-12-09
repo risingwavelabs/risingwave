@@ -1,0 +1,88 @@
+control substitution on
+
+statement ok
+set streaming_use_shared_source to false;
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py create_stream "teststream" "testsubject"
+
+# produce 100 message of format `{"i": $i}` to the stream
+system ok
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+
+statement ok
+set streaming_parallelism to 4;
+
+statement ok
+create table t_nats ( i int ) with (
+  connector = 'nats',
+  server_url='nats-server:4222',
+  subject='testsubject',
+  connect_mode='plain',
+  consumer.durable_name = 'demo1',
+  consumer.ack_policy = 'all',
+  stream='teststream',
+  consumer.max_ack_pending = '100000')
+format plain encode json;
+
+statement ok
+select * from t_nats;
+
+sleep 3s
+
+statement ok
+flush;
+
+# at least once
+query T
+select count(*) >= 100 from t_nats;
+----
+t
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 4
+
+statement ok
+alter table t_nats set PARALLELISM to 6;
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+
+sleep 3s
+
+statement ok
+flush;
+
+query T
+select count(*) >= 200 from t_nats;
+----
+t
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 6
+
+statement ok
+alter table t_nats set PARALLELISM to 2;
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py produce_stream "teststream" "testsubject"
+
+sleep 3s
+
+statement ok
+flush;
+
+query T
+select count(*) >= 300 from t_nats;
+----
+t
+
+system ok
+python3 e2e_test/source_inline/nats/operation.py validate_state "t_nats" 2
+
+
+statement ok
+drop table t_nats;
+
+statement ok
+set streaming_use_shared_source to true;

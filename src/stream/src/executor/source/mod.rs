@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::time::Duration;
 
 use await_tree::InstrumentAwait;
 use governor::clock::MonotonicClock;
@@ -49,8 +50,10 @@ pub use source_backfill_state_table::BackfillStateTableHandler;
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::executor::error::StreamExecutorError;
+use crate::executor::utils::compute_rate_limit_chunk_permits;
 use crate::executor::{Barrier, Message};
 
 /// Receive barriers from barrier manager with the channel, error on channel close.
@@ -133,24 +136,6 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         )
     });
 
-    fn compute_chunk_permits(chunk: &StreamChunk, limit: usize) -> usize {
-        let chunk_size = chunk.capacity();
-        let ends_with_update = if chunk_size >= 2 {
-            // Note we have to check if the 2nd last is `U-` to be consistenct with `StreamChunkBuilder`.
-            // If something inconsistent happens in the stream, we may not have `U+` after this `U-`.
-            chunk.ops()[chunk_size - 2].is_update_delete()
-        } else {
-            false
-        };
-        if chunk_size == limit + 1 && ends_with_update {
-            // If the chunk size exceed limit because of the last `Update` operation,
-            // we should minus 1 to make sure the permits consumed is within the limit (max burst).
-            chunk_size - 1
-        } else {
-            chunk_size
-        }
-    }
-
     #[for_await]
     for chunk in stream {
         let chunk = chunk?;
@@ -165,7 +150,7 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         let limiter = limiter.as_ref().unwrap();
         let limit = rate_limit_rps.unwrap() as usize;
 
-        let required_permits = compute_chunk_permits(&chunk, limit);
+        let required_permits = compute_rate_limit_chunk_permits(&chunk, limit);
         if required_permits <= limit {
             let n = NonZeroU32::new(required_permits as u32).unwrap();
             // `InsufficientCapacity` should never happen because we have check the cardinality
@@ -174,11 +159,22 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         } else {
             // Cut the chunk into smaller chunks
             for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(compute_chunk_permits(&chunk, limit) as u32).unwrap();
+                let n = NonZeroU32::new(compute_rate_limit_chunk_permits(&chunk, limit) as u32)
+                    .unwrap();
                 // chunks split should have effective chunk size <= limit
                 limiter.until_n_ready(n).await.unwrap();
                 yield chunk;
             }
         }
     }
+}
+
+pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
+    const BASE_DELAY: Duration = Duration::from_secs(1);
+    const BACKOFF_FACTOR: u64 = 2;
+    const MAX_DELAY: Duration = Duration::from_secs(10);
+    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
+        .factor(BACKOFF_FACTOR)
+        .max_delay(MAX_DELAY)
+        .map(jitter)
 }

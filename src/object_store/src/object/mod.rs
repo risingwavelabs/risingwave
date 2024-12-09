@@ -40,7 +40,7 @@ pub use s3::*;
 pub mod error;
 pub mod object_metrics;
 
-mod prefix;
+pub mod prefix;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;

@@ -29,7 +29,7 @@ use crate::barrier::info::BarrierInfo;
 use crate::barrier::{
     Command, CreateStreamingJobCommandInfo, CreateStreamingJobType, ReplaceStreamJobPlan,
 };
-use crate::manager::{DdlType, MetadataManager};
+use crate::manager::{MetadataManager, StreamingJobType};
 use crate::model::{ActorId, BackfillUpstreamType, StreamJobFragments};
 use crate::MetaResult;
 
@@ -522,14 +522,14 @@ impl CreateMviewProgressTracker {
             upstream_root_actors,
             dispatchers,
             definition,
-            ddl_type,
+            job_type,
             create_type,
             ..
         } = &info;
 
         let creating_mv_id = table_fragments.stream_job_id();
 
-        let (upstream_mv_count, upstream_total_key_count, ddl_type, create_type) = {
+        let (upstream_mv_count, upstream_total_key_count, job_type, create_type) = {
             // Keep track of how many times each upstream MV appears.
             let mut upstream_mv_count = HashMap::new();
             for (table_id, actors) in upstream_root_actors {
@@ -547,7 +547,7 @@ impl CreateMviewProgressTracker {
             (
                 upstream_mv_count,
                 upstream_total_key_count,
-                ddl_type,
+                job_type,
                 create_type,
             )
         };
@@ -562,7 +562,7 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             definition.clone(),
         );
-        if *ddl_type == DdlType::Sink && *create_type == CreateType::Background {
+        if *job_type == StreamingJobType::Sink && *create_type == CreateType::Background {
             // We return the original tracking job immediately.
             // This is because sink can be decoupled with backfill progress.
             // We don't need to wait for sink to finish backfill.

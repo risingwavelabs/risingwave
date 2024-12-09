@@ -187,6 +187,14 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         arrow_field
     }
 
+    fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        let data_type = arrow_schema::DataType::Utf8;
+
+        let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
+        self.add_field_id(&mut arrow_field);
+        arrow_field
+    }
+
     /// Convert RisingWave data type to Arrow data type.
     ///
     /// This function returns a `Field` instead of `DataType` because some may be converted to

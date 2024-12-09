@@ -228,6 +228,12 @@ statement ok
 create table show_another_schema.t_another (v1 int);
 
 statement ok
+comment on table "show_another_schema"."t_another" IS 'test table description with schema';
+
+statement ok
+comment on column "show_another_schema"."t_another".v1 IS 'test column description with schema';
+
+statement ok
 create table t4 (v1 int);
 
 query T

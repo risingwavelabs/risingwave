@@ -156,7 +156,6 @@ pub struct Actor<C> {
     /// The subtasks to execute concurrently.
     subtasks: Vec<SubtaskHandle>,
 
-    _metrics: Arc<StreamingMetrics>,
     pub actor_context: ActorContextRef,
     expr_context: ExprContext,
     barrier_manager: LocalBarrierManager,
@@ -169,7 +168,7 @@ where
     pub fn new(
         consumer: C,
         subtasks: Vec<SubtaskHandle>,
-        metrics: Arc<StreamingMetrics>,
+        _metrics: Arc<StreamingMetrics>,
         actor_context: ActorContextRef,
         expr_context: ExprContext,
         barrier_manager: LocalBarrierManager,
@@ -177,7 +176,6 @@ where
         Self {
             consumer,
             subtasks,
-            _metrics: metrics,
             actor_context,
             expr_context,
             barrier_manager,
@@ -236,6 +234,15 @@ where
             .with_guarded_label_values(&[&self.actor_context.fragment_id.to_string()]);
         let _actor_count_guard = actor_count.inc_guard();
 
+        let current_epoch = self
+            .actor_context
+            .streaming_metrics
+            .actor_current_epoch
+            .with_guarded_label_values(&[
+                &self.actor_context.id.to_string(),
+                &self.actor_context.fragment_id.to_string(),
+            ]);
+
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
 
@@ -264,6 +271,8 @@ where
                 debug!(actor_id = id, epoch = ?barrier.epoch, "stop at barrier");
                 break Ok(barrier);
             }
+
+            current_epoch.set(barrier.epoch.curr as i64);
 
             // Collect barriers to local barrier manager
             self.barrier_manager.collect(id, &barrier);

@@ -307,6 +307,23 @@ profile:
       - use: compute-node
       - use: frontend
 
+  ci-iceberg-engine:
+    steps:
+      - use: minio
+      - use: postgres
+        port: 5432
+        address: db
+        database: metadata
+        user: postgres
+        password: postgres
+        user-managed: true
+        application: metastore
+      - use: meta-node
+        meta-backend: postgres
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:

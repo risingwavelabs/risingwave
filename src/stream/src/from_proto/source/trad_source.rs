@@ -141,7 +141,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_receiver = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         let system_params = params.env.system_params_manager_ref().get_params();

@@ -52,7 +52,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
+    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Engine, Field, Schema,
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -657,6 +657,7 @@ impl PlanRoot {
         retention_seconds: Option<NonZeroU32>,
         cdc_table_id: Option<String>,
         webhook_info: Option<PbWebhookSourceInfo>,
+        engine: Engine,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -892,6 +893,7 @@ impl PlanRoot {
             retention_seconds,
             cdc_table_id,
             webhook_info,
+            engine,
         )
     }
 

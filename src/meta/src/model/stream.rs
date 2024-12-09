@@ -18,7 +18,7 @@ use std::ops::AddAssign;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, WorkerSlotId};
-use risingwave_common::util::stream_graph_visitor;
+use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node};
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::{SourceId, WorkerId};
 use risingwave_pb::catalog::Table;
@@ -450,6 +450,36 @@ impl StreamJobFragments {
         Ok(source_backfill_fragments)
     }
 
+    /// Find the table job's `Union` fragment.
+    /// Panics if not found.
+    pub fn union_fragment_for_table(&mut self) -> &mut Fragment {
+        let mut union_fragment_id = None;
+        for (fragment_id, fragment) in &mut self.fragments {
+            for actor in &mut fragment.actors {
+                if let Some(node) = &mut actor.nodes {
+                    visit_stream_node(node, |body| {
+                        if let NodeBody::Union(_) = body {
+                            if let Some(union_fragment_id) = union_fragment_id.as_mut() {
+                                // The union fragment should be unique.
+                                assert_eq!(*union_fragment_id, *fragment_id);
+                            } else {
+                                union_fragment_id = Some(*fragment_id);
+                            }
+                        }
+                    })
+                };
+            }
+        }
+
+        let union_fragment_id =
+            union_fragment_id.expect("fragment of placeholder merger not found");
+        let union_fragment = self
+            .fragments
+            .get_mut(&union_fragment_id)
+            .unwrap_or_else(|| panic!("fragment {} not found", union_fragment_id));
+        union_fragment
+    }
+
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
         let table_id = match stream_node.node_body.as_ref() {
@@ -600,13 +630,6 @@ impl StreamJobFragments {
             });
         });
         self
-    }
-
-    /// Panics if the fragment is not found.
-    pub fn fragment_mut(&mut self, fragment_id: FragmentId) -> &mut Fragment {
-        self.fragments
-            .get_mut(&fragment_id)
-            .unwrap_or_else(|| panic!("fragment {} not found", fragment_id))
     }
 }
 

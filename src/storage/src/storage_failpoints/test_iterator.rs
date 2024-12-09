@@ -158,7 +158,7 @@ async fn test_failpoints_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store().await;
-    let table0 = gen_iterator_test_sstable_base(
+    let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -166,7 +166,7 @@ async fn test_failpoints_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -174,14 +174,15 @@ async fn test_failpoints_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![table0, table1];
+    let tables = vec![(table0, sstable_info_0), (table1, sstable_info_1)];
     let mut mi = MergeIterator::new({
         let mut iters = vec![];
-        for table in tables {
+        for (table, sstable_info) in tables {
             iters.push(SstableIterator::new(
                 table,
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
+                &sstable_info,
             ));
         }
         iters
@@ -206,7 +207,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store().await;
-    let table0 = gen_iterator_test_sstable_base(
+    let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -214,7 +215,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -222,10 +223,10 @@ async fn test_failpoints_backward_merge_invalid_key() {
         200,
     )
     .await;
-    let tables = vec![table0, table1];
+    let tables = vec![(table0, sstable_info_0), (table1, sstable_info_1)];
     let mut mi = MergeIterator::new({
         let mut iters = vec![];
-        for table in tables {
+        for (table, _) in tables {
             iters.push(BackwardSstableIterator::new(table, sstable_store.clone()));
         }
         iters
@@ -250,7 +251,7 @@ async fn test_failpoints_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store().await;
-    let table0 = gen_iterator_test_sstable_base(
+    let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -258,7 +259,7 @@ async fn test_failpoints_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -271,11 +272,13 @@ async fn test_failpoints_user_read_err() {
             table0,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
+            &sstable_info_0,
         ),
         SstableIterator::new(
             table1,
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
+            &sstable_info_1,
         ),
     ];
 
@@ -310,7 +313,7 @@ async fn test_failpoints_backward_user_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store().await;
-    let table0 = gen_iterator_test_sstable_base(
+    let (table0, _sstable_info_0) = gen_iterator_test_sstable_base(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -318,7 +321,7 @@ async fn test_failpoints_backward_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base(
+    let (table1, _sstable_info_1) = gen_iterator_test_sstable_base(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,

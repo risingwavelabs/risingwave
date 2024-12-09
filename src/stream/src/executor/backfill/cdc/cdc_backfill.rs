@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::pin::Pin;
 
 use either::Either;
@@ -27,9 +28,11 @@ use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
     ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
-use risingwave_connector::source::cdc::external::CdcOffset;
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext};
 use rw_futures_util::pausable;
+use thiserror_ext::AsReport;
+use tracing::Instrument;
 
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
@@ -42,6 +45,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::backfill::CdcScanOptions;
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
+use crate::executor::source::get_infinite_backoff_strategy;
 use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
@@ -140,7 +144,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
         let external_database_name = self.external_table.database_name().to_owned();
-        let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let additional_columns = self
             .output_columns
@@ -168,29 +171,85 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
-        let mut upstream = transform_upstream(upstream, &self.output_columns)
-            .boxed()
-            .peekable();
-
         state_impl.init_epoch(first_barrier_epoch).await?;
 
         // restore backfill state
         let state = state_impl.restore_state().await?;
         current_pk_pos = state.current_pk_pos.clone();
 
-        let to_backfill = !self.options.disable_backfill && !state.is_finished;
+        let need_backfill = !self.options.disable_backfill && !state.is_finished;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_row_count = state.row_count as u64;
 
+        // After init the state table and forward the initial barrier to downstream,
+        // we now try to create the table reader with retry.
+        // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader;
+        // If backfill is finished, we should forward the upstream cdc events to downstream.
+        let mut table_reader: Option<ExternalTableReaderImpl> = None;
+        let external_table = self.external_table.clone();
+        let mut future = Box::pin(async move {
+            let backoff = get_infinite_backoff_strategy();
+            tokio_retry::Retry::spawn(backoff, || async {
+                match external_table.create_table_reader().await {
+                    Ok(reader) => Ok(reader),
+                    Err(e) => {
+                        tracing::warn!(error = %e.as_report(), "failed to create cdc table reader, retrying...");
+                        Err(e)
+                    }
+                }
+            })
+            .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
+            .await
+            .expect("Retry create cdc table reader until success.")
+        });
+        loop {
+            if let Some(msg) =
+                build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
+                    .await?
+            {
+                match msg {
+                    Message::Barrier(barrier) => {
+                        // commit state to bump the epoch of state table
+                        state_impl.commit_state(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                    }
+                    Message::Chunk(chunk) => {
+                        if need_backfill {
+                            // ignore chunk if we need backfill, since we can read the data from the snapshot
+                        } else {
+                            // forward the chunk to downstream
+                            yield Message::Chunk(chunk);
+                        }
+                    }
+                    Message::Watermark(_) => {
+                        // ignore watermark
+                    }
+                }
+            } else {
+                assert!(table_reader.is_some(), "table reader must created");
+                tracing::info!(
+                    table_id,
+                    upstream_table_name,
+                    "table reader created successfully"
+                );
+                break;
+            }
+        }
+
+        let upstream_table_reader = UpstreamTableReader::new(
+            self.external_table.clone(),
+            table_reader.expect("table reader must created"),
+        );
+
+        let mut upstream = transform_upstream(upstream, &self.output_columns)
+            .boxed()
+            .peekable();
         let mut last_binlog_offset: Option<CdcOffset> = state
             .last_cdc_offset
             .map_or(upstream_table_reader.current_cdc_offset().await?, Some);
 
-        let offset_parse_func = upstream_table_reader
-            .inner()
-            .table_reader()
-            .get_cdc_offset_parser();
+        let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
         tracing::info!(
@@ -227,7 +286,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // finished.
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
-        if to_backfill {
+        if need_backfill {
             // drive the upstream changelog first to ensure we can receive timely changelog event,
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
@@ -698,6 +757,26 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
                 yield msg;
             }
+        }
+    }
+}
+
+async fn build_reader_and_poll_upstream(
+    upstream: &mut BoxedMessageStream,
+    table_reader: &mut Option<ExternalTableReaderImpl>,
+    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
+) -> StreamExecutorResult<Option<Message>> {
+    if table_reader.is_some() {
+        return Ok(None);
+    }
+    tokio::select! {
+        biased;
+        reader = &mut *future => {
+            *table_reader = Some(reader);
+            Ok(None)
+        }
+        msg = upstream.next() => {
+            msg.transpose()
         }
     }
 }

@@ -324,10 +324,9 @@ impl HummockManager {
                 }
             });
 
-        drop(versioning_guard);
-        drop(compaction_guard);
         if !canceled_tasks.is_empty() {
-            self.report_compact_tasks(canceled_tasks).await?;
+            self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
+                .await?;
         }
 
         self.metrics
@@ -559,10 +558,9 @@ impl HummockManager {
                 }
             });
 
-        drop(versioning_guard);
-        drop(compaction_guard);
         if !canceled_tasks.is_empty() {
-            self.report_compact_tasks(canceled_tasks).await?;
+            self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
+                .await?;
         }
 
         self.metrics

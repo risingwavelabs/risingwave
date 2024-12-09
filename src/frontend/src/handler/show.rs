@@ -318,7 +318,7 @@ pub async fn handle_show_object(
                     .get_schema_by_name(session.database(), schema.as_ref())
                 {
                     table_names_in_schema
-                        .extend(schema_catalog.iter_table().map(|t| t.name.clone()));
+                        .extend(schema_catalog.iter_user_table().map(|t| t.name.clone()));
                 }
             }
 
@@ -646,7 +646,7 @@ pub fn handle_show_create_object(
         ShowCreateType::Table => {
             let table = schema
                 .get_created_table_by_name(&object_name)
-                .filter(|t| t.is_table())
+                .filter(|t| t.is_user_table())
                 .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
             table.create_sql()
         }

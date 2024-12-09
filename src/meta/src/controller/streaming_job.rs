@@ -383,6 +383,7 @@ impl CatalogController {
             .oid;
             table_id_map.insert(table.id, table_id as u32);
             table.id = table_id as _;
+            table.job_id = Some(job_id as _);
 
             let table_model = table::ActiveModel {
                 table_id: Set(table_id as _),
@@ -415,6 +416,7 @@ impl CatalogController {
     // TODO: In this function, we also update the `Table` model in the meta store.
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
+    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
     pub async fn prepare_streaming_job(
         &self,
         stream_job_fragments: &StreamJobFragments,
@@ -480,7 +482,7 @@ impl CatalogController {
         }
 
         if !for_replace {
-            // // Update dml fragment id.
+            // Update dml fragment id.
             if let StreamingJob::Table(_, table, ..) = streaming_job {
                 Table::update(table::ActiveModel {
                     table_id: Set(table.id as _),
@@ -1024,6 +1026,7 @@ impl CatalogController {
         let original_job_id = streaming_job.id() as ObjectId;
         let job_type = streaming_job.job_type();
 
+        // Update catalog
         match streaming_job {
             StreamingJob::Table(_source, table, _table_job_type) => {
                 // The source catalog should remain unchanged
@@ -1208,7 +1211,7 @@ impl CatalogController {
         // 4. update catalogs and notify.
         let mut relations = vec![];
         match job_type {
-            StreamingJobType::Table => {
+            StreamingJobType::Table(_) => {
                 let (table, table_obj) = Table::find_by_id(original_job_id)
                     .find_also_related(Object)
                     .one(txn)
@@ -1456,6 +1459,65 @@ impl CatalogController {
         if fragments.is_empty() {
             return Err(MetaError::invalid_parameter(format!(
                 "stream scan node or source node not found in job id {job_id}"
+            )));
+        }
+        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
+        for (id, _, stream_node) in fragments {
+            fragment::ActiveModel {
+                fragment_id: Set(id),
+                stream_node: Set(StreamNode::from(&stream_node)),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        let fragment_actors = get_fragment_actor_ids(&txn, fragment_ids).await?;
+
+        txn.commit().await?;
+
+        Ok(fragment_actors)
+    }
+
+    pub async fn update_dml_rate_limit_by_job_id(
+        &self,
+        job_id: ObjectId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StreamNode,
+            ])
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let mut fragments = fragments
+            .into_iter()
+            .map(|(id, mask, stream_node)| (id, mask, stream_node.to_protobuf()))
+            .collect_vec();
+
+        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+            let mut found = false;
+            if *fragment_type_mask & PbFragmentTypeFlag::dml_rate_limit_fragments() != 0 {
+                visit_stream_node(stream_node, |node| {
+                    if let PbNodeBody::Dml(node) = node {
+                        node.rate_limit = rate_limit;
+                        found = true;
+                    }
+                });
+            }
+            found
+        });
+
+        if fragments.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "dml node not found in job id {job_id}"
             )));
         }
         let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();

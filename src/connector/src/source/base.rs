@@ -456,9 +456,17 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
+    }
+
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -628,6 +636,11 @@ impl SourceMessage {
             split_id: "".into(),
             meta: SourceMeta::Empty,
         }
+    }
+
+    /// Check whether the source message is a CDC heartbeat message.
+    pub fn is_cdc_heartbeat(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
     }
 }
 

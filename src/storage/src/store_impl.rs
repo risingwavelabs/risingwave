@@ -17,9 +17,9 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
+use foyer::prometheus::PrometheusMetricsRegistry;
 use foyer::{
-    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions,
-    PrometheusMetricsRegistry, RateLimitPicker,
+    DirectFsDeviceOptions, Engine, HybridCacheBuilder, LargeEngineOptions, RateLimitPicker,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;

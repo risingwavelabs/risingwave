@@ -28,6 +28,7 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
     ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue,
@@ -38,6 +39,7 @@ use super::OverwriteOptions;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::handler::create_source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use crate::session::SessionImpl;
+use crate::telemetry::report_event;
 use crate::Binder;
 
 mod options {
@@ -194,7 +196,9 @@ impl WithOptions {
 pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
+    object: TelemetryDatabaseObject,
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
+    let connector_name = with_options.get_connector();
     let db_name: &str = session.database();
     let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
 
@@ -219,6 +223,22 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
         )));
             }
         };
+
+        // report to telemetry
+        report_event(
+            PbTelemetryEventStage::CreateStreamJob,
+            "connection_ref",
+            0,
+            connector_name.clone(),
+            Some(object),
+            {
+                connection_params.as_ref().map(|cp| {
+                    jsonbb::json!({
+                        "connection_type": cp.connection_type().as_str_name().to_string()
+                    })
+                })
+            },
+        );
     }
 
     let mut inner_secret_refs = {
@@ -281,6 +301,22 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
                     "Duplicated key in both WITH clause and Connection catalog: {}",
                     k
                 ))));
+            }
+        }
+
+        {
+            // check if not mess up with schema registry connection and glue connection
+            if connection_type == PbConnectionType::SchemaRegistry {
+                // Check no AWS related options when using schema registry connection
+                if options
+                    .keys()
+                    .chain(inner_secret_refs.keys())
+                    .any(|k| k.starts_with("aws"))
+                {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                            "Glue related options/secrets are not allowed when using schema registry connection".to_string()
+                        )));
+                }
             }
         }
     }

@@ -93,7 +93,7 @@ pub(crate) async fn into_chunk_stream(
     let parser =
         crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
     #[for_await]
-    for msg_batch in parser.into_stream(data_stream) {
-        yield msg_batch?;
+    for chunk in parser.into_stream(data_stream) {
+        yield chunk?;
     }
 }

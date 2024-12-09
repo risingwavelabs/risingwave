@@ -28,13 +28,10 @@ use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 async fn test_managed_barrier_collection() -> StreamResult<()> {
     let mut test_env = LocalBarrierTestEnv::for_test().await;
 
-    let manager = &test_env.shared_context.local_barrier_manager;
+    let manager = &test_env.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let barrier_rx = test_env
-            .shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_id);
+        let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
@@ -48,7 +45,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
     test_env.inject_barrier(&barrier, actor_ids.clone());
 
-    manager.flush_all_events().await;
+    test_env.flush_all_events().await;
 
     let count = actor_ids.len();
     let mut rxs = actor_ids
@@ -77,7 +74,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
-        manager.flush_all_events().await;
+        LocalBarrierTestEnv::flush_all_events_impl(&test_env.actor_op_tx).await;
         let notified =
             poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);
@@ -90,13 +87,10 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     let mut test_env = LocalBarrierTestEnv::for_test().await;
 
-    let manager = &test_env.shared_context.local_barrier_manager;
+    let manager = &test_env.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let barrier_rx = test_env
-            .shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_id);
+        let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
@@ -114,7 +108,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
 
     test_env.inject_barrier(&barrier, actor_ids_to_collect.clone());
 
-    manager.flush_all_events().await;
+    test_env.flush_all_events().await;
 
     // Register actors
     let count = actor_ids_to_send.len();
@@ -159,7 +153,7 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
-        manager.flush_all_events().await;
+        LocalBarrierTestEnv::flush_all_events_impl(&test_env.actor_op_tx).await;
         let notified =
             poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);
@@ -172,13 +166,10 @@ async fn test_managed_barrier_collection_separately() -> StreamResult<()> {
 async fn test_late_register_barrier_sender() -> StreamResult<()> {
     let mut test_env = LocalBarrierTestEnv::for_test().await;
 
-    let manager = &test_env.shared_context.local_barrier_manager;
+    let manager = &test_env.local_barrier_manager;
 
     let register_sender = |actor_id: u32| {
-        let barrier_rx = test_env
-            .shared_context
-            .local_barrier_manager
-            .subscribe_barrier(actor_id);
+        let barrier_rx = test_env.local_barrier_manager.subscribe_barrier(actor_id);
         (actor_id, barrier_rx)
     };
 
@@ -203,7 +194,7 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
     test_env.inject_barrier(&barrier1, actor_ids_to_collect.clone());
     test_env.inject_barrier(&barrier2, actor_ids_to_collect.clone());
 
-    manager.flush_all_events().await;
+    test_env.flush_all_events().await;
 
     // register sender after inject barrier
     let mut rxs = actor_ids_to_send
@@ -250,7 +241,7 @@ async fn test_late_register_barrier_sender() -> StreamResult<()> {
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
         manager.collect(actor_id, &barrier);
-        manager.flush_all_events().await;
+        LocalBarrierTestEnv::flush_all_events_impl(&test_env.actor_op_tx).await;
         let notified =
             poll_fn(|cx| Poll::Ready(await_epoch_future.as_mut().poll(cx).is_ready())).await;
         assert_eq!(notified, i == count - 1);

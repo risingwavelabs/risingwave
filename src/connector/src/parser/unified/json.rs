@@ -27,6 +27,7 @@ use risingwave_common::types::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::utils::extract_decimal;
+use simd_json::base::ValueAsObject;
 use simd_json::prelude::{
     TypedValue, ValueAsArray, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
@@ -34,7 +35,6 @@ use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
-use crate::parser::common::json_object_get_case_insensitive;
 use crate::parser::DatumCow;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
@@ -664,4 +664,24 @@ impl Access for JsonAccess<'_> {
 
         self.options.parse(value, type_expected)
     }
+}
+
+/// Get a value from a json object by key, case insensitive.
+///
+/// Returns `None` if the given json value is not an object, or the key is not found.
+fn json_object_get_case_insensitive<'b>(
+    v: &'b simd_json::BorrowedValue<'b>,
+    key: &str,
+) -> Option<&'b simd_json::BorrowedValue<'b>> {
+    let obj = v.as_object()?;
+    let value = obj.get(key);
+    if value.is_some() {
+        return value; // fast path
+    }
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case(key) {
+            return Some(v);
+        }
+    }
+    None
 }

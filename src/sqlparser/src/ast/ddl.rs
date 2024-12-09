@@ -25,6 +25,7 @@ use crate::ast::{
     display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName, SecretRefValue,
     SetVariableValue, Value,
 };
+use crate::parser::{SOURCE_RATE_LIMIT_PAUSED, SOURCE_RATE_LIMIT_RESUMED};
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -110,6 +111,10 @@ pub enum AlterTableOperation {
     },
     /// SET BACKFILL_RATE_LIMIT TO <rate_limit>
     SetBackfillRateLimit {
+        rate_limit: i32,
+    },
+    /// `SET DML_RATE_LIMIT TO <rate_limit>`
+    SetDmlRateLimit {
         rate_limit: i32,
     },
     /// `SWAP WITH <table_name>`
@@ -325,6 +330,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterTableOperation::SetDmlRateLimit { rate_limit } => {
+                write!(f, "SET DML_RATE_LIMIT TO {}", rate_limit)
+            }
             AlterTableOperation::SwapRenameTable { target_table } => {
                 write!(f, "SWAP WITH {}", target_table)
             }
@@ -458,9 +466,11 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
-                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterSourceOperation::SetSourceRateLimit { rate_limit } => match *rate_limit {
+                SOURCE_RATE_LIMIT_PAUSED => write!(f, "PAUSE"),
+                SOURCE_RATE_LIMIT_RESUMED => write!(f, "RESUME"),
+                _ => write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit),
+            },
             AlterSourceOperation::SwapRenameSource { target_source } => {
                 write!(f, "SWAP WITH {}", target_source)
             }

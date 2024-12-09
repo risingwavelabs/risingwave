@@ -426,7 +426,7 @@ impl MetadataManager {
     ) -> MetaResult<(HashMap<TableId, Fragment>, HashMap<ActorId, WorkerId>)> {
         let (upstream_root_fragments, actors) = self
             .catalog_controller
-            .get_upstream_root_fragments(
+            .get_root_fragments(
                 upstream_table_ids
                     .iter()
                     .map(|id| id.table_id as _)
@@ -496,7 +496,7 @@ impl MetadataManager {
             .await
     }
 
-    pub async fn get_downstream_chain_fragments(
+    pub async fn get_downstream_fragments(
         &self,
         job_id: u32,
     ) -> MetaResult<(
@@ -505,7 +505,7 @@ impl MetadataManager {
     )> {
         let (fragments, actors) = self
             .catalog_controller
-            .get_downstream_chain_fragments(job_id as _)
+            .get_downstream_fragments(job_id as _)
             .await?;
 
         let actors = actors
@@ -665,6 +665,21 @@ impl MetadataManager {
             .collect())
     }
 
+    pub async fn update_dml_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let fragment_actors = self
+            .catalog_controller
+            .update_dml_rate_limit_by_job_id(table_id.table_id as _, rate_limit)
+            .await?;
+        Ok(fragment_actors
+            .into_iter()
+            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
+            .collect())
+    }
+
     pub async fn update_actor_splits_by_split_assignment(
         &self,
         split_assignment: &SplitAssignment,
@@ -676,15 +691,20 @@ impl MetadataManager {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
+        let database_id = database_id.map(|database_id| database_id.database_id as _);
         Ok(self
             .catalog_controller
-            .get_mv_depended_subscriptions()
+            .get_mv_depended_subscriptions(database_id)
             .await?
             .into_iter()
-            .map(|(database_id, mv_depended_subscriptions)| {
+            .map(|(loaded_database_id, mv_depended_subscriptions)| {
+                if let Some(database_id) = database_id {
+                    assert_eq!(loaded_database_id, database_id);
+                }
                 (
-                    DatabaseId::new(database_id as _),
+                    DatabaseId::new(loaded_database_id as _),
                     mv_depended_subscriptions
                         .into_iter()
                         .map(|(table_id, subscriptions)| {

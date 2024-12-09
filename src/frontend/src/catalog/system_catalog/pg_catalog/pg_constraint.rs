@@ -140,7 +140,7 @@ fn read_pg_constraint_in_schema(schema: &SchemaCatalog) -> Vec<PgConstraint> {
         .map(|table| PgConstraint::from_system_table(schema, table.as_ref()));
 
     let table_rows = schema
-        .iter_valid_table()
+        .iter_table_mv_indices()
         .map(|table| PgConstraint::from_table(schema, table.as_ref()));
 
     system_table_rows.chain(table_rows).collect()
