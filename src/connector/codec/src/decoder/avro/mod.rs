@@ -415,7 +415,6 @@ impl Access for AvroAccess<'_> {
                         return Err(create_error());
                     };
                     if let Some(idx) = record_schema.lookup.get(key) {
-                        // if let Some((_, v)) = fields.iter().find(|(k, _)| k == key) {
                         value = &fields[*idx].1;
                         options.schema = &record_schema.fields[*idx].schema;
                         i += 1;
