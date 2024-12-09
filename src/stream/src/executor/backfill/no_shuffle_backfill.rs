@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
-use std::collections::HashMap;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::util::epoch::EpochPair;
@@ -426,6 +427,24 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Update(update) => {
+                            if let Some(bitmap) = update.vnode_bitmaps.get(&self.actor_id) {
+                                println!("update bitmap {:#?}", bitmap);
+                                //old_state = None;
+                                if let Some(table) = self.state_table.as_mut() {
+                                    let (prev, res) = table.update_vnode_bitmap(bitmap.clone());
+                                    println!("prev {:#?}", prev);
+                                    println!("res {}", res);
+                                }
+                                self.progress.update_vnodes(bitmap);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
@@ -454,9 +473,7 @@ where
                         Mutation::Resume => {
                             paused = false;
                         }
-                        Mutation::Update(update) => {
-                            self.progress.update_vnodes(vec![]);
-                        }
+
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
