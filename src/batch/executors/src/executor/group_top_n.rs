@@ -129,7 +129,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             group_key_types,
             with_ties: top_n_node.get_with_ties(),
             identity: identity.clone(),
-            chunk_size: source.context.get_config().developer.chunk_size,
+            chunk_size: source.context().get_config().developer.chunk_size,
             mem_ctx: source.context().create_executor_mem_context(&identity),
         };
 

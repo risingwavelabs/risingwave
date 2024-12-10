@@ -255,9 +255,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(AsOf::try_from)
             .transpose()?;
         let chunk_size = if let Some(limit) = seq_scan_node.limit {
-            (limit as u32).min(source.context.get_config().developer.chunk_size as u32)
+            (limit as u32).min(source.context().get_config().developer.chunk_size as u32)
         } else {
-            source.context.get_config().developer.chunk_size as u32
+            source.context().get_config().developer.chunk_size as u32
         };
         let metrics = source.context().batch_metrics();
 

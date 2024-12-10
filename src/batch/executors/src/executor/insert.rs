@@ -249,7 +249,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             insert_node.table_version_id,
             source.context().dml_manager(),
             child,
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
             sorted_default_columns,

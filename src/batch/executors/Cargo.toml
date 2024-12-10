@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_batch"
+name = "risingwave_batch_executors"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -39,6 +39,7 @@ paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
+risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -73,7 +74,7 @@ twox-hash = "1"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
+workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
@@ -82,6 +83,38 @@ risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
+
+[[bench]]
+name = "filter"
+harness = false
+
+[[bench]]
+name = "nested_loop_join"
+harness = false
+
+[[bench]]
+name = "hash_join"
+harness = false
+
+[[bench]]
+name = "sort"
+harness = false
+
+[[bench]]
+name = "top_n"
+harness = false
+
+[[bench]]
+name = "hash_agg"
+harness = false
+
+[[bench]]
+name = "expand"
+harness = false
+
+[[bench]]
+name = "limit"
+harness = false
 
 [lints]
 workspace = true

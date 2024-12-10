@@ -2201,15 +2201,15 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
             cond,
             identity: identity.clone(),
             right_key_types,
-            chunk_size: context.context.get_config().developer.chunk_size,
-            spill_backend: if context.context.get_config().enable_spill {
+            chunk_size: context.context().get_config().developer.chunk_size,
+            spill_backend: if context.context().get_config().enable_spill {
                 Some(Disk)
             } else {
                 None
             },
-            spill_metrics: context.context.spill_metrics(),
-            shutdown_rx: context.shutdown_rx.clone(),
-            mem_ctx: context.context.create_executor_mem_context(&identity),
+            spill_metrics: context.context().spill_metrics(),
+            shutdown_rx: context.shutdown_rx().clone(),
+            mem_ctx: context.context().create_executor_mem_context(&identity),
         }
         .dispatch())
     }

@@ -86,14 +86,14 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
             child,
             schema,
             identity: source.plan_node().get_identity().clone(),
-            shutdown_rx: source.shutdown_rx.clone(),
+            shutdown_rx: source.shutdown_rx().clone(),
 
             inner: ExecutorInner {
                 calls,
                 partition_key_indices,
                 order_key_indices,
                 order_key_order_types,
-                chunk_size: source.context.get_config().developer.chunk_size,
+                chunk_size: source.context().get_config().developer.chunk_size,
             },
         }))
     }

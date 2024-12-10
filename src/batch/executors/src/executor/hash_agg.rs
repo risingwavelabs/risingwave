@@ -163,22 +163,22 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
         let identity = source.plan_node().get_identity();
 
-        let spill_metrics = source.context.spill_metrics();
+        let spill_metrics = source.context().spill_metrics();
 
         Self::deserialize(
             hash_agg_node,
             child,
             source.task_id.clone(),
             identity.clone(),
-            source.context.get_config().developer.chunk_size,
-            source.context.create_executor_mem_context(identity),
-            if source.context.get_config().enable_spill {
+            source.context().get_config().developer.chunk_size,
+            source.context().create_executor_mem_context(identity),
+            if source.context().get_config().enable_spill {
                 Some(Disk)
             } else {
                 None
             },
             spill_metrics,
-            source.shutdown_rx.clone(),
+            source.shutdown_rx().clone(),
         )
     }
 }

@@ -17,6 +17,7 @@ use std::mem::swap;
 
 use futures::pin_mut;
 use itertools::Itertools;
+use risingwave_batch::task::ShutdownToken;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, VnodeCountCompat};
@@ -40,7 +41,6 @@ use crate::executor::{
     unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     BufferChunkExecutor, Executor, ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::ShutdownToken;
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -185,7 +185,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
 
-        let chunk_size = source.context.get_config().developer.chunk_size;
+        let chunk_size = source.context().get_config().developer.chunk_size;
 
         let column_ids = inner_side_column_ids
             .iter()
@@ -226,8 +226,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: identity.clone(),
-                shutdown_rx: source.shutdown_rx.clone(),
-                mem_ctx: source.context.create_executor_mem_context(&identity),
+                shutdown_rx: source.shutdown_rx()().clone(),
+                mem_ctx: source.context().create_executor_mem_context(&identity),
             }
             .dispatch())
         })

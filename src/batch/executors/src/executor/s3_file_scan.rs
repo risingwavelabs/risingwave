@@ -14,6 +14,7 @@
 
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_connector::source::iceberg::{new_s3_operator, read_parquet_file};
 use risingwave_pb::batch_plan::file_scan_node;
@@ -21,7 +22,7 @@ use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 #[derive(PartialEq, Debug)]
 pub enum FileFormat {
@@ -121,7 +122,7 @@ impl BoxedExecutorBuilder for FileScanExecutorBuilder {
             file_scan_node.s3_region.clone(),
             file_scan_node.s3_access_key.clone(),
             file_scan_node.s3_secret_key.clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
             Schema::from_iter(file_scan_node.columns.iter().map(Field::from)),
             source.plan_node().get_identity().clone(),
         )))

@@ -23,7 +23,7 @@ use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::{ArrayImpl, I64Array};
+use risingwave_common::array::{ArrayImpl, DataChunk, I64Array};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, ICEBERG_SEQUENCE_NUM_COLUMN_NAME};
 use risingwave_common::row::Row;
@@ -38,7 +38,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
-use crate::executor::{DataChunk, Executor};
+use crate::executor::Executor;
 use crate::monitor::BatchMetrics;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
@@ -263,7 +263,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
-        let metrics = source.context.batch_metrics().clone();
+        let metrics = source.context().batch_metrics().clone();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]
@@ -279,7 +279,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 Some(split.snapshot_id),
                 split.table_meta.deserialize(),
                 IcebergFileScanTaskEnum::from_iceberg_file_scan_task_json_str_enum(split.files),
-                source.context.get_config().developer.chunk_size,
+                source.context().get_config().developer.chunk_size,
                 schema,
                 source.plan_node().get_identity().clone(),
                 metrics,
