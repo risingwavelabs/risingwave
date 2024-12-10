@@ -1701,6 +1701,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     ///
     /// We can also have further optimization, to permit breaking the streaming update,
     /// to flush the in-memory degrees, if this is proven to have high memory consumption.
+    ///
+    /// TODO(kwannoel): Perhaps we can cache these separately from matched rows too.
+    /// Because matched rows may occupy a larger capacity.
+    ///
+    /// Argument for this:
+    /// We only hit this when cache miss. When cache miss, we will have this as one off cost.
+    /// Keeping this cached separately from matched rows is beneficial.
+    /// Then we can evict matched rows, without touching the degrees.
     async fn handle_fetch_degrees(
         key: &K,
         join_key_data_types: &[DataType],
