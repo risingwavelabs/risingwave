@@ -31,7 +31,6 @@ use tokio::sync::oneshot;
 
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
-use crate::executor::utils::compute_rate_limit_chunk_permits;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
@@ -400,7 +399,7 @@ async fn apply_dml_rate_limit(
                 }
                 let rate_limiter = guard.rate_limiter.as_ref().unwrap();
                 let max_permits = guard.row_per_second.unwrap() as usize;
-                let required_permits = compute_rate_limit_chunk_permits(&chunk, max_permits);
+                let required_permits = chunk.compute_rate_limit_chunk_permits(max_permits);
                 if required_permits <= max_permits {
                     let n = NonZeroU32::new(required_permits as u32).unwrap();
                     // `InsufficientCapacity` should never happen because we have check the cardinality.
@@ -410,7 +409,7 @@ async fn apply_dml_rate_limit(
                     // Split the chunk into smaller chunks.
                     for small_chunk in chunk.split(max_permits) {
                         let required_permits =
-                            compute_rate_limit_chunk_permits(&small_chunk, max_permits);
+                            small_chunk.compute_rate_limit_chunk_permits(max_permits);
                         let n = NonZeroU32::new(required_permits as u32).unwrap();
                         // Smaller chunks should have effective chunk size <= max_permits.
                         rate_limiter.until_n_ready(n).await.unwrap();

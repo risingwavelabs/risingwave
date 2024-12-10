@@ -90,10 +90,7 @@ pub async fn handle_alter_streaming_rate_limit(
             let (table, schema_name) =
                 reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
             if table.table_type != TableType::Table {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "\"{table_name}\" is not a table",
-                ))
-                .into());
+                return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)
@@ -107,6 +104,16 @@ pub async fn handle_alter_streaming_rate_limit(
             }
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.table_id)
+        }
+        PbThrottleTarget::Sink => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (table, schema_name) =
+                reader.get_sink_by_name(db_name, schema_path, &real_table_name)?;
+            if table.target_table.is_some() {
+                bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
+            }
+            session.check_privilege_for_drop_alter(schema_name, &**table)?;
+            (StatementType::ALTER_SINK, table.id.sink_id)
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };

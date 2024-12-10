@@ -250,6 +250,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     factory,
                     chunk_size,
                     input_data_types,
+                    node.rate_limit.map(|x| x as _),
                 )
                 .await?
                 .boxed()
@@ -287,6 +288,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     factory,
                     chunk_size,
                     input_data_types,
+                    node.rate_limit.map(|x| x as _),
                 )
                 .await?
                 .boxed()

@@ -58,6 +58,7 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
+const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -288,6 +289,12 @@ pub struct SessionConfig {
     /// If set to 0, this pauses the DML.
     #[parameter(default = DISABLE_DML_RATE_LIMIT)]
     dml_rate_limit: i32,
+
+    /// Set sink rate limit (rows per second) for each parallelism for external sink.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the sink.
+    #[parameter(default = DISABLE_SINK_RATE_LIMIT)]
+    sink_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
