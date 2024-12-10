@@ -31,6 +31,7 @@ console = "0.15"
 const-str = "0.5"
 home = "0.5"
 prometheus = { version = "0.13" }
+risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
