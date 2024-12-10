@@ -72,10 +72,12 @@ message DropSourceResponse {
   WaitVersion version = 2;
 }
 
+// Only for non-shared source
 message AlterSourceRequest {
   catalog.Source source = 1;
 }
 
+// Only for non-shared source
 message AlterSourceResponse {
   common.Status status = 1;
   WaitVersion version = 2;
