@@ -10496,7 +10496,6 @@ dependencies = [
  "hytra",
  "iceberg",
  "itertools 0.13.0",
- "linkme",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
