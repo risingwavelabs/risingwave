@@ -155,6 +155,15 @@ pub enum DebugCommands {
         #[clap(long, value_delimiter = ',')]
         dirty_fragment_ids: Vec<u32>,
     },
+    /// Fix table or source definition caused by the incorrect watermark syntax.
+    /// Related: <https://github.com/risingwavelabs/risingwave/pull/18393>
+    FixCreateDefinition {
+        #[command(flatten)]
+        common: DebugCommon,
+
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -895,6 +904,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             table_id,
             dirty_fragment_ids,
         }) => cmd_impl::debug::fix_table_fragments(common, table_id, dirty_fragment_ids).await?,
+        Commands::Debug(DebugCommands::FixCreateDefinition { common, dry_run }) => {
+            cmd_impl::debug::fix_create_definition(common, dry_run).await?
+        }
         Commands::Throttle(ThrottleCommands::Source(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
         }
