@@ -20,19 +20,18 @@ use itertools::Itertools;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Actor, ActorDispatcher, Database, Fragment, Index, Object, ObjectDependency, Sink, Source,
+    Actor, ActorDispatcher, Fragment, Index, Object, ObjectDependency, Sink, Source,
     StreamingJob as StreamingJobModel, Table,
 };
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    actor, actor_dispatcher, database, fragment, index, object, object_dependency, sink, source,
+    actor, actor_dispatcher, fragment, index, object, object_dependency, sink, source,
     streaming_job, table, ActorId, ActorUpstreamActors, ColumnCatalogArray, CreateType, DatabaseId,
     ExprNodeArray, FragmentId, I32Array, IndexId, JobStatus, ObjectId, SchemaId, SinkId, SourceId,
     StreamNode, StreamingParallelism, UserId,
@@ -69,8 +68,7 @@ use crate::controller::rename::ReplaceTableExprRewriter;
 use crate::controller::utils::{
     build_relation_group_for_delete, check_relation_name_duplicate, check_sink_into_table_cycle,
     ensure_object_id, ensure_user_id, get_fragment_actor_ids, get_fragment_mappings,
-    get_internal_tables_by_id, get_existing_job_resource_group,
-    rebuild_fragment_mapping_from_actors, PartialObject,
+    get_internal_tables_by_id, rebuild_fragment_mapping_from_actors, PartialObject,
 };
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -768,7 +766,7 @@ impl CatalogController {
         // let resource_group =
         //     get_streaming_job_resource_group(&txn, streaming_job.id() as ObjectId).await?;
 
-        //let specific_resource_group = streaming_job.specific_resource_group();
+        // let specific_resource_group = streaming_job.specific_resource_group();
 
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(

@@ -357,7 +357,6 @@ impl CatalogController {
             .map(|job| (job.job_id, job))
             .collect();
 
-
         Ok(RescheduleWorkingSet {
             fragments,
             actors,

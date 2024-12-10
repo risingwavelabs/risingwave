@@ -55,9 +55,9 @@ use sea_orm::sea_query::{
     WithClause,
 };
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DerivePartialModel,
-    EntityTrait, FromQueryResult, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect,
-    QueryTrait, RelationTrait, Set, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, DerivePartialModel, EntityTrait,
+    FromQueryResult, JoinType, Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Set,
+    Statement,
 };
 use thiserror_ext::AsReport;
 

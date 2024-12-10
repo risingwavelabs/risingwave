@@ -65,7 +65,12 @@ impl CatalogReader {
 /// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str, owner: UserId, resource_group: &str) -> Result<()>;
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()>;
 
     async fn create_schema(
         &self,

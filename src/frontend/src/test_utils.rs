@@ -34,6 +34,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -68,7 +69,7 @@ use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
-use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
+
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SecretId};
@@ -244,7 +245,12 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str, owner: UserId, resource_group: &str) -> Result<()> {
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(&PbDatabase {
             name: db_name.to_owned(),

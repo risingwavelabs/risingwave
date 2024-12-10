@@ -412,7 +412,10 @@ impl StreamingClusterInfo {
             .sum()
     }
 
-    pub fn filter_schedulable_workers_by_resource_group(&self, label: &str) -> HashMap<u32, WorkerNode> {
+    pub fn filter_schedulable_workers_by_resource_group(
+        &self,
+        label: &str,
+    ) -> HashMap<u32, WorkerNode> {
         let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, label);
         self.worker_nodes
             .iter()
