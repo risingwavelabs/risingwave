@@ -17,10 +17,10 @@ use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
-use risingwave_batch::executor::aggregation::build as build_agg;
-use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch::task::ShutdownToken;
+use risingwave_batch_executors::executor::aggregation::build as build_agg;
+use risingwave_batch_executors::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;

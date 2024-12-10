@@ -31,13 +31,15 @@ use risingwave_pb::batch_plan::PbExchangeSource;
 
 use super::{BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
+
+pub use risingwave_batch::executor::test_utils::*;
 
 /// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
@@ -360,5 +362,29 @@ impl BusyLoopExecutor {
         loop {
             yield DataChunk::new_dummy(1);
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct FakeCreateSource {
+    fake_exchange_source: FakeExchangeSource,
+}
+
+impl FakeCreateSource {
+    pub fn new(fake_exchange_source: FakeExchangeSource) -> Self {
+        Self {
+            fake_exchange_source,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl CreateSource for FakeCreateSource {
+    async fn create_source(
+        &self,
+        _: &dyn BatchTaskContext,
+        _: &PbExchangeSource,
+    ) -> Result<ExchangeSourceImpl> {
+        Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
     }
 }
