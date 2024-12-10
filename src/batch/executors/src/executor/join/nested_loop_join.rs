@@ -175,7 +175,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             .collect();
 
         let identity = source.plan_node().get_identity().clone();
-        let mem_context = source.context.create_executor_mem_context(&identity);
+        let mem_context = source.context().create_executor_mem_context(&identity);
 
         Ok(Box::new(NestedLoopJoinExecutor::new(
             join_expr,
@@ -184,9 +184,9 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             left_child,
             right_child,
             identity,
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
             mem_context,
-            source.shutdown_rx.clone(),
+            source.shutdown_rx().clone(),
         )))
     }
 }

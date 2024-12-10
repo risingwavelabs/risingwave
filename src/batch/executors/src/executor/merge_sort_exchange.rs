@@ -164,7 +164,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             Schema { fields },
             source.task_id.clone(),
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
         )))
     }
 }

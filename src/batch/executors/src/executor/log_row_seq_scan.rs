@@ -115,7 +115,7 @@ impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
             None => Some(Bitmap::ones(table_desc.vnode_count()).into()),
         };
 
-        let chunk_size = source.context.get_config().developer.chunk_size as u32;
+        let chunk_size = source.context().get_config().developer.chunk_size as u32;
         let metrics = source.context().batch_metrics();
 
         let Some(BatchQueryEpoch {

@@ -149,7 +149,7 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             .map(|proto| {
                 ProjectSetSelectItem::from_prost(
                     proto,
-                    source.context.get_config().developer.chunk_size,
+                    source.context().get_config().developer.chunk_size,
                 )
             })
             .try_collect()?;
@@ -166,7 +166,7 @@ impl BoxedExecutorBuilder for ProjectSetExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.context.get_config().developer.chunk_size,
+            chunk_size: source.context().get_config().developer.chunk_size,
         }))
     }
 }

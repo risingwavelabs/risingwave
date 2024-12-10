@@ -10566,6 +10566,67 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_batch_executors"
+version = "2.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-recursion",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "criterion",
+ "either",
+ "foyer",
+ "futures",
+ "futures-async-stream",
+ "futures-util",
+ "hashbrown 0.14.5",
+ "hytra",
+ "iceberg",
+ "itertools 0.13.0",
+ "linkme",
+ "madsim-tokio",
+ "madsim-tonic",
+ "memcomparable",
+ "mysql_async",
+ "opendal 0.49.2",
+ "parking_lot 0.12.1",
+ "parquet 53.2.0",
+ "paste",
+ "prometheus",
+ "prost 0.13.1",
+ "rand",
+ "risingwave_batch",
+ "risingwave_common",
+ "risingwave_common_estimate_size",
+ "risingwave_connector",
+ "risingwave_dml",
+ "risingwave_expr",
+ "risingwave_expr_impl",
+ "risingwave_hummock_sdk",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "rust_decimal",
+ "rw_futures_util",
+ "scopeguard",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.63",
+ "thiserror-ext",
+ "tikv-jemallocator",
+ "tokio-metrics",
+ "tokio-postgres",
+ "tokio-stream 0.1.15",
+ "tokio-util",
+ "tracing",
+ "twox-hash 1.6.3",
+ "uuid",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_bench"
 version = "2.2.0-alpha"
 dependencies = [

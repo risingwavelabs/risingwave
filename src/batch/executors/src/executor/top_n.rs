@@ -71,7 +71,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
             top_n_node.get_limit() as usize,
             top_n_node.get_with_ties(),
             identity.clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
             source.context().create_executor_mem_context(identity),
         )))
     }

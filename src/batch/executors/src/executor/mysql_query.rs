@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use mysql_async;
 use mysql_async::prelude::*;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -24,7 +25,7 @@ use risingwave_connector::parser::mysql_datum_to_rw_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, BatchExternalSystemError};
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// `MySqlQuery` executor. Runs a query against a `MySql` database.
 pub struct MySqlQueryExecutor {
@@ -162,7 +163,7 @@ impl BoxedExecutorBuilder for MySqlQueryExecutorBuilder {
             mysql_query_node.database.clone(),
             mysql_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
         )))
     }
 }

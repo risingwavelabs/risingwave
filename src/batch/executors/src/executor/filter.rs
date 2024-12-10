@@ -93,7 +93,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
             expr,
             input,
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
         )))
     }
 }

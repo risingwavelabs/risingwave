@@ -12,91 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod aggregation;
-mod delete;
-mod expand;
-mod filter;
-mod generic_exchange;
-mod group_top_n;
-mod hash_agg;
-mod hop_window;
-mod iceberg_scan;
-mod insert;
-mod join;
-mod limit;
-mod log_row_seq_scan;
 mod managed;
-mod max_one_row;
-mod merge_sort;
-mod merge_sort_exchange;
-mod mysql_query;
-mod order_by;
-mod postgres_query;
-mod project;
-mod project_set;
-mod row_seq_scan;
-mod s3_file_scan;
-mod sort_agg;
-mod sort_over_window;
-mod source;
-mod sys_row_seq_scan;
-mod table_function;
 pub mod test_utils;
-mod top_n;
-mod union;
-mod update;
-mod utils;
-mod values;
 
 use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Context;
 use async_recursion::async_recursion;
-pub use delete::*;
-pub use expand::*;
-pub use filter::*;
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
-pub use generic_exchange::*;
-pub use group_top_n::*;
-pub use hash_agg::*;
-pub use hop_window::*;
-pub use iceberg_scan::*;
-pub use insert::*;
-pub use join::*;
-pub use limit::*;
 pub use managed::*;
-pub use max_one_row::*;
-pub use merge_sort::*;
-pub use merge_sort_exchange::*;
-pub use mysql_query::*;
-pub use order_by::*;
-pub use postgres_query::*;
-pub use project::*;
-pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
-pub use row_seq_scan::*;
-pub use sort_agg::*;
-pub use sort_over_window::SortOverWindowExecutor;
-pub use source::*;
-pub use table_function::*;
 use thiserror_ext::AsReport;
-pub use top_n::TopNExecutor;
-pub use union::*;
-pub use update::*;
-pub use utils::*;
-pub use values::*;
 
-use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
-use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 use crate::error::Result;
-use crate::executor::s3_file_scan::FileScanExecutorBuilder;
-use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -185,6 +119,10 @@ impl<'a> ExecutorBuilder<'a> {
     pub fn epoch(&self) -> BatchQueryEpoch {
         self.epoch
     }
+
+    pub fn shutdown_rx(&self) -> &ShutdownToken {
+        &self.shutdown_rx
+    }
 }
 
 /// Descriptor for executor builder.
@@ -205,13 +143,13 @@ pub struct ExecutorBuilderDescriptor {
 pub static BUILDER_DESCS: [ExecutorBuilderDescriptor];
 
 /// Register an executor builder so that it can be used to build the executor from protobuf.
+#[macro_export]
 macro_rules! register_executor {
     ($node_body:ident, $builder:ty) => {
         const _: () = {
             use futures::FutureExt;
+            use risingwave_batch::executor::{ExecutorBuilderDescriptor, BUILDER_DESCS};
             use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
-
-            use crate::executor::{ExecutorBuilderDescriptor, BUILDER_DESCS};
 
             #[linkme::distributed_slice(BUILDER_DESCS)]
             static BUILDER: ExecutorBuilderDescriptor = ExecutorBuilderDescriptor {
@@ -221,45 +159,7 @@ macro_rules! register_executor {
         };
     };
 }
-pub(crate) use register_executor;
-
-register_executor!(RowSeqScan, RowSeqScanExecutorBuilder);
-register_executor!(Insert, InsertExecutor);
-register_executor!(Delete, DeleteExecutor);
-register_executor!(Exchange, GenericExchangeExecutorBuilder);
-register_executor!(Update, UpdateExecutor);
-register_executor!(Filter, FilterExecutor);
-register_executor!(Project, ProjectExecutor);
-register_executor!(SortAgg, SortAggExecutor);
-register_executor!(Sort, SortExecutor);
-register_executor!(TopN, TopNExecutor);
-register_executor!(GroupTopN, GroupTopNExecutorBuilder);
-register_executor!(Limit, LimitExecutor);
-register_executor!(Values, ValuesExecutor);
-register_executor!(NestedLoopJoin, NestedLoopJoinExecutor);
-register_executor!(HashJoin, HashJoinExecutor<()>);
-register_executor!(HashAgg, HashAggExecutorBuilder);
-register_executor!(MergeSortExchange, MergeSortExchangeExecutorBuilder);
-register_executor!(TableFunction, TableFunctionExecutorBuilder);
-register_executor!(HopWindow, HopWindowExecutor);
-register_executor!(SysRowSeqScan, SysRowSeqScanExecutorBuilder);
-register_executor!(Expand, ExpandExecutor);
-register_executor!(LocalLookupJoin, LocalLookupJoinExecutorBuilder);
-register_executor!(DistributedLookupJoin, DistributedLookupJoinExecutorBuilder);
-register_executor!(ProjectSet, ProjectSetExecutor);
-register_executor!(Union, UnionExecutor);
-register_executor!(Source, SourceExecutor);
-register_executor!(SortOverWindow, SortOverWindowExecutor);
-register_executor!(MaxOneRow, MaxOneRowExecutor);
-register_executor!(FileScan, FileScanExecutorBuilder);
-register_executor!(IcebergScan, IcebergScanExecutorBuilder);
-register_executor!(PostgresQuery, PostgresQueryExecutorBuilder);
-register_executor!(MysqlQuery, MySqlQueryExecutorBuilder);
-
-// Following executors are only for testing.
-register_executor!(BlockExecutor, BlockExecutorBuilder);
-register_executor!(BusyLoopExecutor, BusyLoopExecutorBuilder);
-register_executor!(LogRowSeqScan, LogStoreRowSeqScanExecutorBuilder);
+pub use register_executor;
 
 impl<'a> ExecutorBuilder<'a> {
     pub async fn build(&self) -> Result<BoxedExecutor> {

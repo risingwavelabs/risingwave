@@ -84,8 +84,8 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            output_size_limit: source.context.get_config().developer.chunk_size,
-            shutdown_rx: source.shutdown_rx.clone(),
+            output_size_limit: source.context().get_config().developer.chunk_size,
+            shutdown_rx: source.shutdown_rx().clone(),
         }))
     }
 }

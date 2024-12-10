@@ -15,6 +15,7 @@
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
@@ -24,7 +25,7 @@ use thiserror_ext::AsReport;
 use tokio_postgres;
 
 use crate::error::BatchError;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, DataChunk, Executor, ExecutorBuilder};
+use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
@@ -192,7 +193,7 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
             postgres_query_node.database.clone(),
             postgres_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
         )))
     }
 }

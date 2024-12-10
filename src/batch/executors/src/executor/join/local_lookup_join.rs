@@ -398,7 +398,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
 
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.chunk_size;
+        let chunk_size = source.context().get_config().developer.chunk_size;
 
         let worker_nodes = lookup_join_node.get_worker_nodes();
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
@@ -425,7 +425,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             epoch: query_epoch,
             worker_slot_to_scan_range_mapping: HashMap::new(),
             chunk_size,
-            shutdown_rx: source.shutdown_rx.clone(),
+            shutdown_rx: source.shutdown_rx().clone(),
             next_stage_id: 0,
             worker_slot_mapping,
             as_of,
@@ -448,8 +448,8 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             output_indices,
             chunk_size,
             identity: identity.clone(),
-            shutdown_rx: source.shutdown_rx.clone(),
-            mem_ctx: source.context.create_executor_mem_context(&identity),
+            shutdown_rx: source.shutdown_rx().clone(),
+            mem_ctx: source.context().create_executor_mem_context(&identity),
         }
         .dispatch())
     }

@@ -249,7 +249,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             child,
             old_exprs,
             new_exprs,
-            source.context.get_config().developer.chunk_size,
+            source.context().get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,
             update_node.session_id,
