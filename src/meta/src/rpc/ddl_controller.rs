@@ -52,7 +52,6 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -77,7 +76,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext,
+    SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -390,10 +390,10 @@ impl DdlController {
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
-    pub async fn alter_parallelism(
+    pub async fn reschedule_streaming_job(
         &self,
         table_id: u32,
-        parallelism: PbTableParallelism,
+        target: JobRescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
@@ -415,7 +415,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into(), deferred)
+            .reschedule_streaming_job(table_id, target, deferred)
             .await
     }
 

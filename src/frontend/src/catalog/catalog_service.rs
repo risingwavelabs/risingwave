@@ -220,6 +220,13 @@ pub trait CatalogWriter: Send + Sync {
         deferred: bool,
     ) -> Result<()>;
 
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()>;
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -250,7 +257,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 name: db_name.to_owned(),
                 id: 0,
                 owner,
-                resource_group: resource_group.to_string(),
+                resource_group: resource_group.to_owned(),
             })
             .await?;
         self.wait_version(version).await
@@ -591,6 +598,20 @@ impl CatalogWriter for CatalogWriterImpl {
             )
             .await?;
         self.wait_version(version).await
+    }
+
+    async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        self.meta_client
+            .alter_resource_group(table_id, resource_group, deferred)
+            .await
+            .map_err(|e| anyhow!(e))?;
+
+        Ok(())
     }
 }
 

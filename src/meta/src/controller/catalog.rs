@@ -3141,6 +3141,23 @@ impl CatalogController {
             .collect::<HashMap<ObjectId, StreamingParallelism>>())
     }
 
+    pub async fn get_job_streaming_parallelisms(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<StreamingParallelism> {
+        let inner = self.inner.read().await;
+
+        let job_parallelism: StreamingParallelism = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::Parallelism)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        Ok(job_parallelism)
+    }
+
     pub async fn get_table_name_type_mapping(
         &self,
     ) -> MetaResult<HashMap<TableId, (String, String)>> {
@@ -3231,12 +3248,48 @@ impl CatalogController {
         Ok(res)
     }
 
+    pub async fn get_existing_job_resource_groups(
+        &self,
+        streaming_job_ids: Vec<ObjectId>,
+    ) -> MetaResult<HashMap<ObjectId, String>> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut resource_groups = HashMap::new();
+
+        for job_id in streaming_job_ids {
+            let resource_group = get_existing_job_resource_group(&txn, job_id).await?;
+            resource_groups.insert(job_id, resource_group);
+        }
+
+        Ok(resource_groups)
+    }
+
     pub async fn get_existing_job_resource_group(
         &self,
         streaming_job_id: ObjectId,
     ) -> MetaResult<String> {
         let inner = self.inner.read().await;
         get_existing_job_resource_group(&inner.db, streaming_job_id).await
+    }
+
+    pub async fn get_existing_job_database_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let database_id: ObjectId = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+            .column(object::Column::DatabaseId)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        get_database_resource_group(&inner.db, database_id).await
     }
 
     pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {

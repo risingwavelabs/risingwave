@@ -37,10 +37,8 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
-};
-use crate::stream::SplitAssignment;
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};
 
@@ -382,13 +380,13 @@ impl MetadataManager {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<TableId, TableParallelism>,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // temp convert u32 to i32
         let reschedules = reschedules.into_iter().map(|(k, v)| (k as _, v)).collect();
 
         self.catalog_controller
-            .post_apply_reschedules(reschedules, table_parallelism_assignment)
+            .post_apply_reschedules(reschedules, post_updates)
             .await
     }
 

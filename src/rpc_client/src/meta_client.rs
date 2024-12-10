@@ -580,6 +580,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_resource_group(
+        &self,
+        table_id: u32,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterResourceGroupRequest {
+            table_id,
+            resource_group,
+            deferred,
+        };
+
+        self.inner.alter_resource_group(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_swap_rename(
         &self,
         object: alter_swap_rename_request::Object,
@@ -2091,6 +2107,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
