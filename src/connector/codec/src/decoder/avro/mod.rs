@@ -66,6 +66,13 @@ impl<'a> AvroParseOptions<'a> {
 }
 
 impl<'a> AvroParseOptionsInner<'a> {
+    fn lookup_ref(&self, schema: &'a Schema) -> &'a Schema {
+        match schema {
+            Schema::Ref { name } => self.refs[name],
+            _ => schema,
+        }
+    }
+
     /// Parse an avro value into expected type.
     ///
     /// 3 kinds of type info are used to parsing:
@@ -81,7 +88,7 @@ impl<'a> AvroParseOptionsInner<'a> {
     ///     the `DataType` will be inferred.
     fn convert_to_datum<'b>(
         &self,
-        schema: &'a Schema,
+        unresolved_schema: &'a Schema,
         value: &'b Value,
         type_expected: &DataType,
     ) -> AccessResult<DatumCow<'b>>
@@ -104,7 +111,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             (_, Value::Null) => return Ok(DatumCow::NULL),
             // ---- Union (with >=2 non null variants), and nullable Union ([null, record]) -----
             (DataType::Struct(struct_type_info), Value::Union(variant, v)) => {
-                let Schema::Union(u) = schema else {
+                let Schema::Union(u) = self.lookup_ref(unresolved_schema) else {
                     // XXX: Is this branch actually unreachable? (if self.schema is correctly used)
                     return Err(create_error());
                 };
@@ -141,7 +148,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             }
             // nullable Union ([null, T])
             (_, Value::Union(_, v)) => {
-                let Schema::Union(u) = schema else {
+                let Schema::Union(u) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
                 let Some(schema) = get_nullable_union_inner(u) else {
@@ -169,7 +176,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             (DataType::Float64, Value::Float(i)) => (*i as f64).into(),
             // ---- Decimal -----
             (DataType::Decimal, Value::Decimal(avro_decimal)) => {
-                let (precision, scale) = match schema {
+                let (precision, scale) = match self.lookup_ref(unresolved_schema) {
                     Schema::Decimal(DecimalSchema {
                         precision, scale, ..
                     }) => (*precision, *scale),
@@ -255,7 +262,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             }
             // ---- Struct -----
             (DataType::Struct(struct_type_info), Value::Record(descs)) => StructValue::new({
-                let Schema::Record(record_schema) = schema else {
+                let Schema::Record(record_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
                 struct_type_info
@@ -277,7 +284,7 @@ impl<'a> AvroParseOptionsInner<'a> {
             .into(),
             // ---- List -----
             (DataType::List(item_type), Value::Array(array)) => ListValue::new({
-                let Schema::Array(element_schema) = schema else {
+                let Schema::Array(element_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
                 let schema = element_schema;
@@ -303,7 +310,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                 uuid.as_hyphenated().to_string().into_boxed_str().into()
             }
             (DataType::Map(map_type), Value::Map(map)) => {
-                let Schema::Map(value_schema) = schema else {
+                let Schema::Map(value_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
                 let schema = value_schema;
@@ -354,7 +361,7 @@ impl<'a> AvroAccess<'a> {
 impl Access for AvroAccess<'_> {
     fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         let mut value = self.value;
-        let mut schema = self.options.root_schema;
+        let mut unresolved_schema = self.options.root_schema;
 
         debug_assert!(
             path.len() == 1
@@ -395,22 +402,24 @@ impl Access for AvroAccess<'_> {
                     // },
                     // ...]
                     value = v;
-                    let Schema::Union(u) = schema else {
+                    let Schema::Union(u) = self.options.inner.lookup_ref(unresolved_schema) else {
                         return Err(create_error());
                     };
-                    let Some(s) = get_nullable_union_inner(u) else {
+                    let Some(schema) = get_nullable_union_inner(u) else {
                         return Err(create_error());
                     };
-                    schema = s;
+                    unresolved_schema = schema;
                     continue;
                 }
                 Value::Record(fields) => {
-                    let Schema::Record(record_schema) = schema else {
+                    let Schema::Record(record_schema) =
+                        self.options.inner.lookup_ref(unresolved_schema)
+                    else {
                         return Err(create_error());
                     };
                     if let Some(idx) = record_schema.lookup.get(key) {
                         value = &fields[*idx].1;
-                        schema = &record_schema.fields[*idx].schema;
+                        unresolved_schema = &record_schema.fields[*idx].schema;
                         i += 1;
                         continue;
                     }
@@ -422,7 +431,7 @@ impl Access for AvroAccess<'_> {
 
         self.options
             .inner
-            .convert_to_datum(schema, value, type_expected)
+            .convert_to_datum(unresolved_schema, value, type_expected)
     }
 }
 
