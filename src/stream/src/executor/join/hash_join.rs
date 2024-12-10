@@ -257,17 +257,25 @@ pub struct TableInner<S: StateStore> {
     pk_indices: Vec<usize>,
     /// Indices of the join key in a state row
     join_key_indices: Vec<usize>,
-    // This should be identical to the pk in state table.
+    /// Join key datatypes
+    join_key_data_types: Vec<DataType>,
+    /// This should be identical to the pk in state table.
     order_key_indices: Vec<usize>,
     pub(crate) table: StateTable<S>,
 }
 
 impl<S: StateStore> TableInner<S> {
-    pub fn new(pk_indices: Vec<usize>, join_key_indices: Vec<usize>, table: StateTable<S>) -> Self {
+    pub fn new(
+        pk_indices: Vec<usize>,
+        join_key_indices: Vec<usize>,
+        join_key_data_types: Vec<DataType>,
+        table: StateTable<S>,
+    ) -> Self {
         let order_key_indices = table.pk_indices().to_vec();
         Self {
             pk_indices,
             join_key_indices,
+            join_key_data_types,
             order_key_indices,
             table,
         }
@@ -328,6 +336,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let state = TableInner {
             pk_indices: state_pk_indices,
             join_key_indices: state_join_key_indices,
+            join_key_data_types: join_key_data_types.clone(),
             order_key_indices: state_table.pk_indices().to_vec(),
             table: state_table,
         };
