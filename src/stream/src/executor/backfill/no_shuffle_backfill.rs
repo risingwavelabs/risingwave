@@ -430,12 +430,8 @@ where
                     match mutation {
                         Mutation::Update(update) => {
                             if let Some(bitmap) = update.vnode_bitmaps.get(&self.actor_id) {
-                                println!("update bitmap {:#?}", bitmap);
-                                //old_state = None;
                                 if let Some(table) = self.state_table.as_mut() {
                                     let (prev, res) = table.update_vnode_bitmap(bitmap.clone());
-                                    println!("prev {:#?}", prev);
-                                    println!("res {}", res);
                                 }
                                 self.progress.update_vnodes(bitmap);
                             }

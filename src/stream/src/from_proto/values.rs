@@ -39,7 +39,7 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
             .subscribe_barrier(params.actor_context.id);
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id, vec![]);
+            .register_create_mview_progress(params.actor_context.id, params.vnode_bitmap.clone());
         let rows = node
             .get_tuples()
             .iter()

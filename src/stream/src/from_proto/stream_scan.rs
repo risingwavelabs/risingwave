@@ -40,12 +40,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
 
-        let vnodes = params.vnode_bitmap.as_ref().unwrap().iter_ones().collect_vec();
-
         // For reporting the progress.
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id ,vnodes);
+            .register_create_mview_progress(params.actor_context.id, params.vnode_bitmap.clone());
 
         let output_indices = node
             .output_indices

@@ -840,9 +840,9 @@ impl DatabaseManagedBarrierState {
                     epoch,
                     actor,
                     state,
-                    vnodes,
+                    vnode_bitmap,
                 } => {
-                    self.update_create_mview_progress(epoch, actor, vnodes, state);
+                    self.update_create_mview_progress(epoch, actor, vnode_bitmap, state);
                 }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,

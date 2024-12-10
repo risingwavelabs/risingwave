@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
@@ -93,10 +94,10 @@ impl DatabaseManagedBarrierState {
         &mut self,
         epoch: EpochPair,
         actor: ActorId,
-        vnodes: Vec<usize>,
+        vnode_bitmap: Option<Bitmap>,
         state: BackfillState,
     ) {
-        println!("updating vnodes {:?} actors {}", vnodes, actor);
+        println!("updating vnodes {:?} actors {}", vnode_bitmap, actor);
         if let Some(actor_state) = self.actor_states.get(&actor)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
             && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
@@ -117,13 +118,13 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor: ActorId,
-        vnodes: Vec<usize>,
+        vnode_bitmap: Option<Bitmap>,
         state: BackfillState,
     ) {
         self.send_event(ReportCreateProgress {
             epoch,
             actor,
-            vnodes,
+            vnode_bitmap,
             state,
         })
     }
@@ -165,7 +166,7 @@ pub struct CreateMviewProgressReporter {
     /// The id of the actor containing the backfill executors.
     backfill_actor_id: ActorId,
 
-    vnodes: Vec<usize>,
+    vnode_bitmap: Option<Bitmap>,
 
     state: Option<BackfillState>,
 }
@@ -174,19 +175,19 @@ impl CreateMviewProgressReporter {
     pub fn new(
         barrier_manager: LocalBarrierManager,
         backfill_actor_id: ActorId,
-        vnodes: Vec<usize>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> Self {
         Self {
             barrier_manager,
             backfill_actor_id,
-            vnodes,
+            vnode_bitmap,
             state: None,
         }
     }
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0)
+        Self::new(barrier_manager, 0, None)
     }
 
     pub fn actor_id(&self) -> u32 {
@@ -198,15 +199,13 @@ impl CreateMviewProgressReporter {
         self.barrier_manager.update_create_mview_progress(
             epoch,
             self.backfill_actor_id,
-            self.vnodes.clone(),
+            self.vnode_bitmap.clone(),
             state,
         );
     }
 
-    pub fn update_vnodes(&mut self, vnodes: &Bitmap) {
-        println!("updating vnode to {:?}", vnodes);
-        //todo!()
-        //self.vnodes = vnodes;
+    pub fn update_vnodes(&mut self, vnode_bitmap: &Bitmap) {
+        self.vnode_bitmap = Some(vnode_bitmap.clone());
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
@@ -331,9 +330,9 @@ impl LocalBarrierManager {
     pub(crate) fn register_create_mview_progress(
         &self,
         backfill_actor_id: ActorId,
-        vnodes: Vec<usize>,
+        vnode_bitmap: Option<Bitmap>,
     ) -> CreateMviewProgressReporter {
         trace!("register create mview progress: {}", backfill_actor_id);
-        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id, vnodes)
+        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id, vnode_bitmap)
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::SourceBackfillNode;
@@ -74,7 +75,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         );
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id, vec![]);
+            .register_create_mview_progress(params.actor_context.id, params.vnode_bitmap);
 
         let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),
