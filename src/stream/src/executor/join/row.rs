@@ -47,6 +47,10 @@ impl<R: Row> JoinRow<R> {
         (&self.row, degree)
     }
 
+    pub fn to_degree_row<'a>(&'a self, state_order_key_indices: &'a [usize]) -> impl Row + 'a {
+        self.to_table_rows(state_order_key_indices).1
+    }
+
     pub fn encode(&self) -> EncodedJoinRow {
         EncodedJoinRow {
             compacted_row: (&self.row).into(),
