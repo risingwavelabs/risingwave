@@ -313,6 +313,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             TableInner::new(
                 degree_pk_indices_l,
                 degree_join_key_indices_l,
+                join_key_data_types_l.clone(),
                 degree_state_table_l,
             )
         });
@@ -320,6 +321,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             TableInner::new(
                 degree_pk_indices_r,
                 degree_join_key_indices_r,
+                join_key_data_types_r.clone(),
                 degree_state_table_r,
             )
         });
