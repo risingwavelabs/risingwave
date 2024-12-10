@@ -75,7 +75,11 @@ pub async fn handle_create_database(
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         // TODO: add support for create database with resource_group
-        .create_database(&database_name, database_owner, DEFAULT_STREAMING_JOB_RESOURCE_GROUP)
+        .create_database(
+            &database_name,
+            database_owner,
+            DEFAULT_STREAMING_JOB_RESOURCE_GROUP,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

@@ -139,10 +139,7 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
-use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_pb::user::grant_privilege::Object;
 
-use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::id::IdCategory;
 use crate::controller::utils::filter_workers_by_resource_group;
 
@@ -511,7 +508,7 @@ impl ScaleController {
                 fragment_downstreams: _,
                 fragment_upstreams: _,
                 related_jobs,
-                job_resource_groups,
+                job_resource_groups: _job_resource_groups,
             } = mgr
                 .catalog_controller
                 .resolve_working_set_for_reschedule_fragments(fragment_ids)

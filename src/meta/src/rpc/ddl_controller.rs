@@ -29,7 +29,6 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node, visit_stream_node_cont_mut,
 };
-use risingwave_common::util::worker_util::DEFAULT_STREAMING_JOB_RESOURCE_GROUP;
 use risingwave_common::{bail, bail_not_implemented, hash, must_match};
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
