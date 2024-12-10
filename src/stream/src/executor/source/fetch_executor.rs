@@ -386,6 +386,11 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                     }
                                     _ => unreachable!(),
                                 };
+                                // FIXME(rc): Here we compare `offset` with `fs_split.size` to determine
+                                // whether the file is finished, where the `offset` is the starting position
+                                // of the NEXT message line in the file. However, In other source connectors,
+                                // we use the word `offset` to represent the offset of the current message.
+                                // We have to be careful about this semantical inconsistency.
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
                                     state_store_handler.delete(split_id).await?;
