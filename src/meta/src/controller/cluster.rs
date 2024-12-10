@@ -24,7 +24,7 @@ use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
-use risingwave_common::util::worker_util::DEFAULT_COMPUTE_NODE_LABEL;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::RW_VERSION;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
@@ -48,6 +48,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
+use crate::controller::utils::filter_workers_by_resource_group;
 use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey, META_NODE_ID};
 use crate::model::ClusterId;
 use crate::{MetaError, MetaResult};
@@ -391,17 +392,33 @@ pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<u32, WorkerNode>,
 
+    /// All schedulable compute nodes in the cluster. Normally for label-based scheduling.
+    pub schedulable_workers: HashSet<u32>,
+
     /// All unschedulable compute nodes in the cluster.
     pub unschedulable_workers: HashSet<u32>,
 }
 
 // Encapsulating the use of parallelism
 impl StreamingClusterInfo {
-    pub fn parallelism(&self) -> usize {
+    pub fn parallelism(&self, resource_group: String) -> usize {
+        let available_worker_ids =
+            filter_workers_by_resource_group(&self.worker_nodes, resource_group.as_str());
+
         self.worker_nodes
             .values()
+            .filter(|worker| available_worker_ids.contains(&worker.id))
             .map(|worker| worker.parallelism())
             .sum()
+    }
+
+    pub fn filter_schedulable_workers_by_resource_group(&self, label: &str) -> HashMap<u32, WorkerNode> {
+        let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, label);
+        self.worker_nodes
+            .iter()
+            .filter(|(id, _)| worker_ids.contains(id))
+            .map(|(id, worker)| (*id, worker.clone()))
+            .collect()
     }
 }
 
@@ -677,7 +694,7 @@ impl ClusterControllerInner {
                         "node_label is not set for worker {}, fallback to `default`",
                         worker.worker_id
                     );
-                    DEFAULT_COMPUTE_NODE_LABEL.to_string()
+                    DEFAULT_RESOURCE_GROUP.to_string()
                 })));
 
                 WorkerProperty::update(property).exec(&txn).await?;
@@ -912,7 +929,7 @@ impl ClusterControllerInner {
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
         let mut streaming_workers = self.list_active_streaming_workers().await?;
 
-        let unschedulable_workers = streaming_workers
+        let unschedulable_workers: HashSet<_> = streaming_workers
             .extract_if(|worker| {
                 worker
                     .property
@@ -922,11 +939,18 @@ impl ClusterControllerInner {
             .map(|w| w.id)
             .collect();
 
+        let schedulable_workers = streaming_workers
+            .iter()
+            .map(|worker| worker.id)
+            .filter(|id| !unschedulable_workers.contains(id))
+            .collect();
+
         let active_workers: HashMap<_, _> =
             streaming_workers.into_iter().map(|w| (w.id, w)).collect();
 
         Ok(StreamingClusterInfo {
             worker_nodes: active_workers,
+            schedulable_workers,
             unschedulable_workers,
         })
     }

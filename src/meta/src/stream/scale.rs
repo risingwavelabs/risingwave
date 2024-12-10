@@ -139,8 +139,12 @@ impl CustomFragmentInfo {
 }
 
 use educe::Educe;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_pb::user::grant_privilege::Object;
 
+use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::id::IdCategory;
+use crate::controller::utils::filter_workers_by_resource_group;
 
 // The debug implementation is arbitrary. Just used in debug logs.
 #[derive(Educe)]
@@ -507,6 +511,7 @@ impl ScaleController {
                 fragment_downstreams: _,
                 fragment_upstreams: _,
                 related_jobs,
+                job_resource_groups,
             } = mgr
                 .catalog_controller
                 .resolve_working_set_for_reschedule_fragments(fragment_ids)
@@ -1815,11 +1820,6 @@ impl ScaleController {
             .map(|worker| (worker.id, worker))
             .collect();
 
-        let schedulable_worker_slots = workers
-            .values()
-            .map(|worker| (worker.id as WorkerId, worker.parallelism()))
-            .collect::<BTreeMap<_, _>>();
-
         // index for no shuffle relation
         let mut no_shuffle_source_fragment_ids = HashSet::new();
         let mut no_shuffle_target_fragment_ids = HashSet::new();
@@ -1833,6 +1833,8 @@ impl ScaleController {
         // index for fragment_id -> [actor_id]
         let mut fragment_actor_id_map = HashMap::new();
 
+        let mut job_resource_groups = HashMap::new();
+
         async fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
@@ -1843,6 +1845,7 @@ impl ScaleController {
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
+            resource_groups: &mut HashMap<ObjectId, String>,
             mgr: &MetadataManager,
             table_ids: Vec<ObjectId>,
         ) -> Result<(), MetaError> {
@@ -1853,6 +1856,7 @@ impl ScaleController {
                 fragment_downstreams,
                 fragment_upstreams: _fragment_upstreams,
                 related_jobs: _related_jobs,
+                job_resource_groups,
             } = mgr
                 .catalog_controller
                 .resolve_working_set_for_reschedule_tables(table_ids)
@@ -1892,6 +1896,8 @@ impl ScaleController {
                     .insert(actor_id as ActorId);
             }
 
+            *resource_groups = job_resource_groups;
+
             Ok(())
         }
 
@@ -1907,6 +1913,7 @@ impl ScaleController {
             &mut actor_location,
             &mut table_fragment_id_map,
             &mut fragment_actor_id_map,
+            &mut job_resource_groups,
             &self.metadata_manager,
             table_ids,
         )
@@ -1920,6 +1927,7 @@ impl ScaleController {
             ?actor_location,
             ?table_fragment_id_map,
             ?fragment_actor_id_map,
+            ?job_resource_groups,
             "generate_table_resize_plan, after build_index"
         );
 
@@ -1927,6 +1935,20 @@ impl ScaleController {
 
         for (table_id, parallelism) in table_parallelisms {
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
+
+            let resource_group = job_resource_groups
+                .get(&(table_id as ObjectId))
+                .cloned()
+                .expect("job resource group should exist");
+
+            let schedulable_worker_ids =
+                filter_workers_by_resource_group(&workers, resource_group.as_str());
+
+            let schedulable_worker_slots = workers
+                .iter()
+                .filter(|(id, _)| schedulable_worker_ids.contains(id))
+                .map(|(_, worker)| (worker.id as WorkerId, worker.parallelism()))
+                .collect::<BTreeMap<_, _>>();
 
             for fragment_id in fragment_map {
                 // Currently, all of our NO_SHUFFLE relation propagations are only transmitted from upstream to downstream.
@@ -2577,9 +2599,12 @@ impl GlobalStreamManager {
                             let prev_worker = worker_cache.insert(worker.id, worker.clone());
 
                             match prev_worker {
-                                // todo, add label checking in further changes
-                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()  => {
+                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()   => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
+                                    should_trigger = true;
+                                }
+                                Some(prev_worker) if  prev_worker.node_label() != worker.node_label()  => {
+                                    tracing::info!(worker = worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
                                 None => {
