@@ -1779,7 +1779,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// in `fetch_cached_state`.
     /// The memory use should be limited since we only store a u64.
     ///
-    /// Let's say we have amplification of 1B, we will have 1B * 8 bytes ~= 8GB.
+    /// Let's say we have amplification of 1B, we will have 1B * 8 bytes ~= 8GB
     ///
     /// We can also have further optimization, to permit breaking the streaming update,
     /// to flush the in-memory degrees, if this is proven to have high memory consumption.
