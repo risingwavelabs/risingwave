@@ -47,7 +47,6 @@ pub enum LocalNotification {
     SystemParamsChange(SystemParamsReader),
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
-    AdhocRecovery,
 }
 
 #[derive(Debug)]

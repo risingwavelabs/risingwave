@@ -116,7 +116,7 @@ pub(super) async fn bytes_from_url(
     }
 }
 
-pub fn extreact_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
+pub fn extract_timestamp_from_meta(meta: &SourceMeta) -> DatumRef<'_> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_timestamp(),
         SourceMeta::DebeziumCdc(cdc_meta) => cdc_meta.extract_timestamp(),

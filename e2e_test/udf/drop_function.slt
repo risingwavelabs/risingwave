@@ -10,10 +10,16 @@ def add(a, b):
 $$;
 
 statement ok
-create materialized view mv as select add(a, b) as c from t;
+create function add_v2(INT, INT) returns int language sql as $$select $1 + $2$$;
+
+statement ok
+create materialized view mv as select add(a, b) + add_v2(a, b) as c from t;
 
 statement error function used by 1 other objects
 drop function add;
+
+statement error function used by 1 other objects
+drop function add_v2;
 
 statement ok
 drop materialized view mv;
@@ -21,6 +27,8 @@ drop materialized view mv;
 statement ok
 drop function add;
 
+statement ok
+drop function add_v2;
 
 statement ok
 create function add(a int, b int) returns int language python as $$

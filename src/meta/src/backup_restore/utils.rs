@@ -13,17 +13,15 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_common::config::{MetaBackend, MetaStoreConfig, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use sea_orm::DbBackend;
 
 use crate::backup_restore::RestoreOpts;
-use crate::controller::{SqlMetaStore, IN_MEMORY_STORE};
+use crate::controller::SqlMetaStore;
 use crate::MetaStoreBackend;
 
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
@@ -53,32 +51,10 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
             config: MetaStoreConfig::default(),
         },
     };
-    match meta_store_backend {
-        MetaStoreBackend::Mem => {
-            let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
-            Ok(SqlMetaStore::new(conn, IN_MEMORY_STORE.to_owned()))
-        }
-        MetaStoreBackend::Sql { endpoint, config } => {
-            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                1
-            } else {
-                config.max_connections
-            };
-            let mut options = sea_orm::ConnectOptions::new(endpoint.clone());
-            options
-                .max_connections(max_connection)
-                .min_connections(config.min_connections)
-                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
-                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
-                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
-            let conn = sea_orm::Database::connect(options)
-                .await
-                .map_err(|e| BackupError::MetaStorage(e.into()))?;
-            Ok(SqlMetaStore::new(conn, endpoint))
-        }
-    }
+
+    SqlMetaStore::connect(meta_store_backend)
+        .await
+        .map_err(|e| BackupError::MetaStorage(e.into()))
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {

@@ -24,7 +24,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, Engine, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
-    INITIAL_TABLE_VERSION_ID, ROWID_PREFIX,
+    INITIAL_TABLE_VERSION_ID, RISINGWAVE_ICEBERG_ROW_ID, ROWID_PREFIX,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::license::Feature;
@@ -1528,12 +1528,14 @@ pub async fn create_iceberg_engine_table(
 
     // For the table without primary key. We will use `_row_id` as primary key
     let sink_from = if pks.is_empty() {
-        pks = vec![ROWID_PREFIX.to_owned()];
-        let [stmt]: [_; 1] =
-            Parser::parse_sql(&format!("select {}, * from {}", ROWID_PREFIX, table_name))
-                .context("unable to parse query")?
-                .try_into()
-                .unwrap();
+        pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
+        let [stmt]: [_; 1] = Parser::parse_sql(&format!(
+            "select {} as {}, * from {}",
+            ROWID_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, table_name
+        ))
+        .context("unable to parse query")?
+        .try_into()
+        .unwrap();
 
         let Statement::Query(query) = &stmt else {
             panic!("unexpected statement: {:?}", stmt);
