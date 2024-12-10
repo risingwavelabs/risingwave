@@ -145,6 +145,31 @@ impl ReplaceStreamJobPlan {
         }
         fragment_changes
     }
+
+    /// `old_fragment_id` -> `new_fragment_id`
+    pub fn fragment_replacements(&self) -> HashMap<FragmentId, FragmentId> {
+        let mut fragment_replacements = HashMap::new();
+        for merge_update in &self.merge_updates {
+            if let Some(new_upstream_fragment_id) = merge_update.new_upstream_fragment_id {
+                let r = fragment_replacements
+                    .insert(merge_update.upstream_fragment_id, new_upstream_fragment_id);
+                if let Some(r) = r {
+                    assert_eq!(
+                        new_upstream_fragment_id, r,
+                        "one fragment is replaced by multiple fragments"
+                    );
+                }
+            }
+        }
+        fragment_replacements
+    }
+
+    pub fn dropped_actors(&self) -> HashSet<ActorId> {
+        self.merge_updates
+            .iter()
+            .flat_map(|merge_update| merge_update.removed_upstream_actor_id.clone())
+            .collect()
+    }
 }
 
 #[derive(educe::Educe, Clone)]
