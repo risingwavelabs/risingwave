@@ -9,10 +9,10 @@ cp -a ../proto/*.proto tmp_gen
 # Replace some keywords in JavaScript to avoid conflicts: Array, Object.
 if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i "" -e "s/Array/RwArray/" "tmp_gen/data.proto"
-    sed -i "" -e "s/ Object/ RwObject/" "tmp_gen/meta.proto"
+    sed -i "" -e "s/ Object / RwObject /" "tmp_gen/meta.proto"
 else
     sed -i -e "s/Array/RwArray/" "tmp_gen/data.proto"
-    sed -i -e "s/ Object/ RwObject/" "tmp_gen/meta.proto"
+    sed -i -e "s/ Object / RwObject /" "tmp_gen/meta.proto"
 fi
 
 mkdir -p proto/gen
