@@ -50,24 +50,20 @@ use super::{
     Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
     SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
+use crate::connector_common::AwsAuthProps;
 
 pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
-    #[serde(rename = "s3.access.key")]
-    pub s3_access_key: Option<String>,
-    #[serde(rename = "s3.secret.key")]
-    pub s3_secret_key: Option<String>,
     #[serde(rename = "location")]
     pub location: String,
-    #[serde(rename = "s3.region")]
-    pub s3_region: Option<String>,
-    #[serde(rename = "s3.endpoint")]
-    pub s3_endpoint: Option<String>,
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
     /// Commit every n(>0) checkpoints, default is 10.
@@ -80,35 +76,7 @@ impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
             DeltaTableUrl::S3(s3_path) => {
-                let mut storage_options = HashMap::new();
-                storage_options.insert(
-                    AWS_ACCESS_KEY_ID.to_string(),
-                    self.s3_access_key.clone().ok_or_else(|| {
-                        SinkError::Config(anyhow!("s3.access.key is required with aws s3"))
-                    })?,
-                );
-                storage_options.insert(
-                    AWS_SECRET_ACCESS_KEY.to_string(),
-                    self.s3_secret_key.clone().ok_or_else(|| {
-                        SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
-                    })?,
-                );
-                if self.s3_endpoint.is_none() && self.s3_region.is_none() {
-                    return Err(SinkError::Config(anyhow!(
-                        "s3.endpoint and s3.region need to be filled with at least one"
-                    )));
-                }
-                storage_options.insert(
-                    AWS_REGION.to_string(),
-                    self.s3_region
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_REGION.to_string()),
-                );
-                if let Some(s3_endpoint) = &self.s3_endpoint {
-                    storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
-                }
-                storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
-                storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                let storage_options = self.build_delta_lake_config_for_aws().await?;
                 deltalake::aws::register_handlers(None);
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
@@ -143,6 +111,50 @@ impl DeltaLakeCommon {
                 "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
             )))
         }
+    }
+
+    async fn build_delta_lake_config_for_aws(&self) -> Result<HashMap<String, String>> {
+        let mut storage_options = HashMap::new();
+        storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
+        storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+        let sdk_config = self.aws_auth_props.build_config().await?;
+        let credentials = sdk_config
+            .credentials_provider()
+            .ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "s3.access.key and s3.secret.key is required with aws s3"
+                ))
+            })?
+            .as_ref()
+            .provide_credentials()
+            .await
+            .map_err(|e| SinkError::Config(e.into()))?;
+        let region = sdk_config.region();
+        let endpoint = sdk_config.endpoint_url();
+        storage_options.insert(
+            AWS_ACCESS_KEY_ID.to_string(),
+            credentials.access_key_id().to_string(),
+        );
+        storage_options.insert(
+            AWS_SECRET_ACCESS_KEY.to_string(),
+            credentials.secret_access_key().to_string(),
+        );
+        if endpoint.is_none() && region.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "s3.endpoint and s3.region need to be filled with at least one"
+            )));
+        }
+        storage_options.insert(
+            AWS_REGION.to_string(),
+            region
+                .map(|r| r.as_ref().to_string())
+                .clone()
+                .unwrap_or_else(|| DEFAULT_REGION.to_string()),
+        );
+        if let Some(s3_endpoint) = endpoint {
+            storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.to_string());
+        }
+        Ok(storage_options)
     }
 }
 
