@@ -99,12 +99,12 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     created_at_cluster_version: source.created_at_cluster_version.clone(),
                     is_shared: source.info.is_shared(),
 
-                    connector_props: print_props_with_secret(
+                    connector_props: serialize_props_with_secret(
                         schema,
                         source.with_properties.clone(),
                     )
                     .into(),
-                    format_encode_options: print_props_with_secret(
+                    format_encode_options: serialize_props_with_secret(
                         schema,
                         format_encode_props_with_secrets,
                     )
@@ -115,7 +115,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
         .collect())
 }
 
-pub fn print_props_with_secret(
+pub fn serialize_props_with_secret(
     schema: &SchemaCatalog,
     props_with_secret: WithOptionsSecResolved,
 ) -> jsonbb::Value {
