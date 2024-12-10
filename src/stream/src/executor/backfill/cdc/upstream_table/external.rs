@@ -14,14 +14,9 @@
 
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::error::ConnectorResult;
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, CdcTableType, ExternalTableConfig, ExternalTableReader, ExternalTableReaderImpl,
-    SchemaTableName,
-};
+use risingwave_connector::source::cdc::external::{ExternalTableReaderImpl, SchemaTableName};
 
 /// This struct represents an external table to be read during backfill
-#[derive(Debug, Clone)]
 pub struct ExternalStorageTable {
     /// Id for this table.
     table_id: TableId,
@@ -33,9 +28,7 @@ pub struct ExternalStorageTable {
 
     database_name: String,
 
-    config: ExternalTableConfig,
-
-    table_type: CdcTableType,
+    table_reader: ExternalTableReaderImpl,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// `RowSeqScanExecutor`.
@@ -50,7 +43,6 @@ pub struct ExternalStorageTable {
 }
 
 impl ExternalStorageTable {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         SchemaTableName {
@@ -58,8 +50,7 @@ impl ExternalStorageTable {
             schema_name,
         }: SchemaTableName,
         database_name: String,
-        config: ExternalTableConfig,
-        table_type: CdcTableType,
+        table_reader: ExternalTableReaderImpl,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
@@ -69,8 +60,7 @@ impl ExternalStorageTable {
             table_name,
             schema_name,
             database_name,
-            config,
-            table_type,
+            table_reader,
             schema,
             pk_order_types,
             pk_indices,
@@ -100,14 +90,8 @@ impl ExternalStorageTable {
         }
     }
 
-    pub async fn create_table_reader(&self) -> ConnectorResult<ExternalTableReaderImpl> {
-        self.table_type
-            .create_table_reader(
-                self.config.clone(),
-                self.schema.clone(),
-                self.pk_indices.clone(),
-            )
-            .await
+    pub fn table_reader(&self) -> &ExternalTableReaderImpl {
+        &self.table_reader
     }
 
     pub fn qualified_table_name(&self) -> String {
@@ -116,13 +100,5 @@ impl ExternalStorageTable {
 
     pub fn database_name(&self) -> &str {
         self.database_name.as_str()
-    }
-
-    pub async fn current_cdc_offset(
-        &self,
-        table_reader: &ExternalTableReaderImpl,
-    ) -> ConnectorResult<Option<CdcOffset>> {
-        let binlog = table_reader.current_cdc_offset().await?;
-        Ok(Some(binlog))
     }
 }
