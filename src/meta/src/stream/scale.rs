@@ -2601,7 +2601,7 @@ impl GlobalStreamManager {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }
-                                Some(prev_worker) if  prev_worker.node_label() != worker.node_label()  => {
+                                Some(prev_worker) if  prev_worker.resource_group() != worker.resource_group()  => {
                                     tracing::info!(worker = worker.id, "worker label changed");
                                     should_trigger = true;
                                 }

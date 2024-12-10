@@ -105,9 +105,9 @@ pub struct ComputeNodeOpts {
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
 
-    /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long, env = "RW_NODE_LABEL", default_value_t = default_node_label())]
-    pub node_label: String,
+    /// Resource group for scheduling, default value is "default"
+    #[clap(long, env = "RW_RESOURCE_GROUP", default_value_t = default_resource_group())]
+    pub resource_group: String,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
@@ -254,7 +254,7 @@ pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-pub fn default_node_label() -> String {
+pub fn default_resource_group() -> String {
     DEFAULT_RESOURCE_GROUP.to_owned()
 }
 

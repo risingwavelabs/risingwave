@@ -84,7 +84,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
-                node_label: p.label.clone(),
+                resource_group: p.resource_group.clone(),
                 parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
@@ -392,7 +392,7 @@ pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<u32, WorkerNode>,
 
-    /// All schedulable compute nodes in the cluster. Normally for label-based scheduling.
+    /// All schedulable compute nodes in the cluster. Normally for resource group based scheduling.
     pub schedulable_workers: HashSet<u32>,
 
     /// All unschedulable compute nodes in the cluster.
@@ -414,9 +414,9 @@ impl StreamingClusterInfo {
 
     pub fn filter_schedulable_workers_by_resource_group(
         &self,
-        label: &str,
+        resource_group: &str,
     ) -> HashMap<u32, WorkerNode> {
-        let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, label);
+        let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, resource_group);
         self.worker_nodes
             .iter()
             .filter(|(id, _)| worker_ids.contains(id))
@@ -692,13 +692,14 @@ impl ClusterControllerInner {
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
                 property.parallelism = Set(current_parallelism as _);
-                property.label = Set(Some(add_property.node_label.unwrap_or_else(|| {
-                    tracing::warn!(
-                        "node_label is not set for worker {}, fallback to `default`",
-                        worker.worker_id
-                    );
-                    DEFAULT_RESOURCE_GROUP.to_owned()
-                })));
+                property.resource_group =
+                    Set(Some(add_property.resource_group.unwrap_or_else(|| {
+                        tracing::warn!(
+                            "resource_group is not set for worker {}, fallback to `default`",
+                            worker.worker_id
+                        );
+                        DEFAULT_RESOURCE_GROUP.to_owned()
+                    })));
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
@@ -716,7 +717,7 @@ impl ClusterControllerInner {
                     is_serving: Set(add_property.is_serving),
                     is_unschedulable: Set(add_property.is_unschedulable),
                     internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                    label: Set(None),
+                    resource_group: Set(None),
                 };
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
                 txn.commit().await?;
@@ -752,8 +753,8 @@ impl ClusterControllerInner {
                 is_serving: Set(add_property.is_serving),
                 is_unschedulable: Set(add_property.is_unschedulable),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                label: if r#type == PbWorkerType::ComputeNode {
-                    Set(add_property.node_label.clone())
+                resource_group: if r#type == PbWorkerType::ComputeNode {
+                    Set(add_property.resource_group.clone())
                 } else {
                     Set(None)
                 },

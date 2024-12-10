@@ -128,8 +128,8 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
-            internal_rpc_host_addr: "".to_owned(),
-            node_label: Some(opts.node_label.clone()),
+            internal_rpc_host_addr: "".to_string(),
+            resource_group: Some(opts.resource_group.clone()),
         },
         &config.meta,
     )

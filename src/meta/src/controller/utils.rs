@@ -18,9 +18,7 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{ActorMapping, WorkerSlotId, WorkerSlotMapping};
-use risingwave_common::util::worker_util::{
-    DEFAULT_RESOURCE_GROUP, DEFAULT_STREAMING_JOB_RESOURCE_GROUP,
-};
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::fragment::DistributionType;
@@ -1352,7 +1350,7 @@ where
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
 
     Ok(job_specific_resource_group.unwrap_or_else(|| {
-        database_resource_group.unwrap_or_else(|| DEFAULT_STREAMING_JOB_RESOURCE_GROUP.to_string())
+        database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_string())
     }))
 }
 
@@ -1364,7 +1362,7 @@ pub fn filter_workers_by_resource_group(
         .iter()
         .filter(|&(_, worker)| {
             worker
-                .node_label()
+                .resource_group()
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })

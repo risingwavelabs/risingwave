@@ -11,6 +11,15 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
+                    .table(WorkerProperty::Table)
+                    .add_column(ColumnDef::new(WorkerProperty::ResourceGroup).string())
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
                     .table(StreamingJob::Table)
                     .add_column(ColumnDef::new(StreamingJob::SpecificResourceGroup).string())
                     .to_owned(),
@@ -36,6 +45,14 @@ impl MigrationTrait for Migration {
         manager
             .alter_table(
                 Table::alter()
+                    .table(WorkerProperty::Table)
+                    .drop_column(WorkerProperty::ResourceGroup)
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .alter_table(
+                Table::alter()
                     .table(StreamingJob::Table)
                     .drop_column(StreamingJob::SpecificResourceGroup)
                     .to_owned(),
@@ -51,6 +68,12 @@ impl MigrationTrait for Migration {
             )
             .await
     }
+}
+
+#[derive(DeriveIden)]
+enum WorkerProperty {
+    Table,
+    ResourceGroup,
 }
 
 #[derive(DeriveIden)]
