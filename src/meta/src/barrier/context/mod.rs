@@ -71,7 +71,6 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
 
-    #[expect(dead_code)]
     async fn reload_database_runtime_info(
         &self,
         database_id: DatabaseId,

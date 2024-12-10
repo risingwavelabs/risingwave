@@ -21,6 +21,31 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Score(pub i32);
 
+/// A error with a score, used to find the root cause of multiple failures.
+#[derive(Debug, Clone)]
+pub struct ScoredError<E> {
+    pub error: E,
+    pub score: Score,
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for ScoredError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl<E: std::error::Error> std::error::Error for ScoredError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.error.provide(request);
+        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
+        request.provide_value(self.score);
+    }
+}
+
 /// Extra fields in errors that can be passed through the gRPC boundary.
 ///
 /// - Field being set to `None` means it is not available.

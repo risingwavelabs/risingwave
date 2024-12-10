@@ -184,7 +184,6 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     }
 }
 
-#[expect(dead_code)]
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
     database_fragment_info: InflightDatabaseInfo,
@@ -196,7 +195,6 @@ struct DatabaseRuntimeInfoSnapshot {
 }
 
 impl DatabaseRuntimeInfoSnapshot {
-    #[expect(dead_code)]
     fn validate(
         &self,
         database_id: DatabaseId,
