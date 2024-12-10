@@ -124,7 +124,6 @@ impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
 
 pub struct MergeSortExchangeExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

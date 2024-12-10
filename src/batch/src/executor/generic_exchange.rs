@@ -147,7 +147,6 @@ impl CreateSource for DefaultCreateSource {
 
 pub struct GenericExchangeExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

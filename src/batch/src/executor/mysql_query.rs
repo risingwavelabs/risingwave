@@ -143,7 +143,6 @@ impl MySqlQueryExecutor {
 
 pub struct MySqlQueryExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for MySqlQueryExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

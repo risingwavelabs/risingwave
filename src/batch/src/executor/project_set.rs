@@ -131,7 +131,6 @@ impl ProjectSetExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectSetExecutor {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

@@ -341,7 +341,6 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
 
 pub struct BlockExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for BlockExecutorBuilder {
     async fn new_boxed_executor(
         _source: &ExecutorBuilder<'_>,
@@ -378,7 +377,6 @@ impl BlockExecutor {
 
 pub struct BusyLoopExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for BusyLoopExecutorBuilder {
     async fn new_boxed_executor(
         _source: &ExecutorBuilder<'_>,

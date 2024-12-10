@@ -2144,7 +2144,6 @@ impl DataChunkMutator {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutor<()> {
     async fn new_boxed_executor(
         context: &ExecutorBuilder<'_>,

@@ -173,7 +173,6 @@ impl PostgresQueryExecutor {
 
 pub struct PostgresQueryExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

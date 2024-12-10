@@ -101,7 +101,6 @@ impl ValuesExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

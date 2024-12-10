@@ -48,6 +48,7 @@ mod update;
 mod utils;
 mod values;
 
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -129,12 +130,11 @@ impl std::fmt::Debug for BoxedExecutor {
 
 /// Every Executor should impl this trait to provide a static method to build a `BoxedExecutor`
 /// from proto and global environment.
-#[async_trait::async_trait]
 pub trait BoxedExecutorBuilder {
-    async fn new_boxed_executor(
+    fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor>;
+    ) -> impl Future<Output = Result<BoxedExecutor>> + Send;
 }
 
 pub struct ExecutorBuilder<'a> {
@@ -150,7 +150,7 @@ macro_rules! build_executor {
         match $source.plan_node().get_node_body().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $inputs)
+                    <$data_type>::new_boxed_executor($source, $inputs).await?
                 },
             )*
         }
@@ -256,8 +256,7 @@ impl<'a> ExecutorBuilder<'a> {
             NodeBody::BlockExecutor => BlockExecutorBuilder,
             NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
             NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
-        }
-        .await?;
+        };
 
         Ok(Box::new(ManagedExecutor::new(
             real_executor,

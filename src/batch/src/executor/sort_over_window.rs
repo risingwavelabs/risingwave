@@ -48,7 +48,6 @@ struct ExecutorInner {
     chunk_size: usize,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortOverWindowExecutor {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

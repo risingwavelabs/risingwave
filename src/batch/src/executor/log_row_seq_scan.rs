@@ -86,7 +86,6 @@ impl<S: StateStore> LogRowSeqScanExecutor<S> {
 
 pub struct LogStoreRowSeqScanExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for LogStoreRowSeqScanExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

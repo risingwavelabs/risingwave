@@ -81,7 +81,6 @@ impl<K> DistributedLookupJoinExecutor<K> {
 
 pub struct DistributedLookupJoinExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

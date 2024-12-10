@@ -46,7 +46,6 @@ pub struct TopNExecutor {
     mem_ctx: MemoryContext,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for TopNExecutor {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

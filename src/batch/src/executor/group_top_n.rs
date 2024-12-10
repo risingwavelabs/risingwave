@@ -89,7 +89,6 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,

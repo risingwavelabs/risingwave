@@ -67,7 +67,6 @@ pub struct TableFunctionExecutorBuilder {}
 
 impl TableFunctionExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
