@@ -1145,6 +1145,19 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_min")]
+    pub backfill_adaptive_rate_limit_min: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_max")]
+    pub backfill_adaptive_rate_limit_max: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_init")]
+    pub backfill_adaptive_rate_limit_init: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_min")]
+    pub backfill_adaptive_rate_limit_step_min: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_max")]
+    pub backfill_adaptive_rate_limit_step_max: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_ratio")]
+    pub backfill_adaptive_rate_limit_step_ratio: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2103,6 +2116,30 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn backfill_adaptive_rate_limit_min() -> f64 {
+            100.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_max() -> f64 {
+            100_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_init() -> f64 {
+            1_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_min() -> f64 {
+            10.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_max() -> f64 {
+            10_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_ratio() -> f64 {
+            0.1
         }
     }
 
