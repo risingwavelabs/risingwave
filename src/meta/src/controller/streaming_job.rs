@@ -178,18 +178,6 @@ impl CatalogController {
             }
         }
 
-        // let database_resource_group: String =
-        //     Database::find_by_id(streaming_job.database_id() as ObjectId)
-        //         .select_only()
-        //         .column(database::Column::ResourceGroup)
-        //         .into_tuple()
-        //         .one(&txn)
-        //         .await?
-        //         .unwrap_or(DEFAULT_STREAMING_JOB_RESOURCE_GROUP.to_string());
-
-        // let specific_resource_group = streaming_job.specific_resource_group();
-        // //.unwrap_or(database_resource_group);
-
         let mut relations = vec![];
 
         match streaming_job {
@@ -762,11 +750,6 @@ impl CatalogController {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
-
-        // let resource_group =
-        //     get_streaming_job_resource_group(&txn, streaming_job.id() as ObjectId).await?;
-
-        // let specific_resource_group = streaming_job.specific_resource_group();
 
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
