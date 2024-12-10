@@ -56,6 +56,7 @@ use async_recursion::async_recursion;
 pub use delete::*;
 pub use expand::*;
 pub use filter::*;
+use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
 pub use group_top_n::*;
@@ -76,7 +77,7 @@ pub use project::*;
 pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
@@ -145,18 +146,6 @@ pub struct ExecutorBuilder<'a> {
     shutdown_rx: ShutdownToken,
 }
 
-macro_rules! build_executor {
-    ($source: expr, $inputs: expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
-        match $source.plan_node().get_node_body().unwrap() {
-            $(
-                $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source, $inputs).await?
-                },
-            )*
-        }
-    }
-}
-
 impl<'a> ExecutorBuilder<'a> {
     pub fn new(
         plan_node: &'a PlanNode,
@@ -198,6 +187,80 @@ impl<'a> ExecutorBuilder<'a> {
     }
 }
 
+/// Descriptor for executor builder.
+///
+/// We will call `builder` to build the executor if the `node_body` matches.
+pub struct ExecutorBuilderDescriptor {
+    pub node_body: NodeBodyDiscriminants,
+
+    /// Typically from [`BoxedExecutorBuilder::new_boxed_executor`].
+    pub builder: for<'a> fn(
+        source: &'a ExecutorBuilder<'a>,
+        inputs: Vec<BoxedExecutor>,
+    ) -> BoxFuture<'a, Result<BoxedExecutor>>,
+}
+
+/// All registered executor builders.
+#[linkme::distributed_slice]
+pub static BUILDER_DESCS: [ExecutorBuilderDescriptor];
+
+/// Register an executor builder so that it can be used to build the executor from protobuf.
+macro_rules! register_executor {
+    ($node_body:ident, $builder:ty) => {
+        const _: () = {
+            use futures::FutureExt;
+            use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
+
+            use crate::executor::{ExecutorBuilderDescriptor, BUILDER_DESCS};
+
+            #[linkme::distributed_slice(BUILDER_DESCS)]
+            static BUILDER: ExecutorBuilderDescriptor = ExecutorBuilderDescriptor {
+                node_body: NodeBodyDiscriminants::$node_body,
+                builder: |a, b| <$builder>::new_boxed_executor(a, b).boxed(),
+            };
+        };
+    };
+}
+pub(crate) use register_executor;
+
+register_executor!(RowSeqScan, RowSeqScanExecutorBuilder);
+register_executor!(Insert, InsertExecutor);
+register_executor!(Delete, DeleteExecutor);
+register_executor!(Exchange, GenericExchangeExecutorBuilder);
+register_executor!(Update, UpdateExecutor);
+register_executor!(Filter, FilterExecutor);
+register_executor!(Project, ProjectExecutor);
+register_executor!(SortAgg, SortAggExecutor);
+register_executor!(Sort, SortExecutor);
+register_executor!(TopN, TopNExecutor);
+register_executor!(GroupTopN, GroupTopNExecutorBuilder);
+register_executor!(Limit, LimitExecutor);
+register_executor!(Values, ValuesExecutor);
+register_executor!(NestedLoopJoin, NestedLoopJoinExecutor);
+register_executor!(HashJoin, HashJoinExecutor<()>);
+register_executor!(HashAgg, HashAggExecutorBuilder);
+register_executor!(MergeSortExchange, MergeSortExchangeExecutorBuilder);
+register_executor!(TableFunction, TableFunctionExecutorBuilder);
+register_executor!(HopWindow, HopWindowExecutor);
+register_executor!(SysRowSeqScan, SysRowSeqScanExecutorBuilder);
+register_executor!(Expand, ExpandExecutor);
+register_executor!(LocalLookupJoin, LocalLookupJoinExecutorBuilder);
+register_executor!(DistributedLookupJoin, DistributedLookupJoinExecutorBuilder);
+register_executor!(ProjectSet, ProjectSetExecutor);
+register_executor!(Union, UnionExecutor);
+register_executor!(Source, SourceExecutor);
+register_executor!(SortOverWindow, SortOverWindowExecutor);
+register_executor!(MaxOneRow, MaxOneRowExecutor);
+register_executor!(FileScan, FileScanExecutorBuilder);
+register_executor!(IcebergScan, IcebergScanExecutorBuilder);
+register_executor!(PostgresQuery, PostgresQueryExecutorBuilder);
+register_executor!(MysqlQuery, MySqlQueryExecutorBuilder);
+
+// Following executors are only for testing.
+register_executor!(BlockExecutor, BlockExecutorBuilder);
+register_executor!(BusyLoopExecutor, BusyLoopExecutorBuilder);
+register_executor!(LogRowSeqScan, LogStoreRowSeqScanExecutorBuilder);
+
 impl<'a> ExecutorBuilder<'a> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build()
@@ -218,45 +281,21 @@ impl<'a> ExecutorBuilder<'a> {
             inputs.push(input);
         }
 
-        let real_executor = build_executor! { self, inputs,
-            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
-            NodeBody::Insert => InsertExecutor,
-            NodeBody::Delete => DeleteExecutor,
-            NodeBody::Exchange => GenericExchangeExecutorBuilder,
-            NodeBody::Update => UpdateExecutor,
-            NodeBody::Filter => FilterExecutor,
-            NodeBody::Project => ProjectExecutor,
-            NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::Sort => SortExecutor,
-            NodeBody::TopN => TopNExecutor,
-            NodeBody::GroupTopN => GroupTopNExecutorBuilder,
-            NodeBody::Limit => LimitExecutor,
-            NodeBody::Values => ValuesExecutor,
-            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
-            NodeBody::HashJoin => HashJoinExecutor<()>,
-            // NodeBody::SortMergeJoin => SortMergeJoinExecutor,
-            NodeBody::HashAgg => HashAggExecutorBuilder,
-            NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
-            NodeBody::TableFunction => TableFunctionExecutorBuilder,
-            NodeBody::HopWindow => HopWindowExecutor,
-            NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
-            NodeBody::Expand => ExpandExecutor,
-            NodeBody::LocalLookupJoin => LocalLookupJoinExecutorBuilder,
-            NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
-            NodeBody::ProjectSet => ProjectSetExecutor,
-            NodeBody::Union => UnionExecutor,
-            NodeBody::Source => SourceExecutor,
-            NodeBody::SortOverWindow => SortOverWindowExecutor,
-            NodeBody::MaxOneRow => MaxOneRowExecutor,
-            NodeBody::FileScan => FileScanExecutorBuilder,
-            NodeBody::IcebergScan => IcebergScanExecutorBuilder,
-            NodeBody::PostgresQuery => PostgresQueryExecutorBuilder,
-            NodeBody::MysqlQuery => MySqlQueryExecutorBuilder,
-            // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuilder,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuilder,
-            NodeBody::LogRowSeqScan => LogStoreRowSeqScanExecutorBuilder,
-        };
+        let node_body_discriminants: NodeBodyDiscriminants =
+            self.plan_node.get_node_body().unwrap().into();
+
+        let builder = BUILDER_DESCS
+            .iter()
+            .find(|x| x.node_body == node_body_discriminants)
+            .with_context(|| {
+                format!(
+                    "no executor builder found for {:?}",
+                    node_body_discriminants
+                )
+            })?
+            .builder;
+
+        let real_executor = builder(self, inputs).await?;
 
         Ok(Box::new(ManagedExecutor::new(
             real_executor,
