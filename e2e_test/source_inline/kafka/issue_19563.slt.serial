@@ -55,7 +55,20 @@ cat <<EOF | rpk topic produce test-topic-19563
 {"v1": "0001-01-01 21:00:00"}
 EOF
 
-sleep 3s
+system ok
+rpk topic consume test-topic-19563 -f "%v\n" -o :end
+----
+{"v1": "3031-01-01 19:00:00"}
+{"v1": "3031-01-01 20:00:00"}
+{"v1": "3031-01-01 21:00:00"}
+{"v1": "5031-01-01 21:00:00"}
+{"v1": "0001-01-01 21:00:00"}
+
+
+statement ok
+flush;
+
+sleep 6s
 
 # Below lower bound and above upper bound are not shown
 query I
