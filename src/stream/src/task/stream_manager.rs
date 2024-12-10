@@ -408,6 +408,7 @@ impl StreamActorManager {
             node.rate_limit.map(|x| x as _),
             barrier_rx,
             self.streaming_metrics.clone(),
+            node.snapshot_backfill_epoch,
         )
         .boxed();
 
