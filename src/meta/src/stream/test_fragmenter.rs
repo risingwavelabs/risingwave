@@ -432,6 +432,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
             id: 0,
             property: Some(Property {
                 parallelism: 8,
+                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_string()),
                 ..Default::default()
             }),
             r#type: WorkerType::ComputeNode.into(),
