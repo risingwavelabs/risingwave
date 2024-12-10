@@ -251,17 +251,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         )
     }
 
-    /// NOTE(kwannoel): This method allows us to concurrently stream records from the state_table,
+    /// NOTE(kwannoel): This allows us to concurrently stream records from the state_table,
     /// and update the degree table, without using `unsafe` code.
     ///
     /// This is because we obtain separate references to separate parts of the `JoinHashMap`,
     /// instead of reusing the same reference to `JoinHashMap` for concurrent read access to state_table,
     /// and write access to the degree table.
-    pub(crate) async fn get_state_and_degree_table_refs<'a>(
+    pub(crate) async fn fetch_matched_rows_and_get_degree_table_ref<'a>(
         &'a mut self,
         key: &'a K,
     ) -> StreamExecutorResult<(
-        impl Stream<Item = StreamExecutorResult<JoinRow<OwnedRow>>> + 'a,
+        impl Stream<Item = StreamExecutorResult<(PkType, JoinRow<OwnedRow>)>> + 'a,
         Option<&mut TableInner<S>>,
     )> {
         let degree_state = self.degree_state.as_mut();
@@ -287,7 +287,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 }
 
-#[try_stream(ok = JoinRow<OwnedRow>, error = StreamExecutorError)]
+#[try_stream(ok = (PkType, JoinRow<OwnedRow>), error = StreamExecutorError)]
 pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     join_key_data_types: &'a [DataType],
     pk_indices: &'a [usize],
@@ -309,10 +309,11 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
             .as_ref()
             .project(pk_indices)
             .memcmp_serialize(pk_serializer);
-        yield JoinRow::new(
+        let join_row = JoinRow::new(
             encoded_row.into_owned_row(),
             degrees.as_ref().map_or(0, |d| d[i]),
         );
+        yield (encoded_pk, join_row);
     }
 }
 
