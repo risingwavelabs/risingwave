@@ -27,4 +27,5 @@ pub mod nexmark;
 pub mod slt;
 pub mod utils;
 
+risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

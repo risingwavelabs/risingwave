@@ -45,6 +45,3 @@ pub mod worker_manager;
 extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
-
-#[cfg(test)]
-risingwave_expr_impl::enable!();
