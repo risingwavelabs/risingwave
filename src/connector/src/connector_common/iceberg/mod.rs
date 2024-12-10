@@ -208,7 +208,7 @@ impl IcebergCommon {
             let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
                 "iceberg.table.io.disable_config_load".to_string(),
-                enable_config_load.to_string(),
+                (!enable_config_load).to_string(),
             );
 
             load_iceberg_base_catalog_config(&iceberg_configs)?
@@ -434,11 +434,10 @@ mod v1 {
                 }
             }
 
-            // #TODO
-            // Support load config file
+            let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
                 "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
+                (!enable_config_load).to_string(),
             );
 
             Ok(iceberg_configs)
