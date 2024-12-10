@@ -37,6 +37,7 @@ FORMAT PLAIN ENCODE PROTOBUF(
     message = 'test.User'
 );
 
+# age is new field
 statement error
 SELECT age FROM mv_user;
 
