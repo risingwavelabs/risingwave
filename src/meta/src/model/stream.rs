@@ -369,6 +369,12 @@ impl StreamJobFragments {
         actor_ids
     }
 
+    pub fn root_fragment(&self) -> Option<Fragment> {
+        self.mview_fragment()
+            .or_else(|| self.sink_fragment())
+            .or_else(|| self.source_fragment())
+    }
+
     /// Returns the fragment with the `Mview` type flag.
     pub fn mview_fragment(&self) -> Option<Fragment> {
         self.fragments

@@ -1774,6 +1774,7 @@ impl ScaleController {
                     None,
                     Some(stream_source_actor_splits),
                     Some(stream_source_dropped_actors),
+                    None,
                 )
                 .await;
         }

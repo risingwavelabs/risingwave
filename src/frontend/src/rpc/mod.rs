@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_server::{BoxedError, SessionManager};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, TableSchemaChange};
+use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableSchemaChange};
 use risingwave_pb::frontend_service::frontend_service_server::FrontendService;
 use risingwave_pb::frontend_service::{GetTableReplacePlanRequest, GetTableReplacePlanResponse};
 use risingwave_rpc_client::error::ToTonicStatus;
@@ -81,7 +81,7 @@ async fn get_new_table_plan(
     table_name: String,
     database_id: u32,
     owner: u32,
-) -> Result<ReplaceTablePlan, AutoSchemaChangeError> {
+) -> Result<ReplaceJobPlan, AutoSchemaChangeError> {
     tracing::info!("get_new_table_plan for table {}", table_name);
 
     let session_mgr = SESSION_MANAGER
@@ -109,11 +109,15 @@ async fn get_new_table_plan(
     )
     .await?;
 
-    Ok(ReplaceTablePlan {
-        table: Some(table),
+    Ok(ReplaceJobPlan {
+        replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
+            replace_job_plan::ReplaceTable {
+                table: Some(table),
+                source: None, // none for cdc table
+                job_type: job_type as _,
+            },
+        )),
         fragment_graph: Some(graph),
         table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
-        source: None, // none for cdc table
-        job_type: job_type as _,
     })
 }
