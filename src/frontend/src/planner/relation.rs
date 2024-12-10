@@ -77,16 +77,6 @@ impl Planner {
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
-        match as_of {
-            None
-            | Some(AsOf::ProcessTime)
-            | Some(AsOf::TimestampNum(_))
-            | Some(AsOf::TimestampString(_))
-            | Some(AsOf::ProcessTimeWithInterval(_)) => {}
-            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
-                bail_not_implemented!("As Of Version is not supported yet.")
-            }
-        }
         let table_cardinality = base_table.table_catalog.cardinality;
         let scan = LogicalScan::create(
             base_table.table_catalog.name().to_string(),
@@ -102,8 +92,32 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => Ok(scan.into()),
+            (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => {
+                match as_of {
+                    None
+                    | Some(AsOf::ProcessTime)
+                    | Some(AsOf::TimestampNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::ProcessTimeWithInterval(_)) => {}
+                    Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                };
+                Ok(scan.into())
+            }
             (Engine::Iceberg, PlanFor::Batch) => {
+                match as_of {
+                    None
+                    | Some(AsOf::VersionNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::TimestampNum(_)) => {}
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                }
                 let opt_ctx = self.ctx();
                 let session = opt_ctx.session_ctx();
                 let db_name = session.database();
