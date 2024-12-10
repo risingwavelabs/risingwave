@@ -31,7 +31,7 @@ pub struct LocalExchangeSource {
 impl LocalExchangeSource {
     pub fn create(
         output_id: TaskOutputId,
-        context: impl BatchTaskContext,
+        context: &dyn BatchTaskContext,
         task_id: TaskId,
     ) -> Result<Self> {
         let task_output = context.get_task_output(output_id)?;

@@ -74,7 +74,7 @@ impl TaskService for BatchServiceImpl {
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
                 epoch.expect("no epoch found"),
-                ComputeNodeContext::new(self.env.clone()),
+                ComputeNodeContext::create(self.env.clone()),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
                 expr_context.expect("no expression context found"),
@@ -140,7 +140,7 @@ impl BatchServiceImpl {
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
         let expr_context = expr_context.expect("no expression context found");
 
-        let context = ComputeNodeContext::new(env.clone());
+        let context = ComputeNodeContext::create(env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",
             plan,

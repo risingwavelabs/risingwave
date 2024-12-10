@@ -35,7 +35,7 @@ futures = "0.3"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 num-traits = "0.2"
 parse-display = "0.10"
 paste = "1"

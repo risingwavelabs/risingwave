@@ -40,7 +40,7 @@ use crate::executor::{
     unix_timestamp_sec_to_epoch, AsOf, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder,
     BufferChunkExecutor, Executor, ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -81,10 +81,9 @@ impl<K> DistributedLookupJoinExecutor<K> {
 
 pub struct DistributedLookupJoinExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [outer_side_input]: [_; 1] = inputs.try_into().unwrap();

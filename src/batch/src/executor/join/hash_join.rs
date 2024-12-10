@@ -47,7 +47,7 @@ use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
     SpillBackend, SpillBuildHasher, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// Hash Join Executor
 ///
@@ -2144,10 +2144,9 @@ impl DataChunkMutator {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for HashJoinExecutor<()> {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        context: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        context: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [left_child, right_child]: [_; 2] = inputs.try_into().unwrap();

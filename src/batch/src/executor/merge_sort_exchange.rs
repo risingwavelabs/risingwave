@@ -29,12 +29,12 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-pub type MergeSortExchangeExecutor<C> = MergeSortExchangeExecutorImpl<DefaultCreateSource, C>;
+pub type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
 
 /// `MergeSortExchangeExecutor2` takes inputs from multiple sources and
 /// The outputs of all the sources have been sorted in the same way.
-pub struct MergeSortExchangeExecutorImpl<CS, C> {
-    context: C,
+pub struct MergeSortExchangeExecutorImpl<CS> {
+    context: Arc<dyn BatchTaskContext>,
     column_orders: Arc<Vec<ColumnOrder>>,
     proto_sources: Vec<PbExchangeSource>,
     /// Mock-able `CreateSource`.
@@ -47,10 +47,10 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     mem_ctx: MemoryContext,
 }
 
-impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        context: C,
+        context: Arc<dyn BatchTaskContext>,
         column_orders: Arc<Vec<ColumnOrder>>,
         proto_sources: Vec<PbExchangeSource>,
         source_creators: Vec<CS>,
@@ -75,9 +75,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
     }
 }
 
-impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
-    for MergeSortExchangeExecutorImpl<CS, C>
-{
+impl<CS: 'static + Send + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -93,13 +91,13 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
 /// Everytime `execute` is called, it tries to produce a chunk of size
 /// `self.chunk_size`. It is possible that the chunk's size is smaller than the
 /// `self.chunk_size` as the executor runs out of input from `sources`.
-impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut sources: Vec<BoxedExecutor> = vec![];
         for source_idx in 0..self.proto_sources.len() {
             let new_source = self.source_creators[source_idx]
-                .create_source(self.context.clone(), &self.proto_sources[source_idx])
+                .create_source(&*self.context, &self.proto_sources[source_idx])
                 .await?;
 
             sources.push(Box::new(WrapStreamExecutor::new(
@@ -126,10 +124,9 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
 
 pub struct MergeSortExchangeExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(
@@ -159,7 +156,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(MergeSortExchangeExecutor::<C>::new(
+        Ok(Box::new(MergeSortExchangeExecutor::new(
             source.context().clone(),
             column_orders,
             proto_sources,
@@ -209,10 +206,7 @@ mod tests {
             order_type: OrderType::ascending(),
         }]);
 
-        let executor = Box::new(MergeSortExchangeExecutorImpl::<
-            FakeCreateSource,
-            ComputeNodeContext,
-        >::new(
+        let executor = Box::new(MergeSortExchangeExecutorImpl::<FakeCreateSource>::new(
             ComputeNodeContext::for_test(),
             column_orders,
             proto_sources,

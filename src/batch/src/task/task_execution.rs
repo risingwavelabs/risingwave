@@ -296,7 +296,7 @@ impl ShutdownToken {
 }
 
 /// `BatchTaskExecution` represents a single task execution.
-pub struct BatchTaskExecution<C> {
+pub struct BatchTaskExecution {
     /// Task id.
     task_id: TaskId,
 
@@ -313,7 +313,7 @@ pub struct BatchTaskExecution<C> {
     sender: ChanSenderImpl,
 
     /// Context for task execution
-    context: C,
+    context: Arc<dyn BatchTaskContext>,
 
     /// The execution failure.
     failure: Arc<Mutex<Option<Arc<BatchError>>>>,
@@ -328,11 +328,11 @@ pub struct BatchTaskExecution<C> {
     heartbeat_join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl<C: BatchTaskContext> BatchTaskExecution<C> {
+impl BatchTaskExecution {
     pub fn new(
         prost_tid: &PbTaskId,
         plan: PlanFragment,
-        context: C,
+        context: Arc<dyn BatchTaskContext>,
         epoch: BatchQueryEpoch,
         runtime: Arc<BackgroundShutdownRuntime>,
     ) -> Result<Self> {
@@ -412,10 +412,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         let this = self.clone();
-        async fn notify_panic<C: BatchTaskContext>(
-            this: &BatchTaskExecution<C>,
-            state_tx: Option<&mut StateReporter>,
-        ) {
+        async fn notify_panic(this: &BatchTaskExecution, state_tx: Option<&mut StateReporter>) {
             let err_str = "execution panic".into();
             if let Err(e) = this
                 .change_state_notify(TaskStatus::Failed, state_tx, Some(err_str))
@@ -669,7 +666,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     }
 }
 
-impl<C> BatchTaskExecution<C> {
+impl BatchTaskExecution {
     pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
         *self.heartbeat_join_handle.lock() = Some(join_handle);
     }

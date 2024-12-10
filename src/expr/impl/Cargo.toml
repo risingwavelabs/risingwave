@@ -48,7 +48,7 @@ hmac = "0.12"
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 md5 = "0.7"
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"

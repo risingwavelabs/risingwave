@@ -27,7 +27,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// [`SortOverWindowExecutor`] accepts input chunks sorted by partition key and order key, and
 /// outputs chunks with window function result columns.
@@ -48,10 +48,9 @@ struct ExecutorInner {
     chunk_size: usize,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortOverWindowExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

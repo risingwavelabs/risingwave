@@ -32,7 +32,7 @@ use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 /// Context for batch task execution.
 ///
 /// This context is specific to one task execution, and should *not* be shared by different tasks.
-pub trait BatchTaskContext: Clone + Send + Sync + 'static {
+pub trait BatchTaskContext: Send + Sync + 'static {
     /// Get task output identified by `task_output_id`.
     ///
     /// Returns error if the task of `task_output_id` doesn't run in same worker as current task.
@@ -133,25 +133,25 @@ impl BatchTaskContext for ComputeNodeContext {
 
 impl ComputeNodeContext {
     #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self {
+    pub fn for_test() -> Arc<dyn BatchTaskContext> {
+        Arc::new(Self {
             env: BatchEnvironment::for_test(),
             batch_metrics: BatchMetricsInner::for_test(),
             mem_context: MemoryContext::none(),
-        }
+        })
     }
 
-    pub fn new(env: BatchEnvironment) -> Self {
+    pub fn create(env: BatchEnvironment) -> Arc<dyn BatchTaskContext> {
         let mem_context = env.task_manager().memory_context_ref();
         let batch_metrics = Arc::new(BatchMetricsInner::new(
             env.task_manager().metrics(),
             env.executor_metrics(),
             env.iceberg_scan_metrics(),
         ));
-        Self {
+        Arc::new(Self {
             env,
             batch_metrics,
             mem_context,
-        }
+        })
     }
 }
