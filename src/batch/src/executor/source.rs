@@ -32,7 +32,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use super::Executor;
 use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
-use crate::task::BatchTaskContext;
 
 pub struct SourceExecutor {
     source: SourceReader,
@@ -49,10 +48,9 @@ pub struct SourceExecutor {
     chunk_size: usize,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SourceExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(inputs.is_empty(), "Source should not have input executor!");

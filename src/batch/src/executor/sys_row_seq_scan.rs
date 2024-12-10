@@ -22,7 +22,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 pub struct SysRowSeqScanExecutor {
     table_id: TableId,
@@ -53,10 +52,9 @@ impl SysRowSeqScanExecutor {
 
 pub struct SysRowSeqScanExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SysRowSeqScanExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(

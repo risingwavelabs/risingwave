@@ -256,6 +256,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
+                            }// Handle adhoc recovery triggered by user.
+                            BarrierManagerRequest::AdhocRecovery(sender) => {
+                                self.adhoc_recovery().await;
+                                if sender.send(()).is_err() {
+                                    warn!("failed to notify finish of adhoc recovery");
+                                }
                             }
                         }
                     } else {
@@ -279,18 +285,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
                 notification = local_notification_rx.recv() => {
                     let notification = notification.unwrap();
-                    match notification {
-                        // Handle barrier interval and checkpoint frequency changes.
-                        LocalNotification::SystemParamsChange(p) => {
+                    if let LocalNotification::SystemParamsChange(p) = notification {
+                        {
                             self.periodic_barriers.set_min_interval(Duration::from_millis(p.barrier_interval_ms() as u64));
                             self.periodic_barriers
                                 .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
-                        },
-                        // Handle adhoc recovery triggered by user.
-                        LocalNotification::AdhocRecovery => {
-                            self.adhoc_recovery().await;
                         }
-                        _ => {}
                     }
                 }
                 complete_result = self
