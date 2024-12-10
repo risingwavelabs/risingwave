@@ -37,7 +37,7 @@ use risingwave_connector::sink::{
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
+use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
@@ -220,7 +220,7 @@ pub async fn gen_sink_plan(
     };
 
     let definition = context.normalized_sql().to_owned();
-    let mut plan_root = Planner::new(context.into()).plan_query(bound)?;
+    let mut plan_root = Planner::new_for_stream(context.into()).plan_query(bound)?;
     if let Some(col_names) = &col_names {
         plan_root.set_out_names(col_names.clone())?;
     };
@@ -521,12 +521,16 @@ pub async fn handle_create_sink(
         // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
         hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
 
-        target_table_replace_plan = Some(ReplaceTablePlan {
-            source,
-            table: Some(table),
+        target_table_replace_plan = Some(ReplaceJobPlan {
+            replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
+                replace_job_plan::ReplaceTable {
+                    table: Some(table),
+                    source,
+                    job_type: TableJobType::General as _,
+                },
+            )),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
-            job_type: TableJobType::General as _,
         });
     }
 
