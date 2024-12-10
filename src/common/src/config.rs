@@ -869,7 +869,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
-    /// The concurrent uploading number of `SSTables` of buidler
+    /// The concurrent uploading number of `SSTables` of builder
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 

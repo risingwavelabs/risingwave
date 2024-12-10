@@ -1756,7 +1756,7 @@ def section_streaming_actors(outer_panels: Panels):
                     "it's very likely to be the performance bottleneck",
                     [
                         panels.target(
-                            # Here we use `min` but actually no much difference. Any of the sampled epoches makes sense.
+                            # Here we use `min` but actually no much difference. Any of the sampled epochs makes sense.
                             f"min({metric('stream_actor_current_epoch')} != 0) by (fragment_id)",
                             "fragment {{fragment_id}}",
                             ),
