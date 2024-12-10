@@ -626,6 +626,8 @@ message StreamScanNode {
   // The state table used by ArrangementBackfill to replicate upstream mview's state table.
   // Used iff `ChainType::ArrangementBackfill`.
   catalog.Table arrangement_table = 10;
+
+  optional uint64 snapshot_backfill_epoch = 11;
 }
 
 // Config options for CDC backfill
