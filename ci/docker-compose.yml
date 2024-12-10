@@ -110,7 +110,8 @@ services:
     volumes:
       - ..:/risingwave
 
-  pg-mysql-backend-test-env:
+  # Standard environment for CI, including MySQL and Postgres for metadata.
+  ci-standard-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     depends_on:
       - mysql
