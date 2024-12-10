@@ -1340,7 +1340,7 @@ SLT_HOST = "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS}"
 SLT_PORT = "${RISEDEV_RW_FRONTEND_PORT}"
 SLT_DB = "dev"
 PATH = "${PWD}/e2e_test/commands:${PATH}"
-RUST_BACKTRACE = "0"                                             # slt backtrace is useless
+RUST_BACKTRACE = "0" # slt backtrace is useless
 RUST_LOG = "sqllogictest=warn,sqllogictest::system_command=info"
 
 [tasks.slt-clean]
