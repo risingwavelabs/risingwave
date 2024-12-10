@@ -15,5 +15,3 @@
 pub type WorkerNodeId = u32;
 
 pub const DEFAULT_RESOURCE_GROUP: &str = "default";
-
-pub const DEFAULT_STREAMING_JOB_RESOURCE_GROUP: &str = DEFAULT_RESOURCE_GROUP;

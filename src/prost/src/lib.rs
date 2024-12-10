@@ -229,8 +229,10 @@ impl common::WorkerNode {
             .parallelism as usize
     }
 
-    pub fn node_label(&self) -> Option<String> {
-        self.property.as_ref().and_then(|p| p.node_label.clone())
+    pub fn resource_group(&self) -> Option<String> {
+        self.property
+            .as_ref()
+            .and_then(|p| p.resource_group.clone())
     }
 }
 
