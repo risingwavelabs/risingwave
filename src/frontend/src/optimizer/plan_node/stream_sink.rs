@@ -261,13 +261,13 @@ impl StreamSink {
 
                 if !user_defined_primary_key_table && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a table without primary keys. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a table without primary keys. This sink is not append-only.\nPlease try to add (type = 'append-only', force_append_only = 'true') to the WITH options.".to_string(),
                     )));
                 }
 
                 if t.append_only && !sink_is_append_only {
                     return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a append only table. please try to add type = 'append-only' in the with option. e.g. create sink s into t as select * from t1 with (type = 'append-only')".to_string(),
+                        "Only append-only sinks can sink to a append only table. This sink is not append-only.\nPlease try to add (type = 'append-only', force_append_only = 'true') to the WITH options.".to_string(),
                     )));
                 }
 
@@ -491,21 +491,27 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
+                    // TODO:
                     format!(
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
+                        "The sink is not append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. \
                         Notice that this will cause the sink executor to drop DELETE messages and convert UPDATE messages to INSERT.",
                         if syntax_legacy { "WITH" } else { "FORMAT ENCODE" }
                     ),
                 )))
                     .into())
             }
-            (_, false, true) => {
-                Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy { "type='append-only'" } else { "FORMAT PLAIN" }),
-                )))
-                    .into())
-            }
+            (_, false, true) => Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "force_append_only='true' should be used together with {}.",
+                    if syntax_legacy {
+                        "type='append-only'"
+                    } else {
+                        "FORMAT PLAIN"
+                    }
+                ),
+            )))
+            .into()),
         }
     }
 
