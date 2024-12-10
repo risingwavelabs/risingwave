@@ -520,6 +520,7 @@ pub async fn start_service_as_election_leader(
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
+        barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
     );
