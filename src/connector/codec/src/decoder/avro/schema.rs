@@ -35,18 +35,12 @@ use super::get_nullable_union_inner;
 pub struct ResolvedAvroSchema {
     /// Should be used for parsing bytes into Avro value
     pub original_schema: Arc<Schema>,
-    /// Should be used for type mapping from Avro value to RisingWave datum
-    pub resolved_schema: Schema,
 }
 
 impl ResolvedAvroSchema {
     pub fn create(schema: Arc<Schema>) -> AvroResult<Self> {
-        let resolver = ResolvedSchema::try_from(schema.as_ref())?;
-        // todo: to_resolved may cause stackoverflow if there's a loop in the schema
-        let resolved_schema = resolver.to_resolved(schema.as_ref())?;
         Ok(Self {
             original_schema: schema,
-            resolved_schema,
         })
     }
 }
