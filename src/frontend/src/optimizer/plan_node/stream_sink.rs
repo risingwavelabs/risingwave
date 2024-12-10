@@ -602,6 +602,7 @@ impl StreamNode for StreamSink {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
             log_store_type: self.log_store_type as i32,
+            rate_limit: self.base.ctx().overwrite_options().sink_rate_limit,
         })
     }
 }

@@ -955,6 +955,18 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSinkRateLimit { rate_limit },
+        } => {
+            alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                handler_args,
+                PbThrottleTarget::Sink,
+                name,
+                rate_limit,
+            )
+            .await
+        }
         Statement::AlterSubscription {
             name,
             operation: AlterSubscriptionOperation::RenameSubscription { subscription_name },
