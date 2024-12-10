@@ -45,6 +45,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
+use super::rate_limiter::{AdaptiveRateLimiterConfig, BackfillRateLimiter};
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
@@ -806,9 +807,10 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
     Ok(())
 }
 
-pub type BackfillRateLimiter =
+pub type BackfillRateLimiterV1 =
     RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>;
 
+// TODO(MrCroxx): Do we really need it? Unfullfilled chunk will be truncated.
 /// Creates a data chunk builder for snapshot read.
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
@@ -817,21 +819,32 @@ pub fn create_builder(
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
-    if let Some(rate_limit) = rate_limit
-        && rate_limit < chunk_size
-        && rate_limit > 0
-    {
-        DataChunkBuilder::new(data_types, rate_limit)
-    } else {
-        DataChunkBuilder::new(data_types, chunk_size)
-    }
+    let batch_size = match (rate_limit, chunk_size) {
+        (Some(rate_limit), chunk_size) if rate_limit < chunk_size && rate_limit > 0 => rate_limit,
+        _ => chunk_size,
+    };
+    DataChunkBuilder::new(data_types, batch_size)
 }
 
-pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
+pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiterV1> {
     if rate_limit == 0 {
         return None;
     }
     let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
     let clock = MonotonicClock;
     Some(RateLimiter::direct_with_clock(quota, &clock))
+}
+
+/// None => adaptive
+/// Some(0) => infinite
+/// Some(rate) => Fixed(rate)
+pub fn create_rate_limiter(
+    adaptive_rate_limit_config: AdaptiveRateLimiterConfig,
+    rate_limit: Option<usize>,
+) -> BackfillRateLimiter {
+    match rate_limit {
+        None => BackfillRateLimiter::adaptive(adaptive_rate_limit_config),
+        Some(0) => BackfillRateLimiter::infinite(),
+        Some(rate) => BackfillRateLimiter::fixed(NonZeroU32::new(rate as _).unwrap()),
+    }
 }
