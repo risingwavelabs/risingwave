@@ -7,13 +7,13 @@ We use [criterion](https://bheisler.github.io/criterion.rs/book/index.html) micr
 Run all benchmarks
 
 ```bash
-cargo bench -p risingwave_batch
+cargo bench -p risingwave_batch_executors
 ```
 
 Run a specific benchmark
 
 ```bash
-cargo bench -p risingwave_batch -- <filter>
+cargo bench -p risingwave_batch_executors -- <filter>
 ```
 
 where `<filter>` is a regular expression matching the benchmark ID, e.g.,
@@ -21,14 +21,14 @@ where `<filter>` is a regular expression matching the benchmark ID, e.g.,
 
 ```bash
 # All TopN benchmarks
-cargo bench -p risingwave_batch -- TopN
+cargo bench -p risingwave_batch_executors -- TopN
 # One specific setting of TopN benchmarks
-cargo bench -p risingwave_batch -- "TopNExecutor/2048\(single_column: true\)"
+cargo bench -p risingwave_batch_executors -- "TopNExecutor/2048\(single_column: true\)"
 ```
 
-> *Note*: `-p risingwave_batch` can be omitted if you are in the `src/batch` directory.
+> *Note*: `-p risingwave_batch_executors` can be omitted if you are in the `src/batch/executors` directory.
 
 ## Add new Benchmarks
 
-* Add benchmark target to `src/batch/Cargo.toml`
-* Implement benchmarks in `src/batch/benches`, referring to existing ones
+* Add benchmark target to `src/batch/executors/Cargo.toml`
+* Implement benchmarks in `src/batch/executors/benches`, referring to existing ones
