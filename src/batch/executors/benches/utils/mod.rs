@@ -14,8 +14,8 @@
 
 use criterion::{black_box, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
-use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, JoinType};
+use risingwave_batch_executors::test_utils::{gen_data, MockExecutor};
+use risingwave_batch_executors::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use tokio::runtime::Runtime;

@@ -18,7 +18,8 @@
 #![feature(used_with_arg)]
 
 pub mod executor;
-pub use risingwave_batch::{error, task};
+pub use executor::*;
+pub use risingwave_batch::{error, exchange_source, execution, monitor, spill, task};
 
 #[macro_use]
 extern crate tracing;
@@ -27,3 +28,11 @@ extern crate risingwave_common;
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+
+/// Enable executors in this crate.
+#[macro_export]
+macro_rules! enable {
+    () => {
+        use risingwave_batch_executors as _;
+    };
+}

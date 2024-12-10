@@ -247,7 +247,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         let ordered = seq_scan_node.ordered;
 
-        let epoch = source.epoch;
+        let epoch = source.epoch();
         let limit = seq_scan_node.limit;
         let as_of = seq_scan_node
             .as_of

@@ -11034,6 +11034,7 @@ dependencies = [
  "prost 0.13.1",
  "rand",
  "risingwave_batch",
+ "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",

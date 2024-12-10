@@ -206,6 +206,7 @@ tracing-opentelemetry = "0.25"
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
+risingwave_batch_executors = { path = "./src/batch/executors" }
 risingwave_cmd = { path = "./src/cmd" }
 risingwave_common = { path = "./src/common" }
 risingwave_common_service = { path = "./src/common/common_service" }

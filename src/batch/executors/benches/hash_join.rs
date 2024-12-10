@@ -15,11 +15,11 @@
 pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_batch::executor::hash_join::HashJoinExecutor;
-use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_batch::monitor::BatchSpillMetrics;
 use risingwave_batch::task::ShutdownToken;
+use risingwave_batch_executors::hash_join::HashJoinExecutor;
+use risingwave_batch_executors::executor::test_utils::{gen_projected_data, MockExecutor};
+use risingwave_batch_executors::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;

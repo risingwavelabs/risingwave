@@ -22,6 +22,8 @@
 #[macro_use]
 extern crate tracing;
 
+risingwave_batch_executors::enable!();
+
 pub mod memory;
 pub mod observer;
 pub mod rpc;

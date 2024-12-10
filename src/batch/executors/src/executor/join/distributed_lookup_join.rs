@@ -226,7 +226,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: identity.clone(),
-                shutdown_rx: source.shutdown_rx()().clone(),
+                shutdown_rx: source.shutdown_rx().clone(),
                 mem_ctx: source.context().create_executor_mem_context(&identity),
             }
             .dispatch())
