@@ -66,6 +66,6 @@ impl ExecutionContext {
     }
 
     pub fn to_batch_task_context(&self) -> Arc<dyn BatchTaskContext> {
-        FrontendBatchTaskContext::new(self.session.clone())
+        FrontendBatchTaskContext::create(self.session.clone())
     }
 }
