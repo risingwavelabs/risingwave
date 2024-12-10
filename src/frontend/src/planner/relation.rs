@@ -92,7 +92,7 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => {
+            (Engine::Hummock, PlanFor::Stream) | (Engine::Hummock, PlanFor::Batch) => {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
@@ -103,6 +103,21 @@ impl Planner {
                         bail_not_implemented!("As Of Version is not supported yet.")
                     }
                 };
+                Ok(scan.into())
+            }
+            (Engine::Iceberg, PlanFor::Stream) => {
+                match as_of {
+                    None
+                    | Some(AsOf::VersionNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::TimestampNum(_)) => {}
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                }
                 Ok(scan.into())
             }
             (Engine::Iceberg, PlanFor::Batch) => {
