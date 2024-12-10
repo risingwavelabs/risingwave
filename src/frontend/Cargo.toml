@@ -42,7 +42,7 @@ iceberg = { workspace = true }
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"

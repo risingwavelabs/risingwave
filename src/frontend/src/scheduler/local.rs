@@ -100,7 +100,7 @@ impl LocalQueryExecution {
     pub async fn run_inner(self) {
         debug!(%self.query.query_id, self.sql, "Starting to run query");
 
-        let context = FrontendBatchTaskContext::new(self.session.clone());
+        let context = FrontendBatchTaskContext::create(self.session.clone());
 
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
