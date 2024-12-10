@@ -104,24 +104,24 @@ pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
 }
 
 #[derive(Debug)]
-pub struct KeyedRow<T: AsRef<[u8]>> {
+pub struct KeyedRow<T: AsRef<[u8]>, R = OwnedRow> {
     vnode_prefixed_key: TableKey<T>,
-    row: OwnedRow,
+    row: R,
 }
 
-impl<T: AsRef<[u8]>> KeyedRow<T> {
-    pub fn new(table_key: TableKey<T>, row: OwnedRow) -> Self {
+impl<T: AsRef<[u8]>, R> KeyedRow<T, R> {
+    pub fn new(table_key: TableKey<T>, row: R) -> Self {
         Self {
             vnode_prefixed_key: table_key,
             row,
         }
     }
 
-    pub fn into_owned_row(self) -> OwnedRow {
+    pub fn into_owned_row(self) -> R {
         self.row
     }
 
-    pub fn into_owned_row_key(self) -> (TableKey<T>, OwnedRow) {
+    pub fn into_owned_row_key(self) -> (TableKey<T>, R) {
         (self.vnode_prefixed_key, self.row)
     }
 
@@ -133,11 +133,11 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
         self.vnode_prefixed_key.key_part()
     }
 
-    pub fn row(&self) -> &OwnedRow {
+    pub fn row(&self) -> &R {
         &self.row
     }
 
-    pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
+    pub fn into_parts(self) -> (TableKey<T>, R) {
         (self.vnode_prefixed_key, self.row)
     }
 }
@@ -150,28 +150,7 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct KeyedChangeLogRow<T: AsRef<[u8]>> {
-    vnode_prefixed_key: TableKey<T>,
-    row: ChangeLogRow,
-}
-
-impl<T: AsRef<[u8]>> KeyedChangeLogRow<T> {
-    pub fn new(table_key: TableKey<T>, row: ChangeLogRow) -> Self {
-        Self {
-            vnode_prefixed_key: table_key,
-            row,
-        }
-    }
-
-    pub fn into_owned_row(self) -> ChangeLogRow {
-        self.row
-    }
-
-    pub fn key(&self) -> &[u8] {
-        self.vnode_prefixed_key.key_part()
-    }
-}
+pub type KeyedChangeLogRow<T> = KeyedRow<T, ChangeLogRow>;
 
 pub type ChangeLogRow = ChangeLogValue<OwnedRow>;
 
