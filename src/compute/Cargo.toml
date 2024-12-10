@@ -31,6 +31,7 @@ pprof = { version = "0.14", features = ["flamegraph"] }
 prometheus = { version = "0.13" }
 prost = { workspace = true }
 risingwave_batch = { workspace = true }
+risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }

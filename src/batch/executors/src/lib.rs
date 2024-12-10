@@ -31,17 +31,22 @@
 #![feature(iter_from_coroutine)]
 #![feature(used_with_arg)]
 
-pub mod error;
-pub mod exchange_source;
-pub mod execution;
 pub mod executor;
-pub mod monitor;
-pub mod rpc;
-pub mod spill;
-pub mod task;
-pub mod worker_manager;
+pub use executor::*;
+pub use risingwave_batch::{error, exchange_source, execution, monitor, spill, task};
 
 #[macro_use]
 extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();
+
+/// Enable executors in this crate.
+#[macro_export]
+macro_rules! enable {
+    () => {
+        use risingwave_batch_executors as _;
+    };
+}
