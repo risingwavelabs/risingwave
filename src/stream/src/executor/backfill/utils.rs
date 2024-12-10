@@ -19,9 +19,8 @@ use std::ops::Bound;
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::{pin_mut, Stream, StreamExt};
+use futures::Stream;
 use futures_async_stream::try_stream;
 use governor::clock::MonotonicClock;
 use governor::middleware::NoOpMiddleware;
@@ -42,7 +41,7 @@ use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
+use risingwave_storage::table::collect_data_chunk_with_builder;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
@@ -663,19 +662,6 @@ pub(crate) fn compute_bounds(
         Some((Bound::Excluded(current_pos), Bound::Unbounded))
     } else {
         Some((Bound::Unbounded, Bound::Unbounded))
-    }
-}
-
-#[try_stream(ok = OwnedRow, error = StreamExecutorError)]
-pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
-where
-    StreamExecutorError: From<E>,
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>>,
-{
-    pin_mut!(storage_iter);
-    while let Some(row) = storage_iter.next().await {
-        let row = row?;
-        yield row.into_owned_row()
     }
 }
 

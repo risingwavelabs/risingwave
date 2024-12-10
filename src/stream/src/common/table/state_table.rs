@@ -39,8 +39,8 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, TableKey,
-    TableKeyRange,
+    end_bound_of_prefix, prefixed_range_with_vnode, start_bound_of_excluded_prefix, CopyFromSlice,
+    TableKey, TableKeyRange,
 };
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
@@ -1030,7 +1030,7 @@ where
                     let mut streams = vec![];
                     for vnode in self.vnodes().iter_vnodes() {
                         let stream = self
-                            .iter_with_vnode(vnode, &range, PrefetchOptions::default())
+                            .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
                             .await?;
                         streams.push(Box::pin(stream));
                     }
@@ -1159,11 +1159,9 @@ where
     }
 }
 
-pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
-impl<'a, T> KeyedRowStream<'a> for T where
-    T: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a
-{
-}
+pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
+pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
+pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
 
 // Iterator functions
 impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
@@ -1183,12 +1181,27 @@ where
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'_>> {
+        Ok(deserialize_keyed_row_stream::<'_, ()>(
+            self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
+                .await?,
+            &self.row_serde,
+        )
+        .map_ok(|(_, row)| row))
+    }
+
+    pub async fn iter_keyed_row_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
         Ok(deserialize_keyed_row_stream(
             self.iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
                 .await?,
             &self.row_serde,
-        ))
+        )
+        .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
     }
 
     pub async fn iter_with_vnode_and_output_indices(
@@ -1196,18 +1209,12 @@ where
         vnode: VirtualNode,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + '_> {
+    ) -> StreamExecutorResult<impl RowStream<'_>> {
         assert!(IS_REPLICATED);
         let stream = self
             .iter_with_vnode(vnode, pk_range, prefetch_options)
             .await?;
-        Ok(stream.map(|row| {
-            row.map(|keyed_row| {
-                let (vnode_prefixed_key, row) = keyed_row.into_parts();
-                let row = row.project(&self.output_indices).into_owned_row();
-                KeyedRow::new(vnode_prefixed_key, row)
-            })
-        }))
+        Ok(stream.map(|row| row.map(|row| row.project(&self.output_indices).into_owned_row())))
     }
 
     async fn iter_kv(
@@ -1257,9 +1264,22 @@ where
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'_>> {
+        let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
+            .await?;
+        Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    pub async fn iter_keyed_row_with_prefix(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
-        self.iter_with_prefix_inner::</* REVERSE */ false>(pk_prefix, sub_range, prefetch_options)
-            .await
+        Ok(
+            self.iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
+        )
     }
 
     /// This function scans the table just like `iter_with_prefix`, but in reverse order.
@@ -1268,17 +1288,19 @@ where
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
-        self.iter_with_prefix_inner::</* REVERSE */ true>(pk_prefix, sub_range, prefetch_options)
-            .await
+    ) -> StreamExecutorResult<impl RowStream<'_>> {
+        Ok(
+            self.iter_with_prefix_inner::</* REVERSE */ true, ()>(pk_prefix, sub_range, prefetch_options)
+            .await?.map_ok(|(_, row)| row),
+        )
     }
 
-    async fn iter_with_prefix_inner<const REVERSE: bool>(
+    async fn iter_with_prefix_inner<const REVERSE: bool, K: CopyFromSlice>(
         &self,
         pk_prefix: impl Row,
         sub_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+    ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
 
@@ -1398,14 +1420,13 @@ where
     }
 }
 
-fn deserialize_keyed_row_stream<'a>(
+fn deserialize_keyed_row_stream<'a, K: CopyFromSlice>(
     iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
-) -> impl KeyedRowStream<'a> {
+) -> impl PkRowStream<'a, K> {
     iter.into_stream(move |(key, value)| {
-        Ok(KeyedRow::new(
-            // TODO: may avoid clone the key when key is not needed
-            key.user_key.table_key.copy_into(),
+        Ok((
+            K::copy_from_slice(key.user_key.table_key.as_ref()),
             deserializer.deserialize(value).map(OwnedRow::new)?,
         ))
     })

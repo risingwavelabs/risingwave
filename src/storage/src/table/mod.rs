@@ -32,8 +32,6 @@ use crate::row_serde::value_serde::ValueRowSerde;
 use crate::store::{ChangeLogValue, StateStoreIterExt, StateStoreReadLogItem};
 use crate::StateStoreIter;
 
-// TODO: GAT-ify this trait or remove this trait
-#[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
