@@ -185,7 +185,7 @@ fn run_batch_query(
     let bound = binder
         .bind(stmt)
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
-    let mut planner = Planner::new(context);
+    let mut planner = Planner::new_for_batch(context);
     let mut plan_root = planner.plan(bound).map_err(|e| {
         Failed::from(format!(
             "Failed to generate logical plan:\nReason:\n{}",
