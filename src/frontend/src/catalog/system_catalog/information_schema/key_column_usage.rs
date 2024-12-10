@@ -36,9 +36,10 @@ use risingwave_frontend_macro::system_catalog;
         JOIN rw_catalog.rw_relations ON rw_relations.id = pg_class.oid
         JOIN pg_catalog.pg_namespace ON pg_class.relnamespace = pg_namespace.oid
         WHERE rw_relations.relation_type != 'table' or (rw_relations.relation_type = 'table' and has_table_privilege(pg_constraint.conrelid, 'INSERT, UPDATE, DELETE'))
-        ORDER BY constraint_catalog, constraint_schema, constraint_name)
+        ORDER BY constraint_catalog, constraint_schema, constraint_name
+    )
     SELECT constraint_catalog, constraint_schema, table_catalog, table_schema, table_name, 
-           name as column_name, position as ordinal_position, NULL::int as position_in_unique_constraint
+           name as column_name, rw_columns.position as ordinal_position, NULL::int as position_in_unique_constraint
     FROM key_column_usage_without_name
     JOIN rw_catalog.rw_columns ON 
         rw_columns.position = key_column_usage_without_name.col_id AND 
