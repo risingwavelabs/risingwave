@@ -1633,6 +1633,13 @@ pub async fn create_iceberg_engine_table(
         ))
     })?;
 
+    if commit_checkpoint_interval <= 0 {
+        bail!(
+            "commit_checkpoint_interval must be a positive integer: {}",
+            commit_checkpoint_interval
+        );
+    }
+
     let sink_decouple = session.config().sink_decouple();
     if matches!(sink_decouple, SinkDecouple::Disable) && commit_checkpoint_interval > 1 {
         bail!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")
