@@ -132,7 +132,9 @@ impl MockSinkCoordinationRpcClient {
         response_tx
             .send(Ok(CoordinateResponse {
                 msg: Some(coordinate_response::Msg::StartResponse(
-                    StartCoordinationResponse {},
+                    StartCoordinationResponse {
+                        log_store_rewind_start_epoch: None,
+                    },
                 )),
             }))
             .await

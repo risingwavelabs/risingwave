@@ -17,9 +17,9 @@ use std::future::Future;
 use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_pb::connector_service::coordinate_request::{
+use risingwave_pb::connector_service::{coordinate_request::{
     CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
-};
+}, coordinate_response::StartCoordinationResponse};
 use risingwave_pb::connector_service::{
     coordinate_request, coordinate_response, CoordinateRequest, CoordinateResponse, PbSinkParam,
     SinkMetadata,
@@ -78,7 +78,9 @@ impl CoordinatorStreamHandle {
         .await?;
         match first_response {
             CoordinateResponse {
-                msg: Some(coordinate_response::Msg::StartResponse(_)),
+                msg: Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse{
+                    log_store_rewind_start_epoch
+                })),
             } => Ok(stream_handle),
             msg => Err(anyhow!("should get start response but get {:?}", msg).into()),
         }

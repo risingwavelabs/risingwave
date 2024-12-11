@@ -949,7 +949,7 @@ pub struct IcebergSinkCommitter {
 
 #[async_trait::async_trait]
 impl SinkCommitCoordinator for IcebergSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
+    async fn init(&mut self) -> Result<Option<u64>> {
         if self.is_exactly_once
             && self
                 .iceberg_sink_has_pre_commit_metadata(&self.db, self.param.sink_id.sink_id())
@@ -985,12 +985,14 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                 }
                 last_recommit_epoch = end_epoch;
             }
+            tracing::info!("Iceberg commit coordinator inited.");
+            return Ok(Some(last_recommit_epoch));
         }
 
         // todo: rewind log store to last_recommit_epoch
 
         tracing::info!("Iceberg commit coordinator inited.");
-        Ok(())
+        return Ok(None);
     }
 
     async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {

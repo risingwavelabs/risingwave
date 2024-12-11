@@ -242,7 +242,9 @@ message CoordinateRequest {
 }
 
 message CoordinateResponse {
-  message StartCoordinationResponse {}
+  message StartCoordinationResponse {
+    optional uint64 log_store_rewind_start_epoch = 1;
+  }
 
   message CommitResponse {
     uint64 epoch = 1;

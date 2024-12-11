@@ -52,7 +52,7 @@ impl<CM: 'static + Send> SinkWriter for BoxWriter<CM> {
 
 #[async_trait]
 impl SinkCommitCoordinator for BoxCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<()> {
+    async fn init(&mut self) -> crate::sink::Result<Option<u64>> {
         self.deref_mut().init().await
     }
 
