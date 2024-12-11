@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod columns;
+mod key_column_usage;
 mod schemata;
 mod table_constraints;
 mod tables;
