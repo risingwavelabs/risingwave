@@ -332,14 +332,14 @@ struct JdbcUrl {
 }
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
-    if !url.contains("jdbc:postgres") {
-        bail!("invalid jdbc url")
+    if url.starts_with("jdbc:postgres") {
+        bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgres://...")
     }
 
     let url = url.replace("jdbc:", "");
     let url = Url::parse(&url).map_err(|e| anyhow!(e).context("failed to parse jdbc url"))?;
     let scheme = url.scheme();
-    assert_eq!("postgresql", scheme);
+    assert_eq!("postgresql", scheme, "jdbc target should be postgres");
     let host = url
         .host_str()
         .ok_or_else(|| anyhow!("missing host in jdbc url"))?;
