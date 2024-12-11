@@ -50,9 +50,9 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde_derive::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use thiserror_ext::AsReport;
-use url::Url;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
+use url::Url;
 use with_options::WithOptions;
 
 use self::prometheus::monitored_base_file_writer::MonitoredBaseFileWriterBuilder;
