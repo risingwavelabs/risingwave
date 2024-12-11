@@ -647,7 +647,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+    async fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) -> LogStoreResult<(bool, Option<Bitmap>)> {
         self.rewind_delay.rewind_delay(self.truncate_offset).await;
         self.latest_offset = None;
         self.read_flushed_chunk_future = None;
@@ -666,7 +666,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
         } else {
             assert!(self.state_store_stream.is_none());
         }
-        self.rx.rewind();
+        self.rx.rewind(log_store_rewind_start_epoch);
 
         Ok((true, Some((**self.serde.vnodes()).clone())))
     }

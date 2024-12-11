@@ -169,6 +169,7 @@ pub trait LogReader: Send + Sized + 'static {
     /// The return flag means whether the log store support rewind
     fn rewind(
         &mut self,
+        log_store_rewind_start_epoch: Option<u64>
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 

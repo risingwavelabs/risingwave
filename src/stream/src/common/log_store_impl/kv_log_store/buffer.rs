@@ -209,9 +209,12 @@ impl LogStoreBufferInner {
         }
     }
 
-    fn rewind(&mut self) {
+    fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) {
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
-            self.unconsumed_queue.push_back((epoch, item));
+            if epoch > log_store_rewind_start_epoch.unwrap_or(0){
+                self.unconsumed_queue.push_back((epoch, item));
+            }
+           
         }
         self.update_unconsumed_buffer_metrics();
     }
@@ -451,8 +454,8 @@ impl LogStoreBufferReceiver {
         inner.add_truncate_offset((epoch, None));
     }
 
-    pub(crate) fn rewind(&self) {
-        self.buffer.inner().rewind()
+    pub(crate) fn rewind(&self, log_store_rewind_start_epoch: Option<u64>) {
+        self.buffer.inner().rewind(log_store_rewind_start_epoch)
     }
 }
 
