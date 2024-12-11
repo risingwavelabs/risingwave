@@ -328,12 +328,12 @@ impl LocalBarrierWorker {
                     (*database_id, {
                         match status {
                             DatabaseStatus::Running(state) => {
-                                ("running".to_string(), Some(state.to_debug_info()))
+                                ("running".to_owned(), Some(state.to_debug_info()))
                             }
                             DatabaseStatus::Suspended(state) => {
                                 (format!("suspended: {:?}", state.suspend_time), None)
                             }
-                            DatabaseStatus::Resetting(_) => ("resetting".to_string(), None),
+                            DatabaseStatus::Resetting(_) => ("resetting".to_owned(), None),
                             DatabaseStatus::Unspecified => {
                                 unreachable!()
                             }
