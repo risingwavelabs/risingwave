@@ -150,7 +150,7 @@ impl SourceExecutor {
             self.metrics,
             SourceCtrlOpts {
                 chunk_size: self.chunk_size,
-                rate_limit: None,
+                split_txn: false,
             },
             ConnectorProperties::default(),
             None,
