@@ -1297,6 +1297,7 @@ impl CatalogController {
                 .await?;
             }
         }
+        txn.commit().await?;
         Ok(())
     }
 
