@@ -394,12 +394,14 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             backfill: PbBackfillType::Regular as _,
             dependencies: dependencies.into_iter().collect(),
+            specific_resource_group,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here

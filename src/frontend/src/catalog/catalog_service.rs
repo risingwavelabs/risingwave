@@ -64,7 +64,12 @@ impl CatalogReader {
 /// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()>;
 
     async fn create_schema(
         &self,
@@ -80,6 +85,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -224,13 +230,19 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
+    async fn create_database(
+        &self,
+        db_name: &str,
+        owner: UserId,
+        resource_group: &str,
+    ) -> Result<()> {
         let version = self
             .meta_client
             .create_database(PbDatabase {
                 name: db_name.to_string(),
                 id: 0,
                 owner,
+                resource_group: resource_group.to_string(),
             })
             .await?;
         self.wait_version(version).await
@@ -260,11 +272,12 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies)
+            .create_materialized_view(table, graph, dependencies, specific_resource_group)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?
