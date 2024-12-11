@@ -451,16 +451,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        let mut boot_state =
-            if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
-                tracing::debug!(?splits, "boot with splits");
-                splits.to_vec()
-            } else {
-                Vec::default()
-            };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
-
-        yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -478,8 +469,17 @@ impl<S: StateStore> SourceExecutor<S> {
             unreachable!("Partition and offset columns must be set.");
         };
 
+        let mut boot_state =
+            if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                tracing::debug!(?splits, "boot with splits");
+                splits.to_vec()
+            } else {
+                Vec::default()
+            };
+
         core.split_state_store.init_epoch(first_epoch).await?;
         let mut is_uninitialized = self.actor_ctx.initial_dispatch_num == 0;
+
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -505,6 +505,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
         tracing::debug!(state = ?recover_state, "start with state");
+
+        // yield first barrier after init executor state
+        yield Message::Barrier(first_barrier);
 
         let mut barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> = None;
