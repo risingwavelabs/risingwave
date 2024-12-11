@@ -1147,7 +1147,8 @@ pub struct StreamingDeveloperConfig {
     pub enable_shared_source: bool,
 
     #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
-    /// When true, all jdbc sinks for pg will be switched to native pg sinks.
+    /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
+    /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
 }
 
