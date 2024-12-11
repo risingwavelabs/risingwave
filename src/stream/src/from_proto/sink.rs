@@ -339,7 +339,7 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     let url = url.replace("jdbc:", "");
     let url = Url::parse(&url).map_err(|e| anyhow!(e).context("failed to parse jdbc url"))?;
     let scheme = url.scheme();
-    assert_eq!("postgresql", scheme, "jdbc target should be postgres");
+    assert_eq!("postgresql", scheme, "jdbc scheme should be postgresql");
     let host = url
         .host_str()
         .ok_or_else(|| anyhow!("missing host in jdbc url"))?;
