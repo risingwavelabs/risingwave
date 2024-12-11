@@ -329,7 +329,7 @@ impl Binder {
                     self.bind_rcte(with, entry, *left, *right, all)?;
                 } else {
                     return Err(ErrorCode::BindError(
-                        "RECURSIVE CTE only support query".to_string(),
+                        "RECURSIVE CTE only support query".to_owned(),
                     )
                     .into());
                 }
@@ -406,20 +406,20 @@ impl Binder {
         } = body
         else {
             return Err(
-                ErrorCode::BindError("`UNION` is required in recursive CTE".to_string()).into(),
+                ErrorCode::BindError("`UNION` is required in recursive CTE".to_owned()).into(),
             );
         };
 
         if !all {
             return Err(ErrorCode::BindError(
-                "only `UNION ALL` is supported in recursive CTE now".to_string(),
+                "only `UNION ALL` is supported in recursive CTE now".to_owned(),
             )
             .into());
         }
 
         if corresponding.is_corresponding() {
             return Err(ErrorCode::BindError(
-                "`CORRESPONDING` is not supported in recursive CTE".to_string(),
+                "`CORRESPONDING` is not supported in recursive CTE".to_owned(),
             )
             .into());
         }

@@ -248,7 +248,7 @@ pub fn parse_schema_change(
                                             value_text = None;
                                         }
                                         Some(val_text) => {
-                                            value_text = Some(val_text.to_string());
+                                            value_text = Some(val_text.to_owned());
                                         }
                                     }
                                 }
@@ -261,11 +261,11 @@ pub fn parse_schema_change(
                                             AccessError::TypeError {
                                                 expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
                                                 got: data_type.to_string(),
-                                                value: default_val_expr_str.to_string(),
+                                                value: default_val_expr_str.to_owned(),
                                             }
                                         })?);
                                     } else {
-                                        value_text = Some(default_val_expr_str.to_string());
+                                        value_text = Some(default_val_expr_str.to_owned());
                                     }
                                 }
                                 _ => {
@@ -554,8 +554,8 @@ where
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
-                        name: "_id".to_string(),
-                        path: path[0].to_string(),
+                        name: "_id".to_owned(),
+                        path: path[0].to_owned(),
                     })?
                 }
             }
@@ -572,8 +572,8 @@ where
                     } else {
                         // fail to extract the "_id" field from the message key
                         Err(AccessError::Undefined {
-                            name: "_id".to_string(),
-                            path: "id".to_string(),
+                            name: "_id".to_owned(),
+                            path: "id".to_owned(),
                         })?
                     }
                 } else {

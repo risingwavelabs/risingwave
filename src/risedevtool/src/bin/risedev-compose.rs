@@ -221,7 +221,7 @@ fn main() -> Result<()> {
             | ServiceConfig::SqlServer(_)
             | ServiceConfig::SchemaRegistry(_) => return Err(anyhow!("not supported")),
         };
-        compose.container_name = service.id().to_string();
+        compose.container_name = service.id().to_owned();
         if opts.deploy {
             compose.network_mode = Some("host".into());
             compose.depends_on = vec![];
@@ -229,8 +229,8 @@ fn main() -> Result<()> {
         compose_services
             .entry(address.clone())
             .or_default()
-            .insert(step.to_string(), compose);
-        service_on_node.insert(step.to_string(), address);
+            .insert(step.to_owned(), compose);
+        service_on_node.insert(step.to_owned(), address);
     }
 
     if opts.deploy {
@@ -279,7 +279,7 @@ fn main() -> Result<()> {
 
         compose_deploy(
             Path::new(&opts.directory),
-            &services.iter().map(|s| s.id().to_string()).collect_vec(),
+            &services.iter().map(|s| s.id().to_owned()).collect_vec(),
             &compose_deploy_config.as_ref().unwrap().instances,
             &compose_config,
             &service_on_node,

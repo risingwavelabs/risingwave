@@ -140,7 +140,7 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let table_name = table.identifier().name().to_string();
+        let table_name = table.identifier().name().to_owned();
 
         let (mut position_delete_filter, data_file_scan_tasks) =
             match Option::take(&mut self.file_scan_tasks) {
@@ -336,7 +336,7 @@ impl PositionDeleteFilter {
                         continue;
                     }
                     let entry = position_delete_file_path_pos_map
-                        .entry(file_path.to_string())
+                        .entry(file_path.to_owned())
                         .or_default();
                     // Split `pos` by `batch_size`, because the data file will also be split by `batch_size`
                     let delete_vec_index = pos as usize / batch_size;

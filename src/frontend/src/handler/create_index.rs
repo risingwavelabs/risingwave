@@ -59,7 +59,7 @@ pub(crate) fn resolve_index_schema(
     let read_guard = catalog_reader.read_guard();
     let (table, schema_name) =
         read_guard.get_created_table_by_name(db_name, schema_path, &table_name)?;
-    Ok((schema_name.to_string(), table.clone(), index_table_name))
+    Ok((schema_name.to_owned(), table.clone(), index_table_name))
 }
 
 pub(crate) fn gen_create_index_plan(
@@ -185,7 +185,7 @@ pub(crate) fn gen_create_index_plan(
         .starts_with(&distributed_columns_expr)
     {
         return Err(ErrorCode::InvalidInputSyntax(
-            "Distributed by columns should be a prefix of index columns".to_string(),
+            "Distributed by columns should be a prefix of index columns".to_owned(),
         )
         .into());
     }
@@ -363,9 +363,9 @@ fn assemble_materialize(
                 .get(input_ref.index)
                 .unwrap()
                 .name()
-                .to_string(),
+                .to_owned(),
             ExprImpl::FunctionCall(func) => {
-                let func_name = func.func_type().as_str_name().to_string();
+                let func_name = func.func_type().as_str_name().to_owned();
                 let mut name = func_name.clone();
                 while !col_names.insert(name.clone()) {
                     count += 1;
@@ -382,7 +382,7 @@ fn assemble_materialize(
                     .get(input_ref.index)
                     .unwrap()
                     .name()
-                    .to_string(),
+                    .to_owned(),
                 _ => unreachable!(),
             }
         }))

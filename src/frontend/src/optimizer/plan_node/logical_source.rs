@@ -185,10 +185,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "filename".to_string(),
+                            name: "filename".to_owned(),
                             data_type: DataType::Varchar,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -197,10 +197,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "last_edit_time".to_string(),
+                            name: "last_edit_time".to_owned(),
                             data_type: DataType::Timestamptz,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         1,
                     ),
@@ -209,10 +209,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "file_size".to_string(),
+                            name: "file_size".to_owned(),
                             data_type: DataType::Int64,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),

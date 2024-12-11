@@ -59,7 +59,7 @@ where
             ka.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "key".to_string(),
+                name: "key".to_owned(),
                 path: String::new(),
             })
         }
@@ -70,7 +70,7 @@ where
             va.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "value".to_string(),
+                name: "value".to_owned(),
                 path: String::new(),
             })
         }

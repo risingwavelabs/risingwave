@@ -479,7 +479,7 @@ impl<'a> JsonbRef<'a> {
             .as_object()
             .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
         if !matches!(ty.key(), DataType::Varchar) {
-            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+            return Err("cannot convert jsonb to a map with non-string keys".to_owned());
         }
 
         let mut keys: Vec<Datum> = Vec::with_capacity(object.len());

@@ -39,7 +39,7 @@ pub(crate) fn report_telemetry(feature: &Feature, feature_name: &str, success_fl
             None,
             None,
             Some(attr),
-            "paywall".to_string(),
+            "paywall".to_owned(),
         );
     }
 }

@@ -39,7 +39,7 @@ impl From<ActorSplit> for RwActorSplit {
             fragment_type: FragmentType::try_from(actor_split.fragment_type)
                 .unwrap_or(FragmentType::Unspecified)
                 .as_str_name()
-                .to_string(),
+                .to_owned(),
         }
     }
 }

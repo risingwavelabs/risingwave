@@ -66,7 +66,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 }
 
 pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
-    let path = "test".to_string();
+    let path = "test".to_owned();
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)

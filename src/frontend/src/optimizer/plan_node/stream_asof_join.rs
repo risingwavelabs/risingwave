@@ -117,7 +117,7 @@ impl StreamAsOfJoin {
             }
         } else {
             Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires exactly 1 ineuquality condition".to_string(),
+                "AsOf join requires exactly 1 ineuquality condition".to_owned(),
             )
             .into())
         }

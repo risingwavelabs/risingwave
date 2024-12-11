@@ -544,10 +544,10 @@ impl ConflictBehavior {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            ConflictBehavior::NoCheck => "NoCheck".to_string(),
-            ConflictBehavior::Overwrite => "Overwrite".to_string(),
-            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
-            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+            ConflictBehavior::NoCheck => "NoCheck".to_owned(),
+            ConflictBehavior::Overwrite => "Overwrite".to_owned(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_owned(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_owned(),
         }
     }
 }
@@ -576,8 +576,8 @@ impl Engine {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            Engine::Hummock => "Hummock".to_string(),
-            Engine::Iceberg => "Iceberg".to_string(),
+            Engine::Hummock => "Hummock".to_owned(),
+            Engine::Iceberg => "Iceberg".to_owned(),
         }
     }
 }

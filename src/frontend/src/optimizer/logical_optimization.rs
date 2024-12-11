@@ -258,7 +258,7 @@ static TO_MULTI_JOIN: LazyLock<OptimizationStage> = LazyLock::new(|| {
 
 static LEFT_DEEP_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Join Ordering".to_string(),
+        "Join Ordering".to_owned(),
         vec![LeftDeepTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     )
@@ -266,7 +266,7 @@ static LEFT_DEEP_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| {
 
 static BUSHY_TREE_JOIN_ORDERING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Join Ordering".to_string(),
+        "Join Ordering".to_owned(),
         vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     )
@@ -321,7 +321,7 @@ static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
 
 static JOIN_COMMUTE: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
-        "Join Commute".to_string(),
+        "Join Commute".to_owned(),
         vec![JoinCommuteRule::create()],
         ApplyOrder::TopDown,
     )

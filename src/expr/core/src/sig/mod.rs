@@ -124,7 +124,7 @@ impl FunctionRegistry {
                 args.iter().format(", "),
                 ret,
                 if candidates.is_empty() {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(
                         "\nHINT: Supported functions:\n{}",

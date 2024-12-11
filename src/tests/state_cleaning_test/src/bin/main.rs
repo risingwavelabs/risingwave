@@ -95,7 +95,7 @@ async fn validate_case(
             let SimpleQueryMessage::Row(row) = msg else {
                 return None;
             };
-            Some(row.get("Name").unwrap().to_string())
+            Some(row.get("Name").unwrap().to_owned())
         })
         .collect();
     info!(?internal_tables, "found tables");

@@ -584,13 +584,13 @@ impl HummockManager {
     )> {
         if table_ids.is_empty() {
             return Err(Error::CompactionGroup(
-                "table_ids must not be empty".to_string(),
+                "table_ids must not be empty".to_owned(),
             ));
         }
 
         if !table_ids.is_sorted() {
             return Err(Error::CompactionGroup(
-                "table_ids must be sorted".to_string(),
+                "table_ids must be sorted".to_owned(),
             ));
         }
 

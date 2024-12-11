@@ -281,12 +281,12 @@ pub async fn handle_rename_schema(
                     .check_privilege(&grant_privilege::Object::DatabaseId(db_id), AclMode::Create)
             {
                 return Err(ErrorCode::PermissionDenied(
-                    "Do not have create privilege on the current database".to_string(),
+                    "Do not have create privilege on the current database".to_owned(),
                 )
                 .into());
             }
         } else {
-            return Err(ErrorCode::PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(ErrorCode::PermissionDenied("Session user is invalid".to_owned()).into());
         }
 
         schema.id()
@@ -324,18 +324,18 @@ pub async fn handle_rename_database(
         if let Some(user) = user_reader.get_user_by_name(session.user_name()) {
             if !user.is_super && !user.can_create_db {
                 return Err(ErrorCode::PermissionDenied(
-                    "Non-superuser owners must also have the CREATEDB privilege".to_string(),
+                    "Non-superuser owners must also have the CREATEDB privilege".to_owned(),
                 )
                 .into());
             }
         } else {
-            return Err(ErrorCode::PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(ErrorCode::PermissionDenied("Session user is invalid".to_owned()).into());
         }
 
         // The current database cannot be renamed.
         if database_name == session.database() {
             return Err(ErrorCode::PermissionDenied(
-                "Current database cannot be renamed".to_string(),
+                "Current database cannot be renamed".to_owned(),
             )
             .into());
         }
@@ -388,7 +388,7 @@ mod tests {
             .get_any_table_by_id(&table_id)
             .unwrap()
             .name()
-            .to_string();
+            .to_owned();
         assert_eq!(altered_table_name, "t1");
     }
 }

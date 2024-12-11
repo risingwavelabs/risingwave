@@ -76,7 +76,7 @@ impl ActorContext {
             id,
             fragment_id: 0,
             vnode_count: VirtualNode::COUNT_FOR_TEST,
-            mview_definition: "".to_string(),
+            mview_definition: "".to_owned(),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),

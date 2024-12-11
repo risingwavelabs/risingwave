@@ -78,7 +78,7 @@ impl SetStmts {
             } => {
                 let key = variable.real_value().to_lowercase();
                 // store complete sql as value.
-                self.stmts_cache.put(key, sql.to_string());
+                self.stmts_cache.put(key, sql.to_owned());
             }
             _ => unreachable!(),
         }
@@ -184,12 +184,12 @@ impl sqllogictest::AsyncDB for RisingWave {
                         match row.get(i) {
                             Some(v) => {
                                 if v.is_empty() {
-                                    row_vec.push("(empty)".to_string());
+                                    row_vec.push("(empty)".to_owned());
                                 } else {
-                                    row_vec.push(v.to_string());
+                                    row_vec.push(v.to_owned());
                                 }
                             }
-                            None => row_vec.push("NULL".to_string()),
+                            None => row_vec.push("NULL".to_owned()),
                         }
                     }
                 }

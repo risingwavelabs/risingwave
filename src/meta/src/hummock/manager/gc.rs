@@ -427,7 +427,7 @@ impl HummockManager {
     }
 
     pub(crate) async fn load_now(&self) -> Result<Option<u64>> {
-        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_string())
+        let now = hummock_sequence::Entity::find_by_id(HUMMOCK_NOW.to_owned())
             .one(&self.env.meta_store_ref().conn)
             .await?
             .map(|m| m.seq.try_into().unwrap());

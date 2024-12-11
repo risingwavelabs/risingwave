@@ -206,7 +206,7 @@ async fn test_active_online() -> Result<()> {
 
     // Keep one worker reserved for adding later.
     cluster
-        .simple_kill_nodes(vec!["compute-2".to_string()])
+        .simple_kill_nodes(vec!["compute-2".to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -244,7 +244,7 @@ async fn test_active_online() -> Result<()> {
     assert_eq!(all_worker_slots.len(), config.compute_nodes - 1);
 
     cluster
-        .simple_restart_nodes(vec!["compute-2".to_string()])
+        .simple_restart_nodes(vec!["compute-2".to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -291,7 +291,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
     cluster
-        .simple_kill_nodes(vec![select_worker.to_string()])
+        .simple_kill_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -338,7 +338,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     // Keep one worker reserved for adding later.
     cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
+        .simple_restart_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -373,7 +373,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     // We kill compute-2 again to verify the behavior of auto scale-in
     cluster
-        .simple_kill_nodes(vec![select_worker.to_string()])
+        .simple_kill_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -410,7 +410,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     // Keep one worker reserved for adding later.
     cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
+        .simple_restart_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -445,7 +445,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
     cluster
-        .simple_kill_nodes(vec![select_worker.to_string()])
+        .simple_kill_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -556,7 +556,7 @@ async fn test_compatibility_with_low_level() -> Result<()> {
         .await?;
 
     cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
+        .simple_restart_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -584,7 +584,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
     // Keep one worker reserved for adding later.
     let select_worker = "compute-2";
     cluster
-        .simple_kill_nodes(vec![select_worker.to_string()])
+        .simple_kill_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(
@@ -669,7 +669,7 @@ async fn test_compatibility_with_low_level_and_arrangement_backfill() -> Result<
         .await?;
 
     cluster
-        .simple_restart_nodes(vec![select_worker.to_string()])
+        .simple_restart_nodes(vec![select_worker.to_owned()])
         .await;
 
     sleep(Duration::from_secs(

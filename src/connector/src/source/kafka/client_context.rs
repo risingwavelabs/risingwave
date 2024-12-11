@@ -137,7 +137,7 @@ impl KafkaContextCommon {
             };
             Ok(OAuthToken {
                 token,
-                principal_name: "".to_string(),
+                principal_name: "".to_owned(),
                 lifetime_ms: expiration_time_ms,
             })
         } else {

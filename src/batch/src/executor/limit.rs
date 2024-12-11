@@ -187,7 +187,7 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            identity: "LimitExecutor2".to_string(),
+            identity: "LimitExecutor2".to_owned(),
         });
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -309,7 +309,7 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            identity: "LimitExecutor2".to_string(),
+            identity: "LimitExecutor2".to_owned(),
         });
 
         let mut results = vec![];

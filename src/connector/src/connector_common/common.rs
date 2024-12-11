@@ -326,7 +326,7 @@ impl KafkaConnectionProps {
     #[cfg(test)]
     pub fn test_default() -> Self {
         Self {
-            brokers: "localhost:9092".to_string(),
+            brokers: "localhost:9092".to_owned(),
             security_protocol: None,
             ssl_ca_location: None,
             ssl_certificate_location: None,
@@ -516,7 +516,7 @@ impl PulsarCommon {
                         .path()
                         .to_str()
                         .unwrap()
-                        .to_string();
+                        .to_owned();
                     raw_path.insert_str(0, "file://");
                     raw_path
                 },
@@ -528,7 +528,7 @@ impl PulsarCommon {
                 .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
         } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
+                name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
         }
@@ -721,7 +721,7 @@ impl NatsCommon {
                     config.deliver_policy = deliver_policy;
                     config.durable_name = Some(durable_consumer_name);
                     config.filter_subjects =
-                        self.subject.split(',').map(|s| s.to_string()).collect();
+                        self.subject.split(',').map(|s| s.to_owned()).collect();
                     config
                 })
                 .await?
@@ -734,7 +734,7 @@ impl NatsCommon {
         jetstream: jetstream::Context,
         stream: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
-        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
         if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",

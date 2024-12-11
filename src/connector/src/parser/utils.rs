@@ -135,7 +135,7 @@ pub fn extract_cdc_meta_column<'a>(
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
         ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
         _ => Err(AccessError::UnsupportedAdditionalColumn {
-            name: column_name.to_string(),
+            name: column_name.to_owned(),
         }),
     }
 }

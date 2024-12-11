@@ -433,12 +433,12 @@ mod test {
             assert_eq!(meta_opts.advertise_addr, "127.0.0.1:9999");
             assert_eq!(
                 meta_opts.data_directory,
-                Some("some path with spaces".to_string())
+                Some("some path with spaces".to_owned())
             );
             assert_eq!(meta_opts.temp_secret_file_dir, "./meta/secrets/");
             assert_eq!(
                 meta_opts.prometheus_listener_addr,
-                Some("127.0.0.1:1234".to_string())
+                Some("127.0.0.1:1234".to_owned())
             );
             assert_eq!(meta_opts.config_path, "src/config/test.toml");
         } else {

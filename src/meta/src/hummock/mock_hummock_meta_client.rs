@@ -257,7 +257,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .add_worker_node(
                 WorkerType::Compactor,
                 HostAddress {
-                    host: "compactor".to_string(),
+                    host: "compactor".to_owned(),
                     port: 0,
                 },
                 Default::default(),

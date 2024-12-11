@@ -178,7 +178,7 @@ struct LabelGuardedMetricsInfo<const N: usize> {
 impl<const N: usize> LabelGuardedMetricsInfo<N> {
     fn register_new_label(mutex: &Arc<Mutex<Self>>, labels: &[&str; N]) -> LabelGuard<N> {
         let mut guard = mutex.lock();
-        let label_string = labels.map(|str| str.to_string());
+        let label_string = labels.map(|str| str.to_owned());
         guard.uncollected_removed_labels.remove(&label_string);
         *guard
             .labeled_metrics_count
