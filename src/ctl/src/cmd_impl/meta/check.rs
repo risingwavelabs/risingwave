@@ -25,8 +25,8 @@ pub async fn graph_check(endpoint: String) -> anyhow::Result<()> {
             println!("all integrity check passed!");
             exit(0);
         }
-        Err(e) => {
-            println!("integrity check failed! {:?}", e);
+        Err(_) => {
+            println!("integrity check failed!");
             exit(1);
         }
     }
