@@ -19,6 +19,7 @@ async-trait = "0.1"
 easy-ext = "1"
 either = "1.13.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+h2 = "0.4.6" # https://github.com/risingwavelabs/risingwave/issues/18039
 http = "1"
 hyper = "1"
 itertools = { workspace = true }
