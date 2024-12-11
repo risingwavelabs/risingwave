@@ -205,12 +205,31 @@ impl CompletingTask {
             }
         }
 
-        self.next_completed_barrier_inner()
+        async move {
+            if !matches!(self, CompletingTask::Completing { .. }) {
+                return pending().await;
+            };
+            self.next_completed_barrier_inner().await
+        }
+    }
+
+    pub(super) async fn wait_completing_task(
+        &mut self,
+    ) -> MetaResult<Option<BarrierCompleteOutput>> {
+        match self {
+            CompletingTask::None => Ok(None),
+            CompletingTask::Completing { .. } => {
+                self.next_completed_barrier_inner().await.map(Some)
+            }
+            CompletingTask::Err(_) => {
+                unreachable!("should not be called on previous err")
+            }
+        }
     }
 
     async fn next_completed_barrier_inner(&mut self) -> MetaResult<BarrierCompleteOutput> {
         let CompletingTask::Completing { join_handle, .. } = self else {
-            return pending().await;
+            unreachable!()
         };
 
         {

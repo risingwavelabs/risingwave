@@ -17,6 +17,7 @@ use std::mem::replace;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
@@ -24,15 +25,16 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{PausedReason, Recovery};
+use risingwave_pb::stream_service::streaming_control_stream_response::Response;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tonic::Status;
 use tracing::{debug, error, info, warn, Instrument};
 
-use crate::barrier::checkpoint::CheckpointControl;
+use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::rpc::{merge_node_rpc_errors, ControlStreamManager};
@@ -311,19 +313,83 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                 },
-                (worker_id, resp_result) = self.control_stream_manager.next_collect_barrier_response() => {
-                    if let Err(e) = resp_result.and_then(|resp| self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)) {
-                        {
-
+                event = self.checkpoint_control.next_event() => {
+                    let result: MetaResult<()> = try {
+                        match event {
+                            CheckpointControlEvent::EnteringInitializing(entering_initializing) => {
+                                let database_id = entering_initializing.database_id();
+                                let error = merge_node_rpc_errors(&format!("database {} reset", database_id), entering_initializing.action.0.iter().filter_map(|(worker_id, resp)| {
+                                    resp.root_err.as_ref().map(|root_err| {
+                                        (*worker_id, ScoredError {
+                                            error: Status::internal(&root_err.err_msg),
+                                            score: Score(root_err.score)
+                                        })
+                                    })
+                                }));
+                                Self::report_collect_failure(&self.env, &error);
+                                if let Some(runtime_info) = self.context.reload_database_runtime_info(database_id).await? {
+                                    runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
+                                        warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                    })?;
+                                    entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
+                                } else {
+                                    info!(database_id = database_id.database_id, "database removed after reloading empty runtime info");
+                                    entering_initializing.remove();
+                                }
+                            }
+                            CheckpointControlEvent::EnteringRunning(entering_running) => {
+                                self.context.mark_ready(Some(entering_running.database_id()));
+                                entering_running.enter();
+                            }
+                        }
+                    };
+                    if let Err(e) = result {
+                        self.failure_recovery(e).await;
+                    }
+                }
+                (worker_id, resp_result) = self.control_stream_manager.next_response() => {
+                     let resp = match resp_result {
+                        Err(e) => {
                             if self.checkpoint_control.is_failed_at_worker_err(worker_id) {
                                 let errors = self.control_stream_manager.collect_errors(worker_id, e).await;
                                 let err = merge_node_rpc_errors("get error from control stream", errors);
-                                self.report_collect_failure(&err);
+                                Self::report_collect_failure(&self.env, &err);
                                 self.failure_recovery(err).await;
                             }  else {
                                 warn!(worker_id, "no barrier to collect from worker, ignore err");
                             }
+                            continue;
                         }
+                        Ok(resp) => resp,
+                    };
+                    let result: MetaResult<()> = try {
+                        match resp {
+                            Response::CompleteBarrier(resp) => {
+                                self.checkpoint_control.barrier_collected(resp, &mut self.control_stream_manager)?;
+                            },
+                            Response::ReportDatabaseFailure(resp) => {
+                                if !self.enable_recovery {
+                                    panic!("database failure reported but recovery not enabled: {:?}", resp)
+                                }
+                                if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(resp, &mut self.control_stream_manager) {
+                                    let database_id = entering_recovery.database_id();
+                                    warn!(database_id = database_id.database_id, "database entering recovery");
+                                    self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
+                                    // TODO: add log on blocking time
+                                    let output = self.completing_task.wait_completing_task().await?;
+                                    entering_recovery.enter(output, &mut self.control_stream_manager);
+                                }
+                            }
+                            Response::ResetDatabase(resp) => {
+                                self.checkpoint_control.on_reset_database_resp(worker_id, resp);
+                            }
+                            other @ Response::Init(_) | other @ Response::Shutdown(_) => {
+                                Err(anyhow!("get expected response: {:?}", other))?;
+                            }
+                        }
+                    };
+                    if let Err(e) = result {
+                        self.failure_recovery(e).await;
                     }
                 }
                 new_barrier = self.periodic_barriers.next_barrier(&*self.context),
@@ -465,32 +531,58 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
 impl<C> GlobalBarrierWorker<C> {
     /// Send barrier-complete-rpc and wait for responses from all CNs
-    pub(super) fn report_collect_failure(&self, error: &MetaError) {
+    pub(super) fn report_collect_failure(env: &MetaSrvEnv, error: &MetaError) {
         // Record failure in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventCollectBarrierFail {
             error: error.to_report_string(),
         };
-        self.env
-            .event_log_manager_ref()
+        env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
     }
 }
 
-impl<C> GlobalBarrierWorker<C> {
+mod retry_strategy {
+    use std::time::Duration;
+
+    use tokio_retry::strategy::{jitter, ExponentialBackoff};
+
     // Retry base interval in milliseconds.
     const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.
     const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
 
+    mod retry_backoff_future {
+        use std::future::Future;
+        use std::time::Duration;
+
+        use tokio::time::sleep;
+
+        pub(crate) type RetryBackoffFuture = impl Future<Output = ()> + Unpin + Send + 'static;
+        pub(super) fn get_retry_backoff_future(duration: Duration) -> RetryBackoffFuture {
+            Box::pin(sleep(duration))
+        }
+    }
+    pub(crate) use retry_backoff_future::*;
+
+    pub(crate) type RetryBackoffStrategy =
+        impl Iterator<Item = RetryBackoffFuture> + Send + 'static;
+
     #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.
-    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(Self::RECOVERY_RETRY_BASE_INTERVAL)
-            .max_delay(Self::RECOVERY_RETRY_MAX_INTERVAL)
+    pub(crate) fn get_retry_strategy() -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(RECOVERY_RETRY_BASE_INTERVAL)
+            .max_delay(RECOVERY_RETRY_MAX_INTERVAL)
             .map(jitter)
     }
+
+    pub(crate) fn get_retry_backoff_strategy() -> RetryBackoffStrategy {
+        get_retry_strategy().map(get_retry_backoff_future)
+    }
 }
+
+pub(crate) use retry_strategy::*;
+use risingwave_common::error::tonic::extra::{Score, ScoredError};
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
@@ -520,7 +612,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         err: Option<MetaError>,
     ) {
         tracing::info!("recovery start!");
-        let retry_strategy = Self::get_retry_strategy();
+        let retry_strategy = get_retry_strategy();
 
         // We take retry into consideration because this is the latency user sees for a cluster to
         // get recovered.
@@ -589,8 +681,16 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 }
                 while !collecting_databases.is_empty() {
                     let (worker_id, result) =
-                        control_stream_manager.next_collect_barrier_response().await;
+                        control_stream_manager.next_response().await;
                     let resp = result?;
+                    let resp = match resp {
+                        Response::CompleteBarrier(resp) => {
+                            resp
+                        }
+                        other => {
+                            return Err(anyhow!("expect Response::CollectBarrier but get {:?}", other).into());
+                        }
+                    };
                     let database_id = DatabaseId::new(resp.database_id);
                     let (node_to_collect, _, prev_epoch) = collecting_databases.get_mut(&database_id).expect("should exist");
                     assert_eq!(resp.epoch, *prev_epoch);
