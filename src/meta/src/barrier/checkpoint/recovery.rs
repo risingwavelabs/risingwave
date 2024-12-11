@@ -59,7 +59,7 @@ use crate::MetaResult;
 /// `Initializing`
 ///     - on `BarrierComplete`:
 ///         - mark the CN as collected
-///         - when all CNs ahve collected the response: enter Running
+///         - when all CNs have collected the response: enter Running
 ///     - on `ReportDatabaseFailure`
 ///         - increment the previously saved `reset_request_id`, and send `ResetDatabaseRequest` to all CNs
 ///         - enter `Resetting`
