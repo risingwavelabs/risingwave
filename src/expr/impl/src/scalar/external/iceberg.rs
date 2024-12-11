@@ -19,7 +19,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use iceberg::spec::Transform;
+use iceberg::spec::{PrimitiveType, Transform, Type as IcebergType};
 use iceberg::transform::{create_transform_function, BoxedTransformFunction};
 use risingwave_common::array::arrow::{arrow_schema_iceberg, IcebergArrowConvert};
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -133,13 +133,21 @@ fn build(return_type: DataType, mut children: Vec<BoxedExpression>) -> Result<Bo
         )
         .into(),
     })?;
+
     ensure!(
-        expect_res_type == actual_res_type,
+        (expect_res_type == actual_res_type)
+            ||
+            // This is a confusing stuff.<https://github.com/apache/iceberg/pull/11749>
+            (matches!(transform_type, Transform::Day) && matches!(actual_res_type, IcebergType::Primitive(PrimitiveType::Int))),
         ExprError::InvalidParam {
             name: "return type in iceberg_transform",
             reason: format!(
-                "Expect return type {:?} but got {:?}",
-                expect_res_type, actual_res_type
+                "Expect return type {:?} but got {:?}, RisingWave return type is {:?}, input type is {:?}, transform type is {:?}",
+                expect_res_type,
+                actual_res_type,
+                return_type,
+                (input_type, input_arrow_type),
+                transform_type
             )
             .into()
         }
