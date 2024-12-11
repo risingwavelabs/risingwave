@@ -61,7 +61,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         Arc::new(ObjectStoreConfig::default()),
     );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
-    let path = "test".to_string();
+    let path = "test".to_owned();
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
@@ -230,7 +230,7 @@ async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
     let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
-    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
+    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options, info);
     iter.rewind().await.unwrap();
     while iter.is_valid() {
         iter.next().await.unwrap();

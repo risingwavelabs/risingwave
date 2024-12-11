@@ -105,7 +105,7 @@ fn create_hash_agg_executor(
         group_key_types,
         schema,
         input,
-        "HashAggExecutor".to_string(),
+        "HashAggExecutor".to_owned(),
         CHUNK_SIZE,
         MemoryContext::none(),
         None,

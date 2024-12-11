@@ -24,7 +24,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 pub struct UnionExecutor {
     inputs: Vec<BoxedExecutor>,
@@ -63,10 +62,9 @@ impl UnionExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for UnionExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let _union_node =
@@ -125,7 +123,7 @@ mod tests {
 
         let union_executor = Box::new(UnionExecutor {
             inputs: vec![Box::new(mock_executor1), Box::new(mock_executor2)],
-            identity: "UnionExecutor".to_string(),
+            identity: "UnionExecutor".to_owned(),
         });
         let fields = &union_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);

@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .type_attribute(
             "node_body",
-            "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display)]",
+            "#[derive(::enum_as_inner::EnumAsInner, ::strum::Display, ::strum::EnumDiscriminants)]",
         )
         .type_attribute("rex_node", "#[derive(::enum_as_inner::EnumAsInner)]")
         .type_attribute(
@@ -210,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
-        .compile_with_config(prost_config, &protos, &[proto_dir.to_string()])
+        .compile_with_config(prost_config, &protos, &[proto_dir.to_owned()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.

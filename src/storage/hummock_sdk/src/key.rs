@@ -440,7 +440,7 @@ impl SetSlice<Bytes> for Bytes {
     }
 }
 
-pub trait CopyFromSlice {
+pub trait CopyFromSlice: Send + 'static {
     fn copy_from_slice(slice: &[u8]) -> Self;
 }
 
@@ -454,6 +454,10 @@ impl CopyFromSlice for Bytes {
     fn copy_from_slice(slice: &[u8]) -> Self {
         Bytes::copy_from_slice(slice)
     }
+}
+
+impl CopyFromSlice for () {
+    fn copy_from_slice(_: &[u8]) -> Self {}
 }
 
 /// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the

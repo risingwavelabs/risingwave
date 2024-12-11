@@ -433,7 +433,7 @@ mod tests {
                     vec![
                         // 1043 is the oid of varchar type.
                         // -1 is the type len of varchar type.
-                        PgFieldDescriptor::new("".to_string(), 1043, -1);
+                        PgFieldDescriptor::new("".to_owned(), 1043, -1);
                         1
                     ],
                 )
@@ -469,7 +469,7 @@ mod tests {
                     vec![
                     // 1043 is the oid of varchar type.
                     // -1 is the type len of varchar type.
-                    PgFieldDescriptor::new("".to_string(), 1043, -1);
+                    PgFieldDescriptor::new("".to_owned(), 1043, -1);
                     1
                 ],
                 )
@@ -482,7 +482,7 @@ mod tests {
         ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
             Ok((
                 vec![],
-                vec![PgFieldDescriptor::new("".to_string(), 1043, -1)],
+                vec![PgFieldDescriptor::new("".to_owned(), 1043, -1)],
             ))
         }
 
@@ -490,7 +490,7 @@ mod tests {
             self: Arc<Self>,
             _portal: String,
         ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
-            Ok(vec![PgFieldDescriptor::new("".to_string(), 1043, -1)])
+            Ok(vec![PgFieldDescriptor::new("".to_owned(), 1043, -1)])
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {
@@ -502,7 +502,7 @@ mod tests {
         }
 
         fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
-            Ok("".to_string())
+            Ok("".to_owned())
         }
 
         fn take_notices(self: Arc<Self>) -> Vec<String> {

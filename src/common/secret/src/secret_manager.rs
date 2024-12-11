@@ -68,7 +68,7 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init("./tmp".to_string(), "test_cluster".to_string(), 0);
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0);
 
         INSTANCE.get().unwrap()
     }

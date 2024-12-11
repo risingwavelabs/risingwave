@@ -654,7 +654,7 @@ pub trait FromArrow {
                 let array: &arrow_array::StringArray =
                     array.as_any().downcast_ref().ok_or_else(|| {
                         ArrayError::from_arrow(
-                            "expected string array for `arrowudf.decimal`".to_string(),
+                            "expected string array for `arrowudf.decimal`".to_owned(),
                         )
                     })?;
                 Ok(ArrayImpl::Decimal(array.try_into()?))
@@ -663,7 +663,7 @@ pub trait FromArrow {
                 let array: &arrow_array::StringArray =
                     array.as_any().downcast_ref().ok_or_else(|| {
                         ArrayError::from_arrow(
-                            "expected string array for `arrowudf.json`".to_string(),
+                            "expected string array for `arrowudf.json`".to_owned(),
                         )
                     })?;
                 Ok(ArrayImpl::Jsonb(array.try_into()?))

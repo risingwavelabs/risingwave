@@ -57,9 +57,7 @@ pub async fn handle_alter_parallelism(
                 match (table.table_type(), stmt_type) {
                     (TableType::Internal, _) => {
                         // we treat internal table as NOT FOUND
-                        return Err(
-                            CatalogError::NotFound("table", table.name().to_string()).into()
-                        );
+                        return Err(CatalogError::NotFound("table", table.name().to_owned()).into());
                     }
                     (TableType::Table, StatementType::ALTER_TABLE)
                     | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
@@ -103,7 +101,7 @@ pub async fn handle_alter_parallelism(
         .await?;
 
     if deferred {
-        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_string());
+        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
     }
 
     Ok(builder.into())
@@ -146,7 +144,7 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
 
         _ => {
             return Err(ErrorCode::InvalidInputSyntax(
-                "target parallelism must be a valid number or adaptive".to_string(),
+                "target parallelism must be a valid number or adaptive".to_owned(),
             )
             .into());
         }

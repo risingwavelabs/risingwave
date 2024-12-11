@@ -81,7 +81,7 @@ impl Topic {
     pub fn topic_str_without_partition(&self) -> Result<String> {
         if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
             let parts: Vec<&str> = self.topic.split(PARTITIONED_TOPIC_SUFFIX).collect();
-            Ok(parts[0].to_string())
+            Ok(parts[0].to_owned())
         } else {
             Ok(self.topic.clone())
         }
@@ -112,7 +112,7 @@ pub fn get_partition_index(topic: &str) -> Result<Option<i32>> {
 /// The fully qualified topic name can be:
 /// `<domain>://<tenant>/<namespace>/<topic>`
 pub fn parse_topic(topic: &str) -> Result<Topic> {
-    let mut complete_topic = topic.to_string();
+    let mut complete_topic = topic.to_owned();
 
     if !topic.contains("://") {
         let parts: Vec<&str> = topic.split('/').collect();
@@ -155,15 +155,15 @@ pub fn parse_topic(topic: &str) -> Result<Topic> {
     }
 
     let parsed_topic = Topic {
-        domain: domain.to_string(),
-        tenant: parts[0].to_string(),
-        namespace: parts[1].to_string(),
-        topic: parts[2].to_string(),
+        domain: domain.to_owned(),
+        tenant: parts[0].to_owned(),
+        namespace: parts[1].to_owned(),
+        topic: parts[2].to_owned(),
         partition_index: get_partition_index(complete_topic.as_str())?,
     };
 
     if parsed_topic.topic.is_empty() {
-        bail!("topic name cannot be empty".to_string());
+        bail!("topic name cannot be empty".to_owned());
     }
 
     Ok(parsed_topic)
@@ -177,23 +177,23 @@ mod test {
     fn test_parse_topic() {
         assert_eq!(
             parse_topic("success").unwrap().to_string(),
-            "persistent://public/default/success".to_string()
+            "persistent://public/default/success".to_owned()
         );
         assert_eq!(
             parse_topic("tenant/namespace/success").unwrap().to_string(),
-            "persistent://tenant/namespace/success".to_string()
+            "persistent://tenant/namespace/success".to_owned()
         );
         assert_eq!(
             parse_topic("persistent://tenant/namespace/success")
                 .unwrap()
                 .to_string(),
-            "persistent://tenant/namespace/success".to_string()
+            "persistent://tenant/namespace/success".to_owned()
         );
         assert_eq!(
             parse_topic("non-persistent://tenant/namespace/success")
                 .unwrap()
                 .to_string(),
-            "non-persistent://tenant/namespace/success".to_string()
+            "non-persistent://tenant/namespace/success".to_owned()
         );
 
         assert_eq!(

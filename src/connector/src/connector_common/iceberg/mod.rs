@@ -44,9 +44,9 @@ pub struct IcebergCommon {
     #[serde(rename = "s3.endpoint")]
     pub endpoint: Option<String>,
     #[serde(rename = "s3.access.key")]
-    pub access_key: String,
+    pub access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
-    pub secret_key: String,
+    pub secret_key: Option<String>,
     /// Path of iceberg warehouse, only applicable in storage catalog.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
@@ -85,6 +85,9 @@ pub struct IcebergCommon {
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
     pub path_style_access: Option<bool>,
+    /// enable config load currently is used by iceberg engine, so it only support jdbc catalog.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
 }
 
 impl IcebergCommon {
@@ -96,7 +99,7 @@ impl IcebergCommon {
         self.catalog_name
             .as_ref()
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "risingwave".to_string())
+            .unwrap_or_else(|| "risingwave".to_owned())
     }
 
     /// For both V1 and V2.
@@ -107,56 +110,55 @@ impl IcebergCommon {
         let mut iceberg_configs = HashMap::new();
 
         let base_catalog_config = {
-            let catalog_type = self.catalog_type().to_string();
+            let catalog_type = self.catalog_type().to_owned();
 
-            iceberg_configs.insert(CATALOG_TYPE.to_string(), catalog_type.clone());
-            iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
+            iceberg_configs.insert(CATALOG_TYPE.to_owned(), catalog_type.clone());
+            iceberg_configs.insert(CATALOG_NAME.to_owned(), self.catalog_name());
 
             if let Some(region) = &self.region {
                 // icelake
-                iceberg_configs.insert(
-                    "iceberg.table.io.region".to_string(),
-                    region.clone().to_string(),
-                );
+                iceberg_configs.insert("iceberg.table.io.region".to_owned(), region.clone());
                 // iceberg-rust
-                iceberg_configs.insert(
-                    ("iceberg.table.io.".to_string() + S3_REGION).to_string(),
-                    region.clone().to_string(),
-                );
+                iceberg_configs.insert(format!("iceberg.table.io.{}", S3_REGION), region.clone());
             }
 
             if let Some(endpoint) = &self.endpoint {
-                iceberg_configs.insert(
-                    "iceberg.table.io.endpoint".to_string(),
-                    endpoint.clone().to_string(),
-                );
+                iceberg_configs.insert("iceberg.table.io.endpoint".to_owned(), endpoint.clone());
 
                 // iceberg-rust
                 iceberg_configs.insert(
-                    ("iceberg.table.io.".to_string() + S3_ENDPOINT).to_string(),
-                    endpoint.clone().to_string(),
+                    format!("iceberg.table.io.{}", S3_ENDPOINT),
+                    endpoint.clone(),
                 );
             }
 
             // icelake
-            iceberg_configs.insert(
-                "iceberg.table.io.access_key_id".to_string(),
-                self.access_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                "iceberg.table.io.secret_access_key".to_string(),
-                self.secret_key.clone().to_string(),
-            );
+            if let Some(access_key) = &self.access_key {
+                iceberg_configs.insert(
+                    "iceberg.table.io.access_key_id".to_owned(),
+                    access_key.clone(),
+                );
+            }
+            if let Some(secret_key) = &self.secret_key {
+                iceberg_configs.insert(
+                    "iceberg.table.io.secret_access_key".to_owned(),
+                    secret_key.clone(),
+                );
+            }
 
             // iceberg-rust
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + S3_ACCESS_KEY_ID).to_string(),
-                self.access_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                ("iceberg.table.io.".to_string() + S3_SECRET_ACCESS_KEY).to_string(),
-                self.secret_key.clone().to_string(),
-            );
+            if let Some(access_key) = &self.access_key {
+                iceberg_configs.insert(
+                    format!("iceberg.table.io.{}", S3_ACCESS_KEY_ID),
+                    access_key.clone(),
+                );
+            }
+            if let Some(secret_key) = &self.secret_key {
+                iceberg_configs.insert(
+                    format!("iceberg.table.io.{}", S3_SECRET_ACCESS_KEY),
+                    secret_key.clone(),
+                );
+            }
 
             match &self.warehouse_path {
                 Some(warehouse_path) => {
@@ -178,14 +180,14 @@ impl IcebergCommon {
                                         warehouse_path
                                     )
                                 })?
-                                .to_string();
-                            let root = url.path().trim_start_matches('/').to_string();
+                                .to_owned();
+                            let root = url.path().trim_start_matches('/').to_owned();
                             (Some(bucket), Some(root))
                         }
                     };
 
                     if let Some(bucket) = bucket {
-                        iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                        iceberg_configs.insert("iceberg.table.io.bucket".to_owned(), bucket);
                     }
                 }
                 None => {
@@ -194,12 +196,10 @@ impl IcebergCommon {
                     }
                 }
             }
-
-            // #TODO
-            // Support load config file
+            let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
+                "iceberg.table.io.disable_config_load".to_owned(),
+                (!enable_config_load).to_string(),
             );
 
             load_iceberg_base_catalog_config(&iceberg_configs)?
@@ -209,41 +209,40 @@ impl IcebergCommon {
         let mut java_catalog_configs = HashMap::new();
         {
             if let Some(uri) = self.catalog_uri.as_deref() {
-                java_catalog_configs.insert("uri".to_string(), uri.to_string());
+                java_catalog_configs.insert("uri".to_owned(), uri.to_owned());
             }
 
             if let Some(warehouse_path) = &self.warehouse_path {
-                java_catalog_configs.insert("warehouse".to_string(), warehouse_path.clone());
+                java_catalog_configs.insert("warehouse".to_owned(), warehouse_path.clone());
             }
             java_catalog_configs.extend(java_catalog_props.clone());
 
             // Currently we only support s3, so let's set it to s3
             java_catalog_configs.insert(
-                "io-impl".to_string(),
-                "org.apache.iceberg.aws.s3.S3FileIO".to_string(),
+                "io-impl".to_owned(),
+                "org.apache.iceberg.aws.s3.S3FileIO".to_owned(),
             );
 
             // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
-            java_catalog_configs
-                .insert("init-creation-stacktrace".to_string(), "false".to_string());
+            java_catalog_configs.insert("init-creation-stacktrace".to_owned(), "false".to_owned());
 
+            if let Some(region) = &self.region {
+                java_catalog_configs.insert("client.region".to_owned(), region.clone());
+            }
             if let Some(endpoint) = &self.endpoint {
-                java_catalog_configs
-                    .insert("s3.endpoint".to_string(), endpoint.clone().to_string());
+                java_catalog_configs.insert("s3.endpoint".to_owned(), endpoint.clone());
             }
 
-            java_catalog_configs.insert(
-                "s3.access-key-id".to_string(),
-                self.access_key.clone().to_string(),
-            );
-            java_catalog_configs.insert(
-                "s3.secret-access-key".to_string(),
-                self.secret_key.clone().to_string(),
-            );
+            if let Some(access_key) = &self.access_key {
+                java_catalog_configs.insert("s3.access-key-id".to_owned(), access_key.clone());
+            }
+            if let Some(secret_key) = &self.secret_key {
+                java_catalog_configs.insert("s3.secret-access-key".to_owned(), secret_key.clone());
+            }
 
             if let Some(path_style_access) = self.path_style_access {
                 java_catalog_configs.insert(
-                    "s3.path-style-access".to_string(),
+                    "s3.path-style-access".to_owned(),
                     path_style_access.to_string(),
                 );
             }
@@ -251,39 +250,42 @@ impl IcebergCommon {
             match self.catalog_type.as_deref() {
                 Some("rest") => {
                     if let Some(credential) = &self.credential {
-                        java_catalog_configs.insert("credential".to_string(), credential.clone());
+                        java_catalog_configs.insert("credential".to_owned(), credential.clone());
                     }
                     if let Some(token) = &self.token {
-                        java_catalog_configs.insert("token".to_string(), token.clone());
+                        java_catalog_configs.insert("token".to_owned(), token.clone());
                     }
                     if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
                         java_catalog_configs
-                            .insert("oauth2-server-uri".to_string(), oauth2_server_uri.clone());
+                            .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
                     }
                     if let Some(scope) = &self.scope {
-                        java_catalog_configs.insert("scope".to_string(), scope.clone());
+                        java_catalog_configs.insert("scope".to_owned(), scope.clone());
                     }
                 }
                 Some("glue") => {
                     java_catalog_configs.insert(
-                        "client.credentials-provider".to_string(),
-                        "com.risingwave.connector.catalog.GlueCredentialProvider".to_string(),
+                        "client.credentials-provider".to_owned(),
+                        "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
                     );
                     // Use S3 ak/sk and region as glue ak/sk and region by default.
                     // TODO: use different ak/sk and region for s3 and glue.
-                    java_catalog_configs.insert(
-                        "client.credentials-provider.glue.access-key-id".to_string(),
-                        self.access_key.clone().to_string(),
-                    );
-                    java_catalog_configs.insert(
-                        "client.credentials-provider.glue.secret-access-key".to_string(),
-                        self.secret_key.clone().to_string(),
-                    );
-                    if let Some(region) = &self.region {
-                        java_catalog_configs
-                            .insert("client.region".to_string(), region.clone().to_string());
+                    if let Some(access_key) = &self.access_key {
                         java_catalog_configs.insert(
-                            "glue.endpoint".to_string(),
+                            "client.credentials-provider.glue.access-key-id".to_owned(),
+                            access_key.clone(),
+                        );
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        java_catalog_configs.insert(
+                            "client.credentials-provider.glue.secret-access-key".to_owned(),
+                            secret_key.clone(),
+                        );
+                    }
+                    if let Some(region) = &self.region {
+                        java_catalog_configs.insert("client.region".to_owned(), region.clone());
+                        java_catalog_configs.insert(
+                            "glue.endpoint".to_owned(),
                             format!("https://glue.{}.amazonaws.com", region),
                         );
                     }
@@ -318,9 +320,9 @@ mod v1 {
         fn build_iceberg_configs(&self) -> ConnectorResult<HashMap<String, String>> {
             let mut iceberg_configs = HashMap::new();
 
-            let catalog_type = self.catalog_type().to_string();
+            let catalog_type = self.catalog_type().to_owned();
 
-            iceberg_configs.insert(CATALOG_NAME.to_string(), self.catalog_name());
+            iceberg_configs.insert(CATALOG_NAME.to_owned(), self.catalog_name());
 
             match catalog_type.as_str() {
                 "storage" => {
@@ -330,16 +332,16 @@ mod v1 {
                             anyhow!("`warehouse.path` must be set in storage catalog")
                         })?,
                     );
-                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "storage".into());
+                    iceberg_configs.insert(CATALOG_TYPE.to_owned(), "storage".into());
                 }
                 "rest_rust" => {
                     let uri = self
                         .catalog_uri
                         .clone()
-                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_string())?;
+                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?;
                     iceberg_configs
                         .insert(format!("iceberg.catalog.{}.uri", self.catalog_name()), uri);
-                    iceberg_configs.insert(CATALOG_TYPE.to_string(), "rest".into());
+                    iceberg_configs.insert(CATALOG_TYPE.to_owned(), "rest".into());
                 }
                 _ => {
                     bail!(
@@ -350,30 +352,29 @@ mod v1 {
             }
 
             if let Some(region) = &self.region {
-                iceberg_configs.insert(
-                    "iceberg.table.io.region".to_string(),
-                    region.clone().to_string(),
-                );
+                iceberg_configs.insert("iceberg.table.io.region".to_owned(), region.clone());
             }
 
             if let Some(endpoint) = &self.endpoint {
+                iceberg_configs.insert("iceberg.table.io.endpoint".to_owned(), endpoint.clone());
+            }
+
+            if let Some(access_key) = &self.access_key {
                 iceberg_configs.insert(
-                    "iceberg.table.io.endpoint".to_string(),
-                    endpoint.clone().to_string(),
+                    "iceberg.table.io.access_key_id".to_owned(),
+                    access_key.clone(),
+                );
+            }
+            if let Some(secret_key) = &self.secret_key {
+                iceberg_configs.insert(
+                    "iceberg.table.io.secret_access_key".to_owned(),
+                    secret_key.clone(),
                 );
             }
 
-            iceberg_configs.insert(
-                "iceberg.table.io.access_key_id".to_string(),
-                self.access_key.clone().to_string(),
-            );
-            iceberg_configs.insert(
-                "iceberg.table.io.secret_access_key".to_string(),
-                self.secret_key.clone().to_string(),
-            );
             if let Some(path_style_access) = self.path_style_access {
                 iceberg_configs.insert(
-                    "iceberg.table.io.enable_virtual_host_style".to_string(),
+                    "iceberg.table.io.enable_virtual_host_style".to_owned(),
                     (!path_style_access).to_string(),
                 );
             }
@@ -389,16 +390,16 @@ mod v1 {
                             .with_context(|| {
                                 format!("Invalid s3 path: {}, bucket is missing", warehouse_path)
                             })?
-                            .to_string();
-                        let root = url.path().trim_start_matches('/').to_string();
+                            .to_owned();
+                        let root = url.path().trim_start_matches('/').to_owned();
                         (bucket, root)
                     };
 
-                    iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket);
+                    iceberg_configs.insert("iceberg.table.io.bucket".to_owned(), bucket);
 
                     // Only storage catalog should set this.
                     if catalog_type == "storage" {
-                        iceberg_configs.insert("iceberg.table.io.root".to_string(), root);
+                        iceberg_configs.insert("iceberg.table.io.root".to_owned(), root);
                     }
                 }
                 None => {
@@ -408,11 +409,10 @@ mod v1 {
                 }
             }
 
-            // #TODO
-            // Support load config file
+            let enable_config_load = self.enable_config_load.unwrap_or(false);
             iceberg_configs.insert(
-                "iceberg.table.io.disable_config_load".to_string(),
-                "true".to_string(),
+                "iceberg.table.io.disable_config_load".to_owned(),
+                (!enable_config_load).to_string(),
             );
 
             Ok(iceberg_configs)
@@ -514,8 +514,12 @@ mod v2 {
                         .warehouse(self.warehouse_path.clone().ok_or_else(|| {
                             anyhow!("`warehouse.path` must be set in storage catalog")
                         })?)
-                        .access_key(self.access_key.clone())
-                        .secret_key(self.secret_key.clone())
+                        .access_key(self.access_key.clone().ok_or_else(|| {
+                            anyhow!("`s3.access.key` must be set in storage catalog")
+                        })?)
+                        .secret_key(self.secret_key.clone().ok_or_else(|| {
+                            anyhow!("`s3.secret.key` must be set in storage catalog")
+                        })?)
                         .region(self.region.clone())
                         .endpoint(self.endpoint.clone())
                         .build();
@@ -525,37 +529,34 @@ mod v2 {
                 "rest_rust" => {
                     let mut iceberg_configs = HashMap::new();
                     if let Some(region) = &self.region {
-                        iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                        iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
                     }
                     if let Some(endpoint) = &self.endpoint {
-                        iceberg_configs
-                            .insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                        iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
                     }
-                    iceberg_configs.insert(
-                        S3_ACCESS_KEY_ID.to_string(),
-                        self.access_key.clone().to_string(),
-                    );
-                    iceberg_configs.insert(
-                        S3_SECRET_ACCESS_KEY.to_string(),
-                        self.secret_key.clone().to_string(),
-                    );
+                    if let Some(access_key) = &self.access_key {
+                        iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
                     if let Some(credential) = &self.credential {
-                        iceberg_configs.insert("credential".to_string(), credential.clone());
+                        iceberg_configs.insert("credential".to_owned(), credential.clone());
                     }
                     if let Some(token) = &self.token {
-                        iceberg_configs.insert("token".to_string(), token.clone());
+                        iceberg_configs.insert("token".to_owned(), token.clone());
                     }
                     if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
                         iceberg_configs
-                            .insert("oauth2-server-uri".to_string(), oauth2_server_uri.clone());
+                            .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
                     }
                     if let Some(scope) = &self.scope {
-                        iceberg_configs.insert("scope".to_string(), scope.clone());
+                        iceberg_configs.insert("scope".to_owned(), scope.clone());
                     }
 
                     let config_builder = iceberg_catalog_rest::RestCatalogConfig::builder()
                         .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_string()
+                            "`catalog.uri` must be set in rest catalog".to_owned()
                         })?)
                         .props(iceberg_configs);
 
@@ -572,40 +573,35 @@ mod v2 {
                     let mut iceberg_configs = HashMap::new();
                     // glue
                     if let Some(region) = &self.region {
-                        iceberg_configs
-                            .insert(AWS_REGION_NAME.to_string(), region.clone().to_string());
+                        iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.clone());
                     }
-                    iceberg_configs.insert(
-                        AWS_ACCESS_KEY_ID.to_string(),
-                        self.access_key.clone().to_string(),
-                    );
-                    iceberg_configs.insert(
-                        AWS_SECRET_ACCESS_KEY.to_string(),
-                        self.secret_key.clone().to_string(),
-                    );
+                    if let Some(access_key) = &self.access_key {
+                        iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        iceberg_configs
+                            .insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
                     // s3
                     if let Some(region) = &self.region {
-                        iceberg_configs.insert(S3_REGION.to_string(), region.clone().to_string());
+                        iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
                     }
                     if let Some(endpoint) = &self.endpoint {
-                        iceberg_configs
-                            .insert(S3_ENDPOINT.to_string(), endpoint.clone().to_string());
+                        iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
                     }
-                    iceberg_configs.insert(
-                        S3_ACCESS_KEY_ID.to_string(),
-                        self.access_key.clone().to_string(),
-                    );
-                    iceberg_configs.insert(
-                        S3_SECRET_ACCESS_KEY.to_string(),
-                        self.secret_key.clone().to_string(),
-                    );
+                    if let Some(access_key) = &self.access_key {
+                        iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                    }
+                    if let Some(secret_key) = &self.secret_key {
+                        iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
                     let config_builder = iceberg_catalog_glue::GlueCatalogConfig::builder()
                         .warehouse(self.warehouse_path.clone().ok_or_else(|| {
                             anyhow!("`warehouse.path` must be set in glue catalog")
                         })?)
                         .props(iceberg_configs);
                     let config = if let Some(uri) = self.catalog_uri.as_deref() {
-                        config_builder.uri(uri.to_string()).build()
+                        config_builder.uri(uri.to_owned()).build()
                     } else {
                         config_builder.build()
                     };
@@ -671,8 +667,12 @@ mod v2 {
                         .warehouse(self.warehouse_path.clone().ok_or_else(|| {
                             anyhow!("`warehouse.path` must be set in storage catalog")
                         })?)
-                        .access_key(self.access_key.clone())
-                        .secret_key(self.secret_key.clone())
+                        .access_key(self.access_key.clone().ok_or_else(|| {
+                            anyhow!("`s3.access.key` must be set in storage catalog")
+                        })?)
+                        .secret_key(self.secret_key.clone().ok_or_else(|| {
+                            anyhow!("`s3.secret.key` must be set in storage catalog")
+                        })?)
                         .region(self.region.clone())
                         .endpoint(self.endpoint.clone())
                         .build();

@@ -80,12 +80,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-# foyer = { version = "0.12.2", features = ["tracing", "nightly"] }
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "19bc2def14dfa8bb7d6581fb625584694bc7f4a0", features = [
-    "tracing",
-    "nightly",
-    "prometheus",
-] }
+foyer = { version = "0.13.1", features = ["tracing", "nightly", "prometheus"] }
 apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "25113ba88234a9ae23296e981d8302c290fdaa4b", features = [
     "snappy",
     "zstandard",
@@ -160,13 +155,10 @@ arrow-udf-flight = "0.4"
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 # Use a forked version which removes the dependencies on dynamo db to reduce
 # compile time and binary size.
-deltalake = { version = "0.20.1", features = [
-    "s3",
-    "gcs",
-    "datafusion",
-] }
+deltalake = { version = "0.20.1", features = ["s3", "gcs", "datafusion"] }
 itertools = "0.13.0"
 jsonbb = "0.1.4"
+linkme = { version = "0.3", features = ["used_linker"] }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "2682b85" }
 parquet = { version = "53.2", features = ["async"] }
 mysql_async = { version = "0.34", default-features = false, features = [
@@ -296,6 +288,8 @@ new_without_default = "allow"
 # TODO: remove later https://github.com/rust-lang/rust-clippy/issues/12436
 mixed_attributes_style = "allow"
 too_long_first_doc_paragraph = "allow"
+str_to_string = "warn"
+string_to_string = "warn"
 
 [workspace.lints.rustdoc]
 private_intra_doc_links = "allow"

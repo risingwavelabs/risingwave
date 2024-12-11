@@ -1,0 +1,94 @@
+# Due to the transaction semantic and MAX_CHUNK_FOR_ATOMICITY in DmlExecutor,
+# data chunks will be buffered for certain period before yielding.
+# To overcome this buffer, instead of inserting data in one transaction like insert into t SELECT generate_series,
+# this test inserts data via multiple inserts.
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &
+
+system ok
+nohup ./risedev psql -c 'insert into t values (1)' > /dev/null 2>&1 &

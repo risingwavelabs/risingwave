@@ -25,7 +25,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 /// Limit executor.
 pub struct LimitExecutor {
@@ -38,10 +37,9 @@ pub struct LimitExecutor {
     identity: String,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for LimitExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -189,7 +187,7 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            identity: "LimitExecutor2".to_string(),
+            identity: "LimitExecutor2".to_owned(),
         });
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -311,7 +309,7 @@ mod tests {
             child: Box::new(mock_executor),
             limit,
             offset,
-            identity: "LimitExecutor2".to_string(),
+            identity: "LimitExecutor2".to_owned(),
         });
 
         let mut results = vec![];

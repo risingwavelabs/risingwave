@@ -53,7 +53,7 @@ pub use rpc::{ElectionClient, ElectionMember};
 
 use crate::manager::MetaOpts;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MetaStoreBackend {
     Mem,
     Sql {

@@ -43,10 +43,11 @@ use risingwave_sqlparser::ast::{
 };
 use thiserror_ext::AsReport;
 
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result as RwResult, RwError};
 use crate::session::{current, SessionImpl};
-use crate::HashSet;
+use crate::{Binder, HashSet, TableCatalog};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -308,6 +309,24 @@ pub fn check_connector_match_connection_type(
         ))));
     }
     Ok(())
+}
+
+pub fn get_table_catalog_by_table_name(
+    session: &SessionImpl,
+    table_name: &ObjectName,
+) -> RwResult<(Arc<TableCatalog>, String)> {
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let search_path = session.config().search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let reader = session.env().catalog_reader().read_guard();
+    let (table, schema_name) =
+        reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+    Ok((table.clone(), schema_name.to_owned()))
 }
 
 #[cfg(test)]

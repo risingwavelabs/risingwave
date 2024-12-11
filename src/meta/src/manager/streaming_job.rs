@@ -18,25 +18,24 @@ use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::{bail_not_implemented, current_cluster_version};
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::Table as TableModel;
-use risingwave_meta_model::{table, TableId, TableVersion};
+use risingwave_meta_model::prelude::{SourceModel, TableModel};
+use risingwave_meta_model::{source, table, SourceId, TableId, TableVersion};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, QuerySelect};
-use strum::{EnumDiscriminants, EnumIs};
+use strum::{EnumIs, EnumTryAs};
 
 use super::{
     get_referred_connection_ids_from_sink, get_referred_connection_ids_from_source,
     get_referred_secret_ids_from_sink, get_referred_secret_ids_from_source,
 };
-use crate::model::FragmentId;
+use crate::stream::StreamFragmentGraph;
 use crate::{MetaError, MetaResult};
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug, Clone, EnumDiscriminants, EnumIs)]
-#[strum_discriminants(name(StreamingJobType))]
+#[derive(Debug, Clone, EnumIs, EnumTryAs)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink, Option<(Table, Option<PbSource>)>),
@@ -46,7 +45,7 @@ pub enum StreamingJob {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DdlType {
+pub enum StreamingJobType {
     MaterializedView,
     Sink,
     Table(TableJobType),
@@ -54,25 +53,25 @@ pub enum DdlType {
     Source,
 }
 
-impl From<&StreamingJob> for DdlType {
+impl From<&StreamingJob> for StreamingJobType {
     fn from(job: &StreamingJob) -> Self {
         match job {
-            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
-            StreamingJob::Sink(_, _) => DdlType::Sink,
-            StreamingJob::Table(_, _, ty) => DdlType::Table(*ty),
-            StreamingJob::Index(_, _) => DdlType::Index,
-            StreamingJob::Source(_) => DdlType::Source,
+            StreamingJob::MaterializedView(_) => StreamingJobType::MaterializedView,
+            StreamingJob::Sink(_, _) => StreamingJobType::Sink,
+            StreamingJob::Table(_, _, ty) => StreamingJobType::Table(*ty),
+            StreamingJob::Index(_, _) => StreamingJobType::Index,
+            StreamingJob::Source(_) => StreamingJobType::Source,
         }
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::derivable_impls)]
-impl Default for DdlType {
+impl Default for StreamingJobType {
     fn default() -> Self {
         // This should not be used by mock services,
         // so we can just pick an arbitrary default variant.
-        DdlType::MaterializedView
+        StreamingJobType::MaterializedView
     }
 }
 
@@ -163,16 +162,6 @@ impl StreamingJob {
         }
     }
 
-    /// Set the fragment id where the table is materialized.
-    pub fn set_table_fragment_id(&mut self, id: FragmentId) {
-        match self {
-            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
-                table.fragment_id = id;
-            }
-            Self::Sink(_, _) | Self::Source(_) => {}
-        }
-    }
-
     /// Set the vnode count of the table.
     pub fn set_table_vnode_count(&mut self, vnode_count: usize) {
         match self {
@@ -183,14 +172,17 @@ impl StreamingJob {
         }
     }
 
-    /// Set the fragment id where the table dml is received.
-    pub fn set_dml_fragment_id(&mut self, id: Option<FragmentId>) {
+    /// Add some info which is only available in fragment graph to the catalog.
+    pub fn set_info_from_graph(&mut self, graph: &StreamFragmentGraph) {
         match self {
             Self::Table(_, table, ..) => {
-                table.dml_fragment_id = id;
+                table.fragment_id = graph.table_fragment_id();
+                table.dml_fragment_id = graph.dml_fragment_id();
             }
-            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_, _) => {}
-            Self::Source(_) => {}
+            Self::MaterializedView(table) | Self::Index(_, table) => {
+                table.fragment_id = graph.table_fragment_id();
+            }
+            Self::Sink(_, _) | Self::Source(_) => {}
         }
     }
 
@@ -389,10 +381,23 @@ impl StreamingJob {
                     return Err(MetaError::permission_denied("table version is stale"));
                 }
             }
+            StreamingJob::Source(source) => {
+                let new_version = source.get_version();
+                let original_version: Option<i64> = SourceModel::find_by_id(id as SourceId)
+                    .select_only()
+                    .column(source::Column::Version)
+                    .into_tuple()
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found(self.job_type_str(), id))?;
+                let original_version = original_version.expect("version for source should exist");
+                if new_version != original_version as u64 + 1 {
+                    return Err(MetaError::permission_denied("source version is stale"));
+                }
+            }
             StreamingJob::MaterializedView(_)
             | StreamingJob::Sink(_, _)
-            | StreamingJob::Index(_, _)
-            | StreamingJob::Source(_) => {
+            | StreamingJob::Index(_, _) => {
                 bail_not_implemented!("schema change for {}", self.job_type_str())
             }
         }

@@ -544,7 +544,7 @@ pub trait IteratorFactory {
     fn add_overlapping_sst_iter(&mut self, iter: Self::SstableIteratorType);
     fn add_concat_sst_iter(
         &mut self,
-        tables: Vec<SstableInfo>,
+        sstable_table_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     );

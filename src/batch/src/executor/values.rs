@@ -26,7 +26,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 /// [`ValuesExecutor`] implements Values executor.
 pub struct ValuesExecutor {
@@ -102,10 +101,9 @@ impl ValuesExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ValuesExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         ensure!(inputs.is_empty(), "ValuesExecutor should have no child!");
@@ -180,7 +178,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor {
             rows: vec![exprs].into_iter(),
             schema: Schema { fields },
-            identity: "ValuesExecutor2".to_string(),
+            identity: "ValuesExecutor2".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
 
@@ -243,7 +241,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor::new(
             rows,
             Schema { fields },
-            "ValuesExecutor2".to_string(),
+            "ValuesExecutor2".to_owned(),
             3,
         ));
         let mut stream = values_executor.execute();
@@ -258,7 +256,7 @@ mod tests {
         let values_executor = Box::new(ValuesExecutor::new(
             vec![vec![]],
             Schema::default(),
-            "ValuesExecutor2".to_string(),
+            "ValuesExecutor2".to_owned(),
             CHUNK_SIZE,
         ));
         let mut stream = values_executor.execute();

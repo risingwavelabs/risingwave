@@ -13,17 +13,14 @@
 // limitations under the License.
 
 mod schema;
-use std::sync::LazyLock;
 
-use apache_avro::schema::{DecimalSchema, RecordSchema, UnionSchema};
+use apache_avro::schema::{DecimalSchema, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
 use itertools::Itertools;
 use num_bigint::{BigInt, Sign};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::bail;
-use risingwave_common::log::LogSuppresser;
 use risingwave_common::types::{
     DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
     Timestamptz, ToOwnedDatum,
@@ -42,37 +39,22 @@ pub struct AvroParseOptions<'a> {
     ///
     /// FIXME: In theory we should use resolved schema.
     /// e.g., it's possible that a field is a reference to a decimal or a record containing a decimal field.
-    pub schema: Option<&'a Schema>,
+    schema: &'a Schema,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
-    pub relax_numeric: bool,
+    relax_numeric: bool,
 }
 
 impl<'a> AvroParseOptions<'a> {
     pub fn create(schema: &'a Schema) -> Self {
         Self {
-            schema: Some(schema),
+            schema,
             relax_numeric: true,
         }
     }
 }
 
 impl<'a> AvroParseOptions<'a> {
-    fn extract_inner_schema(&self, key: Option<&str>) -> Option<&'a Schema> {
-        self.schema
-            .map(|schema| avro_extract_field_schema(schema, key))
-            .transpose()
-            .map_err(|_err| {
-                static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                    LazyLock::new(LogSuppresser::default);
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                    tracing::error!(suppressed_count, "extract sub-schema");
-                }
-            })
-            .ok()
-            .flatten()
-    }
-
     /// Parse an avro value into expected type.
     ///
     /// 3 kinds of type info are used to parsing:
@@ -86,7 +68,7 @@ impl<'a> AvroParseOptions<'a> {
     ///    `type_expected`, converting the value if possible.
     /// - If only value is provided (without schema and `type_expected`),
     ///     the `DataType` will be inferred.
-    pub fn convert_to_datum<'b>(
+    fn convert_to_datum<'b>(
         &self,
         value: &'b Value,
         type_expected: &DataType,
@@ -110,7 +92,7 @@ impl<'a> AvroParseOptions<'a> {
             (_, Value::Null) => return Ok(DatumCow::NULL),
             // ---- Union (with >=2 non null variants), and nullable Union ([null, record]) -----
             (DataType::Struct(struct_type_info), Value::Union(variant, v)) => {
-                let Some(Schema::Union(u)) = self.schema else {
+                let Schema::Union(u) = self.schema else {
                     // XXX: Is this branch actually unreachable? (if self.schema is correctly used)
                     return Err(create_error());
                 };
@@ -118,7 +100,7 @@ impl<'a> AvroParseOptions<'a> {
                 if let Some(inner) = get_nullable_union_inner(u) {
                     // nullable Union ([null, record])
                     return Self {
-                        schema: Some(inner),
+                        schema: inner,
                         relax_numeric: self.relax_numeric,
                     }
                     .convert_to_datum(v, type_expected);
@@ -139,7 +121,7 @@ impl<'a> AvroParseOptions<'a> {
                 for (field_name, field_type) in struct_type_info.iter() {
                     if field_name == expected_field_name {
                         let datum = Self {
-                            schema: Some(variant_schema),
+                            schema: variant_schema,
                             relax_numeric: self.relax_numeric,
                         }
                         .convert_to_datum(v, field_type)?
@@ -154,7 +136,12 @@ impl<'a> AvroParseOptions<'a> {
             }
             // nullable Union ([null, T])
             (_, Value::Union(_, v)) => {
-                let schema = self.extract_inner_schema(None);
+                let Schema::Union(u) = self.schema else {
+                    return Err(create_error());
+                };
+                let Some(schema) = get_nullable_union_inner(u) else {
+                    return Err(create_error());
+                };
                 return Self {
                     schema,
                     relax_numeric: self.relax_numeric,
@@ -182,9 +169,9 @@ impl<'a> AvroParseOptions<'a> {
             // ---- Decimal -----
             (DataType::Decimal, Value::Decimal(avro_decimal)) => {
                 let (precision, scale) = match self.schema {
-                    Some(Schema::Decimal(DecimalSchema {
+                    Schema::Decimal(DecimalSchema {
                         precision, scale, ..
-                    })) => (*precision, *scale),
+                    }) => (*precision, *scale),
                     _ => Err(create_error())?,
                 };
                 let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
@@ -266,14 +253,17 @@ impl<'a> AvroParseOptions<'a> {
                 ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
             }
             // ---- Struct -----
-            (DataType::Struct(struct_type_info), Value::Record(descs)) => StructValue::new(
+            (DataType::Struct(struct_type_info), Value::Record(descs)) => StructValue::new({
+                let Schema::Record(record_schema) = &self.schema else {
+                    return Err(create_error());
+                };
                 struct_type_info
                     .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
-                        let maybe_value = descs.iter().find(|(k, _v)| k == field_name);
-                        if let Some((_, value)) = maybe_value {
-                            let schema = self.extract_inner_schema(Some(field_name));
+                        if let Some(idx) = record_schema.lookup.get(field_name) {
+                            let value = &descs[*idx].1;
+                            let schema = &record_schema.fields[*idx].schema;
                             Ok(Self {
                                 schema,
                                 relax_numeric: self.relax_numeric,
@@ -284,12 +274,15 @@ impl<'a> AvroParseOptions<'a> {
                             Ok(None)
                         }
                     })
-                    .collect::<Result<_, AccessError>>()?,
-            )
+                    .collect::<Result<_, AccessError>>()?
+            })
             .into(),
             // ---- List -----
             (DataType::List(item_type), Value::Array(array)) => ListValue::new({
-                let schema = self.extract_inner_schema(None);
+                let Schema::Array(element_schema) = &self.schema else {
+                    return Err(create_error());
+                };
+                let schema = element_schema;
                 let mut builder = item_type.create_array_builder(array.len());
                 for v in array {
                     let value = Self {
@@ -316,7 +309,10 @@ impl<'a> AvroParseOptions<'a> {
                 uuid.as_hyphenated().to_string().into_boxed_str().into()
             }
             (DataType::Map(map_type), Value::Map(map)) => {
-                let schema = self.extract_inner_schema(None);
+                let Schema::Map(value_schema) = &self.schema else {
+                    return Err(create_error());
+                };
+                let schema = value_schema;
                 let mut builder = map_type
                     .clone()
                     .into_struct()
@@ -376,7 +372,7 @@ impl Access for AvroAccess<'_> {
         while i < path.len() {
             let key = path[i];
             let create_error = || AccessError::Undefined {
-                name: key.to_string(),
+                name: key.to_owned(),
                 path: path.iter().take(i).join("."),
             };
             match value {
@@ -405,13 +401,22 @@ impl Access for AvroAccess<'_> {
                     // },
                     // ...]
                     value = v;
-                    options.schema = options.extract_inner_schema(None);
+                    let Schema::Union(u) = options.schema else {
+                        return Err(create_error());
+                    };
+                    let Some(schema) = get_nullable_union_inner(u) else {
+                        return Err(create_error());
+                    };
+                    options.schema = schema;
                     continue;
                 }
                 Value::Record(fields) => {
-                    if let Some((_, v)) = fields.iter().find(|(k, _)| k == key) {
-                        value = v;
-                        options.schema = options.extract_inner_schema(Some(key));
+                    let Schema::Record(record_schema) = &options.schema else {
+                        return Err(create_error());
+                    };
+                    if let Some(idx) = record_schema.lookup.get(key) {
+                        value = &fields[*idx].1;
+                        options.schema = &record_schema.fields[*idx].schema;
                         i += 1;
                         continue;
                     }
@@ -444,7 +449,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
 }
 
 /// If the union schema is `[null, T]` or `[T, null]`, returns `Some(T)`; otherwise returns `None`.
-fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
+pub fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
     let variants = union_schema.variants();
     // Note: `[null, null] is invalid`, we don't need to worry about that.
     if variants.len() == 2 && variants.contains(&Schema::Null) {
@@ -455,45 +460,6 @@ fn get_nullable_union_inner(union_schema: &UnionSchema) -> Option<&'_ Schema> {
         Some(inner_schema)
     } else {
         None
-    }
-}
-
-pub fn avro_schema_skip_nullable_union(schema: &Schema) -> anyhow::Result<&Schema> {
-    match schema {
-        Schema::Union(union_schema) => match get_nullable_union_inner(union_schema) {
-            Some(s) => Ok(s),
-            None => Err(anyhow::format_err!(
-                "illegal avro union schema, expected [null, T], got {:?}",
-                union_schema
-            )),
-        },
-        other => Ok(other),
-    }
-}
-
-// extract inner filed/item schema of record/array/union
-pub fn avro_extract_field_schema<'a>(
-    schema: &'a Schema,
-    name: Option<&str>,
-) -> anyhow::Result<&'a Schema> {
-    match schema {
-        Schema::Record(RecordSchema { fields, lookup, .. }) => {
-            let name =
-                name.ok_or_else(|| anyhow::format_err!("no name provided for a field in record"))?;
-            let index = lookup.get(name).ok_or_else(|| {
-                anyhow::format_err!("no field named '{}' in record: {:?}", name, schema)
-            })?;
-            let field = fields
-                .get(*index)
-                .ok_or_else(|| anyhow::format_err!("illegal avro record schema {:?}", schema))?;
-            Ok(&field.schema)
-        }
-        Schema::Array(schema) => Ok(schema),
-        // Only nullable union should be handled here.
-        // We will not extract inner schema for real union (and it's not extractable).
-        Schema::Union(_) => avro_schema_skip_nullable_union(schema),
-        Schema::Map(schema) => Ok(schema),
-        _ => bail!("avro schema does not have inner item, schema: {:?}", schema),
     }
 }
 
@@ -1052,8 +1018,8 @@ mod tests {
         )
         .unwrap();
         let value = Value::Record(vec![
-            ("scale".to_string(), Value::Int(0)),
-            ("value".to_string(), Value::Bytes(vec![0x01, 0x02, 0x03])),
+            ("scale".to_owned(), Value::Int(0)),
+            ("value".to_owned(), Value::Bytes(vec![0x01, 0x02, 0x03])),
         ]);
 
         let options = AvroParseOptions::create(&schema);

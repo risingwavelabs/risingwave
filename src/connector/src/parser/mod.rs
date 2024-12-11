@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 use auto_enums::auto_enum;
 pub use avro::AvroParserConfig;
 pub use canal::*;
+pub use chunk_builder::{SourceStreamChunkBuilder, SourceStreamChunkRowWriter};
 use csv_parser::CsvParser;
 pub use debezium::*;
 use futures::{Future, TryFutureExt};
@@ -26,56 +27,38 @@ use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
-use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::bail;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::types::{Datum, DatumCow, DatumRef, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::types::{Datum, DatumCow, DatumRef};
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
-use risingwave_pb::catalog::{
-    SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
-};
-use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use thiserror_ext::AsReport;
 
-use self::avro::AvroAccessBuilder;
-use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::{mysql_datum_to_rw_datum, mysql_row_to_owned_row};
 use self::plain_parser::PlainParser;
 pub use self::postgres::postgres_row_to_owned_row;
-use self::simd_json_parser::DebeziumJsonAccessBuilder;
 pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
-use self::unified::AccessImpl;
 use self::upsert_parser::UpsertParser;
-use self::util::get_kafka_topic;
-use crate::connector_common::AwsAuthProps;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::maxwell::MaxwellParser;
-use crate::parser::simd_json_parser::DebeziumMongoJsonAccessBuilder;
-use crate::parser::util::{
-    extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extreact_timestamp_from_meta,
-};
 use crate::schema::schema_registry::SchemaRegistryAuth;
-use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    extract_source_struct, BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType,
-    SourceContext, SourceContextRef, SourceEncode, SourceFormat, SourceMessage, SourceMeta,
+    BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceMessage, SourceMeta,
 };
-use crate::with_options::WithOptionsSecResolved;
 
+mod access_builder;
 pub mod additional_columns;
 mod avro;
 mod bytes_parser;
 mod canal;
-mod common;
+mod chunk_builder;
+mod config;
 mod csv_parser;
 mod debezium;
 mod json_parser;
@@ -84,122 +67,18 @@ mod mysql;
 pub mod parquet_parser;
 pub mod plain_parser;
 mod postgres;
-mod sql_server;
-
 mod protobuf;
 pub mod scalar_adapter;
+mod sql_server;
 mod unified;
 mod upsert_parser;
-mod util;
+mod utils;
 
+use access_builder::{AccessBuilder, AccessBuilderImpl};
+pub use config::*;
 use debezium::schema_change::SchemaChangeEnvelope;
 pub use debezium::DEBEZIUM_IGNORE_KEY;
-use risingwave_common::bitmap::BitmapBuilder;
 pub use unified::{AccessError, AccessResult};
-
-/// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
-pub struct SourceStreamChunkBuilder {
-    descs: Vec<SourceColumnDesc>,
-    builders: Vec<ArrayBuilderImpl>,
-    op_builder: Vec<Op>,
-    vis_builder: BitmapBuilder,
-}
-
-impl SourceStreamChunkBuilder {
-    pub fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
-        let builders = descs
-            .iter()
-            .map(|desc| desc.data_type.create_array_builder(cap))
-            .collect();
-
-        Self {
-            descs,
-            builders,
-            op_builder: Vec::with_capacity(cap),
-            vis_builder: BitmapBuilder::with_capacity(cap),
-        }
-    }
-
-    pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
-        SourceStreamChunkRowWriter {
-            descs: &self.descs,
-            builders: &mut self.builders,
-            op_builder: &mut self.op_builder,
-            vis_builder: &mut self.vis_builder,
-            visible: true, // write visible rows by default
-            row_meta: None,
-        }
-    }
-
-    /// Consumes the builder and returns a [`StreamChunk`].
-    pub fn finish(self) -> StreamChunk {
-        StreamChunk::with_visibility(
-            self.op_builder,
-            self.builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect(),
-            self.vis_builder.finish(),
-        )
-    }
-
-    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
-    /// the builders of the next [`StreamChunk`].
-    #[must_use]
-    pub fn take(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.descs); // we don't use `descs` in `finish`
-        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
-        builder.finish()
-    }
-
-    pub fn len(&self) -> usize {
-        self.op_builder.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.op_builder.is_empty()
-    }
-}
-
-/// `SourceStreamChunkRowWriter` is responsible to write one or more records to the [`StreamChunk`],
-/// where each contains either one row (Insert/Delete) or two rows (Update) that can be written atomically.
-///
-/// Callers are supposed to call one of the `insert`, `delete` or `update` methods to write a record,
-/// providing a closure that produces one or two [`Datum`]s by corresponding [`SourceColumnDesc`].
-/// Specifically,
-/// - only columns with [`SourceColumnType::Normal`] need to be handled;
-/// - errors for non-primary key columns will be ignored and filled with default value instead;
-/// - other errors will be propagated.
-pub struct SourceStreamChunkRowWriter<'a> {
-    descs: &'a [SourceColumnDesc],
-    builders: &'a mut [ArrayBuilderImpl],
-    op_builder: &'a mut Vec<Op>,
-    vis_builder: &'a mut BitmapBuilder,
-
-    /// Whether the rows written by this writer should be visible in output `StreamChunk`.
-    visible: bool,
-
-    /// An optional meta data of the original message.
-    ///
-    /// When this is set by `with_meta`, it'll be used to fill the columns of types other than [`SourceColumnType::Normal`].
-    row_meta: Option<MessageMeta<'a>>,
-}
-
-impl<'a> SourceStreamChunkRowWriter<'a> {
-    /// Set the meta data of the original message for this row writer.
-    ///
-    /// This should always be called except for tests.
-    fn with_meta(mut self, row_meta: MessageMeta<'a>) -> Self {
-        self.row_meta = Some(row_meta);
-        self
-    }
-
-    /// Convert the row writer to invisible row writer.
-    fn invisible(mut self) -> Self {
-        self.visible = false;
-        self
-    }
-}
 
 /// The meta data of the original message for a row writer.
 ///
@@ -245,324 +124,6 @@ impl<'a> MessageMeta<'a> {
         };
 
         datum
-    }
-}
-
-trait OpAction {
-    type Output<'a>;
-
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a>;
-
-    fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
-
-    fn rollback(builder: &mut ArrayBuilderImpl);
-
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>);
-}
-
-struct OpActionInsert;
-
-impl OpAction for OpActionInsert {
-    type Output<'a> = DatumCow<'a>;
-
-    #[inline(always)]
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
-        datum.into()
-    }
-
-    #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
-        builder.append(output)
-    }
-
-    #[inline(always)]
-    fn rollback(builder: &mut ArrayBuilderImpl) {
-        builder.pop().unwrap()
-    }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::Insert);
-    }
-}
-
-struct OpActionDelete;
-
-impl OpAction for OpActionDelete {
-    type Output<'a> = DatumCow<'a>;
-
-    #[inline(always)]
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
-        datum.into()
-    }
-
-    #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
-        builder.append(output)
-    }
-
-    #[inline(always)]
-    fn rollback(builder: &mut ArrayBuilderImpl) {
-        builder.pop().unwrap()
-    }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::Delete);
-    }
-}
-
-struct OpActionUpdate;
-
-impl OpAction for OpActionUpdate {
-    type Output<'a> = (DatumCow<'a>, DatumCow<'a>);
-
-    #[inline(always)]
-    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
-        let datum = datum.into();
-        (datum.clone(), datum)
-    }
-
-    #[inline(always)]
-    fn apply(builder: &mut ArrayBuilderImpl, output: (DatumCow<'_>, DatumCow<'_>)) {
-        builder.append(output.0);
-        builder.append(output.1);
-    }
-
-    #[inline(always)]
-    fn rollback(builder: &mut ArrayBuilderImpl) {
-        builder.pop().unwrap();
-        builder.pop().unwrap();
-    }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::UpdateDelete);
-        writer.append_op(Op::UpdateInsert);
-    }
-}
-
-impl SourceStreamChunkRowWriter<'_> {
-    fn append_op(&mut self, op: Op) {
-        self.op_builder.push(op);
-        self.vis_builder.append(self.visible);
-    }
-
-    fn do_action<'a, A: OpAction>(
-        &'a mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,
-    ) -> AccessResult<()> {
-        let mut parse_field = |desc: &SourceColumnDesc| {
-            match f(desc) {
-                Ok(output) => Ok(output),
-
-                // Throw error for failed access to primary key columns.
-                Err(e) if desc.is_pk => Err(e),
-                // Ignore error for other columns and fill in `NULL` instead.
-                Err(error) => {
-                    // TODO: figure out a way to fill in not-null default value if user specifies one
-                    // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
-                    // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
-                    //       see #13105
-                    static LOG_SUPPERSSER: LazyLock<LogSuppresser> =
-                        LazyLock::new(LogSuppresser::default);
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
-                        tracing::warn!(
-                            error = %error.as_report(),
-                            split_id = self.row_meta.as_ref().map(|m| m.split_id),
-                            offset = self.row_meta.as_ref().map(|m| m.offset),
-                            column = desc.name,
-                            suppressed_count,
-                            "failed to parse non-pk column, padding with `NULL`"
-                        );
-                    }
-                    Ok(A::output_for(Datum::None))
-                }
-            }
-        };
-
-        let mut wrapped_f = |desc: &SourceColumnDesc| {
-            match (&desc.column_type, &desc.additional_column.column_type) {
-                (&SourceColumnType::Offset | &SourceColumnType::RowId, _) => {
-                    // SourceColumnType is for CDC source only.
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|row_meta| row_meta.value_for_column(desc)),
-                    ))
-                }
-                (&SourceColumnType::Meta, _)
-                    if matches!(
-                        &self.row_meta.map(|ele| ele.meta),
-                        &Some(SourceMeta::Kafka(_) | SourceMeta::DebeziumCdc(_))
-                    ) =>
-                {
-                    // SourceColumnType is for CDC source only.
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|row_meta| row_meta.value_for_column(desc)),
-                    ))
-                }
-
-                (
-                    _, // for cdc tables
-                    &Some(ref col @ AdditionalColumnType::DatabaseName(_))
-                    | &Some(ref col @ AdditionalColumnType::TableName(_)),
-                ) => {
-                    match self.row_meta {
-                        Some(row_meta) => {
-                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
-                                Ok(A::output_for(extract_cdc_meta_column(
-                                    cdc_meta,
-                                    col,
-                                    desc.name.as_str(),
-                                )?))
-                            } else {
-                                Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_string(),
-                                })
-                            }
-                        }
-                        None => parse_field(desc), // parse from payload
-                    }
-                }
-                (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
-                    Some(row_meta) => {
-                        Ok(A::output_for(extreact_timestamp_from_meta(row_meta.meta)))
-                    }
-                    None => parse_field(desc), // parse from payload
-                },
-                (_, &Some(AdditionalColumnType::CollectionName(_))) => {
-                    // collection name for `mongodb-cdc` should be parsed from the message payload
-                    parse_field(desc)
-                }
-                (_, &Some(AdditionalColumnType::Partition(_))) => {
-                    // the meta info does not involve spec connector
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ))
-                }
-                (_, &Some(AdditionalColumnType::Offset(_))) => {
-                    // the meta info does not involve spec connector
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.offset)),
-                    ))
-                }
-                (_, &Some(AdditionalColumnType::HeaderInner(ref header_inner))) => {
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .and_then(|ele| {
-                                extract_header_inner_from_meta(
-                                    ele.meta,
-                                    header_inner.inner_field.as_ref(),
-                                    header_inner.data_type.as_ref(),
-                                )
-                            })
-                            .unwrap_or(Datum::None.into()),
-                    ))
-                }
-                (_, &Some(AdditionalColumnType::Headers(_))) => Ok(A::output_for(
-                    self.row_meta
-                        .as_ref()
-                        .and_then(|ele| extract_headers_from_meta(ele.meta))
-                        .unwrap_or(None),
-                )),
-                (_, &Some(AdditionalColumnType::Filename(_))) => {
-                    // Filename is used as partition in FS connectors
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ))
-                }
-                (_, &Some(AdditionalColumnType::Payload(_))) => {
-                    // ingest the whole payload as a single column
-                    // do special logic in `KvEvent::access_field`
-                    parse_field(desc)
-                }
-                (_, _) => {
-                    // For normal columns, call the user provided closure.
-                    parse_field(desc)
-                }
-            }
-        };
-
-        // Columns that changes have been applied to. Used to rollback when an error occurs.
-        let mut applied_columns = 0;
-
-        let result = (self.descs.iter())
-            .zip_eq_fast(self.builders.iter_mut())
-            .try_for_each(|(desc, builder)| {
-                wrapped_f(desc).map(|output| {
-                    A::apply(builder, output);
-                    applied_columns += 1;
-                })
-            });
-
-        match result {
-            Ok(_) => {
-                A::finish(self);
-                Ok(())
-            }
-            Err(e) => {
-                for i in 0..applied_columns {
-                    A::rollback(&mut self.builders[i]);
-                }
-                Err(e)
-            }
-        }
-    }
-
-    /// Write an `Insert` record to the [`StreamChunk`], with the given fallible closure that
-    /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
-    ///
-    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    #[inline(always)]
-    pub fn do_insert<'a, D>(
-        &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
-    ) -> AccessResult<()>
-    where
-        D: Into<DatumCow<'a>>,
-    {
-        self.do_action::<OpActionInsert>(|desc| f(desc).map(Into::into))
-    }
-
-    /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
-    /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
-    ///
-    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    #[inline(always)]
-    pub fn do_delete<'a, D>(
-        &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
-    ) -> AccessResult<()>
-    where
-        D: Into<DatumCow<'a>>,
-    {
-        self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
-    }
-
-    /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
-    /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
-    ///
-    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
-    #[inline(always)]
-    pub fn do_update<'a, D1, D2>(
-        &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<(D1, D2)>,
-    ) -> AccessResult<()>
-    where
-        D1: Into<DatumCow<'a>>,
-        D2: Into<DatumCow<'a>>,
-    {
-        self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
 
@@ -638,7 +199,7 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
             .map_ok(|_| ParseResult::Rows)
     }
 
-    fn emit_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
+    fn append_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
         _ = writer.do_insert(|_column| Ok(Datum::None));
     }
 }
@@ -689,7 +250,7 @@ impl<P: ByteStreamSourceParser> P {
 
 /// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
 /// committed to avoid potential OOM.
-const MAX_ROWS_FOR_TRANSACTION: usize = 4096;
+const MAX_TRANSACTION_SIZE: usize = 4096;
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
@@ -700,8 +261,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 ) {
     let columns = parser.columns().to_vec();
 
-    let mut heartbeat_builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 0);
-    let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+    let mut chunk_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
 
     struct Transaction {
         id: Box<str>,
@@ -712,45 +272,71 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
 
     #[for_await]
     for batch in data_stream {
+        // It's possible that the split is not active, which means the next batch may arrive
+        // very lately, so we should prefer emitting all records in current batch before the end
+        // of each iteration, instead of merging them with the next batch. An exception is when
+        // a transaction is not committed yet, in which yield when the transaction is committed.
+
         let batch = batch?;
         let batch_len = batch.len();
 
-        let mut last_batch_not_yielded = false;
-        if let Some(Transaction { len, id }) = &mut current_transaction {
-            // Dirty state. The last batch is not yielded due to uncommitted transaction.
-            if *len > MAX_ROWS_FOR_TRANSACTION {
-                // Large transaction. Force commit.
+        if batch_len == 0 {
+            continue;
+        }
+
+        if batch.iter().all(|msg| msg.is_cdc_heartbeat()) {
+            // This `.iter().all(...)` will short-circuit after seeing the first `false`, so in
+            // normal cases, this should only involve a constant time cost.
+
+            // Now we know that there is no data message in the batch, let's just emit the latest
+            // heartbeat message. Note that all messages in `batch` should belong to the same
+            // split, so we don't have to do a split to heartbeats mapping here.
+
+            if let Some(Transaction { id, len }) = &mut current_transaction {
+                // if there's an ongoing transaction, something may be wrong
                 tracing::warn!(
                     id,
                     len,
-                    "transaction is larger than {MAX_ROWS_FOR_TRANSACTION} rows, force commit"
+                    "got a batch of empty messages during an ongoing transaction"
                 );
-                *len = 0; // reset `len` while keeping `id`
-                yield builder.take(batch_len);
-            } else {
-                last_batch_not_yielded = true
+                // for the sake of simplicity, let's force emit the partial transaction chunk
+                if *len > 0 {
+                    *len = 0; // reset `len` while keeping `id`
+                    yield chunk_builder.take_and_reserve(1); // next chunk will only contain the heartbeat
+                }
             }
-        } else {
-            // Clean state. Reserve capacity for the builder.
-            assert!(builder.is_empty());
-            let _ = builder.take(batch_len);
+
+            // According to the invariant we mentioned at the beginning of the `for batch` loop,
+            // there should be no data of previous batch in `chunk_builder`.
+            assert!(chunk_builder.is_empty());
+
+            let heartbeat_msg = batch.last().unwrap();
+            tracing::debug!(
+                offset = heartbeat_msg.offset,
+                "emitting a heartbeat message"
+            );
+            // TODO(rc): should be `chunk_builder.append_heartbeat` instead, which is simpler
+            parser.append_empty_row(chunk_builder.row_writer().invisible().with_meta(
+                MessageMeta {
+                    meta: &heartbeat_msg.meta,
+                    split_id: &heartbeat_msg.split_id,
+                    offset: &heartbeat_msg.offset,
+                },
+            ));
+            yield chunk_builder.take_and_reserve(batch_len);
+
+            continue;
         }
 
+        // When we reach here, there is at least one data message in the batch. We should ignore all
+        // heartbeat messages.
+
+        let mut txn_started_in_last_batch = current_transaction.is_some();
         let process_time_ms = chrono::Utc::now().timestamp_millis();
+
         for (i, msg) in batch.into_iter().enumerate() {
-            if msg.key.is_none() && msg.payload.is_none() {
-                tracing::debug!(
-                    offset = msg.offset,
-                    "got a empty message, could be a heartbeat"
-                );
-                // Emit an empty invisible row for the heartbeat message.
-                parser.emit_empty_row(heartbeat_builder.row_writer().invisible().with_meta(
-                    MessageMeta {
-                        meta: &msg.meta,
-                        split_id: &msg.split_id,
-                        offset: &msg.offset,
-                    },
-                ));
+            if msg.is_cdc_heartbeat() {
+                // ignore heartbeat messages
                 continue;
             }
 
@@ -769,12 +355,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
-            let old_len = builder.len();
+            let old_len = chunk_builder.len();
             match parser
                 .parse_one_with_txn(
                     msg.key,
                     msg.payload,
-                    builder.row_writer().with_meta(MessageMeta {
+                    chunk_builder.row_writer().with_meta(MessageMeta {
                         meta: &msg.meta,
                         split_id: &msg.split_id,
                         offset: &msg.offset,
@@ -787,7 +373,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     // Aggregate the number of new rows into the current transaction.
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        let n_new_rows = builder.len() - old_len;
+                        let n_new_rows = chunk_builder.len() - old_len;
                         *len += n_new_rows;
                     }
 
@@ -809,7 +395,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         // report to error metrics
                         let context = parser.source_ctx();
                         GLOBAL_ERROR_METRICS.user_source_error.report([
-                            error.variant_name().to_string(),
+                            error.variant_name().to_owned(),
                             context.source_id.to_string(),
                             context.source_name.clone(),
                             context.fragment_id.to_string(),
@@ -833,9 +419,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                         tracing::debug!(id, "commit upstream transaction");
                         current_transaction = None;
 
-                        if last_batch_not_yielded {
-                            yield builder.take(batch_len - (i + 1));
-                            last_batch_not_yielded = false;
+                        if txn_started_in_last_batch {
+                            yield chunk_builder.take_and_reserve(batch_len - (i + 1));
+                            txn_started_in_last_batch = false;
                         }
                     }
                 },
@@ -864,76 +450,30 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             }
         }
 
-        // emit heartbeat for each message batch
-        // we must emit heartbeat chunk before the data chunk,
-        // otherwise the source offset could be backward due to the heartbeat
-        if !heartbeat_builder.is_empty() {
-            yield heartbeat_builder.take(0);
-        }
-
-        // If we are not in a transaction, we should yield the chunk now.
-        if current_transaction.is_none() {
-            yield builder.take(0);
+        if let Some(Transaction { len, id }) = &mut current_transaction {
+            // in transaction, check whether it's too large
+            if *len > MAX_TRANSACTION_SIZE {
+                // force commit
+                tracing::warn!(
+                    id,
+                    len,
+                    "transaction is larger than {MAX_TRANSACTION_SIZE} rows, force commit"
+                );
+                *len = 0; // reset `len` while keeping `id`
+                yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
+            }
+            // TODO(rc): we will have better chunk size control later
+        } else if !chunk_builder.is_empty() {
+            // not in transaction, yield the chunk now
+            yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
         }
     }
-}
-
-/// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`] from the parsed data.
-pub trait AccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>>;
 }
 
 #[derive(Debug)]
 pub enum EncodingType {
     Key,
     Value,
-}
-
-#[derive(Debug)]
-pub enum AccessBuilderImpl {
-    Avro(AvroAccessBuilder),
-    Protobuf(ProtobufAccessBuilder),
-    Json(JsonAccessBuilder),
-    Bytes(BytesAccessBuilder),
-    DebeziumAvro(DebeziumAvroAccessBuilder),
-    DebeziumJson(DebeziumJsonAccessBuilder),
-    DebeziumMongoJson(DebeziumMongoJsonAccessBuilder),
-}
-
-impl AccessBuilderImpl {
-    pub async fn new_default(config: EncodingProperties) -> ConnectorResult<Self> {
-        let accessor = match config {
-            EncodingProperties::Avro(_) => {
-                let config = AvroParserConfig::new(config).await?;
-                AccessBuilderImpl::Avro(AvroAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Protobuf(_) => {
-                let config = ProtobufParserConfig::new(config).await?;
-                AccessBuilderImpl::Protobuf(ProtobufAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Bytes(_) => {
-                AccessBuilderImpl::Bytes(BytesAccessBuilder::new(config)?)
-            }
-            EncodingProperties::Json(config) => {
-                AccessBuilderImpl::Json(JsonAccessBuilder::new(config)?)
-            }
-            _ => unreachable!(),
-        };
-        Ok(accessor)
-    }
-
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
-        let accessor = match self {
-            Self::Avro(builder) => builder.generate_accessor(payload).await?,
-            Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
-            Self::Json(builder) => builder.generate_accessor(payload).await?,
-            Self::Bytes(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumAvro(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumJson(builder) => builder.generate_accessor(payload).await?,
-            Self::DebeziumMongoJson(builder) => builder.generate_accessor(payload).await?,
-        };
-        Ok(accessor)
-    }
 }
 
 /// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
@@ -1059,322 +599,5 @@ pub mod test_utils {
                 .unwrap()
                 .unwrap()
         }
-    }
-}
-
-/// Note: this is created in `SourceReader::build_stream`
-#[derive(Debug, Clone, Default)]
-pub struct ParserConfig {
-    pub common: CommonParserConfig,
-    pub specific: SpecificParserConfig,
-}
-
-impl ParserConfig {
-    pub fn get_config(self) -> (Vec<SourceColumnDesc>, SpecificParserConfig) {
-        (self.common.rw_columns, self.specific)
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CommonParserConfig {
-    /// Note: this is created by `SourceDescBuilder::builder`
-    pub rw_columns: Vec<SourceColumnDesc>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SpecificParserConfig {
-    pub encoding_config: EncodingProperties,
-    pub protocol_config: ProtocolProperties,
-}
-
-impl SpecificParserConfig {
-    // for test only
-    pub const DEFAULT_PLAIN_JSON: SpecificParserConfig = SpecificParserConfig {
-        encoding_config: EncodingProperties::Json(JsonProperties {
-            use_schema_registry: false,
-            timestamptz_handling: None,
-        }),
-        protocol_config: ProtocolProperties::Plain,
-    };
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct AvroProperties {
-    pub schema_location: SchemaLocation,
-    pub record_name: Option<String>,
-    pub key_record_name: Option<String>,
-    pub map_handling: Option<MapHandling>,
-}
-
-/// WIP: may cover protobuf and json schema later.
-#[derive(Debug, Clone)]
-pub enum SchemaLocation {
-    /// Avsc from `https://`, `s3://` or `file://`.
-    File {
-        url: String,
-        aws_auth_props: Option<AwsAuthProps>, // for s3
-    },
-    /// <https://docs.confluent.io/platform/current/schema-registry/index.html>
-    Confluent {
-        urls: String,
-        client_config: SchemaRegistryAuth,
-        name_strategy: PbSchemaRegistryNameStrategy,
-        topic: String,
-    },
-    /// <https://docs.aws.amazon.com/glue/latest/dg/schema-registry.html>
-    Glue {
-        schema_arn: String,
-        aws_auth_props: AwsAuthProps,
-        // When `Some(_)`, ignore AWS and load schemas from provided config
-        mock_config: Option<String>,
-    },
-}
-
-// TODO: `SpecificParserConfig` shall not `impl`/`derive` a `Default`
-impl Default for SchemaLocation {
-    fn default() -> Self {
-        // backward compatible but undesired
-        Self::File {
-            url: Default::default(),
-            aws_auth_props: None,
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct ProtobufProperties {
-    pub message_name: String,
-    pub use_schema_registry: bool,
-    pub row_schema_location: String,
-    pub aws_auth_props: Option<AwsAuthProps>,
-    pub client_config: SchemaRegistryAuth,
-    pub enable_upsert: bool,
-    pub topic: String,
-    pub key_message_name: Option<String>,
-    pub name_strategy: PbSchemaRegistryNameStrategy,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct CsvProperties {
-    pub delimiter: u8,
-    pub has_header: bool,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct JsonProperties {
-    pub use_schema_registry: bool,
-    pub timestamptz_handling: Option<TimestamptzHandling>,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct BytesProperties {
-    pub column_name: Option<String>,
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum EncodingProperties {
-    Avro(AvroProperties),
-    Protobuf(ProtobufProperties),
-    Csv(CsvProperties),
-    Json(JsonProperties),
-    MongoJson,
-    Bytes(BytesProperties),
-    Parquet,
-    Native,
-    /// Encoding can't be specified because the source will determines it. Now only used in Iceberg.
-    None,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Default, Clone)]
-pub enum ProtocolProperties {
-    Debezium(DebeziumProps),
-    DebeziumMongo,
-    Maxwell,
-    Canal,
-    Plain,
-    Upsert,
-    Native,
-    /// Protocol can't be specified because the source will determines it. Now only used in Iceberg.
-    None,
-    #[default]
-    Unspecified,
-}
-
-impl SpecificParserConfig {
-    // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(
-        info: &StreamSourceInfo,
-        with_properties: &WithOptionsSecResolved,
-    ) -> ConnectorResult<Self> {
-        let info = info.clone();
-        let source_struct = extract_source_struct(&info)?;
-        let format_encode_options_with_secret = LocalSecretManager::global()
-            .fill_secrets(info.format_encode_options, info.format_encode_secret_refs)?;
-        let (options, secret_refs) = with_properties.clone().into_parts();
-        let options_with_secret =
-            LocalSecretManager::global().fill_secrets(options.clone(), secret_refs.clone())?;
-        let format = source_struct.format;
-        let encode = source_struct.encode;
-        // this transformation is needed since there may be config for the protocol
-        // in the future
-        let protocol_config = match format {
-            SourceFormat::Native => ProtocolProperties::Native,
-            SourceFormat::None => ProtocolProperties::None,
-            SourceFormat::Debezium => {
-                let debezium_props = DebeziumProps::from(&format_encode_options_with_secret);
-                ProtocolProperties::Debezium(debezium_props)
-            }
-            SourceFormat::DebeziumMongo => ProtocolProperties::DebeziumMongo,
-            SourceFormat::Maxwell => ProtocolProperties::Maxwell,
-            SourceFormat::Canal => ProtocolProperties::Canal,
-            SourceFormat::Upsert => ProtocolProperties::Upsert,
-            SourceFormat::Plain => ProtocolProperties::Plain,
-            _ => unreachable!(),
-        };
-
-        let encoding_config = match (format, encode) {
-            (SourceFormat::Plain, SourceEncode::Csv) => EncodingProperties::Csv(CsvProperties {
-                delimiter: info.csv_delimiter as u8,
-                has_header: info.csv_has_header,
-            }),
-            (SourceFormat::Plain, SourceEncode::Parquet) => EncodingProperties::Parquet,
-            (SourceFormat::Plain, SourceEncode::Avro)
-            | (SourceFormat::Upsert, SourceEncode::Avro) => {
-                let mut config = AvroProperties {
-                    record_name: if info.proto_message_name.is_empty() {
-                        None
-                    } else {
-                        Some(info.proto_message_name.clone())
-                    },
-                    key_record_name: info.key_message_name.clone(),
-                    map_handling: MapHandling::from_options(&format_encode_options_with_secret)?,
-                    ..Default::default()
-                };
-                config.schema_location = if let Some(schema_arn) =
-                    format_encode_options_with_secret.get(AWS_GLUE_SCHEMA_ARN_KEY)
-                {
-                    risingwave_common::license::Feature::GlueSchemaRegistry
-                        .check_available()
-                        .map_err(anyhow::Error::from)?;
-                    SchemaLocation::Glue {
-                        schema_arn: schema_arn.clone(),
-                        aws_auth_props: serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(format_encode_options_with_secret.clone())
-                                .unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
-                        // The option `mock_config` is not public and we can break compatibility.
-                        mock_config: format_encode_options_with_secret
-                            .get("aws.glue.mock_config")
-                            .cloned(),
-                    }
-                } else if info.use_schema_registry {
-                    SchemaLocation::Confluent {
-                        urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
-                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                            .unwrap(),
-                        topic: get_kafka_topic(with_properties)?.clone(),
-                    }
-                } else {
-                    SchemaLocation::File {
-                        url: info.row_schema_location.clone(),
-                        aws_auth_props: Some(
-                            serde_json::from_value::<AwsAuthProps>(
-                                serde_json::to_value(format_encode_options_with_secret.clone())
-                                    .unwrap(),
-                            )
-                            .map_err(|e| anyhow::anyhow!(e))?,
-                        ),
-                    }
-                };
-                EncodingProperties::Avro(config)
-            }
-            (SourceFormat::Plain, SourceEncode::Protobuf)
-            | (SourceFormat::Upsert, SourceEncode::Protobuf) => {
-                if info.row_schema_location.is_empty() {
-                    bail!("protobuf file location not provided");
-                }
-                let mut config = ProtobufProperties {
-                    message_name: info.proto_message_name.clone(),
-                    use_schema_registry: info.use_schema_registry,
-                    row_schema_location: info.row_schema_location.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                        .unwrap(),
-                    key_message_name: info.key_message_name.clone(),
-                    ..Default::default()
-                };
-                if format == SourceFormat::Upsert {
-                    config.enable_upsert = true;
-                }
-                if info.use_schema_registry {
-                    config
-                        .topic
-                        .clone_from(get_kafka_topic(&options_with_secret)?);
-                    config.client_config =
-                        SchemaRegistryAuth::from(&format_encode_options_with_secret);
-                } else {
-                    config.aws_auth_props = Some(
-                        serde_json::from_value::<AwsAuthProps>(
-                            serde_json::to_value(format_encode_options_with_secret.clone())
-                                .unwrap(),
-                        )
-                        .map_err(|e| anyhow::anyhow!(e))?,
-                    );
-                }
-                EncodingProperties::Protobuf(config)
-            }
-            (SourceFormat::Debezium, SourceEncode::Avro) => {
-                EncodingProperties::Avro(AvroProperties {
-                    record_name: if info.proto_message_name.is_empty() {
-                        None
-                    } else {
-                        Some(info.proto_message_name.clone())
-                    },
-                    key_record_name: info.key_message_name.clone(),
-                    schema_location: SchemaLocation::Confluent {
-                        urls: info.row_schema_location.clone(),
-                        client_config: SchemaRegistryAuth::from(&format_encode_options_with_secret),
-                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                            .unwrap(),
-                        topic: get_kafka_topic(with_properties).unwrap().clone(),
-                    },
-                    ..Default::default()
-                })
-            }
-            (
-                SourceFormat::Plain
-                | SourceFormat::Debezium
-                | SourceFormat::Maxwell
-                | SourceFormat::Canal
-                | SourceFormat::Upsert,
-                SourceEncode::Json,
-            ) => EncodingProperties::Json(JsonProperties {
-                use_schema_registry: info.use_schema_registry,
-                timestamptz_handling: TimestamptzHandling::from_options(
-                    &format_encode_options_with_secret,
-                )?,
-            }),
-            (SourceFormat::DebeziumMongo, SourceEncode::Json) => {
-                EncodingProperties::Json(JsonProperties {
-                    use_schema_registry: false,
-                    timestamptz_handling: None,
-                })
-            }
-            (SourceFormat::Plain, SourceEncode::Bytes) => {
-                EncodingProperties::Bytes(BytesProperties { column_name: None })
-            }
-            (SourceFormat::Native, SourceEncode::Native) => EncodingProperties::Native,
-            (SourceFormat::None, SourceEncode::None) => EncodingProperties::None,
-            (format, encode) => {
-                bail!("Unsupported format {:?} encode {:?}", format, encode);
-            }
-        };
-        Ok(Self {
-            encoding_config,
-            protocol_config,
-        })
     }
 }

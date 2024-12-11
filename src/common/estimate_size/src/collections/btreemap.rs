@@ -279,25 +279,25 @@ mod tests {
         assert!(left.is_empty());
         assert!(right.is_empty());
 
-        map.insert(1, "hello".to_string());
-        map.insert(6, "world".to_string());
+        map.insert(1, "hello".to_owned());
+        map.insert(6, "world".to_owned());
         let (left, right) = map.retain_range(&6..=&6);
         assert_eq!(map.len(), 1);
-        assert_eq!(map.inner[&6], "world".to_string());
+        assert_eq!(map.inner[&6], "world".to_owned());
         assert_eq!(left.len(), 1);
-        assert_eq!(left[&1], "hello".to_string());
+        assert_eq!(left[&1], "hello".to_owned());
         assert!(right.is_empty());
 
-        map.insert(8, "risingwave".to_string());
-        map.insert(3, "great".to_string());
-        map.insert(0, "wooow".to_string());
+        map.insert(8, "risingwave".to_owned());
+        map.insert(3, "great".to_owned());
+        map.insert(0, "wooow".to_owned());
         let (left, right) = map.retain_range(&2..=&7);
         assert_eq!(map.len(), 2);
-        assert_eq!(map.inner[&3], "great".to_string());
-        assert_eq!(map.inner[&6], "world".to_string());
+        assert_eq!(map.inner[&3], "great".to_owned());
+        assert_eq!(map.inner[&6], "world".to_owned());
         assert_eq!(left.len(), 1);
-        assert_eq!(left[&0], "wooow".to_string());
+        assert_eq!(left[&0], "wooow".to_owned());
         assert_eq!(right.len(), 1);
-        assert_eq!(right[&8], "risingwave".to_string());
+        assert_eq!(right[&8], "risingwave".to_owned());
     }
 }
