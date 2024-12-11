@@ -83,6 +83,7 @@ tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
+url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
