@@ -82,7 +82,6 @@ pub use utils::*;
 pub use values::*;
 
 use self::log_row_seq_scan::LogStoreRowSeqScanExecutorBuilder;
-use self::test_utils::{BlockExecutorBuilder, BusyLoopExecutorBuilder};
 
 register_executor!(RowSeqScan, RowSeqScanExecutorBuilder);
 register_executor!(Insert, InsertExecutor);
@@ -116,8 +115,4 @@ register_executor!(FileScan, FileScanExecutorBuilder);
 register_executor!(IcebergScan, IcebergScanExecutorBuilder);
 register_executor!(PostgresQuery, PostgresQueryExecutorBuilder);
 register_executor!(MysqlQuery, MySqlQueryExecutorBuilder);
-
-// Following executors are only for testing.
-register_executor!(BlockExecutor, BlockExecutorBuilder);
-register_executor!(BusyLoopExecutor, BusyLoopExecutorBuilder);
 register_executor!(LogRowSeqScan, LogStoreRowSeqScanExecutorBuilder);

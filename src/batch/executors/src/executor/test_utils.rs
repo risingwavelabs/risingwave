@@ -14,11 +14,8 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use std::collections::VecDeque;
-
 use assert_matches::assert_matches;
-use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
@@ -29,12 +26,9 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
-use super::{BoxedExecutorBuilder, ExecutorBuilder};
-use crate::error::{BatchError, Result};
+use crate::error::Result;
 use crate::exchange_source::ExchangeSourceImpl;
-use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
-};
+use crate::executor::{BoxedExecutor, CreateSource, LookupExecutorBuilder};
 use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
@@ -115,58 +109,6 @@ pub fn gen_projected_data(
     }
 
     ret
-}
-
-/// Mock the input of executor.
-/// You can bind one or more `MockExecutor` as the children of the executor to test,
-/// (`HashAgg`, e.g), so that allow testing without instantiating real `SeqScan`s and real storage.
-pub struct MockExecutor {
-    chunks: VecDeque<DataChunk>,
-    schema: Schema,
-    identity: String,
-}
-
-impl MockExecutor {
-    pub fn new(schema: Schema) -> Self {
-        Self {
-            chunks: VecDeque::new(),
-            schema,
-            identity: "MockExecutor".to_string(),
-        }
-    }
-
-    pub fn with_chunk(chunk: DataChunk, schema: Schema) -> Self {
-        let mut ret = Self::new(schema);
-        ret.add(chunk);
-        ret
-    }
-
-    pub fn add(&mut self, chunk: DataChunk) {
-        self.chunks.push_back(chunk);
-    }
-}
-
-impl Executor for MockExecutor {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn identity(&self) -> &str {
-        &self.identity
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
-    }
-}
-
-impl MockExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    async fn do_execute(self: Box<Self>) {
-        for data_chunk in self.chunks {
-            yield data_chunk;
-        }
-    }
 }
 
 /// if the input from two child executor is same(considering order),
@@ -289,79 +231,6 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
 
     fn reset(&mut self) {
         self.datums = vec![];
-    }
-}
-
-pub struct BlockExecutorBuilder {}
-
-impl BoxedExecutorBuilder for BlockExecutorBuilder {
-    async fn new_boxed_executor(
-        _source: &ExecutorBuilder<'_>,
-        _inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor> {
-        Ok(Box::new(BlockExecutor {}))
-    }
-}
-
-pub struct BlockExecutor {}
-
-impl Executor for BlockExecutor {
-    fn schema(&self) -> &Schema {
-        unimplemented!("Not used in test")
-    }
-
-    fn identity(&self) -> &str {
-        "BlockExecutor"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute().boxed()
-    }
-}
-
-impl BlockExecutor {
-    #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn do_execute(self) {
-        // infinite loop to block
-        #[allow(clippy::empty_loop)]
-        loop {}
-    }
-}
-
-pub struct BusyLoopExecutorBuilder {}
-
-impl BoxedExecutorBuilder for BusyLoopExecutorBuilder {
-    async fn new_boxed_executor(
-        _source: &ExecutorBuilder<'_>,
-        _inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor> {
-        Ok(Box::new(BusyLoopExecutor {}))
-    }
-}
-
-pub struct BusyLoopExecutor {}
-
-impl Executor for BusyLoopExecutor {
-    fn schema(&self) -> &Schema {
-        unimplemented!("Not used in test")
-    }
-
-    fn identity(&self) -> &str {
-        "BusyLoopExecutor"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute().boxed()
-    }
-}
-
-impl BusyLoopExecutor {
-    #[try_stream(ok = DataChunk, error = BatchError)]
-    async fn do_execute(self) {
-        // infinite loop to generate data
-        loop {
-            yield DataChunk::new_dummy(1);
-        }
     }
 }
 

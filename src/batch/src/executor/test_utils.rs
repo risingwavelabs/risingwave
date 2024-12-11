@@ -1,6 +1,15 @@
-use risingwave_common::array::DataChunk;
+use std::collections::VecDeque;
 
-use crate::error::Result;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::Schema;
+
+use super::{
+    register_executor, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
+};
+use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSource;
 use crate::task::TaskId;
 
@@ -26,5 +35,130 @@ impl ExchangeSource for FakeExchangeSource {
 
     fn get_task_id(&self) -> TaskId {
         TaskId::default()
+    }
+}
+
+// Following executors are only for testing.
+register_executor!(BlockExecutor, BlockExecutor);
+register_executor!(BusyLoopExecutor, BusyLoopExecutor);
+
+/// Mock the input of executor.
+/// You can bind one or more `MockExecutor` as the children of the executor to test,
+/// (`HashAgg`, e.g), so that allow testing without instantiating real `SeqScan`s and real storage.
+pub struct MockExecutor {
+    chunks: VecDeque<DataChunk>,
+    schema: Schema,
+    identity: String,
+}
+
+impl MockExecutor {
+    pub fn new(schema: Schema) -> Self {
+        Self {
+            chunks: VecDeque::new(),
+            schema,
+            identity: "MockExecutor".to_string(),
+        }
+    }
+
+    pub fn with_chunk(chunk: DataChunk, schema: Schema) -> Self {
+        let mut ret = Self::new(schema);
+        ret.add(chunk);
+        ret
+    }
+
+    pub fn add(&mut self, chunk: DataChunk) {
+        self.chunks.push_back(chunk);
+    }
+}
+
+impl Executor for MockExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl MockExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
+    async fn do_execute(self: Box<Self>) {
+        for data_chunk in self.chunks {
+            yield data_chunk;
+        }
+    }
+}
+
+pub struct BlockExecutor;
+
+impl Executor for BlockExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BlockExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BlockExecutor {
+    #[try_stream(ok = DataChunk, error = BatchError)]
+    async fn do_execute(self) {
+        // infinite loop to block
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
+}
+
+impl BoxedExecutorBuilder for BlockExecutor {
+    async fn new_boxed_executor(
+        _source: &ExecutorBuilder<'_>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BlockExecutor))
+    }
+}
+
+pub struct BusyLoopExecutor;
+
+impl Executor for BusyLoopExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BusyLoopExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BusyLoopExecutor {
+    #[try_stream(ok = DataChunk, error = BatchError)]
+    async fn do_execute(self) {
+        // infinite loop to generate data
+        loop {
+            yield DataChunk::new_dummy(1);
+        }
+    }
+}
+
+impl BoxedExecutorBuilder for BusyLoopExecutor {
+    async fn new_boxed_executor(
+        _source: &ExecutorBuilder<'_>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BusyLoopExecutor))
     }
 }
