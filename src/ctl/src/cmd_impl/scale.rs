@@ -13,7 +13,5 @@
 // limitations under the License.
 
 mod resize;
-mod check;
 
 pub use resize::*;
-pub use check::*;

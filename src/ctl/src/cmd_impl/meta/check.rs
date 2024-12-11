@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backup_meta;
-mod check;
-mod cluster_info;
-mod connection;
-mod pause_resume;
-mod reschedule;
-mod serving;
+use std::process::exit;
 
-pub use backup_meta::*;
-pub use check::*;
-pub use cluster_info::*;
-pub use connection::*;
-pub use pause_resume::*;
-pub use reschedule::*;
-pub use serving::*;
+use risingwave_meta::controller::catalog::CatalogController;
+use sea_orm::TransactionTrait;
+
+pub async fn graph_check(endpoint: String) -> anyhow::Result<()> {
+    let conn = sea_orm::Database::connect(sea_orm::ConnectOptions::new(endpoint)).await?;
+    let txn = conn.begin().await?;
+    match CatalogController::graph_check(&txn).await {
+        Ok(_) => {
+            println!("all integrity check passed!");
+            exit(0);
+        }
+        Err(e) => {
+            println!("integrity check failed! {:?}", e);
+            exit(1);
+        }
+    }
+}

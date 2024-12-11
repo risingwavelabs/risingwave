@@ -317,13 +317,6 @@ enum TableCommands {
 
 #[derive(Subcommand, Debug)]
 enum ScaleCommands {
-    /// Performing an integrity check for scaling.
-    #[clap(verbatim_doc_comment)]
-    Check {
-        /// SQL endpoint
-        #[clap(long, required = true)]
-        endpoint: String,
-    },
     /// Mark a compute node as unschedulable
     #[clap(verbatim_doc_comment)]
     Cordon {
@@ -450,6 +443,14 @@ enum MetaCommands {
         /// If privatelink is used, specify `connection.id` instead of `connection.name`
         #[clap(long)]
         props: String,
+    },
+
+    /// Performing graph check for scaling.
+    #[clap(verbatim_doc_comment)]
+    GraphCheck {
+        /// SQL endpoint
+        #[clap(long, required = true)]
+        endpoint: String,
     },
 }
 
@@ -824,15 +825,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
+        Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
+            cmd_impl::meta::graph_check(endpoint).await?
+        }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
             cmd_impl::profile::cpu_profile(context, sleep).await?
         }
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
-        }
-        Commands::Scale(ScaleCommands::Check { endpoint }) => {
-            cmd_impl::scale::integrity_check(context, endpoint).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
