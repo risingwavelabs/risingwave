@@ -22,11 +22,11 @@ pub async fn graph_check(endpoint: String) -> anyhow::Result<()> {
     let txn = conn.begin().await?;
     match CatalogController::graph_check(&txn).await {
         Ok(_) => {
-            println!("all integrity check passed!");
+            println!("integrity check passed!");
             exit(0);
         }
-        Err(e) => {
-            println!("integrity check failed! {:?}", e);
+        Err(_) => {
+            println!("integrity check failed!");
             exit(1);
         }
     }
