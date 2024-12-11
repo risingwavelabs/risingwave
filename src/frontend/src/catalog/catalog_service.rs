@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::ddl_service::replace_job_plan::{ReplaceJob, ReplaceSource, ReplaceTable};
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
     create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
@@ -97,6 +98,13 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
         job_type: TableJobType,
+    ) -> Result<()>;
+
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
     ) -> Result<()>;
 
     async fn create_index(
@@ -311,7 +319,34 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         let version = self
             .meta_client
-            .replace_table(source, table, graph, mapping, job_type)
+            .replace_job(
+                graph,
+                mapping,
+                ReplaceJob::ReplaceTable(ReplaceTable {
+                    source,
+                    table: Some(table),
+                    job_type: job_type as _,
+                }),
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_source(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_job(
+                graph,
+                mapping,
+                ReplaceJob::ReplaceSource(ReplaceSource {
+                    source: Some(source),
+                }),
+            )
             .await?;
         self.wait_version(version).await
     }

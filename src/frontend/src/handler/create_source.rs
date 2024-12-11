@@ -66,6 +66,7 @@ use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, ColumnDef, CreateSourceStatement, Encode, Format,
@@ -1802,18 +1803,7 @@ pub async fn handle_create_source(
     let catalog_writer = session.catalog_writer()?;
 
     if is_shared {
-        let graph = {
-            let context = OptimizerContext::from_handler_args(handler_args);
-            let source_node = LogicalSource::with_catalog(
-                Rc::new(source_catalog),
-                SourceNodeKind::CreateSharedSource,
-                context.into(),
-                None,
-            )?;
-
-            let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
-            build_graph(stream_plan)?
-        };
+        let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
         catalog_writer.create_source(source, Some(graph)).await?;
     } else {
         // For other sources we don't create a streaming job
@@ -1821,6 +1811,23 @@ pub async fn handle_create_source(
     }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
+}
+
+pub(super) fn generate_stream_graph_for_source(
+    handler_args: HandlerArgs,
+    source_catalog: SourceCatalog,
+) -> Result<PbStreamFragmentGraph> {
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let source_node = LogicalSource::with_catalog(
+        Rc::new(source_catalog),
+        SourceNodeKind::CreateSharedSource,
+        context.into(),
+        None,
+    )?;
+
+    let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+    let graph = build_graph(stream_plan)?;
+    Ok(graph)
 }
 
 fn format_to_prost(format: &Format) -> FormatType {
