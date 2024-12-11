@@ -332,7 +332,7 @@ struct JdbcUrl {
 }
 
 fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
-    if url.starts_with("jdbc:postgresql") {
+    if !url.starts_with("jdbc:postgresql") {
         bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
     }
 
