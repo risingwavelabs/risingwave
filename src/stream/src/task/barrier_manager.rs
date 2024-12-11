@@ -405,7 +405,10 @@ impl LocalBarrierWorker {
                             self.on_epoch_completed(database_id, partial_graph_id, barrier.epoch.prev, result);
                         }
                         Err(err) => {
-                            self.on_database_failure(database_id, None, err, "failed to complete epoch");
+                            // TODO: may only report as database failure instead of reset the stream
+                            // when the HummockUploader support partial recovery. Currently the HummockUploader
+                            // enter `Err` state and stop working until a global recovery to clear the uploader.
+                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {} {:?} {:?}", database_id, partial_graph_id.0, barrier.epoch, err.as_report())));
                         }
                     }
                 },
