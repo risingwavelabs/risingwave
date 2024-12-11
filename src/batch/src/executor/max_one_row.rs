@@ -19,7 +19,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::task::BatchTaskContext;
 
 pub struct MaxOneRowExecutor {
     child: BoxedExecutor,
@@ -28,10 +27,9 @@ pub struct MaxOneRowExecutor {
     identity: String,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for MaxOneRowExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();

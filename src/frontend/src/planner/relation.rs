@@ -126,7 +126,7 @@ impl Planner {
                         .clone()
                         .into_iter()
                         .enumerate()
-                        .map(|(i, column)| (column.name().to_string(), (i, column)))
+                        .map(|(i, column)| (column.name().to_owned(), (i, column)))
                         .collect();
                     let exprs = scan
                         .table_catalog()

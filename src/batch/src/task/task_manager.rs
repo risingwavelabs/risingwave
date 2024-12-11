@@ -30,18 +30,17 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
+use super::BatchTaskContext;
 use crate::error::Result;
 use crate::monitor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
-use crate::task::{
-    BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
-};
+use crate::task::{BatchTaskExecution, StateReporter, TaskId, TaskOutput, TaskOutputId};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
-    tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution<ComputeNodeContext>>>>>,
+    tasks: Arc<Mutex<HashMap<TaskId, Arc<BatchTaskExecution>>>>,
 
     /// Runtime for the batch manager.
     runtime: Arc<BackgroundShutdownRuntime>,
@@ -93,7 +92,7 @@ impl BatchManager {
         tid: &PbTaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
-        context: ComputeNodeContext,
+        context: Arc<dyn BatchTaskContext>, // ComputeNodeContext
         state_reporter: StateReporter,
         tracing_context: TracingContext,
         expr_context: ExprContext,
@@ -138,6 +137,8 @@ impl BatchManager {
         plan: PlanFragment,
     ) -> Result<()> {
         use risingwave_hummock_sdk::test_batch_query_epoch;
+
+        use crate::task::ComputeNodeContext;
 
         self.fire_task(
             tid,
