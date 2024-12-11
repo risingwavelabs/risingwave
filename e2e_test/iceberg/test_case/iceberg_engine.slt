@@ -15,6 +15,11 @@ select * from t;
 ----
 1 xxx
 
+query ??
+select * from t for system_time as of '2222-12-10 11:48:06';
+----
+1 xxx
+
 statement ok
 DROP TABLE t;
 

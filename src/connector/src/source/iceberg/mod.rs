@@ -293,15 +293,12 @@ impl IcebergSplitEnumerator {
                 let snapshot = table
                     .metadata()
                     .snapshots()
-                    .map(|snapshot| snapshot.timestamp().map(|ts| ts.timestamp_millis()))
-                    .collect::<Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .filter(|&snapshot_millis| snapshot_millis <= timestamp)
-                    .max_by_key(|&snapshot_millis| snapshot_millis);
+                    .filter(|snapshot| snapshot.timestamp_ms() <= timestamp)
+                    .max_by_key(|snapshot| snapshot.timestamp_ms());
                 match snapshot {
-                    Some(snapshot) => snapshot,
+                    Some(snapshot) => snapshot.snapshot_id(),
                     None => {
-                        // convert unix time to human readable time
+                        // convert unix time to human-readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
                         if time.is_some() {
                             bail!("Cannot find a snapshot older than {}", time.unwrap());
