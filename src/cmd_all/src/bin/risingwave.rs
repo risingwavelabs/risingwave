@@ -216,7 +216,7 @@ where
 }
 
 #[cfg_attr(coverage, coverage(off))]
-fn main() {
+fn mian() {
     let (component, matches) = parse_args(std::env::args_os())
         .map_err(|e| e.exit())
         .unwrap();
