@@ -325,14 +325,14 @@ impl IcebergCompactionClient {
             .job_driver(JobDriver::SparkSubmit(
                 SparkSubmitBuilder::default()
                     .entry_point(self.config.entrypoint.clone())
-                    .entry_point_arguments(catalog)
+                    .entry_point_arguments(catalog.clone())
                     .entry_point_arguments(db)
                     .entry_point_arguments(table)
                     .spark_submit_parameters(
                         catalog_config
                             .iter()
                             .map(|(key, value)| {
-                                format!("--conf spark.sql.catalog.iceberg.{}={}", key, value)
+                                format!("--conf spark.sql.catalog.{}.{}={}", catalog, key, value)
                             })
                             .join(" "),
                     )
