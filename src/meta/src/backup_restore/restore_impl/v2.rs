@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
@@ -106,8 +107,21 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
-        insert_models(metadata.objects.clone(), db).await?;
-        insert_models(metadata.user_privileges.clone(), db).await?;
+        // The sort is required to pass table's foreign key check.
+        insert_models(
+            metadata.objects.iter().sorted_by_key(|o| o.oid).cloned(),
+            db,
+        )
+        .await?;
+        insert_models(
+            metadata
+                .user_privileges
+                .iter()
+                .sorted_by_key(|u| u.id)
+                .cloned(),
+            db,
+        )
+        .await?;
         insert_models(metadata.object_dependencies.clone(), db).await?;
         insert_models(metadata.databases.clone(), db).await?;
         insert_models(metadata.schemas.clone(), db).await?;
