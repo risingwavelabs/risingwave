@@ -63,7 +63,7 @@ impl RedisPipe {
             (RedisPipe::Single(pipe), RedisConn::Single(conn)) => {
                 Ok(pipe.query_async(conn).await?)
             }
-            _ => Err(SinkError::Redis("RedisPipe and RedisConn not match".to_string()).into()),
+            _ => Err(SinkError::Redis("RedisPipe and RedisConn not match".to_owned()).into()),
         }
     }
 
@@ -115,7 +115,7 @@ impl RedisCommon {
                                 Ok(s)
                             } else {
                                 Err(SinkError::Redis(
-                                    "redis.url must be array of string".to_string(),
+                                    "redis.url must be array of string".to_owned(),
                                 )
                                 .into())
                             }
@@ -128,7 +128,7 @@ impl RedisCommon {
                         RedisPipe::Cluster(redis::cluster::cluster_pipe()),
                     ))
                 } else {
-                    Err(SinkError::Redis("redis.url must be array or string".to_string()).into())
+                    Err(SinkError::Redis("redis.url must be array or string".to_owned()).into())
                 }
             }
             Err(_) => {
@@ -299,7 +299,7 @@ impl FormattedSink for RedisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_string()))?;
+        let k = k.ok_or_else(|| SinkError::Redis("The redis key cannot be null".to_owned()))?;
         match v {
             Some(v) => self.pipe.set(k, v),
             None => self.pipe.del(k),
@@ -347,8 +347,8 @@ impl RedisSinkWriter {
             format_desc,
             schema.clone(),
             pk_indices.clone(),
-            "d1".to_string(),
-            "t1".to_string(),
+            "d1".to_owned(),
+            "t1".to_owned(),
             "NO_TOPIC",
         )
         .await?;
@@ -394,15 +394,15 @@ mod test {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "id".to_string(),
+                name: "id".to_owned(),
                 sub_fields: vec![],
-                type_name: "string".to_string(),
+                type_name: "string".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "name".to_string(),
+                name: "name".to_owned(),
                 sub_fields: vec![],
-                type_name: "string".to_string(),
+                type_name: "string".to_owned(),
             },
         ]);
 
@@ -467,23 +467,23 @@ mod test {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "id".to_string(),
+                name: "id".to_owned(),
                 sub_fields: vec![],
-                type_name: "string".to_string(),
+                type_name: "string".to_owned(),
             },
             Field {
                 data_type: DataType::Varchar,
-                name: "name".to_string(),
+                name: "name".to_owned(),
                 sub_fields: vec![],
-                type_name: "string".to_string(),
+                type_name: "string".to_owned(),
             },
         ]);
 
         let mut btree_map = BTreeMap::default();
-        btree_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
+        btree_map.insert(KEY_FORMAT.to_owned(), "key-{id}".to_owned());
         btree_map.insert(
-            VALUE_FORMAT.to_string(),
-            "values:{id:{id},name:{name}}".to_string(),
+            VALUE_FORMAT.to_owned(),
+            "values:{id:{id},name:{name}}".to_owned(),
         );
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,

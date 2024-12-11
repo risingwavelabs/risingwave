@@ -22,7 +22,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::task::BatchTaskContext;
 
 pub struct ExpandExecutor {
     column_subsets: Vec<Vec<usize>>,
@@ -90,10 +89,9 @@ impl ExpandExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ExpandExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let expand_node = try_match_expand!(
@@ -166,7 +164,7 @@ mod tests {
             column_subsets,
             child: Box::new(mock_executor),
             schema: expand_schema,
-            identity: "ExpandExecutor".to_string(),
+            identity: "ExpandExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
         let mut stream = expand_executor.execute();

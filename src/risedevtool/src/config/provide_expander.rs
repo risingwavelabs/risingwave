@@ -35,7 +35,7 @@ impl ProvideExpander {
             let id = id
                 .as_str()
                 .ok_or_else(|| anyhow!("expect id to be a string"))?;
-            all_items.insert(id.to_string(), Yaml::Hash(v.clone()));
+            all_items.insert(id.to_owned(), Yaml::Hash(v.clone()));
         }
         Ok(Self {
             all_items: Self::remove_provide(all_items)?,
@@ -88,7 +88,7 @@ impl ProvideExpander {
                             )
                         });
                         return Ok::<_, anyhow::Error>((
-                            Yaml::String(k.to_string()),
+                            Yaml::String(k.to_owned()),
                             Yaml::Array(array.try_collect()?),
                         ));
                     }

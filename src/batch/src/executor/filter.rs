@@ -24,7 +24,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 pub struct FilterExecutor {
     expr: BoxedExpression,
@@ -76,10 +75,9 @@ impl FilterExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for FilterExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [input]: [_; 1] = inputs.try_into().unwrap();
@@ -156,7 +154,7 @@ mod tests {
         let filter_executor = Box::new(FilterExecutor {
             expr: build_from_pretty("(greater_than:boolean $0:int4[] {2}:int4[])"),
             child: Box::new(mock_executor),
-            identity: "FilterExecutor".to_string(),
+            identity: "FilterExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
 
@@ -209,7 +207,7 @@ mod tests {
         let filter_executor = Box::new(FilterExecutor {
             expr: build_from_pretty("(equal:boolean $0:int4 $1:int4)"),
             child: Box::new(mock_executor),
-            identity: "FilterExecutor".to_string(),
+            identity: "FilterExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
         let fields = &filter_executor.schema().fields;

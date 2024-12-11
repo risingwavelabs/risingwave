@@ -27,6 +27,7 @@ use either::Either;
 use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
+use replace_job_plan::ReplaceJob;
 use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
@@ -283,7 +284,7 @@ impl MetaClient {
                         host: Some(addr.to_protobuf()),
                         property: Some(property.clone()),
                         resource: Some(risingwave_pb::common::worker_node::Resource {
-                            rw_version: RW_VERSION.to_string(),
+                            rw_version: RW_VERSION.to_owned(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
                         }),
@@ -443,7 +444,7 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
@@ -517,7 +518,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = AlterNameRequest {
             object: Some(object),
-            new_name: name.to_string(),
+            new_name: name.to_owned(),
         };
         let resp = self.inner.alter_name(request).await?;
         Ok(resp
@@ -613,24 +614,20 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn replace_table(
+    pub async fn replace_job(
         &self,
-        source: Option<PbSource>,
-        table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
-        job_type: PbTableJobType,
+        replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
-        let request = ReplaceTablePlanRequest {
-            plan: Some(ReplaceTablePlan {
-                source,
-                table: Some(table),
+        let request = ReplaceJobPlanRequest {
+            plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
-                job_type: job_type as _,
+                replace_job: Some(replace_job),
             }),
         };
-        let resp = self.inner.replace_table_plan(request).await?;
+        let resp = self.inner.replace_job_plan(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp
             .version
@@ -710,7 +707,7 @@ impl MetaClient {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
     ) -> Result<WaitVersion> {
         let request = DropSinkRequest {
             sink_id,
@@ -2113,7 +2110,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
-            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
+            ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }

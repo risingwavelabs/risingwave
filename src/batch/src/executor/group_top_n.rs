@@ -36,7 +36,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 /// Group Top-N Executor
 ///
@@ -90,10 +89,9 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -294,7 +292,7 @@ mod tests {
                 with_ties: false,
                 group_key: vec![2],
                 group_key_types: vec![DataType::Int32],
-                identity: "GroupTopNExecutor".to_string(),
+                identity: "GroupTopNExecutor".to_owned(),
                 chunk_size: CHUNK_SIZE,
                 mem_ctx,
             })

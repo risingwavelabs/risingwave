@@ -200,6 +200,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let input = input.inspect_ok(move |msg| {
             if let Message::Chunk(c) = msg {
                 metrics.sink_input_row_count.inc_by(c.capacity() as u64);
+                metrics.sink_input_bytes.inc_by(c.estimated_size() as u64);
             }
         });
 
@@ -482,12 +483,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let log_store_read_rows = GLOBAL_SINK_METRICS
             .log_store_read_rows
             .with_guarded_label_values(&labels);
+        let log_store_read_bytes = GLOBAL_SINK_METRICS
+            .log_store_read_bytes
+            .with_guarded_label_values(&labels);
         let log_store_latest_read_epoch = GLOBAL_SINK_METRICS
             .log_store_latest_read_epoch
             .with_guarded_label_values(&labels);
         let metrics = LogReaderMetrics {
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_read_bytes,
             log_store_reader_wait_new_future_duration_ns,
         };
 
@@ -646,7 +651,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices,
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(
@@ -775,7 +780,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices: vec![0, 1],
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(
@@ -877,7 +882,7 @@ mod test {
         let info = ExecutorInfo {
             schema,
             pk_indices,
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_owned(),
         };
 
         let sink_executor = SinkExecutor::new(

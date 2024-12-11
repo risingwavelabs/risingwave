@@ -38,7 +38,7 @@ impl Rule for TableFunctionToFileScanRule {
             let fields = st
                 .types()
                 .zip_eq_debug(st.names())
-                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_string()))
+                .map(|(data_type, name)| Field::with_name(data_type.clone(), name.to_owned()))
                 .collect_vec();
 
             let schema = Schema::new(fields);
@@ -68,8 +68,8 @@ impl Rule for TableFunctionToFileScanRule {
                 LogicalFileScan::new(
                     logical_table_function.ctx(),
                     schema,
-                    "parquet".to_string(),
-                    "s3".to_string(),
+                    "parquet".to_owned(),
+                    "s3".to_owned(),
                     s3_region,
                     s3_access_key,
                     s3_secret_key,

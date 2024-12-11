@@ -37,7 +37,7 @@ use risingwave_connector::sink::{
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSink, PbSource, Table};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
+use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{MergeNode, StreamFragmentGraph, StreamNode};
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
@@ -179,12 +179,11 @@ pub async fn gen_sink_plan(
     };
 
     if sink_into_table_name.is_some() {
-        let prev =
-            resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
+        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
 
         if prev.is_some() {
             return Err(RwError::from(ErrorCode::BindError(
-                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_string(),
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
             )));
         }
     }
@@ -231,7 +230,7 @@ pub async fn gen_sink_plan(
                 true
             } else {
                 return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
                 )
                 .into());
             }
@@ -479,7 +478,7 @@ pub async fn handle_create_sink(
         if has_order_by {
             plan.ctx().warn_to_user(
                 r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -521,12 +520,16 @@ pub async fn handle_create_sink(
         // for new creating sink, we don't have a unique identity because the sink id is not generated yet.
         hijack_merger_for_target_table(&mut graph, &columns_without_rw_timestamp, &sink, None)?;
 
-        target_table_replace_plan = Some(ReplaceTablePlan {
-            source,
-            table: Some(table),
+        target_table_replace_plan = Some(ReplaceJobPlan {
+            replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
+                replace_job_plan::ReplaceTable {
+                    table: Some(table),
+                    source,
+                    job_type: TableJobType::General as _,
+                },
+            )),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
-            job_type: TableJobType::General as _,
         });
     }
 
@@ -659,7 +662,7 @@ pub(crate) fn insert_merger_to_union_with_project(
             }],
             identity: uniq_identity
                 .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
-                .to_string(),
+                .to_owned(),
             fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()
@@ -946,7 +949,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_owned();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

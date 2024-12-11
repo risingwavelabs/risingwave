@@ -131,8 +131,8 @@ pub fn check_format_encode(
     ) else {
         return Err(ErrorCode::NotSupported(
             "altering a legacy source which is not created using `FORMAT .. ENCODE ..` Clause"
-                .to_string(),
-            "try this feature by creating a fresh source".to_string(),
+                .to_owned(),
+            "try this feature by creating a fresh source".to_owned(),
         )
         .into());
     };
@@ -220,8 +220,8 @@ pub async fn handle_alter_source_with_sr(
 
     if source.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
-            "alter table with connector using ALTER SOURCE statement".to_string(),
-            "try to use ALTER TABLE instead".to_string(),
+            "alter table with connector using ALTER SOURCE statement".to_owned(),
+            "try to use ALTER TABLE instead".to_owned(),
         )
         .into());
     };
@@ -233,8 +233,8 @@ pub async fn handle_alter_source_with_sr(
 
     if !schema_has_schema_registry(&format_encode) {
         return Err(ErrorCode::NotSupported(
-            "altering a source without schema registry".to_string(),
-            "try `ALTER SOURCE .. ADD COLUMN ...` instead".to_string(),
+            "altering a source without schema registry".to_owned(),
+            "try `ALTER SOURCE .. ADD COLUMN ...` instead".to_owned(),
         )
         .into());
     }

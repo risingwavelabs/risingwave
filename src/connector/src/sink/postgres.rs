@@ -82,7 +82,7 @@ fn default_max_batch_rows() -> usize {
 }
 
 fn default_schema() -> String {
-    "public".to_string()
+    "public".to_owned()
 }
 
 impl PostgresConfig {
@@ -556,15 +556,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "a".to_string(),
+                name: "a".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
             Field {
                 data_type: DataType::Int32,
-                name: "b".to_string(),
+                name: "b".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
         ]);
         let table_name = "test_table";
@@ -580,15 +580,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "a".to_string(),
+                name: "a".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
             Field {
                 data_type: DataType::Int32,
-                name: "b".to_string(),
+                name: "b".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
         ]);
         let table_name = "test_table";
@@ -601,15 +601,15 @@ mod tests {
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
-                name: "a".to_string(),
+                name: "a".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
             Field {
                 data_type: DataType::Int32,
-                name: "b".to_string(),
+                name: "b".to_owned(),
                 sub_fields: vec![],
-                type_name: "".to_string(),
+                type_name: "".to_owned(),
             },
         ]);
         let table_name = "test_table";

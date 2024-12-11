@@ -749,7 +749,7 @@ impl ListValue {
             fn parse_array(&mut self) -> Result<ListValue, String> {
                 self.skip_whitespace();
                 if !self.try_consume('{') {
-                    return Err("Array value must start with \"{\"".to_string());
+                    return Err("Array value must start with \"{\"".to_owned());
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
@@ -775,7 +775,7 @@ impl ListValue {
                             break;
                         }
                         None => return Err(Self::eoi()),
-                        _ => return Err("Unexpected array element.".to_string()),
+                        _ => return Err("Unexpected array element.".to_owned()),
                     }
                 }
                 Ok(ListValue::new(builder.finish()))
@@ -813,8 +813,8 @@ impl ListValue {
                                 Cow::Borrowed(trimmed)
                             };
                         }
-                        (_, '{') => return Err("Unexpected \"{\" character.".to_string()),
-                        (_, '"') => return Err("Unexpected array element.".to_string()),
+                        (_, '{') => return Err("Unexpected \"{\" character.".to_owned()),
+                        (_, '"') => return Err("Unexpected array element.".to_owned()),
                         _ => {}
                     }
                 };
@@ -921,7 +921,7 @@ impl ListValue {
             fn expect_end(&mut self) -> Result<(), String> {
                 self.skip_whitespace();
                 match self.peek() {
-                    Some(_) => Err("Junk after closing right brace.".to_string()),
+                    Some(_) => Err("Junk after closing right brace.".to_owned()),
                     None => Ok(()),
                 }
             }

@@ -48,7 +48,7 @@ pub(crate) fn report_event(
         connector_name,
         component,
         attributes,
-        TELEMETRY_META_REPORT_TYPE.to_string(),
+        TELEMETRY_META_REPORT_TYPE.to_owned(),
     );
 }
 
@@ -137,7 +137,7 @@ impl TelemetryToProtobuf for MetaTelemetryReport {
             stream_job_count: self.streaming_job_count as u32,
             stream_jobs: self.job_desc.into_iter().map(|job| job.into()).collect(),
             cluster_type: self.cluster_type as i32,
-            object_store_media_type: self.object_store_media_type.to_string(),
+            object_store_media_type: self.object_store_media_type.to_owned(),
         };
         pb_report.encode_to_vec()
     }
@@ -203,8 +203,8 @@ impl TelemetryReportCreator for MetaReportCreator {
 
         Ok(MetaTelemetryReport {
             rw_version: RwVersion {
-                version: RW_VERSION.to_string(),
-                git_sha: GIT_SHA.to_string(),
+                version: RW_VERSION.to_owned(),
+                git_sha: GIT_SHA.to_owned(),
             },
             base: TelemetryReportBase {
                 tracking_id,

@@ -128,7 +128,7 @@ pub async fn compute_node_serve(
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
             is_unschedulable: false,
-            internal_rpc_host_addr: "".to_string(),
+            internal_rpc_host_addr: "".to_owned(),
             node_label: Some(opts.node_label.clone()),
         },
         &config.meta,
@@ -220,7 +220,7 @@ pub async fn compute_node_serve(
 
     LocalSecretManager::init(
         opts.temp_secret_file_dir,
-        meta_client.cluster_id().to_string(),
+        meta_client.cluster_id().to_owned(),
         worker_id,
     );
 
@@ -563,7 +563,7 @@ fn print_memory_config(
         if embedded_compactor_enabled {
             convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
         } else {
-            "Not enabled".to_string()
+            "Not enabled".to_owned()
         },
         convert(compute_memory_bytes as _),
         convert(reserved_memory_bytes as _),
