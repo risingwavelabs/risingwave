@@ -14,6 +14,7 @@
 
 use std::sync::LazyLock;
 
+use risingwave_common::array::stream_record::RecordType;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::log::LogSuppresser;
@@ -133,12 +134,7 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
 }
 
 impl SourceStreamChunkRowWriter<'_> {
-    fn append_op(&mut self, op: Op) {
-        self.builder.op_builder.push(op);
-        self.builder.vis_builder.append(self.visible);
-    }
-
-    fn do_action<'a, A: OpAction>(
+    fn do_action<'a, A: RowWriterAction>(
         &'a mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output<'a>>,
     ) -> AccessResult<()> {
@@ -301,7 +297,12 @@ impl SourceStreamChunkRowWriter<'_> {
 
         match result {
             Ok(_) => {
-                A::finish(self);
+                // commit the action by appending `Op`s and visibility
+                for op in A::RECORD_TYPE.ops() {
+                    self.builder.op_builder.push(*op);
+                    self.builder.vis_builder.append(self.visible);
+                }
+
                 Ok(())
             }
             Err(e) => {
@@ -325,7 +326,7 @@ impl SourceStreamChunkRowWriter<'_> {
     where
         D: Into<DatumCow<'a>>,
     {
-        self.do_action::<OpActionInsert>(|desc| f(desc).map(Into::into))
+        self.do_action::<InsertAction>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
@@ -340,7 +341,7 @@ impl SourceStreamChunkRowWriter<'_> {
     where
         D: Into<DatumCow<'a>>,
     {
-        self.do_action::<OpActionDelete>(|desc| f(desc).map(Into::into))
+        self.do_action::<DeleteAction>(|desc| f(desc).map(Into::into))
     }
 
     /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
@@ -356,26 +357,27 @@ impl SourceStreamChunkRowWriter<'_> {
         D1: Into<DatumCow<'a>>,
         D2: Into<DatumCow<'a>>,
     {
-        self.do_action::<OpActionUpdate>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
+        self.do_action::<UpdateAction>(|desc| f(desc).map(|(old, new)| (old.into(), new.into())))
     }
 }
 
-trait OpAction {
+trait RowWriterAction {
     type Output<'a>;
+    const RECORD_TYPE: RecordType;
 
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a>;
 
     fn apply(builder: &mut ArrayBuilderImpl, output: Self::Output<'_>);
 
     fn rollback(builder: &mut ArrayBuilderImpl);
-
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>);
 }
 
-struct OpActionInsert;
+struct InsertAction;
 
-impl OpAction for OpActionInsert {
+impl RowWriterAction for InsertAction {
     type Output<'a> = DatumCow<'a>;
+
+    const RECORD_TYPE: RecordType = RecordType::Insert;
 
     #[inline(always)]
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
@@ -391,17 +393,14 @@ impl OpAction for OpActionInsert {
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap()
     }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::Insert);
-    }
 }
 
-struct OpActionDelete;
+struct DeleteAction;
 
-impl OpAction for OpActionDelete {
+impl RowWriterAction for DeleteAction {
     type Output<'a> = DatumCow<'a>;
+
+    const RECORD_TYPE: RecordType = RecordType::Delete;
 
     #[inline(always)]
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
@@ -417,17 +416,14 @@ impl OpAction for OpActionDelete {
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap()
     }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::Delete);
-    }
 }
 
-struct OpActionUpdate;
+struct UpdateAction;
 
-impl OpAction for OpActionUpdate {
+impl RowWriterAction for UpdateAction {
     type Output<'a> = (DatumCow<'a>, DatumCow<'a>);
+
+    const RECORD_TYPE: RecordType = RecordType::Update;
 
     #[inline(always)]
     fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
@@ -445,11 +441,5 @@ impl OpAction for OpActionUpdate {
     fn rollback(builder: &mut ArrayBuilderImpl) {
         builder.pop().unwrap();
         builder.pop().unwrap();
-    }
-
-    #[inline(always)]
-    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
-        writer.append_op(Op::UpdateDelete);
-        writer.append_op(Op::UpdateInsert);
     }
 }
