@@ -934,6 +934,30 @@ impl DdlService for DdlServiceImpl {
         };
 
         for table_change in schema_change.table_changes {
+            for c in &table_change.columns {
+                let c = ColumnCatalog::from(c.clone());
+
+                let invalid_col_type = |column_type: &str, c: &ColumnCatalog| {
+                    tracing::warn!(target: "auto_schema_change",
+                      cdc_table_id = table_change.cdc_table_id,
+                    upstraem_ddl = table_change.upstream_ddl,
+                        "invalid column type from cdc table change");
+                    Err(Status::invalid_argument(format!(
+                        "invalid column type: {} from cdc table change, column: {:?}",
+                        column_type, c
+                    )))
+                };
+                if c.is_generated() {
+                    return invalid_col_type("generated column", &c);
+                }
+                if c.is_rw_sys_column() {
+                    return invalid_col_type("rw system column", &c);
+                }
+                if c.is_hidden {
+                    return invalid_col_type("hidden column", &c);
+                }
+            }
+
             // get the table catalog corresponding to the cdc table
             let tables: Vec<Table> = self
                 .metadata_manager
@@ -944,10 +968,14 @@ impl DdlService for DdlServiceImpl {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
                 let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().map(|col| {
+                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
                         let data_type = col.data_type().clone();
-                        (col.column_desc.name, data_type)
+                        if col.is_generated() {
+                            None
+                        } else {
+                            Some((col.column_desc.name, data_type))
+                        }
                     }));
                 let new_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table_change.columns.iter().map(|col| {
