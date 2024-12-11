@@ -1642,7 +1642,7 @@ pub async fn create_iceberg_engine_table(
 
     with.insert(
         "commit_checkpoint_interval".to_owned(),
-        commit_checkpoint_interval.to_owned(),
+        commit_checkpoint_interval.to_string(),
     );
     with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
     with.insert("enable_config_load".to_owned(), "true".to_owned());
