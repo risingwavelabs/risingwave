@@ -2,7 +2,7 @@ statement ok
 set sink_decouple = false;
 
 statement ok
-create table t(id int primary key, name varchar) engine = iceberg;
+create table t(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
 insert into t values(1, 'xxx');
@@ -37,7 +37,7 @@ v_array int[],
 v_struct struct<a int,b int>,
 v_json jsonb,
 v_one_layer_struct struct<id bigint, v_small_int smallint, v_int int, v_long bigint, v_float real, v_double double, v_varchar varchar, v_bool boolean, v_date date, v_timestamp timestamptz, v_ts_ntz timestamp, v_decimal decimal, v_json jsonb>
-) engine = iceberg;
+) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
 INSERT INTO full_type_t VALUES
