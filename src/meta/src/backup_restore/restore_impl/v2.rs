@@ -167,7 +167,7 @@ macro_rules! for_all_auto_increment {
     };
 }
 
-macro_rules! reset_mysql_sequence {
+macro_rules! reset_sql_sequence {
     ($metadata:ident, $db:ident, $( {$table:expr, $model:ident, $id_field:ident} ),*) => {
         $(
         match $db.get_database_backend() {
@@ -200,7 +200,7 @@ async fn update_auto_inc(
     metadata: &MetadataV2,
     db: &impl sea_orm::ConnectionTrait,
 ) -> BackupResult<()> {
-    for_all_auto_increment!(metadata, db, reset_mysql_sequence);
+    for_all_auto_increment!(metadata, db, reset_sql_sequence);
     Ok(())
 }
 
