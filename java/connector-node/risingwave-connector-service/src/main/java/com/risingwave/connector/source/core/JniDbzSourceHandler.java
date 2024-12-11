@@ -60,7 +60,7 @@ public class JniDbzSourceHandler {
         boolean isCdcSourceJob = request.getIsSourceJob();
 
         if (request.getSourceType() == POSTGRES) {
-            DbzSourceUtils.createPostgresPublicationIfNeeded(
+            DbzSourceUtils.createPostgresPublicationInSourceExecutor(
                     request.getPropertiesMap(), request.getSourceId());
         }
 

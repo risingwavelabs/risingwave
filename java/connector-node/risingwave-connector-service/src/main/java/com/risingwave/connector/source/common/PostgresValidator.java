@@ -354,22 +354,22 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
-        if (!isPublicationExists) {
+        if (!isPublicationExists && !pubAutoCreate) {
             // We require a publication on upstream to publish table cdc events
-            if (!pubAutoCreate) {
-                throw ValidatorUtils.invalidArgument(
-                        "Publication '" + pubName + "' doesn't exist and auto create is disabled");
-            } else {
-                // createPublicationIfNeeded(Optional.empty());
-                LOG.info(
-                        "Publication '{}' doesn't exist, will be created in the process of streaming job.",
-                        this.pubName);
-            }
+            throw ValidatorUtils.invalidArgument(
+                    "Publication '" + pubName + "' doesn't exist and auto create is disabled");
         }
 
         // If the source properties is created by share source, skip the following
         // check of publication
         if (isCdcSourceJob) {
+            if (!isPublicationExists) {
+                LOG.info(
+                        "Creating cdc source job: publication '{}' doesn't exist, creating...",
+                        pubName);
+                DbzSourceUtils.createPostgresPublicationInValidate(userProps);
+                LOG.info("Creating cdc source job: publication '{}' created successfully", pubName);
+            }
             return;
         }
 
