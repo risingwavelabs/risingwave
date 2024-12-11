@@ -369,7 +369,7 @@ enum TableCommands {
 enum ScaleCommands {
     /// Performing an integrity graph check for scaling.
     #[clap(verbatim_doc_comment)]
-    GraphCheck {
+    Check {
         /// SQL endpoint
         #[clap(long, required = true)]
         endpoint: String,
@@ -888,7 +888,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
         }
-        Commands::Scale(ScaleCommands::GraphCheck { endpoint }) => {
+        Commands::Scale(ScaleCommands::Check { endpoint }) => {
             cmd_impl::scale::integrity_check(endpoint).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
