@@ -14,7 +14,8 @@
 
 mod control;
 mod creating_job;
+mod recovery;
 mod state;
 
-pub(super) use control::{CheckpointControl, DatabaseCheckpointControl};
+pub(crate) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
 pub(super) use state::BarrierWorkerState;
