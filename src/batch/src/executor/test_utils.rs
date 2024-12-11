@@ -56,7 +56,7 @@ impl MockExecutor {
         Self {
             chunks: VecDeque::new(),
             schema,
-            identity: "MockExecutor".to_string(),
+            identity: "MockExecutor".to_owned(),
         }
     }
 

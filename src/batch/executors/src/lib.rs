@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Batch executor implementations.
+//!
+//! To enable executors in this crate, add the following line to your code:
+//!
+//! ```
+//! risingwave_batch_executors::enable!();
+//! ```
+
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
