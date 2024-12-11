@@ -17,10 +17,10 @@ use std::process::exit;
 use risingwave_meta::controller::catalog::CatalogController;
 use sea_orm::TransactionTrait;
 
-pub async fn integrity_check(endpoint: String) -> anyhow::Result<()> {
+pub async fn graph_check(endpoint: String) -> anyhow::Result<()> {
     let conn = sea_orm::Database::connect(sea_orm::ConnectOptions::new(endpoint)).await?;
     let txn = conn.begin().await?;
-    match CatalogController::integrity_check_inner(&txn).await {
+    match CatalogController::graph_check(&txn).await {
         Ok(_) => {
             println!("all integrity check passed!");
             exit(0);

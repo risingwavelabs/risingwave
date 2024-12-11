@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod backup_meta;
+mod check;
 mod cluster_info;
 mod connection;
 mod migration;
@@ -21,6 +22,7 @@ mod reschedule;
 mod serving;
 
 pub use backup_meta::*;
+pub use check::*;
 pub use cluster_info::*;
 pub use connection::*;
 pub use migration::*;

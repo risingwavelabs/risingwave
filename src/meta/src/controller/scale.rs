@@ -372,7 +372,7 @@ macro_rules! crit_check_in_loop {
 }
 
 impl CatalogController {
-    pub async fn integrity_check_inner<C>(txn: &C) -> MetaResult<()>
+    pub async fn graph_check<C>(txn: &C) -> MetaResult<()>
     where
         C: ConnectionTrait,
     {
@@ -838,6 +838,6 @@ impl CatalogController {
     pub async fn integrity_check(&self) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
-        Self::integrity_check_inner(&txn).await
+        Self::graph_check(&txn).await
     }
 }
