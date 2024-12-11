@@ -1622,8 +1622,8 @@ pub async fn create_iceberg_engine_table(
     let commit_checkpoint_interval = handler_args
         .with_options
         .get("commit_checkpoint_interval")
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| "60".to_string());
+        .map(|v| v.to_owned())
+        .unwrap_or_else(|| "60".to_owned());
     let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|e| {
         ErrorCode::InvalidInputSyntax(format!(
             "commit_checkpoint_interval must be a positive integer: {}",
