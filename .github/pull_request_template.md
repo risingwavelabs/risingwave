@@ -30,7 +30,8 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 - [ ] <!-- OPTIONAL --> My PR needs documentation updates. <!-- Please use the **Release note** section below to summarize the impact on users -->
 
-## Release note
+<details>
+<summary><b>Release note</b></summary>
 
 <!--
 If this PR includes changes that directly affect users or other significant modifications relevant to the community, kindly draft a release note to provide a concise summary of these changes.
@@ -40,3 +41,5 @@ Discuss technical details in the "What's changed" section, and focus on the impa
 
 You should also mention the environment or conditions where the impact may occur.
 -->
+
+</details>
