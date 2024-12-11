@@ -18,6 +18,7 @@ use std::ops::{BitAnd, BitOrAssign};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash;
+use risingwave_common::hash::VirtualNode;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -371,10 +372,10 @@ macro_rules! crit_check_in_loop {
 }
 
 impl CatalogController {
-    pub async fn integrity_check(&self) -> MetaResult<()> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
+    pub async fn integrity_check_inner<C>(txn: &C) -> MetaResult<()>
+    where
+        C: ConnectionTrait,
+    {
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "ActorDispatcher")]
         pub struct PartialActorDispatcher {
@@ -392,7 +393,6 @@ impl CatalogController {
             pub fragment_id: FragmentId,
             pub distribution_type: DistributionType,
             pub upstream_fragment_id: I32Array,
-            pub vnode_count: i32,
         }
 
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
@@ -409,14 +409,14 @@ impl CatalogController {
         let mut flag = false;
 
         let fragments: Vec<PartialFragment> =
-            Fragment::find().into_partial_model().all(&txn).await?;
+            Fragment::find().into_partial_model().all(txn).await?;
 
         let fragment_map: HashMap<_, _> = fragments
             .into_iter()
             .map(|fragment| (fragment.fragment_id, fragment))
             .collect();
 
-        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(&txn).await?;
+        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
 
         let mut fragment_actors = HashMap::new();
         for actor in &actors {
@@ -433,7 +433,7 @@ impl CatalogController {
 
         let actor_dispatchers: Vec<PartialActorDispatcher> = ActorDispatcher::find()
             .into_partial_model()
-            .all(&txn)
+            .all(txn)
             .await?;
 
         let mut discovered_upstream_fragments = HashMap::new();
@@ -500,7 +500,7 @@ impl CatalogController {
                         )
                     );
 
-                    let fragment_vnode_count = fragment.vnode_count as usize;
+                    let fragment_vnode_count = VirtualNode::COUNT;
 
                     let mut result_bitmap = Bitmap::zeros(fragment_vnode_count);
 
@@ -515,8 +515,8 @@ impl CatalogController {
                             )
                         );
 
-                        let bitmap =
-                            Bitmap::from(actor.vnode_bitmap.as_ref().unwrap().to_protobuf());
+                        let buffer = actor.vnode_bitmap.as_ref().unwrap().to_protobuf();
+                        let bitmap = Bitmap::from(&buffer);
 
                         crit_check_in_loop!(
                             flag,
@@ -640,7 +640,7 @@ impl CatalogController {
                         flag,
                         &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {dispatcher_downstream_actor_ids:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {dispatcher_downstream_actor_ids:?} != target_fragment_actor_ids: {target_fragment_actor_ids:?}",
                         )
                     );
                 }
@@ -693,7 +693,7 @@ impl CatalogController {
                         flag,
                         &mapping_actors == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {mapping_actors:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {mapping_actors:?} != target_fragment_actor_ids: {target_fragment_actor_ids:?}",
                         )
                     );
 
@@ -719,7 +719,7 @@ impl CatalogController {
                                 flag,
                                 mapping.to_bitmaps() == downstream_bitmaps,
                                 format!(
-                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
+                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != downstream bitmaps: {downstream_bitmaps:?}"
                                 )
                             );
                         }
@@ -790,7 +790,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_fragment_ids == upstream_fragment_ids,
                 format!(
-                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != {upstream_fragment_ids:?}",
+                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != upstream_fragment_ids: {upstream_fragment_ids:?}",
                 )
             );
         }
@@ -823,7 +823,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_actor_ids == upstream_actor_ids,
                 format!(
-                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != {upstream_actor_ids:?}",
+                    "Actor {actor_id} has different upstream_actor_ids from dispatcher discovered: {discovered_upstream_actor_ids:?} != upstream_actor_ids: {upstream_actor_ids:?}",
                 )
             )
         }
@@ -833,5 +833,11 @@ impl CatalogController {
         }
 
         Ok(())
+    }
+
+    pub async fn integrity_check(&self) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        Self::integrity_check_inner(&txn).await
     }
 }
