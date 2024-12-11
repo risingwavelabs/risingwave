@@ -462,7 +462,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -514,7 +514,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -566,7 +566,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -643,7 +643,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -725,7 +725,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -833,7 +833,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             column_orders.into(),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -982,7 +982,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -1024,7 +1024,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::for_spill_test(),
             Some(SpillBackend::Memory),

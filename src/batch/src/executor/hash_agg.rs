@@ -817,7 +817,7 @@ mod tests {
                 &agg_prost,
                 src_exec,
                 TaskId::default(),
-                "HashAggExecutor".to_string(),
+                "HashAggExecutor".to_owned(),
                 CHUNK_SIZE,
                 mem_context.clone(),
                 None,
@@ -892,7 +892,7 @@ mod tests {
             &agg_prost,
             Box::new(src_exec),
             TaskId::default(),
-            "HashAggExecutor".to_string(),
+            "HashAggExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -959,7 +959,7 @@ mod tests {
                 },
             );
             for i in 0..10 {
-                map.entry(i).or_insert_with(|| "i".to_string());
+                map.entry(i).or_insert_with(|| "i".to_owned());
             }
 
             for (k, v) in map {
@@ -1011,7 +1011,7 @@ mod tests {
             &agg_prost,
             Box::new(src_exec),
             TaskId::default(),
-            "HashAggExecutor".to_string(),
+            "HashAggExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -1105,7 +1105,7 @@ mod tests {
             &agg_prost,
             src_exec,
             TaskId::default(),
-            "HashAggExecutor".to_string(),
+            "HashAggExecutor".to_owned(),
             CHUNK_SIZE,
             mem_context.clone(),
             Some(SpillBackend::Memory),

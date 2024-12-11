@@ -58,27 +58,27 @@ impl HeaderBuilder {
 
     pub fn add_common_header(mut self) -> Self {
         self.header
-            .insert("expect".to_string(), "100-continue".to_string());
+            .insert("expect".to_owned(), "100-continue".to_owned());
         self
     }
 
     /// The method is temporarily not in use, reserved for later use in 2PC.
     /// Doris will generate a default, non-repeating label.
     pub fn set_label(mut self, label: String) -> Self {
-        self.header.insert("label".to_string(), label);
+        self.header.insert("label".to_owned(), label);
         self
     }
 
     pub fn set_columns_name(mut self, columns_name: Vec<&str>) -> Self {
         let columns_name_str = columns_name.join(",");
-        self.header.insert("columns".to_string(), columns_name_str);
+        self.header.insert("columns".to_owned(), columns_name_str);
         self
     }
 
     /// This method is only called during upsert operations.
     pub fn add_hidden_column(mut self) -> Self {
         self.header
-            .insert("hidden_columns".to_string(), DORIS_DELETE_SIGN.to_string());
+            .insert("hidden_columns".to_owned(), DORIS_DELETE_SIGN.to_owned());
         self
     }
 
@@ -86,7 +86,7 @@ impl HeaderBuilder {
     /// Only use in Doris
     pub fn enable_2_pc(mut self) -> Self {
         self.header
-            .insert("two_phase_commit".to_string(), "true".to_string());
+            .insert("two_phase_commit".to_owned(), "true".to_owned());
         self
     }
 
@@ -95,7 +95,7 @@ impl HeaderBuilder {
             "Basic {}",
             general_purpose::STANDARD.encode(format!("{}:{}", user, password))
         );
-        self.header.insert("Authorization".to_string(), auth);
+        self.header.insert("Authorization".to_owned(), auth);
         self
     }
 
@@ -103,7 +103,7 @@ impl HeaderBuilder {
     /// Only use in Doris
     pub fn set_txn_id(mut self, txn_id: i64) -> Self {
         self.header
-            .insert("txn_operation".to_string(), txn_id.to_string());
+            .insert("txn_operation".to_owned(), txn_id.to_string());
         self
     }
 
@@ -111,7 +111,7 @@ impl HeaderBuilder {
     /// Only use in Doris
     pub fn add_commit(mut self) -> Self {
         self.header
-            .insert("txn_operation".to_string(), "commit".to_string());
+            .insert("txn_operation".to_owned(), "commit".to_owned());
         self
     }
 
@@ -119,34 +119,34 @@ impl HeaderBuilder {
     /// Only use in Doris
     pub fn add_abort(mut self) -> Self {
         self.header
-            .insert("txn_operation".to_string(), "abort".to_string());
+            .insert("txn_operation".to_owned(), "abort".to_owned());
         self
     }
 
     pub fn add_json_format(mut self) -> Self {
-        self.header.insert("format".to_string(), "json".to_string());
+        self.header.insert("format".to_owned(), "json".to_owned());
         self
     }
 
     /// Only use in Doris
     pub fn add_read_json_by_line(mut self) -> Self {
         self.header
-            .insert("read_json_by_line".to_string(), "true".to_string());
+            .insert("read_json_by_line".to_owned(), "true".to_owned());
         self
     }
 
     /// Only use in Starrocks
     pub fn add_strip_outer_array(mut self) -> Self {
         self.header
-            .insert("strip_outer_array".to_string(), "true".to_string());
+            .insert("strip_outer_array".to_owned(), "true".to_owned());
         self
     }
 
     /// Only use in Starrocks
     pub fn set_partial_update(mut self, partial_update: Option<String>) -> Self {
         self.header.insert(
-            "partial_update".to_string(),
-            partial_update.unwrap_or_else(|| "false".to_string()),
+            "partial_update".to_owned(),
+            partial_update.unwrap_or_else(|| "false".to_owned()),
         );
         self
     }
@@ -154,21 +154,21 @@ impl HeaderBuilder {
     /// Only use in Doris
     pub fn set_partial_columns(mut self, partial_columns: Option<String>) -> Self {
         self.header.insert(
-            "partial_columns".to_string(),
-            partial_columns.unwrap_or_else(|| "false".to_string()),
+            "partial_columns".to_owned(),
+            partial_columns.unwrap_or_else(|| "false".to_owned()),
         );
         self
     }
 
     /// Only used in Starrocks Transaction API
     pub fn set_db(mut self, db: String) -> Self {
-        self.header.insert("db".to_string(), db);
+        self.header.insert("db".to_owned(), db);
         self
     }
 
     /// Only used in Starrocks Transaction API
     pub fn set_table(mut self, table: String) -> Self {
-        self.header.insert("table".to_string(), table);
+        self.header.insert("table".to_owned(), table);
         self
     }
 
@@ -195,7 +195,7 @@ fn try_get_be_url(resp: &Response, fe_host: &str) -> Result<Option<Url>> {
                 .to_str()
                 .context("Can't get doris BE url in header")
                 .map_err(SinkError::DorisStarrocksConnect)?
-                .to_string();
+                .to_owned();
 
             let mut parsed_be_url = Url::parse(&be_url)
                 .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?;
@@ -245,7 +245,7 @@ impl InserterInnerBuilder {
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .host_str()
             .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get fe host from url")))?
-            .to_string();
+            .to_owned();
         let url = format!("{}/api/{}/{}/_stream_load", url, db, table);
 
         Ok(Self {
@@ -498,7 +498,7 @@ impl StarrocksTxnRequestBuilder {
             .map_err(|err| SinkError::DorisStarrocksConnect(anyhow!(err)))?
             .host_str()
             .ok_or_else(|| SinkError::DorisStarrocksConnect(anyhow!("Can't get fe host from url")))?
-            .to_string();
+            .to_owned();
 
         let url_begin = format!("{}/api/transaction/begin", url);
         let url_load = format!("{}/api/transaction/load", url);

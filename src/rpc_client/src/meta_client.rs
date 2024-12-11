@@ -284,7 +284,7 @@ impl MetaClient {
                         host: Some(addr.to_protobuf()),
                         property: Some(property.clone()),
                         resource: Some(risingwave_pb::common::worker_node::Resource {
-                            rw_version: RW_VERSION.to_string(),
+                            rw_version: RW_VERSION.to_owned(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
                         }),
@@ -518,7 +518,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = AlterNameRequest {
             object: Some(object),
-            new_name: name.to_string(),
+            new_name: name.to_owned(),
         };
         let resp = self.inner.alter_name(request).await?;
         Ok(resp

@@ -269,7 +269,7 @@ pub fn get_json_schema_location(
         (None, Some(schema_registry)) => Ok(Some((schema_registry, true))),
         (Some(schema_location), None) => Ok(Some((schema_location, false))),
         (Some(_), Some(_)) => Err(RwError::from(ProtocolError(
-            "only need either the schema location or the schema registry".to_string(),
+            "only need either the schema location or the schema registry".to_owned(),
         ))),
     }
 }
@@ -281,12 +281,12 @@ fn get_schema_location(
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
     match (schema_location, schema_registry) {
         (None, None) => Err(RwError::from(ProtocolError(
-            "missing either a schema location or a schema registry".to_string(),
+            "missing either a schema location or a schema registry".to_owned(),
         ))),
         (None, Some(schema_registry)) => Ok((schema_registry, true)),
         (Some(schema_location), None) => Ok((schema_location, false)),
         (Some(_), Some(_)) => Err(RwError::from(ProtocolError(
-            "only need either the schema location or the schema registry".to_string(),
+            "only need either the schema location or the schema registry".to_owned(),
         ))),
     }
 }
@@ -367,7 +367,7 @@ pub(crate) async fn bind_columns_from_source(
         ))?;
         if !use_sr && name_strategy.is_some() {
             return Err(RwError::from(ProtocolError(
-                "schema registry name strategy only works with schema registry enabled".to_string(),
+                "schema registry name strategy only works with schema registry enabled".to_owned(),
             )));
         }
         Ok(name_strategy)
@@ -441,7 +441,7 @@ pub(crate) async fn bind_columns_from_source(
 
                 if matches!(format, Format::Debezium) && !use_schema_registry {
                     return Err(RwError::from(ProtocolError(
-                        "schema location for DEBEZIUM_AVRO row format is not supported".to_string(),
+                        "schema location for DEBEZIUM_AVRO row format is not supported".to_owned(),
                     )));
                 }
 
@@ -574,8 +574,8 @@ fn bind_columns_from_source_for_cdc(
     let with_options = WithOptions::try_from(format_encode.row_options())?;
     if !with_options.connection_ref().is_empty() {
         return Err(RwError::from(NotSupported(
-            "CDC connector does not support connection ref yet".to_string(),
-            "Explicitly specify the connection in WITH clause".to_string(),
+            "CDC connector does not support connection ref yet".to_owned(),
+            "Explicitly specify the connection in WITH clause".to_owned(),
         )));
     }
     let (format_encode_options, format_encode_secret_refs) =
@@ -724,9 +724,8 @@ pub(crate) fn bind_all_columns(
         } else if let Some(wildcard_idx) = wildcard_idx {
             if col_defs_from_sql.iter().any(|c| !c.is_generated()) {
                 Err(RwError::from(NotSupported(
-                    "Only generated columns are allowed in user-defined schema from SQL"
-                        .to_string(),
-                    "Remove the non-generated columns".to_string(),
+                    "Only generated columns are allowed in user-defined schema from SQL".to_owned(),
+                    "Remove the non-generated columns".to_owned(),
                 )))
             } else {
                 // Replace `*` with `cols_from_source`
@@ -746,8 +745,8 @@ pub(crate) fn bind_all_columns(
     } else {
         if wildcard_idx.is_some() {
             return Err(RwError::from(NotSupported(
-                "Wildcard in user-defined schema is only allowed when there exists columns from external schema".to_string(),
-                "Remove the wildcard or use a source with external schema".to_string(),
+                "Wildcard in user-defined schema is only allowed when there exists columns from external schema".to_owned(),
+                "Remove the wildcard or use a source with external schema".to_owned(),
             )));
         }
         let non_generated_sql_defined_columns = non_generated_sql_columns(col_defs_from_sql);
@@ -770,7 +769,7 @@ pub(crate) fn bind_all_columns(
                     return Err(RwError::from(ProtocolError(
                         "the not generated columns of the source with row format DebeziumMongoJson
         must be (_id [Jsonb | Varchar | Int32 | Int64], payload jsonb)."
-                            .to_string(),
+                            .to_owned(),
                     )));
                 }
                 // ok to unwrap since it was checked at `bind_sql_columns`
@@ -788,7 +787,7 @@ pub(crate) fn bind_all_columns(
                         return Err(RwError::from(ProtocolError(
                             "the `_id` column of the source with row format DebeziumMongoJson
         must be [Jsonb | Varchar | Int32 | Int64]"
-                                .to_string(),
+                                .to_owned(),
                         )));
                     }
                 }
@@ -804,14 +803,14 @@ pub(crate) fn bind_all_columns(
                     return Err(RwError::from(ProtocolError(
                         "the `payload` column of the source with row format DebeziumMongoJson
         must be Jsonb datatype"
-                            .to_string(),
+                            .to_owned(),
                     )));
                 }
                 Ok(columns)
             }
             (Format::Plain, Encode::Bytes) => {
                 let err = Err(RwError::from(ProtocolError(
-                    "ENCODE BYTES only accepts one BYTEA type column".to_string(),
+                    "ENCODE BYTES only accepts one BYTEA type column".to_owned(),
                 )));
                 if non_generated_sql_defined_columns.len() == 1 {
                     // ok to unwrap `data_type`` since it was checked at `bind_sql_columns`
@@ -866,7 +865,7 @@ pub(crate) async fn bind_source_pk(
                 catalog.column_desc.additional_column.column_type,
                 Some(AdditionalColumnType::Key(_))
             ) {
-                Some(catalog.name().to_string())
+                Some(catalog.name().to_owned())
             } else {
                 None
             }
@@ -876,7 +875,7 @@ pub(crate) async fn bind_source_pk(
         .iter()
         .filter_map(|col| {
             if col.column_desc.additional_column.column_type.is_some() {
-                Some(col.name().to_string())
+                Some(col.name().to_owned())
             } else {
                 None
             }
@@ -938,7 +937,7 @@ pub(crate) async fn bind_source_pk(
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with FORMAT DEBEZIUM."
-                        .to_string(),
+                        .to_owned(),
                 )));
             }
             sql_defined_pk_names
@@ -974,7 +973,7 @@ pub(crate) async fn bind_source_pk(
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                vec!["_id".to_string()]
+                vec!["_id".to_owned()]
             }
         }
 
@@ -987,8 +986,7 @@ pub(crate) async fn bind_source_pk(
             }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-    "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON."
-    .to_string(),
+    "Primary key must be specified when creating source with FORMAT MAXWELL ENCODE JSON.".to_owned(),
     )));
             }
             sql_defined_pk_names
@@ -1003,8 +1001,7 @@ pub(crate) async fn bind_source_pk(
             }
             if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-    "Primary key must be specified when creating source with FORMAT CANAL ENCODE JSON."
-    .to_string(),
+    "Primary key must be specified when creating source with FORMAT CANAL ENCODE JSON.".to_owned(),
     )));
             }
             sql_defined_pk_names
@@ -1037,7 +1034,7 @@ fn check_and_add_timestamp_column(with_properties: &WithOptions, columns: &mut V
             ColumnId::placeholder(),
             KAFKA_CONNECTOR,
             "timestamp",
-            Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_string()),
+            Some(KAFKA_TIMESTAMP_COLUMN_NAME.to_owned()),
             None,
             None,
             true,
@@ -1204,21 +1201,21 @@ pub fn validate_compatibility(
 ) -> Result<()> {
     let mut connector = props
         .get_connector()
-        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_string())))?;
+        .ok_or_else(|| RwError::from(ProtocolError("missing field 'connector'".to_owned())))?;
 
     if connector == OPENDAL_S3_CONNECTOR {
         // reject s3_v2 creation
         return Err(RwError::from(Deprecated(
-            OPENDAL_S3_CONNECTOR.to_string(),
-            S3_CONNECTOR.to_string(),
+            OPENDAL_S3_CONNECTOR.to_owned(),
+            S3_CONNECTOR.to_owned(),
         )));
     }
     if connector == S3_CONNECTOR {
         // S3 connector is deprecated, use OPENDAL_S3_CONNECTOR instead
         // do s3 -> s3_v2 migration
         let entry = props.get_mut(UPSTREAM_SOURCE_KEY).unwrap();
-        *entry = OPENDAL_S3_CONNECTOR.to_string();
-        connector = OPENDAL_S3_CONNECTOR.to_string();
+        *entry = OPENDAL_S3_CONNECTOR.to_owned();
+        connector = OPENDAL_S3_CONNECTOR.to_owned();
     }
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
@@ -1524,7 +1521,7 @@ pub fn bind_connector_props(
         // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
         // group (that is, different from any other server id being used by any master or slave)
         with_properties
-            .entry("server.id".to_string())
+            .entry("server.id".to_owned())
             .or_insert(rand::thread_rng().gen_range(1..u32::MAX).to_string());
     }
     Ok(with_properties)
@@ -1558,7 +1555,7 @@ pub async fn bind_create_source_or_table_with_connector(
     if !is_create_source && with_properties.is_iceberg_connector() {
         return Err(ErrorCode::BindError(
             "can't CREATE TABLE with iceberg connector\n\nHint: use CREATE SOURCE instead"
-                .to_string(),
+                .to_owned(),
         )
         .into());
     }
@@ -1600,7 +1597,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
     if columns.is_empty() {
         return Err(RwError::from(ProtocolError(
-            "Schema definition is required, either from SQL or schema registry.".to_string(),
+            "Schema definition is required, either from SQL or schema registry.".to_owned(),
         )));
     }
 
@@ -1743,7 +1740,7 @@ pub async fn handle_create_source(
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
-            "missing WITH clause".to_string(),
+            "missing WITH clause".to_owned(),
         )));
     }
 
@@ -1992,7 +1989,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_multi_table_cdc_create_source_handler() {
         let sql =
-            "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
+            "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_owned();
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
 
@@ -2049,8 +2046,7 @@ pub mod tests {
     async fn test_source_addition_columns() {
         // test derive include column for format plain
         let sql =
-            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json"
-                .to_string();
+            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json".to_owned();
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
         let session = frontend.session_ref();
@@ -2101,8 +2097,7 @@ pub mod tests {
         .assert_debug_eq(&columns);
 
         let sql =
-            "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json"
-                .to_string();
+            "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json".to_owned();
         match frontend.run_sql(sql).await {
             Err(e) => {
                 assert_eq!(

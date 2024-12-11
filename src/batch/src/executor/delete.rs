@@ -246,7 +246,7 @@ mod tests {
             dml_manager,
             Box::new(mock_executor),
             1024,
-            "DeleteExecutor".to_string(),
+            "DeleteExecutor".to_owned(),
             false,
             0,
         ));

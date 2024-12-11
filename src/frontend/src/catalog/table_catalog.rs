@@ -634,7 +634,7 @@ impl From<PbTable> for TableCatalog {
         }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
-            if !col_names.insert(col_name.to_string()) {
+            if !col_names.insert(col_name.to_owned()) {
                 panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
@@ -736,7 +736,7 @@ mod tests {
             id: 0,
             schema_id: 0,
             database_id: 0,
-            name: "test".to_string(),
+            name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
                 PbColumnCatalog {
@@ -785,7 +785,7 @@ mod tests {
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
-            description: Some("description".to_string()),
+            description: Some("description".to_owned()),
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
@@ -803,7 +803,7 @@ mod tests {
             TableCatalog {
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
-                name: "test".to_string(),
+                name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![
                     ColumnCatalog::row_id_column(),
@@ -815,12 +815,12 @@ mod tests {
                             ],)
                             .into(),
                             column_id: ColumnId::new(1),
-                            name: "country".to_string(),
+                            name: "country".to_owned(),
                             field_descs: vec![
                                 ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string(),
+                            type_name: ".test.Country".to_owned(),
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
@@ -854,7 +854,7 @@ mod tests {
                 cleaned_by_watermark: false,
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
-                description: Some("description".to_string()),
+                description: Some("description".to_owned()),
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,

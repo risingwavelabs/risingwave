@@ -70,7 +70,7 @@ impl Binder {
         if is_watermark_func(func_name) {
             if with_ordinality {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "WITH ORDINALITY for watermark".to_string(),
+                    "WITH ORDINALITY for watermark".to_owned(),
                 )
                 .into());
             }

@@ -429,12 +429,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
             owner: value.1.owner_id as _,
-            arg_names: value
-                .0
-                .arg_names
-                .split(',')
-                .map(|s| s.to_string())
-                .collect(),
+            arg_names: value.0.arg_names.split(',').map(|s| s.to_owned()).collect(),
             arg_types: value.0.arg_types.to_protobuf(),
             return_type: Some(value.0.return_type.to_protobuf()),
             language: value.0.language,

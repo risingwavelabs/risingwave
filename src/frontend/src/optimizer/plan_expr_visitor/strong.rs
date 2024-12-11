@@ -363,7 +363,7 @@ mod tests {
         assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = Literal(
-            crate::expr::Literal::new(Some("test".to_string().into()), DataType::Varchar).into(),
+            crate::expr::Literal::new(Some("test".to_owned().into()), DataType::Varchar).into(),
         );
         assert!(!Strong::is_null(&expr, null_columns));
     }

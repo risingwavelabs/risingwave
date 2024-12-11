@@ -1027,11 +1027,11 @@ pub async fn refresh_fragment_info_metrics(
             let (table_name, table_type) = table_name_and_type_mapping
                 .get(&table_id)
                 .cloned()
-                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                .unwrap_or_else(|| ("unknown".to_owned(), "unknown".to_owned()));
             let compaction_group_id = table_compaction_group_id_mapping
                 .get(&(table_id as u32))
                 .map(|cg_id| cg_id.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+                .unwrap_or_else(|| "unknown".to_owned());
             meta_metrics
                 .table_info
                 .with_label_values(&[

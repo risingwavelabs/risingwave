@@ -420,7 +420,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -504,7 +504,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -596,7 +596,7 @@ mod tests {
             group_key: vec![],
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 4,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -668,7 +668,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -759,7 +759,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -854,7 +854,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit,
             shutdown_rx,
         });

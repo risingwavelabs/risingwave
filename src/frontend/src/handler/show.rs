@@ -105,7 +105,7 @@ pub fn get_indexes_from_table(
 fn schema_or_default(schema: &Option<Ident>) -> String {
     schema
         .as_ref()
-        .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
+        .map_or_else(|| DEFAULT_SCHEMA_NAME.to_owned(), |s| s.real_value())
 }
 
 fn schema_or_search_path(
@@ -412,10 +412,10 @@ pub async fn handle_show_object(
                     let name = c.name.clone();
                     let r#type = match &c.info {
                         connection::Info::PrivateLinkService(_) => {
-                            PRIVATELINK_CONNECTION.to_string()
+                            PRIVATELINK_CONNECTION.to_owned()
                         },
                         connection::Info::ConnectionParams(params) => {
-                            params.get_connection_type().unwrap().as_str_name().to_string()
+                            params.get_connection_type().unwrap().as_str_name().to_owned()
                         }
                     };
                     let source_names = schema
@@ -482,7 +482,7 @@ pub async fn handle_show_object(
                     id: worker.id as _,
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
-                    state: worker.get_state().unwrap().as_str_name().to_string(),
+                    state: worker.get_state().unwrap().as_str_name().to_owned(),
                     parallelism: worker.parallelism() as _,
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
@@ -627,7 +627,7 @@ pub fn handle_show_create_object(
     let catalog_reader = session.env().catalog_reader().read_guard();
     let (schema_name, object_name) =
         Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
-    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
     let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
@@ -709,7 +709,7 @@ mod tests {
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
         rows.sort();
-        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_string(),]);
+        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_owned(),]);
     }
 
     #[tokio::test]
@@ -735,10 +735,10 @@ mod tests {
                 columns.push((
                     std::str::from_utf8(row.index(0).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                     std::str::from_utf8(row.index(1).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                 ));
             }
         }

@@ -144,7 +144,7 @@ impl LocalQueryExecution {
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
         let auth_context = self.session.auth_context().clone();
-        let db_name = self.session.database().to_string();
+        let db_name = self.session.database().to_owned();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
         let strict_mode = self.session.config().batch_expr_strict_mode();
@@ -158,7 +158,7 @@ impl LocalQueryExecution {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
                     r = Err(Box::new(SchedulerError::QueryCancelled(
-                        "Cancelled by user".to_string(),
+                        "Cancelled by user".to_owned(),
                     )) as BoxedError);
                 }
                 if sender1.send(r).await.is_err() {
