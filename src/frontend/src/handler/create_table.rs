@@ -1633,11 +1633,8 @@ pub async fn create_iceberg_engine_table(
         ))
     })?;
 
-    if commit_checkpoint_interval <= 0 {
-        bail!(
-            "commit_checkpoint_interval must be a positive integer: {}",
-            commit_checkpoint_interval
-        );
+    if commit_checkpoint_interval == 0 {
+        bail!("commit_checkpoint_interval must be a positive integer: 0");
     }
 
     let sink_decouple = session.config().sink_decouple();
