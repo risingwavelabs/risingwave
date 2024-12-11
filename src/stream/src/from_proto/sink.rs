@@ -336,8 +336,12 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
         bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
     }
 
+    // trim the "jdbc:" prefix to make it a valid url
     let url = url.replace("jdbc:", "");
+
+    // parse the url
     let url = Url::parse(&url).map_err(|e| anyhow!(e).context("failed to parse jdbc url"))?;
+
     let scheme = url.scheme();
     assert_eq!("postgresql", scheme, "jdbc scheme should be postgresql");
     let host = url
@@ -359,6 +363,7 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     }
     let username = username.ok_or_else(|| anyhow!("missing username in jdbc url"))?;
     let password = password.ok_or_else(|| anyhow!("missing password in jdbc url"))?;
+
     Ok(JdbcUrl {
         host: host.to_string(),
         port,
