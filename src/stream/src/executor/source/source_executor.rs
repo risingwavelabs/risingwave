@@ -553,6 +553,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
+                                        actor_id = self.actor_ctx.id,
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
                                         *new_rate_limit
@@ -587,7 +588,10 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             } else {
                 assert!(reader_and_splits.is_some());
-                tracing::info!("source stream created successfully");
+                tracing::info!(
+                    actor_id = self.actor_ctx.id,
+                    "source stream created successfully"
+                );
                 break;
             }
         }
