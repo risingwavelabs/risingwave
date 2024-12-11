@@ -40,7 +40,6 @@ use crate::spill::spill_op::SpillBackend::Disk;
 use crate::spill::spill_op::{
     SpillBackend, SpillOp, DEFAULT_SPILL_PARTITION_NUM, SPILL_AT_LEAST_MEMORY,
 };
-use crate::task::BatchTaskContext;
 
 /// Sort Executor
 ///
@@ -76,10 +75,9 @@ impl Executor for SortExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -464,7 +462,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -516,7 +514,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -568,7 +566,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -645,7 +643,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -727,7 +725,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -835,7 +833,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             column_orders.into(),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -984,7 +982,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor".to_string(),
+            "SortExecutor".to_owned(),
             CHUNK_SIZE,
             MemoryContext::none(),
             None,
@@ -1026,7 +1024,7 @@ mod tests {
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
             Arc::new(column_orders),
-            "SortExecutor2".to_string(),
+            "SortExecutor2".to_owned(),
             CHUNK_SIZE,
             MemoryContext::for_spill_test(),
             Some(SpillBackend::Memory),

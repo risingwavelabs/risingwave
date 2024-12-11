@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use anyhow::Context;
 use itertools::Itertools;
@@ -49,7 +50,7 @@ use crate::executor::{
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
-struct InnerSideExecutorBuilder<C> {
+struct InnerSideExecutorBuilder {
     table_desc: StorageTableDesc,
     table_distribution: TableDistribution,
     vnode_mapping: ExpandedWorkerSlotMapping,
@@ -58,7 +59,7 @@ struct InnerSideExecutorBuilder<C> {
     inner_side_column_ids: Vec<i32>,
     inner_side_key_types: Vec<DataType>,
     lookup_prefix_len: usize,
-    context: C,
+    context: Arc<dyn BatchTaskContext>,
     task_id: TaskId,
     epoch: BatchQueryEpoch,
     worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode>,
@@ -82,7 +83,7 @@ pub trait LookupExecutorBuilder: Send {
 
 pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 
-impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
+impl InnerSideExecutorBuilder {
     /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
         let virtual_node = scan_range
@@ -127,7 +128,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    identity: "SeqScan".to_string(),
+                    identity: "SeqScan".to_owned(),
                     node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -161,7 +162,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
 }
 
 #[async_trait::async_trait]
-impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> {
+impl LookupExecutorBuilder for InnerSideExecutorBuilder {
     fn reset(&mut self) {
         self.worker_slot_to_scan_range_mapping = HashMap::new();
     }
@@ -228,7 +229,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let plan_node = PlanNode {
             children: vec![],
-            identity: "LocalLookupJoinExchangeExecutor".to_string(),
+            identity: "LocalLookupJoinExchangeExecutor".to_owned(),
             node_body: Some(exchange_node),
         };
 
@@ -287,10 +288,9 @@ impl<K> LocalLookupJoinExecutor<K> {
 
 pub struct LocalLookupJoinExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [outer_side_input]: [_; 1] = inputs.try_into().unwrap();
@@ -597,7 +597,7 @@ mod tests {
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
-            identity: "TestLookupJoinExecutor".to_string(),
+            identity: "TestLookupJoinExecutor".to_owned(),
             shutdown_rx: ShutdownToken::empty(),
             mem_ctx: MemoryContext::none(),
         }

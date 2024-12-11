@@ -27,7 +27,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_owner_request, alter_set_schema_request, alter_swap_rename_request,
-    create_connection_request, PbReplaceTablePlan, PbTableJobType, ReplaceTablePlan, TableJobType,
+    create_connection_request, PbReplaceJobPlan, PbTableJobType, ReplaceJobPlan, TableJobType,
     WaitVersion,
 };
 use risingwave_pb::meta::PbTableParallelism;
@@ -116,7 +116,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<PbReplaceTablePlan>,
+        affected_table_change: Option<PbReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<()>;
 
@@ -161,7 +161,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<PbReplaceTablePlan>,
+        affected_table_change: Option<PbReplaceJobPlan>,
     ) -> Result<()>;
 
     async fn drop_subscription(&self, subscription_id: u32, cascade: bool) -> Result<()>;
@@ -228,7 +228,7 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .create_database(PbDatabase {
-                name: db_name.to_string(),
+                name: db_name.to_owned(),
                 id: 0,
                 owner,
             })
@@ -246,7 +246,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_schema(PbSchema {
                 id: 0,
-                name: schema_name.to_string(),
+                name: schema_name.to_owned(),
                 database_id: db_id,
                 owner,
             })
@@ -329,7 +329,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         let version = self
@@ -425,7 +425,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
     ) -> Result<()> {
         let version = self
             .meta_client

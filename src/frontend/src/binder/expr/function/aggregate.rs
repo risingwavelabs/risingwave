@@ -180,7 +180,7 @@ impl Binder {
                     }
                     _ => {
                         return Err(ErrorCode::InvalidInputSyntax(
-                            "invalid direct args for approx_percentile aggregation".to_string(),
+                            "invalid direct args for approx_percentile aggregation".to_owned(),
                         )
                         .into())
                     }

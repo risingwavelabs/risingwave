@@ -256,9 +256,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -278,9 +278,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: fields,
-            type_name: type_name.to_string(),
+            type_name: type_name.to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },

@@ -84,7 +84,7 @@ impl JavaVmWrapper {
             if entry_path.file_name().is_some() {
                 let path = fs::canonicalize(entry_path)
                     .expect("invalid entry_path obtained from fs::read_dir");
-                class_vec.push(path.to_str().unwrap().to_string());
+                class_vec.push(path.to_str().unwrap().to_owned());
             }
         }
 
@@ -272,7 +272,7 @@ pub fn jobj_to_str(env: &mut JNIEnv<'_>, obj: JObject<'_>) -> anyhow::Result<Str
     }
     let jstr = JString::from(obj);
     let java_str = env.get_string(&jstr)?;
-    Ok(java_str.to_str()?.to_string())
+    Ok(java_str.to_str()?.to_owned())
 }
 
 /// Dumps the JVM stack traces.
@@ -299,7 +299,7 @@ pub fn dump_jvm_stack_traces() -> anyhow::Result<Option<String>> {
             let result = result
                 .to_str()
                 .with_context(|| "Failed to convert JavaStr")?;
-            Ok(Some(result.to_string()))
+            Ok(Some(result.to_owned()))
         }),
     }
 }

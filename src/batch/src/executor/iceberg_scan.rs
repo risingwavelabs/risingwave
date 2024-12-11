@@ -40,7 +40,6 @@ use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
 use crate::executor::{DataChunk, Executor};
 use crate::monitor::BatchMetrics;
-use crate::task::BatchTaskContext;
 
 static POSITION_DELETE_FILE_FILE_PATH_INDEX: usize = 0;
 static POSITION_DELETE_FILE_POS: usize = 1;
@@ -141,7 +140,7 @@ impl IcebergScanExecutor {
             .load_table_v2_with_metadata(self.table_meta)
             .await?;
         let data_types = self.schema.data_types();
-        let table_name = table.identifier().name().to_string();
+        let table_name = table.identifier().name().to_owned();
 
         let (mut position_delete_filter, data_file_scan_tasks) =
             match Option::take(&mut self.file_scan_tasks) {
@@ -225,10 +224,9 @@ impl IcebergScanExecutor {
 
 pub struct IcebergScanExecutorBuilder {}
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> crate::error::Result<BoxedExecutor> {
         ensure!(
@@ -338,7 +336,7 @@ impl PositionDeleteFilter {
                         continue;
                     }
                     let entry = position_delete_file_path_pos_map
-                        .entry(file_path.to_string())
+                        .entry(file_path.to_owned())
                         .or_default();
                     // Split `pos` by `batch_size`, because the data file will also be split by `batch_size`
                     let delete_vec_index = pos as usize / batch_size;

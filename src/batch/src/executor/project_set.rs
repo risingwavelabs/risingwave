@@ -30,7 +30,6 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
 
 pub struct ProjectSetExecutor {
     select_list: Vec<ProjectSetSelectItem>,
@@ -132,10 +131,9 @@ impl ProjectSetExecutor {
     }
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for ProjectSetExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -275,7 +273,7 @@ mod tests {
             select_list,
             child: Box::new(mock_executor),
             schema: Schema { fields },
-            identity: "ProjectSetExecutor".to_string(),
+            identity: "ProjectSetExecutor".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
 
@@ -320,7 +318,7 @@ mod tests {
         let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
             vec![vec![]], // One single row with no column.
             Schema::default(),
-            "ValuesExecutor".to_string(),
+            "ValuesExecutor".to_owned(),
             CHUNK_SIZE,
         ));
 
@@ -328,7 +326,7 @@ mod tests {
             select_list: vec![literal.boxed().into(), tf.into()],
             child: values_executor2,
             schema: schema_unnamed!(DataType::Int32, DataType::Int32),
-            identity: "ProjectSetExecutor2".to_string(),
+            identity: "ProjectSetExecutor2".to_owned(),
             chunk_size: CHUNK_SIZE,
         });
         let mut stream = proj_executor.execute();

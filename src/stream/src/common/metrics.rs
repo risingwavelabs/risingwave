@@ -43,9 +43,9 @@ impl MetricsInfo {
     pub fn for_test() -> Self {
         Self {
             metrics: Arc::new(StreamingMetrics::unused()),
-            table_id: "table_id test".to_string(),
-            actor_id: "actor_id test".to_string(),
-            desc: "desc test".to_string(),
+            table_id: "table_id test".to_owned(),
+            actor_id: "actor_id test".to_owned(),
+            desc: "desc test".to_owned(),
         }
     }
 }

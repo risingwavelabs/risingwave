@@ -28,7 +28,7 @@ use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::{BatchTaskContext, ShutdownToken};
+use crate::task::ShutdownToken;
 
 /// `SortAggExecutor` implements the sort aggregate algorithm, which assumes
 /// that the input chunks has already been sorted by group columns.
@@ -47,10 +47,9 @@ pub struct SortAggExecutor {
     shutdown_rx: ShutdownToken,
 }
 
-#[async_trait::async_trait]
 impl BoxedExecutorBuilder for SortAggExecutor {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        source: &ExecutorBuilder<'_, C>,
+    async fn new_boxed_executor(
+        source: &ExecutorBuilder<'_>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
         let [child]: [_; 1] = inputs.try_into().unwrap();
@@ -421,7 +420,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -505,7 +504,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -597,7 +596,7 @@ mod tests {
             group_key: vec![],
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 4,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -669,7 +668,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -760,7 +759,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit: 3,
             shutdown_rx: ShutdownToken::empty(),
         });
@@ -855,7 +854,7 @@ mod tests {
             group_key: group_exprs,
             child: Box::new(child),
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: "SortAggExecutor".to_owned(),
             output_size_limit,
             shutdown_rx,
         });
