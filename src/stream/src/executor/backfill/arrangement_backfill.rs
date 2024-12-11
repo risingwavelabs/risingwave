@@ -67,6 +67,8 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     rate_limit: Option<usize>,
 }
 
+const INITIAL_ADAPTIVE_RATE_LIMIT: usize = 1;
+
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
 where
     S: StateStore,
@@ -110,6 +112,41 @@ where
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
         let mut rate_limit = self.rate_limit;
+
+        // Query the current barrier latency from meta.
+        // Permit a 2x fluctuation in barrier latency. Set threshold to 15s.
+        let mut total_barrier_latency = Self::get_total_barrier_latency(&self.metrics);
+        let mut highest_barrier_latency = Self::get_barrier_latency(&self.metrics);
+        let threshold_barrier_latency = {
+            if highest_barrier_latency <= 10.0 {
+                20.0
+            } else {
+                highest_barrier_latency * 2.0
+            }
+        };
+        let chunk_size_1 = {
+            use std::env;
+            let key = "CHUNK_SIZE_1";
+            match env::var(key) {
+                Ok(_val) => true,
+                Err(_) => false,
+            }
+        };
+        if chunk_size_1 {
+            self.chunk_size = 1;
+        }
+        let adaptive_rate_limit = {
+            use std::env;
+            let key = "ADAPTIVE_RATE_LIMIT";
+            match env::var(key) {
+                Ok(_val) => true,
+                Err(_) => false,
+            }
+        };
+        tracing::debug!(target: "adaptive_rate_limit", adaptive_rate_limit, highest_barrier_latency, threshold_barrier_latency, "initial configs");
+        if adaptive_rate_limit {
+            rate_limit = Some(INITIAL_ADAPTIVE_RATE_LIMIT);
+        }
 
         // These builders will build data chunks.
         // We must supply them with the full datatypes which correspond to
@@ -343,6 +380,7 @@ where
                         .as_ref()
                         .map(|r| r.check().is_ok())
                         .unwrap_or(true);
+                    let rate_limit_ready = false;
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
@@ -532,6 +570,19 @@ where
                     }
                 }
 
+                // Adapt Rate Limit
+                if adaptive_rate_limit {
+                    Self::adapt_rate_limit_2(
+                        &self.actor_id,
+                        &self.metrics,
+                        threshold_barrier_latency,
+                        &mut highest_barrier_latency,
+                        &mut total_barrier_latency,
+                        &mut rate_limit,
+                        &mut rate_limiter,
+                    )
+                }
+
                 yield Message::Barrier(barrier);
 
                 // We will switch snapshot at the start of the next iteration of the backfill loop.
@@ -605,6 +656,75 @@ where
                 yield msg;
             }
         }
+    }
+
+    fn adapt_rate_limit_2(
+        actor_id: &ActorId,
+        metrics: &StreamingMetrics,
+        threshold_barrier_latency: f64,
+        highest_barrier_latency: &mut f64,
+        total_barrier_latency: &mut f64,
+        rate_limit: &mut Option<usize>,
+        rate_limiter: &mut Option<BackfillRateLimiter>,
+    ) {
+        let new_total_barrier_latency = Self::get_total_barrier_latency(metrics);
+        let new_barrier_latency = new_total_barrier_latency - *total_barrier_latency;
+        *highest_barrier_latency = f64::max(new_barrier_latency, *highest_barrier_latency);
+        tracing::debug!(
+            target: "adaptive_rate_limit",
+            new_barrier_latency,
+        );
+        let new_rate_limit = if *highest_barrier_latency > 2_f64 * threshold_barrier_latency {
+            *highest_barrier_latency = 0.0;
+            Some(INITIAL_ADAPTIVE_RATE_LIMIT)
+        } else if *highest_barrier_latency > threshold_barrier_latency
+            && rate_limit.is_some()
+        {
+            tracing::debug!(
+                target: "adaptive_rate_limit",
+                "barrier latency keep constant"
+            );
+            *rate_limit
+        } else if new_total_barrier_latency > *total_barrier_latency
+            && let Some(rate_limit_set) = rate_limit
+        {
+            let scaling_factor = 1.01_f64;
+            let scaled_rate_limit = (*rate_limit_set as f64) * scaling_factor;
+            let new_rate_limit = scaled_rate_limit.ceil() as usize;
+            Some(new_rate_limit)
+        } else {
+            *rate_limit
+        };
+        *total_barrier_latency = new_total_barrier_latency;
+        if *rate_limit != new_rate_limit
+            && let Some(rate_limit_setting) = new_rate_limit
+        {
+            *rate_limit = new_rate_limit;
+            tracing::debug!(
+                target: "adaptive_rate_limit",
+                actor_id,
+                ?rate_limit,
+                "adjusted rate limit"
+            );
+            *rate_limiter = create_limiter(rate_limit_setting)
+        }
+    }
+
+    fn get_total_barrier_latency(metrics: &StreamingMetrics) -> f64 {
+        let histogram = &metrics.barrier_inflight_latency;
+        histogram.get_sample_sum()
+    }
+
+    // FIXME(kwannoel): Is there some way for an actor to directly query meta?
+    // FIXME(kwannoel): IIUC These metrics are per parallelism.
+    // It is a good-enough approximate,
+    // but it can be further improved, e.g. another parallelism might be the bottleneck,
+    // so we should still consider the global inflight barrier latency,
+    // since chunks could be exchanged from this parallelism
+    // to the hot parallelism.
+    fn get_barrier_latency(metrics: &StreamingMetrics) -> f64 {
+        let histogram = &metrics.barrier_inflight_latency;
+        histogram.get_sample_sum() / histogram.get_sample_count() as f64
     }
 
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
