@@ -35,6 +35,7 @@ use super::join::hash_join::*;
 use super::join::row::{DegreeType, JoinRow};
 use super::join::*;
 use super::watermark::*;
+use crate::consistency::enable_strict_consistency;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
 
@@ -863,7 +864,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() });
 
             let matched_rows = if key_satisfies_non_null_requirement {
-                Self::hash_eq_match_opt(key, &mut side_match.ht)
+                if enable_strict_consistency() {
+                    Self::hash_eq_match_opt(key, &mut side_match.ht)
+                } else {
+                    let result = Self::hash_eq_match(key, &mut side_match.ht).await?;
+                    CacheResult::Hit(result)
+                }
             } else {
                 CacheResult::Hit(None)
             };
