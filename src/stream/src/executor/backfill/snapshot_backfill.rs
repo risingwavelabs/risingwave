@@ -252,7 +252,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     table_id = self.upstream_table.table_id().table_id,
                     "skip backfill"
                 );
-                let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 assert_eq!(first_barrier.epoch, first_recv_barrier.epoch);
                 yield Message::Barrier(first_barrier);
             }
