@@ -798,9 +798,13 @@ impl SubscriptionCursor {
             .filter(|(is_hidden, _)| *is_hidden)
             .map(|(_, field)| (*field).clone())
             .collect();
-        let mut pk_keep = iter.iter().map(|(is_hidden, _)| *is_hidden);
+        let pk_keep = iter
+            .iter()
+            .map(|(is_hidden, _)| *is_hidden)
+            .collect::<Vec<_>>();
         rows.iter_mut().for_each(|row| {
-            row.0.retain(|_| pk_keep.next().unwrap());
+            let mut pk_keep_iter = pk_keep.iter();
+            row.0.retain(|_| *pk_keep_iter.next().unwrap())
         });
         (pk_fields, rows, last_row)
     }
@@ -911,7 +915,9 @@ impl SubscriptionCursor {
         let out_fields = batch_log_seq_scan.core().out_fields();
         let out_names = batch_log_seq_scan.core().column_names();
 
-        let plan = if let Some(predicate) = predicate {
+        let plan = if let Some(predicate) = predicate
+            && !predicate.always_true()
+        {
             BatchFilter::new(generic::Filter::new(predicate, batch_log_seq_scan.into())).into()
         } else {
             batch_log_seq_scan.into()

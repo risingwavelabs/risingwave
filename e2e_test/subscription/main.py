@@ -109,6 +109,7 @@ def test_cursor_since_begin():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
@@ -138,6 +139,7 @@ def test_cursor_since_now():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -163,6 +165,7 @@ def test_cursor_without_since():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([6,6],row[0],"Insert")
     row = execute_query("fetch next from cur",conn)
     assert row == []
@@ -187,6 +190,7 @@ def test_cursor_since_rw_timestamp():
     execute_insert("insert into t1 values(6,6)",conn)
     execute_insert("flush",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     valuelen = len(row[0])
     rw_timestamp_1 = row[0][valuelen - 1]
     check_rows_data([4,4],row[0],"Insert")
@@ -204,15 +208,18 @@ def test_cursor_since_rw_timestamp():
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_1}",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([4,4],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_2}",conn)
     row = execute_query("fetch next from cur",conn)
+    row = execute_query("fetch next from cur",conn)
     check_rows_data([5,5],row[0],"Insert")
     execute_insert("close cur",conn)
 
     execute_insert(f"declare cur subscription cursor for sub since {rw_timestamp_3}",conn)
+    row = execute_query("fetch next from cur",conn)
     row = execute_query("fetch next from cur",conn)
     assert row == []
     execute_insert("close cur",conn)
@@ -567,14 +574,14 @@ def test_explain_cursor():
     execute_query("fetch next from cur",conn)
     plan = execute_query("explain fetch next from cur",conn)
     assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
-    assert plan[1][0] == "└─BatchFilter { predicate: (Row(t5.v1, t5.v2) > '(1,1)':Struct(StructType { field_names: [], field_types: [Int32, Int32] })) }"
-    assert plan[2][0] == "  └─BatchScan { table: t5, columns: [v1, v2, v3, v4] }"
+    assert plan[1][0] == "└─BatchScan { table: t5, columns: [v1, v2, v3, v4], scan_ranges: [(v1, v2) > (Int32(1), Int32(1))] }"
     execute_query("fetch next from cur",conn)
     execute_query("fetch next from cur",conn)
     plan = execute_query("explain fetch next from cur",conn)
+    print(plan)
     assert plan[0][0] == "BatchExchange { order: [t5.v1 ASC, t5.v2 ASC], dist: Single }"
-    assert plan[1][0] == "└─BatchFilter { predicate: (Row(t5.v1, t5.v2) > '(3,3)':Struct(StructType { field_names: [], field_types: [Int32, Int32] })) }"
-    assert "  └─BatchLogSeqScan { table: t5, columns: [v1, v2, v3, v4, op]" in plan[2][0]
+    assert "└─BatchLogSeqScan { table: t5, columns: [v1, v2, v3, v4, op]" in plan[1][0]
+    assert "scan_ranges: [(v1, v2) > (Int32(3), Int32(3))] }" in plan[1][0]
     execute_query("fetch next from cur",conn)
     drop_table_subscription()
 
