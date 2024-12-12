@@ -251,6 +251,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         )
     }
 
+    pub(crate) fn get_degree_state_mut_ref(&mut self) -> &mut Option<TableInner<S>> {
+        &mut self.degree_state
+    }
+
     /// NOTE(kwannoel): This allows us to concurrently stream records from the state_table,
     /// and update the degree table, without using `unsafe` code.
     ///
