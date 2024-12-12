@@ -4,7 +4,7 @@ set -euo pipefail
 
 if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
   mv .risingwave/log risedev-logs
-  risedev diagnose || true
+  ./risedev diagnose || true
   zip -q -r risedev-logs.zip risedev-logs/
   buildkite-agent artifact upload "risedev-logs/*"
   buildkite-agent artifact upload risedev-logs.zip
