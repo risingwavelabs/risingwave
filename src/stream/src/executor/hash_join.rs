@@ -792,18 +792,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     fn eq_join_left(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
-        Self::eq_join_oneside_opt::<{ SideType::Left }>(args)
+        Self::eq_join_oneside::<{ SideType::Left }>(args)
     }
 
     /// Used to forward `eq_join_oneside` to show join side in stack.
     fn eq_join_right(
         args: EqJoinArgs<'_, K, S>,
     ) -> impl Stream<Item = Result<StreamChunk, StreamExecutorError>> + '_ {
-        Self::eq_join_oneside_opt::<{ SideType::Right }>(args)
+        Self::eq_join_oneside::<{ SideType::Right }>(args)
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_oneside_opt<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
         let EqJoinArgs {
             ctx,
             side_l,
