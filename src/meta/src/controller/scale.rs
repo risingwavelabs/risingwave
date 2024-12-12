@@ -22,10 +22,12 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
+use risingwave_meta_model::prelude::{
+    Actor, ActorDispatcher, Fragment, Sink, Source, StreamingJob, Table,
+};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, streaming_job, ActorId, ActorMapping, ActorUpstreamActors,
-    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
+    ActorUpstreamActors, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -165,7 +167,7 @@ pub struct RescheduleWorkingSet {
     pub fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
     pub fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
 
-    pub related_jobs: HashMap<ObjectId, streaming_job::Model>,
+    pub related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
 }
 
 async fn resolve_no_shuffle_query<C>(
@@ -190,6 +192,67 @@ where
         .map_err(MetaError::from)?;
 
     Ok(result)
+}
+
+async fn resolve_streaming_job_definition<C>(
+    txn: &C,
+    job_ids: &HashSet<ObjectId>,
+) -> MetaResult<HashMap<ObjectId, String>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids = job_ids.iter().cloned().collect_vec();
+
+    // including table, materialized view, index
+    let common_job_definitions: Vec<(ObjectId, String)> = Table::find()
+        .select_only()
+        .columns([
+            table::Column::TableId,
+            #[cfg(not(debug_assertions))]
+            table::Column::Name,
+            #[cfg(debug_assertions)]
+            table::Column::Definition,
+        ])
+        .filter(table::Column::TableId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let sink_definitions: Vec<(ObjectId, String)> = Sink::find()
+        .select_only()
+        .columns([
+            sink::Column::SinkId,
+            #[cfg(not(debug_assertions))]
+            sink::Column::Name,
+            #[cfg(debug_assertions)]
+            sink::Column::Definition,
+        ])
+        .filter(sink::Column::SinkId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let source_definitions: Vec<(ObjectId, String)> = Source::find()
+        .select_only()
+        .columns([
+            source::Column::SourceId,
+            #[cfg(not(debug_assertions))]
+            source::Column::Name,
+            #[cfg(debug_assertions)]
+            source::Column::Definition,
+        ])
+        .filter(source::Column::SourceId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let definitions: HashMap<ObjectId, String> = common_job_definitions
+        .into_iter()
+        .chain(sink_definitions.into_iter())
+        .chain(source_definitions.into_iter())
+        .collect();
+
+    Ok(definitions)
 }
 
 impl CatalogController {
@@ -339,6 +402,9 @@ impl CatalogController {
         let related_job_ids: HashSet<_> =
             fragments.values().map(|fragment| fragment.job_id).collect();
 
+        let related_job_definitions =
+            resolve_streaming_job_definition(txn, &related_job_ids).await?;
+
         let related_jobs = StreamingJob::find()
             .filter(streaming_job::Column::JobId.is_in(related_job_ids))
             .all(txn)
@@ -346,7 +412,19 @@ impl CatalogController {
 
         let related_jobs = related_jobs
             .into_iter()
-            .map(|job| (job.job_id, job))
+            .map(|job| {
+                let job_id = job.job_id;
+                (
+                    job_id,
+                    (
+                        job,
+                        related_job_definitions
+                            .get(&job_id)
+                            .cloned()
+                            .unwrap_or("".to_string()),
+                    ),
+                )
+            })
             .collect();
 
         Ok(RescheduleWorkingSet {
