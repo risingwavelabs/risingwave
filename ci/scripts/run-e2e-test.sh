@@ -86,6 +86,7 @@ sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-$
 sqllogictest -p 4566 -d dev './e2e_test/backfill/sink/different_pk_and_dist_key.slt'
 
 echo "--- Kill cluster"
+exit 88
 cluster_stop
 
 echo "--- e2e, $mode, batch"

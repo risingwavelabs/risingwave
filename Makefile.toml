@@ -196,6 +196,19 @@ script = '''
 watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
+[tasks.diagnose]
+category = "Misc"
+description = "Dump diagnose info"
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -ex
+file_name=${PREFIX_LOG}/diagnose-$(date +%Y-%m-%d-%H-%M-%S).txt
+curl ${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/ > ${file_name}
+echo "Diagnose info has been dumped to ${file_name}"
+'''
+
+
 [tasks.del]
 alias = "delete"
 

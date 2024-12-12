@@ -28,7 +28,8 @@ use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
     ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
-    ObjectId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -879,6 +880,25 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let actor_locations: Vec<PartialActorLocation> =
             Actor::find().into_partial_model().all(&inner.db).await?;
+        Ok(actor_locations)
+    }
+
+    pub async fn list_actor_info(
+        &self,
+    ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
+        let inner = self.inner.read().await;
+        let actor_locations: Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)> =
+            Actor::find()
+                .join(JoinType::LeftJoin, actor::Relation::Fragment.def())
+                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .select_only()
+                .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                .column_as(object::Column::Oid, "job_id")
+                .column_as(object::Column::SchemaId, "schema_id")
+                .column_as(object::Column::ObjType, "type")
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
         Ok(actor_locations)
     }
 
