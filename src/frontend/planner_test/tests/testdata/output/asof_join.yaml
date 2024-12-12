@@ -7,7 +7,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: [t2.v2 DESC], limit: 1, offset: 0, group_key: [t1.v1, t1.v2] }
       └─BatchExchange { order: [], dist: HashShard(t1.v1, t1.v2) }
-        └─BatchHashJoin { type: Inner, predicate: t1.v1 = $expr1, output: [t1.v1, t1.v2, t2.v1, t2.v2] }
+        └─BatchHashJoin { type: Inner, predicate: t1.v1 = $expr1 AND (t1.v2 > t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2] }
           ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
           │ └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
           └─BatchExchange { order: [], dist: HashShard($expr1) }
@@ -27,7 +27,7 @@
     └─BatchProject { exprs: [t1.v1, t1.v2, t2.v1, t2.v2] }
       └─BatchGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t1.v1, t2.v1] }
         └─BatchExchange { order: [], dist: HashShard(t1.v1, t2.v1) }
-          └─BatchHashJoin { type: LeftOuter, predicate: t1.v1 = t2.v1, output: [t1.v1, t1.v2, t2.v1, t2.v2, $expr1] }
+          └─BatchHashJoin { type: LeftOuter, predicate: t1.v1 = t2.v1 AND ($expr1 < t2.v2), output: [t1.v1, t1.v2, t2.v1, t2.v2, $expr1] }
             ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
             │ └─BatchProject { exprs: [t1.v1, t1.v2, (t1.v2 * 2:Int32) as $expr1] }
             │   └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }

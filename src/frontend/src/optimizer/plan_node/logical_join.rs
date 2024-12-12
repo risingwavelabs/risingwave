@@ -38,7 +38,10 @@ use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::stream_asof_join::StreamAsOfJoin;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchGroupTopN, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, BatchProject, ColumnPruningContext, EqJoinPredicate, LogicalFilter, LogicalProject, LogicalScan, PredicatePushdownContext, RewriteStreamContext, StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext
+    BatchGroupTopN, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, BatchProject,
+    ColumnPruningContext, EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext,
+    RewriteStreamContext, StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin,
+    ToStreamContext,
 };
 use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -1378,7 +1381,8 @@ impl LogicalJoin {
         let left_len = left.schema().len();
         let logical_join = self.clone_with_left_right(left, right);
 
-        let inequality_desc = Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
+        let inequality_desc =
+            Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
 
         Ok(StreamAsOfJoin::new(
             logical_join.core.clone(),
@@ -1387,7 +1391,7 @@ impl LogicalJoin {
         ))
     }
 
-    /// Convert the logical AsOf join to a Hash join + a Group top 1.
+    /// Convert the logical `AsOf` join to a Hash join + a Group top 1.
     fn to_batch_asof_join(
         &self,
         mut logical_join: generic::Join<PlanRef>,
@@ -1399,21 +1403,24 @@ impl LogicalJoin {
 
         if predicate.eq_keys().is_empty() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires at least 1 equal condition".to_string(),
+                "AsOf join requires at least 1 equal condition".to_owned(),
             )
             .into());
         }
 
-
         logical_join.join_type = match logical_join.join_type {
-            JoinType::AsofInner  => JoinType::Inner,
+            JoinType::AsofInner => JoinType::Inner,
             JoinType::AsofLeftOuter => JoinType::LeftOuter,
             _ => unreachable!(),
         };
         let left_schema_len = logical_join.left.schema().len();
-        let asof_desc = Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
+        let asof_desc =
+            Self::get_inequality_desc_from_predicate(predicate.non_eq_cond(), left_schema_len)?;
 
-        let (left_asof_idx, right_asof_idx) = (asof_desc.left_idx as usize, asof_desc.right_idx as usize + left_schema_len);
+        let (left_asof_idx, right_asof_idx) = (
+            asof_desc.left_idx as usize,
+            asof_desc.right_idx as usize + left_schema_len,
+        );
 
         // Add the AsOf columns to the output indices
         let original_output_indices = logical_join.output_indices.clone();
@@ -1423,22 +1430,12 @@ impl LogicalJoin {
         if !logical_join.output_indices.contains(&right_asof_idx) {
             logical_join.output_indices.push(right_asof_idx);
         }
-        
-        let mapping = logical_join.i2o_col_mapping();
-        dbg!(&mapping);
-        dbg!(&predicate.eq_cond());
-        dbg!(&predicate.non_eq_cond());
 
-        dbg!(&logical_join);
-        dbg!(&logical_join.schema());
-       
-        let batch_join = BatchHashJoin::new(logical_join, predicate.eq_predicate());
-       
-        dbg!(&batch_join);
-        dbg!(&batch_join.schema());
-        
-        let right_output_asof_idx = mapping.map(right_asof_idx) as usize;
-        // let left_output_asof_idx = mapping.map(left_asof_idx) as usize;
+        let mapping = logical_join.i2o_col_mapping();
+
+        let batch_join = BatchHashJoin::new(logical_join, predicate.clone());
+
+        let right_output_asof_idx = mapping.map(right_asof_idx);
 
         // Add a Group Top1 operator that group by LHS's join key and sort by RHS's asof column.
         let order = match asof_desc.inequality_type() {
@@ -1456,7 +1453,11 @@ impl LogicalJoin {
                 bail!("unspecified AsOf join inequality type")
             }
         };
-        let group_key = vec![predicate.left_eq_indexes(), vec![asof_desc.left_idx as usize]].concat();
+        let group_key = [
+            predicate.left_eq_indexes(),
+            vec![asof_desc.left_idx as usize],
+        ]
+        .concat();
         let logical_group_top1 = generic::TopN::with_group(
             batch_join.into(),
             generic::TopNLimit::new(1, false),
@@ -1464,7 +1465,7 @@ impl LogicalJoin {
             order,
             group_key,
         );
-        let batch_group_top1 = BatchGroupTopN::new(logical_group_top1.into());
+        let batch_group_top1 = BatchGroupTopN::new(logical_group_top1);
 
         let group_top_1_schema_len = batch_group_top1.schema().len();
         if original_output_indices.len() != group_top_1_schema_len {
@@ -1474,10 +1475,9 @@ impl LogicalJoin {
                 0..original_output_indices.len(),
             );
             Ok(BatchProject::new(logical_project).into())
-        } else  {
+        } else {
             Ok(batch_group_top1.into())
-        } 
-
+        }
     }
 
     pub fn get_inequality_desc_from_predicate(
@@ -1498,7 +1498,7 @@ impl LogicalJoin {
             }
         } else {
             Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires exactly 1 ineuquality condition".to_string(),
+                "AsOf join requires exactly 1 ineuquality condition".to_owned(),
             )
             .into())
         }
@@ -1536,7 +1536,6 @@ impl ToBatch for LogicalJoin {
 
         if self.join_type() == JoinType::AsofInner || self.join_type() == JoinType::AsofLeftOuter {
             self.to_batch_asof_join(logical_join, predicate)
-                .map(|x| x.into())
         } else if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
                 return Err(ErrorCode::InternalError(format!(

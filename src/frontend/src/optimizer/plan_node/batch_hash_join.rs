@@ -70,7 +70,12 @@ impl BatchHashJoin {
                     unreachable!()
                 }
                 JoinType::FullOuter => Distribution::SomeShard,
-                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti | JoinType::AsofInner | JoinType::AsofLeftOuter => {
+                JoinType::Inner
+                | JoinType::LeftOuter
+                | JoinType::LeftSemi
+                | JoinType::LeftAnti
+                | JoinType::AsofInner
+                | JoinType::AsofLeftOuter => {
                     let l2o = join.l2i_col_mapping().composite(&join.i2o_col_mapping());
                     l2o.rewrite_provided_distribution(left)
                 }
