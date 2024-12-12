@@ -203,7 +203,7 @@ dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 set -ex
-file_name=${PREFIX_LOG}/diagnose-$(date +%Y-%m-%d-%H-%M-%S).txt
+file_name=${PREFIX_LOG}/diagnose-$(date -u +%Y-%m-%dT%H:%M:%SZ).txt
 curl ${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/ > ${file_name}
 echo "Diagnose info has been dumped to ${file_name}"
 '''
