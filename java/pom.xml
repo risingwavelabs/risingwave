@@ -65,16 +65,16 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- dependency versions -->
         <protobuf.version>3.25.5</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
-        <grpc.version>1.68.1</grpc.version>
+        <grpc.version>1.69.0</grpc.version>
         <log4j.version>2.24.2</log4j.version>
         <slf4j.version>2.0.16</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
-        <jackson.version>2.18.1</jackson.version>
+        <jackson.version>2.18.2</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.20.4</testcontainers.version>
-        <aws.version>2.29.20</aws.version>
-        <jetty.version>12.0.15</jetty.version>
-        <parquet.version>1.14.4</parquet.version>
+        <aws.version>2.29.32</aws.version>
+        <jetty.version>12.0.16</jetty.version>
+        <parquet.version>1.15.0</parquet.version>
     </properties>
 
     <dependencyManagement>
@@ -175,7 +175,7 @@
             <dependency>
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-high-level-client</artifactId>
-                <version>7.17.25</version>
+                <version>7.17.26</version>
             </dependency>
             <dependency>
                 <groupId>org.opensearch.client</groupId>
@@ -310,7 +310,7 @@
             <dependency>
                 <groupId>org.xerial</groupId>
                 <artifactId>sqlite-jdbc</artifactId>
-                <version>3.47.0.0</version>
+                <version>3.47.1.0</version>
             </dependency>
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
@@ -398,7 +398,7 @@
                         <groupId>com.puppycrawl.tools</groupId>
                         <artifactId>checkstyle</artifactId>
                         <!-- TODO: Document it for devs. -->
-                        <version>10.20.1</version>
+                        <version>10.20.2</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -491,7 +491,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.11.1</version>
+                <version>3.11.2</version>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>
