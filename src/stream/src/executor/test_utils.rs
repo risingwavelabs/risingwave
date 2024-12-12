@@ -870,30 +870,21 @@ pub mod hash_join_executor {
             }
         }
 
-        match join_type_primitive {
-            JoinType::LeftOuter => {
-                match stream.next().await {
-                    Some(Ok(Message::Chunk(c))) => {
-                        assert_eq!(c.cardinality(), 1024);
-                    }
-                    other => {
-                        panic!("Expected a barrier, got {:?}", other);
-                    }
-                }
-            }
-            JoinType::Inner => {
-                for _ in 0..amp {
-                    match stream.next().await {
-                        Some(Ok(Message::Chunk(c))) => {
-                            assert_eq!(c.cardinality(), chunk_size);
-                        }
-                        other => {
-                            panic!("Expected a barrier, got {:?}", other);
-                        }
-                    }
-                }
-            }
+        let expected_count = match join_type_primitive {
+            JoinType::LeftOuter => amp * chunk_size,
+            JoinType::Inner => chunk_size,
             _ => panic!("Unsupported join type"),
+        };
+        let mut current_count = 0;
+        while current_count < expected_count {
+            match stream.next().await {
+                Some(Ok(Message::Chunk(c))) => {
+                    current_count += c.cardinality();
+                }
+                other => {
+                    panic!("Expected a barrier, got {:?}", other);
+                }
+            }
         }
     }
 }
