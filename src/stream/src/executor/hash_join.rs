@@ -1247,6 +1247,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
         }
 
+        // forward rows depending on join types
         let op = match JOIN_OP {
             JoinOp::Insert => Op::Insert,
             JoinOp::Delete => Op::Delete,
@@ -1259,30 +1260,35 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         {
             yield chunk;
         }
+
         // cache refill
         if entry_state_count <= entry_state_max_rows {
             side_match.ht.update_state(key, Box::new(entry_state));
         }
 
+        // watermark state cleaning
         for matched_row in matched_rows_to_clean {
             side_match.ht.delete_handle_degree(key, matched_row)?;
         }
 
+        // apply append_only optimization to clean matched_rows which have been persisted
         if append_only_optimize && let Some(row) = append_only_matched_row {
             assert_matches!(JOIN_OP, JoinOp::Insert);
             side_match.ht.delete_handle_degree(key, row)?;
-        } else {
-            match JOIN_OP {
-                JoinOp::Insert => {
-                    side_update
-                        .ht
-                        .insert_handle_degree(key, JoinRow::new(row, degree))?;
-                }
-                JoinOp::Delete => {
-                    side_update
-                        .ht
-                        .delete_handle_degree(key, JoinRow::new(row, degree))?;
-                }
+            return Ok(());
+        }
+
+        // no append_only optimization, update state table(s).
+        match JOIN_OP {
+            JoinOp::Insert => {
+                side_update
+                    .ht
+                    .insert_handle_degree(key, JoinRow::new(row, degree))?;
+            }
+            JoinOp::Delete => {
+                side_update
+                    .ht
+                    .delete_handle_degree(key, JoinRow::new(row, degree))?;
             }
         }
     }
