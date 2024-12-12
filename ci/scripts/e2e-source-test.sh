@@ -35,10 +35,12 @@ echo "--- Install dependencies"
 python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema nats-py requests psycopg2-binary
 apt-get -y install jq
 
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev 92b350d
+
 echo "--- e2e, inline test"
 RUST_LOG="debug,risingwave_stream=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info,events::stream::message::chunk=trace" \
 risedev ci-start ci-inline-source-test
-risedev slt './e2e_test/source_inline/**/*.slt' -j16
+risedev slt './e2e_test/source_inline/**/*.slt' -j16 --keep-db-on-failure
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 echo "--- Kill cluster"
 risedev ci-kill
