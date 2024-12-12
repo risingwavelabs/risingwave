@@ -550,7 +550,7 @@ pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
     );
 }
 
-/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// FIXME: Perhaps we should use sth like `ColumnIdGenerator::new_alter`,
 /// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
 /// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
 ///
