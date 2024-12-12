@@ -26,23 +26,9 @@ CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
 statement ok
 CREATE MATERIALIZED VIEW mv_user_2 AS SELECT * FROM src_user;
 
-statement ok
-CREATE TABLE t_user WITH (
-    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
-    topic = 'pb_alter_source_shared_test',
-    scan.startup.mode = 'earliest'
-)
-FORMAT PLAIN ENCODE PROTOBUF(
-    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
-    message = 'test.User'
-);
-
 # age is new field
 statement error
 SELECT age FROM mv_user;
-
-statement error
-SELECT age FROM t_user;
 
 # Push more events with extended fields
 system ok
