@@ -32,3 +32,9 @@ SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2
 ----
 1 2 3 NULL NULL NULL
 2 3 4 NULL NULL NULL
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
