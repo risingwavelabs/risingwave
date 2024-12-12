@@ -12273,6 +12273,7 @@ dependencies = [
  "tokio-stream 0.1.15",
  "tracing",
  "tracing-test",
+ "url",
  "workspace-hack",
 ]
 
