@@ -1265,19 +1265,23 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
 
         for matched_row in matched_rows_to_clean {
-            side_match.ht.delete(key, matched_row)?;
+            side_match.ht.delete_handle_degree(key, matched_row)?;
         }
 
         if append_only_optimize && let Some(row) = append_only_matched_row {
             assert_matches!(JOIN_OP, JoinOp::Insert);
-            side_match.ht.delete(key, row)?;
+            side_match.ht.delete_handle_degree(key, row)?;
         } else {
             match JOIN_OP {
                 JoinOp::Insert => {
-                    side_update.ht.insert(key, JoinRow::new(row, degree))?;
+                    side_update
+                        .ht
+                        .insert_handle_degree(key, JoinRow::new(row, degree))?;
                 }
                 JoinOp::Delete => {
-                    side_update.ht.delete(key, JoinRow::new(row, degree))?;
+                    side_update
+                        .ht
+                        .delete_handle_degree(key, JoinRow::new(row, degree))?;
                 }
             }
         }
