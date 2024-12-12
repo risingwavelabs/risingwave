@@ -901,7 +901,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             #[for_await]
-                            for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }>(
+                            for chunk in Self::handle_fetch_matched_rows::<
+                                SIDE,
+                                { JoinOp::Insert },
+                                { true },
+                            >(
+                                None,
                                 row,
                                 key,
                                 &mut hashjoin_chunk_builder,
@@ -918,7 +923,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         Op::Delete | Op::UpdateDelete => {
                             #[for_await]
-                            for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }>(
+                            for chunk in Self::handle_fetch_matched_rows::<
+                                SIDE,
+                                { JoinOp::Delete },
+                                { true },
+                            >(
+                                None,
                                 row,
                                 key,
                                 &mut hashjoin_chunk_builder,
@@ -1192,7 +1202,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         'a,
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
+        const MATCHED_ROWS_FROM_CACHE: bool,
     >(
+        cached_rows: Option<HashValueType>,
         row: RowRef<'a>,
         key: &'a K,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
@@ -1211,39 +1223,70 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut degree = 0;
         let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
         let mut matched_rows_to_clean = vec![];
-        let (matched_rows, mut degree_table) = side_match
-            .ht
-            .fetch_matched_rows_and_get_degree_table_ref(key)
-            .await?;
 
-        #[for_await]
-        for matched_row in matched_rows {
-            let (encoded_pk, mut matched_row) = matched_row?;
-
-            // cache refill
-            if entry_state_count <= entry_state_max_rows {
-                entry_state
-                    .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
-                    .with_context(|| format!("row: {}", row.display(),))?;
-                entry_state_count += 1;
-            }
-            if let Some(chunk) = Self::handle_matched_row::<SIDE, { JOIN_OP }>(
-                row,
-                matched_row,
-                hashjoin_chunk_builder,
-                degree_table,
-                side_update.start_pos,
-                side_match.start_pos,
-                cond,
-                &mut degree,
-                useful_state_clean_columns,
-                append_only_optimize,
-                &mut append_only_matched_row,
-                &mut matched_rows_to_clean,
-            )
-            .await
+        if MATCHED_ROWS_FROM_CACHE {
+            let mut cached_rows = cached_rows.unwrap();
+            for (matched_row_ref, matched_row) in cached_rows.values_mut(&side_match.all_data_types)
             {
-                yield chunk;
+                let matched_row = matched_row?;
+                if let Some(chunk) =
+                    Self::handle_matched_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
+                        row,
+                        matched_row,
+                        Some(matched_row_ref),
+                        hashjoin_chunk_builder,
+                        side_match.ht.get_degree_state_mut_ref(),
+                        side_update.start_pos,
+                        side_match.start_pos,
+                        cond,
+                        &mut degree,
+                        useful_state_clean_columns,
+                        append_only_optimize,
+                        &mut append_only_matched_row,
+                        &mut matched_rows_to_clean,
+                    )
+                    .await
+                {
+                    yield chunk;
+                }
+            }
+        } else {
+            let (matched_rows, mut degree_table) = side_match
+                .ht
+                .fetch_matched_rows_and_get_degree_table_ref(key)
+                .await?;
+
+            #[for_await]
+            for matched_row in matched_rows {
+                let (encoded_pk, mut matched_row) = matched_row?;
+
+                // cache refill
+                if entry_state_count <= entry_state_max_rows {
+                    entry_state
+                        .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
+                        .with_context(|| format!("row: {}", row.display(),))?;
+                    entry_state_count += 1;
+                }
+                if let Some(chunk) =
+                    Self::handle_matched_row::<SIDE, { JOIN_OP }, { MATCHED_ROWS_FROM_CACHE }>(
+                        row,
+                        matched_row,
+                        None,
+                        hashjoin_chunk_builder,
+                        degree_table,
+                        side_update.start_pos,
+                        side_match.start_pos,
+                        cond,
+                        &mut degree,
+                        useful_state_clean_columns,
+                        append_only_optimize,
+                        &mut append_only_matched_row,
+                        &mut matched_rows_to_clean,
+                    )
+                    .await
+                {
+                    yield chunk;
+                }
             }
         }
 
@@ -1297,9 +1340,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         'a,
         const SIDE: SideTypePrimitive,
         const JOIN_OP: JoinOpPrimitive,
+        const MATCHED_ROWS_FROM_CACHE: bool,
     >(
         update_row: RowRef<'a>,
         mut matched_row: JoinRow<OwnedRow>,
+        mut matched_row_cache_ref: Option<&mut StateValueType>,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
         degree_table: &mut Option<TableInner<S>>,
         side_update_start_pos: usize,
@@ -1327,6 +1372,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             *update_row_degree += 1;
             if let Some(degree_table) = degree_table {
                 update_degree::<S, { JOIN_OP }>(degree_table, &mut matched_row);
+                if MATCHED_ROWS_FROM_CACHE {
+                    // update matched row in cache
+                    match JOIN_OP {
+                        JoinOp::Insert => {
+                            matched_row_cache_ref.as_mut().unwrap().degree += 1;
+                        }
+                        JoinOp::Delete => {
+                            matched_row_cache_ref.as_mut().unwrap().degree -= 1;
+                        }
+                    }
+                }
             }
             // send matched row downstream
             if !forward_exactly_once(T, SIDE) {
