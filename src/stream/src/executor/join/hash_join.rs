@@ -262,9 +262,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         key: &'a K,
     ) -> StreamExecutorResult<(
         impl Stream<Item = StreamExecutorResult<(PkType, JoinRow<OwnedRow>)>> + 'a,
-        Option<&mut TableInner<S>>,
+        &mut Option<TableInner<S>>,
     )> {
-        let degree_state = self.degree_state.as_mut();
+        let degree_state = &mut self.degree_state;
         let (order_key_indices, pk_indices, state_table) = (
             &self.state.order_key_indices,
             &self.state.pk_indices,
@@ -281,9 +281,9 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             &self.pk_serializer,
             state_table,
             key,
-            None,
+            degrees,
         );
-        Ok((stream, degree_state))
+        Ok((stream, &mut self.degree_state))
     }
 }
 
