@@ -171,16 +171,16 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         {
             let jdbc_url = parse_jdbc_url(url)
                 .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id.sink_id)))?;
-            properties_with_secret.insert("host".to_string(), jdbc_url.host);
-            properties_with_secret.insert("port".to_string(), jdbc_url.port.to_string());
-            properties_with_secret.insert("database".to_string(), jdbc_url.db_name);
-            properties_with_secret.insert("user".to_string(), jdbc_url.username);
-            properties_with_secret.insert("password".to_string(), jdbc_url.password);
+            properties_with_secret.insert("host".to_owned(), jdbc_url.host);
+            properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
+            properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
+            properties_with_secret.insert("user".to_owned(), jdbc_url.username);
+            properties_with_secret.insert("password".to_owned(), jdbc_url.password);
             if let Some(table_name) = properties_with_secret.get("table.name") {
-                properties_with_secret.insert("table".to_string(), table_name.clone());
+                properties_with_secret.insert("table".to_owned(), table_name.clone());
             }
             if let Some(schema_name) = properties_with_secret.get("schema.name") {
-                properties_with_secret.insert("schema".to_string(), schema_name.clone());
+                properties_with_secret.insert("schema".to_owned(), schema_name.clone());
             }
             // TODO(kwannoel): Do we need to handle jdbc.query.timeout?
         }
@@ -365,11 +365,11 @@ fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
     let password = password.ok_or_else(|| anyhow!("missing password in jdbc url"))?;
 
     Ok(JdbcUrl {
-        host: host.to_string(),
+        host: host.to_owned(),
         port,
-        db_name: db_name.to_string(),
-        username: username.to_string(),
-        password: password.to_string(),
+        db_name: db_name.to_owned(),
+        username: username.to_owned(),
+        password: password.to_owned(),
     })
 }
 
