@@ -1,4 +1,7 @@
 statement ok
+set sink_decouple = false;
+
+statement ok
 create table t(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
 
 statement ok
@@ -81,7 +84,7 @@ with (
   nexmark.table.type = 'Auction',
   nexmark.split.num = '2',
   nexmark.min.event.gap.in.ns = '500000',
-  commit_checkpoint_interval = 30
+  commit_checkpoint_interval = 1
 ) engine = iceberg;
 
 statement ok
