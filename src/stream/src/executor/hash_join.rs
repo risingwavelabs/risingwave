@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, Bound, HashSet};
 use std::time::Duration;
 
@@ -897,22 +898,42 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
                 CacheResult::Miss => {
-                    #[for_await]
-                    for chunk in Self::handle_fetch_matched_rows(
-                        row,
-                        op,
-                        key,
-                        &mut hashjoin_chunk_builder,
-                        side_match,
-                        side_update,
-                        &useful_state_clean_columns,
-                        cond,
-                        append_only_optimize,
-                    ) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
-                    }
+                    match op {
+                        Op::Insert | Op::UpdateInsert => {
+                            #[for_await]
+                            for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Insert }>(
+                                row,
+                                key,
+                                &mut hashjoin_chunk_builder,
+                                side_match,
+                                side_update,
+                                &useful_state_clean_columns,
+                                cond,
+                                append_only_optimize,
+                            ) {
+                                let chunk = chunk?;
+                                total_matches += chunk.cardinality();
+                                yield chunk;
+                            }
+                        }
+                        Op::Delete | Op::UpdateDelete => {
+                            #[for_await]
+                            for chunk in Self::handle_fetch_matched_rows::<SIDE, { JoinOp::Delete }>(
+                                row,
+                                key,
+                                &mut hashjoin_chunk_builder,
+                                side_match,
+                                side_update,
+                                &useful_state_clean_columns,
+                                cond,
+                                append_only_optimize,
+                            ) {
+                                let chunk = chunk?;
+                                total_matches += chunk.cardinality();
+                                yield chunk;
+                            }
+                        }
+                    };
                 }
             }
 
@@ -1467,9 +1488,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     /// 3. Handle state cleaning.
     /// 4. Handle degree table update.
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn handle_fetch_matched_rows<'a, const SIDE: SideTypePrimitive>(
+    async fn handle_fetch_matched_rows<
+        'a,
+        const SIDE: SideTypePrimitive,
+        const JOIN_OP: JoinOpPrimitive,
+    >(
         row: RowRef<'a>,
-        op: Op,
         key: &'a K,
         hashjoin_chunk_builder: &'a mut JoinChunkBuilder<T, SIDE>,
         side_match: &'a mut JoinSide<K, S>,
@@ -1482,212 +1506,132 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut entry_state_count = 0;
         let entry_state_max_rows = 30000;
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
-        match op {
-            Op::Insert | Op::UpdateInsert => {
-                let mut degree = 0;
-                let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
-                let mut matched_rows_to_clean = vec![];
-                let (matched_rows, mut degree_table) = side_match
-                    .ht
-                    .fetch_matched_rows_and_get_degree_table_ref(key)
-                    .await?;
-                #[for_await]
-                for matched_row in matched_rows {
-                    let (encoded_pk, mut matched_row) = matched_row?;
 
-                    // cache refill
-                    if entry_state_count <= entry_state_max_rows {
-                        entry_state
-                            .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
-                            .with_context(|| format!("row: {}", row.display(),))?;
-                        entry_state_count += 1;
-                    }
+        let mut degree = 0;
+        let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
+        let mut matched_rows_to_clean = vec![];
+        let (matched_rows, mut degree_table) = side_match
+            .ht
+            .fetch_matched_rows_and_get_degree_table_ref(key)
+            .await?;
 
-                    // check join cond
-                    let join_condition_satisfied = Self::check_join_condition(
-                        row,
-                        side_update.start_pos,
-                        &matched_row.row,
-                        side_match.start_pos,
-                        cond,
-                    )
-                    .await;
-                    let mut need_state_clean = false;
-                    if join_condition_satisfied {
-                        // update degree
-                        degree += 1;
-                        if side_match.need_degree_table {
-                            update_degree::<S, true>(
-                                degree_table.as_mut().unwrap(),
-                                &mut matched_row,
-                            );
-                        }
-                        // send matched row downstream
-                        if !forward_exactly_once(T, SIDE) {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.with_match_on_insert(&row, &matched_row)
-                            {
-                                yield chunk;
-                            }
-                        }
-                    } else {
-                        // state cleaning
-                        for (column_idx, watermark) in useful_state_clean_columns {
-                            if matched_row
-                                .row
-                                .datum_at(*column_idx)
-                                .map_or(false, |scalar| {
-                                    scalar
-                                        .default_cmp(&watermark.val.as_scalar_ref_impl())
-                                        .is_lt()
-                                })
-                            {
-                                need_state_clean = true;
-                                break;
-                            }
-                        }
-                    }
-                    // If the stream is append-only and the join key covers pk in both side,
-                    // then we can remove matched rows since pk is unique and will not be
-                    // inserted again
-                    if append_only_optimize {
-                        // Since join key contains pk and pk is unique, there should be only
-                        // one row if matched.
-                        assert!(append_only_matched_row.is_none());
-                        append_only_matched_row = Some(matched_row);
-                    } else if need_state_clean {
-                        // `append_only_optimize` and `need_state_clean` won't both be true.
-                        // 'else' here is only to suppress compiler error.
-                        matched_rows_to_clean.push(matched_row);
-                    }
+        #[for_await]
+        for matched_row in matched_rows {
+            let (encoded_pk, mut matched_row) = matched_row?;
+
+            // cache refill
+            if entry_state_count <= entry_state_max_rows {
+                entry_state
+                    .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
+                    .with_context(|| format!("row: {}", row.display(),))?;
+                entry_state_count += 1;
+            }
+
+            // check join cond
+            let join_condition_satisfied = Self::check_join_condition(
+                row,
+                side_update.start_pos,
+                &matched_row.row,
+                side_match.start_pos,
+                cond,
+            )
+            .await;
+            let mut need_state_clean = false;
+            if join_condition_satisfied {
+                // update degree
+                degree += 1;
+                if side_match.need_degree_table {
+                    update_degree::<S, JOIN_OP>(degree_table.as_mut().unwrap(), &mut matched_row);
                 }
-                if degree == 0 {
+                // send matched row downstream
+                if !forward_exactly_once(T, SIDE) {
                     if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                        hashjoin_chunk_builder.with_match::<JOIN_OP>(&row, &matched_row)
                     {
                         yield chunk;
                     }
-                } else if let Some(chunk) =
-                    hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
-                {
-                    yield chunk;
                 }
-                // cache refill
-                if entry_state_count <= entry_state_max_rows {
-                    side_match.ht.update_state(key, Box::new(entry_state));
-                }
-                for matched_row in matched_rows_to_clean {
-                    if side_match.need_degree_table {
-                        side_match.ht.delete(key, matched_row)?;
-                    } else {
-                        side_match.ht.delete_row(key, matched_row.row)?;
+            } else {
+                // state cleaning
+                for (column_idx, watermark) in useful_state_clean_columns {
+                    if matched_row
+                        .row
+                        .datum_at(*column_idx)
+                        .map_or(false, |scalar| {
+                            scalar
+                                .default_cmp(&watermark.val.as_scalar_ref_impl())
+                                .is_lt()
+                        })
+                    {
+                        need_state_clean = true;
+                        break;
                     }
-                }
-
-                if append_only_optimize && let Some(row) = append_only_matched_row {
-                    if side_match.need_degree_table {
-                        side_match.ht.delete(key, row)?;
-                    } else {
-                        side_match.ht.delete_row(key, row.row)?;
-                    }
-                } else if side_update.need_degree_table {
-                    side_update.ht.insert(key, JoinRow::new(row, degree))?;
-                } else {
-                    side_update.ht.insert_row(key, row)?;
                 }
             }
-            Op::Delete | Op::UpdateDelete => {
-                let mut degree = 0;
-                let mut matched_rows_to_clean = vec![];
-                let (matched_rows, mut degree_table) = side_match
-                    .ht
-                    .fetch_matched_rows_and_get_degree_table_ref(key)
-                    .await?;
-                #[for_await]
-                for matched_row in matched_rows {
-                    let (encoded_pk, mut matched_row) = matched_row?;
+            // If the stream is append-only and the join key covers pk in both side,
+            // then we can remove matched rows since pk is unique and will not be
+            // inserted again
+            // INSERT ONLY
+            if append_only_optimize {
+                assert_matches!(JOIN_OP, JoinOp::Insert);
+                // Since join key contains pk and pk is unique, there should be only
+                // one row if matched.
+                assert!(append_only_matched_row.is_none());
+                append_only_matched_row = Some(matched_row);
+            } else if need_state_clean {
+                // `append_only_optimize` and `need_state_clean` won't both be true.
+                // 'else' here is only to suppress compiler error.
+                matched_rows_to_clean.push(matched_row);
+            }
+        }
+        let op = match JOIN_OP {
+            JoinOp::Insert => Op::Insert,
+            JoinOp::Delete => Op::Delete,
+        };
+        if degree == 0 {
+            if let Some(chunk) = hashjoin_chunk_builder.forward_if_not_matched(op, row) {
+                yield chunk;
+            }
+        } else if let Some(chunk) = hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+        {
+            yield chunk;
+        }
+        // cache refill
+        if entry_state_count <= entry_state_max_rows {
+            side_match.ht.update_state(key, Box::new(entry_state));
+        }
+        for matched_row in matched_rows_to_clean {
+            if side_match.need_degree_table {
+                side_match.ht.delete(key, matched_row)?;
+            } else {
+                side_match.ht.delete_row(key, matched_row.row)?;
+            }
+        }
 
-                    // cache refill
-                    if entry_state_count <= entry_state_max_rows {
-                        entry_state
-                            .insert(encoded_pk, matched_row.encode(), None) // TODO(kwannoel): handle ineq key for asof join.
-                            .with_context(|| format!("row: {}", row.display(),))?;
-                        entry_state_count += 1;
-                    }
-                    let join_condition_satisfied = Self::check_join_condition(
-                        row,
-                        side_update.start_pos,
-                        &matched_row.row,
-                        side_match.start_pos,
-                        cond,
-                    )
-                    .await;
-                    let mut need_state_clean = false;
-                    if join_condition_satisfied {
-                        degree += 1;
-                        if side_match.need_degree_table {
-                            update_degree::<S, false>(
-                                degree_table.as_mut().unwrap(),
-                                &mut matched_row,
-                            );
-                        }
-                        if !forward_exactly_once(T, SIDE) {
-                            if let Some(chunk) =
-                                hashjoin_chunk_builder.with_match_on_delete(&row, &matched_row)
-                            {
-                                yield chunk;
-                            }
-                        }
-                    } else {
-                        for (column_idx, watermark) in useful_state_clean_columns {
-                            if matched_row
-                                .row
-                                .datum_at(*column_idx)
-                                .map_or(false, |scalar| {
-                                    scalar
-                                        .default_cmp(&watermark.val.as_scalar_ref_impl())
-                                        .is_lt()
-                                })
-                            {
-                                need_state_clean = true;
-                                break;
-                            }
-                        }
-                    }
-                    if need_state_clean {
-                        matched_rows_to_clean.push(matched_row);
-                    }
+        if append_only_optimize && let Some(row) = append_only_matched_row {
+            assert_matches!(JOIN_OP, JoinOp::Insert);
+            if side_match.need_degree_table {
+                side_match.ht.delete(key, row)?;
+            } else {
+                side_match.ht.delete_row(key, row.row)?;
+            }
+        } else if side_update.need_degree_table {
+            match JOIN_OP {
+                JoinOp::Insert => {
+                    side_update.ht.insert(key, JoinRow::new(row, degree))?;
                 }
-                if degree == 0 {
-                    if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
-                    {
-                        yield chunk;
-                    }
-                } else if let Some(chunk) =
-                    hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
-                {
-                    yield chunk;
-                }
-                // cache refill
-                if entry_state_count <= entry_state_max_rows {
-                    side_match.ht.update_state(key, Box::new(entry_state));
-                }
-                for matched_row in matched_rows_to_clean {
-                    if side_match.need_degree_table {
-                        side_match.ht.delete(key, matched_row)?;
-                    } else {
-                        side_match.ht.delete_row(key, matched_row.row)?;
-                    }
-                }
-
-                if append_only_optimize {
-                    unreachable!();
-                } else if side_update.need_degree_table {
+                JoinOp::Delete => {
                     side_update.ht.delete(key, JoinRow::new(row, degree))?;
-                } else {
+                }
+            }
+        } else {
+            match JOIN_OP {
+                JoinOp::Insert => {
+                    side_update.ht.insert_row(key, row)?;
+                }
+                JoinOp::Delete => {
                     side_update.ht.delete_row(key, row)?;
-                };
+                }
             }
         }
     }
@@ -1741,6 +1685,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     // TODO(yuhao-su): We should find a better way to eval the expression
     // without concat two rows.
     // if there are non-equi expressions
+    // NOTE(kwannoel): We can probably let `eval` use `impl Row` instead of `OwnedRow`.
     async fn check_join_condition(
         row: impl Row,
         side_update_start_pos: usize,
