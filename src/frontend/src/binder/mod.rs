@@ -328,7 +328,7 @@ impl Binder {
     ) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
-            db_name: session.database().to_owned(),
+            db_name: session.database(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),

@@ -620,7 +620,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     )?;
     let session = context.session_ctx().clone();
 
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
@@ -1043,7 +1043,7 @@ pub(super) async fn handle_create_table_plan(
             )?;
 
             let session = &handler_args.session;
-            let db_name = session.database();
+            let db_name = &session.database();
             let (schema_name, resolved_table_name) =
                 Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
             let (database_id, schema_id) =
@@ -1871,7 +1871,7 @@ fn get_source_and_resolved_table_name(
     cdc_table: CdcTableInfo,
     table_name: ObjectName,
 ) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, resolved_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) =
@@ -1914,7 +1914,7 @@ fn bind_webhook_info(
     } = webhook_info;
 
     // validate secret_ref
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
     let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;

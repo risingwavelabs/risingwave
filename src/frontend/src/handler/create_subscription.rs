@@ -31,7 +31,7 @@ pub fn create_subscription_catalog(
     context: OptimizerContextRef,
     stmt: CreateSubscriptionStatement,
 ) -> Result<SubscriptionCatalog> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (subscription_schema_name, subscription_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.subscription_name.clone())?;
     let (table_schema_name, subscription_from_table_name) =

@@ -58,7 +58,7 @@ async fn handle_declare_subscription_cursor(
     rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, cursor_name) =
         Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
 

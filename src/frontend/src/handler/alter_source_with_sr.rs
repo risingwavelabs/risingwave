@@ -100,11 +100,11 @@ pub fn fetch_source_catalog_with_db_schema_id(
     session: &SessionImpl,
     name: &ObjectName,
 ) -> Result<(Arc<SourceCatalog>, DatabaseId, SchemaId)> {
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, name.clone())?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
