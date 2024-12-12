@@ -2119,7 +2119,7 @@ pub mod default {
         }
 
         pub fn backfill_adaptive_rate_limit_min() -> f64 {
-            100.0
+            10.0
         }
 
         pub fn backfill_adaptive_rate_limit_max() -> f64 {
