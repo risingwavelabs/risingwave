@@ -1505,6 +1505,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut entry_state = JoinEntryState::default();
         let mut entry_state_count = 0;
         let entry_state_max_rows = 30000;
+
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
 
         let mut degree = 0;
@@ -1552,7 +1553,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
                 }
             } else {
-                // state cleaning
+                // check if need state cleaning
                 for (column_idx, watermark) in useful_state_clean_columns {
                     if matched_row
                         .row
