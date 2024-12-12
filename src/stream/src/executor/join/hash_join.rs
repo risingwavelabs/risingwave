@@ -757,6 +757,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         Ok(())
     }
 
+    pub fn insert_handle_degree(
+        &mut self,
+        key: &K,
+        value: JoinRow<impl Row>,
+    ) -> StreamExecutorResult<()> {
+        if self.need_degree_table {
+            self.insert(key, value)
+        } else {
+            self.insert_row(key, value.row)
+        }
+    }
+
     /// Insert a join row
     pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
         let pk = self.serialize_pk_from_row(&value.row);
@@ -801,6 +813,18 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let join_row = JoinRow::new(&value, 0);
         self.insert(key, join_row)?;
         Ok(())
+    }
+
+    pub fn delete_handle_degree(
+        &mut self,
+        key: &K,
+        value: JoinRow<impl Row>,
+    ) -> StreamExecutorResult<()> {
+        if self.need_degree_table {
+            self.delete(key, value)
+        } else {
+            self.delete_row(key, value.row)
+        }
     }
 
     /// Delete a join row
