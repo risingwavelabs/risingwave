@@ -199,6 +199,20 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> JoinChunkBuilder
         c.into()
     }
 
+    /// TODO(kwannoel): We can actually reuse a lot of the logic between `with_match_on_insert`
+    /// and `with_match_on_delete`. We should refactor this to avoid code duplication.
+    /// We just introduce this wrapper function to avoid large code diffs.
+    pub fn with_match<const OP: JoinOpPrimitive>(
+        &mut self,
+        row: &RowRef<'_>,
+        matched_row: &JoinRow<OwnedRow>,
+    ) -> Option<StreamChunk> {
+        match OP {
+            JoinOp::Insert => self.with_match_on_insert(row, matched_row),
+            JoinOp::Delete => self.with_match_on_delete(row, matched_row),
+        }
+    }
+
     pub fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
