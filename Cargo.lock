@@ -12239,6 +12239,7 @@ dependencies = [
  "tokio-stream 0.1.15 (git+https://github.com/madsim-rs/tokio.git?rev=0dd1055)",
  "tracing",
  "tracing-test",
+ "url",
  "workspace-hack",
 ]
 
