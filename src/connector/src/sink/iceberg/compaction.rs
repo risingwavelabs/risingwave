@@ -143,9 +143,9 @@ async fn run_compact(
 fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, String>> {
     match config.common.catalog_type.as_deref() {
         Some("storage") | None => Ok(HashMap::from_iter([
-            ("type".to_string(), "hadoop".to_string()),
+            ("type".to_owned(), "hadoop".to_owned()),
             (
-                "warehouse".to_string(),
+                "warehouse".to_owned(),
                 config
                     .common
                     .warehouse_path
@@ -155,9 +155,9 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
         ])),
         Some("jdbc") => Ok(HashMap::from_iter(
             [
-                ("type".to_string(), "jdbc".to_string()),
+                ("type".to_owned(), "jdbc".to_owned()),
                 (
-                    "warehouse".to_string(),
+                    "warehouse".to_owned(),
                     config
                         .common
                         .warehouse_path
@@ -165,7 +165,7 @@ fn get_catalog_config(config: &IcebergConfig) -> anyhow::Result<HashMap<String, 
                         .ok_or_else(|| anyhow!("warehouse unspecified for jdbc catalog"))?,
                 ),
                 (
-                    "uri".to_string(),
+                    "uri".to_owned(),
                     config
                         .common
                         .catalog_uri
@@ -364,8 +364,8 @@ async fn trigger_compaction() {
             db.to_owned(),
             table.to_owned(),
             &HashMap::from_iter([
-                ("type".to_string(), "hadoop".to_string()),
-                ("warehouse".to_string(), warehouse.to_string()),
+                ("type".to_owned(), "hadoop".to_owned()),
+                ("warehouse".to_owned(), warehouse.to_owned()),
             ]),
         )
         .await;
