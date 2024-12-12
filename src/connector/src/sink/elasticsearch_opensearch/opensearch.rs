@@ -64,14 +64,20 @@ impl Sink for OpenSearchSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(ElasticSearchOpenSearchSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            Self::SINK_NAME,
-        )?
-        .into_log_sinker(self.config.concurrent_requests))
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            ElasticSearchOpenSearchSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                Self::SINK_NAME,
+            )?
+            .into_log_sinker(self.config.concurrent_requests),
+            None,
+        ))
     }
 
     fn set_default_commit_checkpoint_interval(

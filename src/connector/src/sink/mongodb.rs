@@ -344,16 +344,22 @@ impl Sink for MongodbSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(MongodbSinkWriter::new(
-            format!("{}-{}", writer_param.executor_id, self.param.sink_name),
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.is_append_only,
-        )
-        .await?
-        .into_log_sinker(MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE))
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            MongodbSinkWriter::new(
+                format!("{}-{}", writer_param.executor_id, self.param.sink_name),
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                self.is_append_only,
+            )
+            .await?
+            .into_log_sinker(MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE),
+            None,
+        ))
     }
 }
 

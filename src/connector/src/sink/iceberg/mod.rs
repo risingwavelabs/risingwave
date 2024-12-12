@@ -380,7 +380,10 @@ impl Sink for IcebergSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
         let table = self.create_and_validate_table().await?;
         let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
             IcebergWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
@@ -404,16 +407,15 @@ impl Sink for IcebergSink {
             inner,
         )
         .await?;
-
+        let log_store_rewind_start_epoch = writer.log_store_rewind_start_epoch;
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.commit_checkpoint_interval).expect(
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
-            commit_checkpoint_interval,
+        Ok((
+            DecoupleCheckpointLogSinkerOf::new(writer, metrics, commit_checkpoint_interval),
+            log_store_rewind_start_epoch,
         ))
     }
 

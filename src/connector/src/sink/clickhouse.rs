@@ -538,7 +538,10 @@ impl Sink for ClickHouseSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
         let writer = ClickHouseSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -551,10 +554,13 @@ impl Sink for ClickHouseSink {
         "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
     );
 
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            SinkWriterMetrics::new(&writer_param),
-            commit_checkpoint_interval,
+        Ok((
+            DecoupleCheckpointLogSinkerOf::new(
+                writer,
+                SinkWriterMetrics::new(&writer_param),
+                commit_checkpoint_interval,
+            ),
+            None,
         ))
     }
 }

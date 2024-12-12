@@ -433,7 +433,10 @@ impl Sink for BigQuerySink {
 
     const SINK_NAME: &'static str = BIGQUERY_SINK;
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
         let (writer, resp_stream) = BigQuerySinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -441,10 +444,9 @@ impl Sink for BigQuerySink {
             self.is_append_only,
         )
         .await?;
-        Ok(BigQueryLogSinker::new(
-            writer,
-            resp_stream,
-            BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE,
+        Ok((
+            BigQueryLogSinker::new(writer, resp_stream, BIGQUERY_SEND_FUTURE_BUFFER_MAX_SIZE),
+            None,
         ))
     }
 

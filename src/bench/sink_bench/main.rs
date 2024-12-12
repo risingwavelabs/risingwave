@@ -132,7 +132,10 @@ impl LogReader for MockRangeLogReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+    async fn rewind(
+        &mut self,
+        _log_store_rewind_start_epoch: Option<u64>,
+    ) -> LogStoreResult<(bool, Option<Bitmap>)> {
         Ok((false, None))
     }
 }
@@ -384,7 +387,7 @@ where
         )));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }
-    let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
+    let (log_sinker, _) = sink.new_log_sinker(sink_writer_param).await.unwrap();
     match log_sinker.consume_log_and_sink(&mut log_reader).await {
         Ok(_) => Err("Stream closed".to_string()),
         Err(e) => Err(e.to_report_string()),

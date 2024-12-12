@@ -633,7 +633,10 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 
     async fn validate(&self) -> Result<()>;
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker>;
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)>;
     #[expect(clippy::unused_async)]
     async fn new_coordinator(&self, _db: DatabaseConnection) -> Result<Self::Coordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))

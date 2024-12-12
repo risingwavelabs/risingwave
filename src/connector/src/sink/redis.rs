@@ -198,17 +198,23 @@ impl Sink for RedisSink {
 
     const SINK_NAME: &'static str = "redis";
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(RedisSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            &self.format_desc,
-            self.db_name.clone(),
-            self.sink_from_name.clone(),
-        )
-        .await?
-        .into_log_sinker(usize::MAX))
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            RedisSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                &self.format_desc,
+                self.db_name.clone(),
+                self.sink_from_name.clone(),
+            )
+            .await?
+            .into_log_sinker(usize::MAX),
+            None,
+        ))
     }
 
     async fn validate(&self) -> Result<()> {

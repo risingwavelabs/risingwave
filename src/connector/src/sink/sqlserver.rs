@@ -251,15 +251,21 @@ ORDER BY
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(SqlServerSinkWriter::new(
-            self.config.clone(),
-            self.schema.clone(),
-            self.pk_indices.clone(),
-            self.is_append_only,
-        )
-        .await?
-        .into_log_sinker(SinkWriterMetrics::new(&writer_param)))
+    async fn new_log_sinker(
+        &self,
+        writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
+            SqlServerSinkWriter::new(
+                self.config.clone(),
+                self.schema.clone(),
+                self.pk_indices.clone(),
+                self.is_append_only,
+            )
+            .await?
+            .into_log_sinker(SinkWriterMetrics::new(&writer_param)),
+            None,
+        ))
     }
 }
 

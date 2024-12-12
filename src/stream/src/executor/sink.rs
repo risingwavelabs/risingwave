@@ -506,11 +506,24 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_reader.init().await?;
 
         #[expect(irrefutable_let_patterns)] // false positive
-        while let Err(e) = sink
-            .new_log_sinker(sink_writer_param.clone())
-            .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
+        while let Err(e) = {
+            let res = sink.new_log_sinker(sink_writer_param.clone()).await;
+
+            async {
+                match res {
+                    Ok((log_sinker, log_store_rewind_start_offset)) => {
+                        log_reader
+                            .rewind(log_store_rewind_start_offset)
+                            .await
+                            .unwrap();
+
+                        log_sinker.consume_log_and_sink(&mut log_reader).await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
             .await
-        {
+        } {
             GLOBAL_ERROR_METRICS.user_sink_error.report([
                 "sink_executor_error".to_owned(),
                 sink_param.sink_id.to_string(),
@@ -528,8 +541,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     )
                     .await;
             }
-
-            match log_reader.rewind().await {
+            // todo(wcy-fdu)
+            match log_reader.rewind(None).await {
                 Ok((true, curr_vnode_bitmap)) => {
                     warn!(
                         error = %e.as_report(),

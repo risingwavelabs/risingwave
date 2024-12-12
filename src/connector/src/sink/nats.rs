@@ -117,12 +117,16 @@ impl Sink for NatsSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(
+    async fn new_log_sinker(
+        &self,
+        _writer_param: SinkWriterParam,
+    ) -> Result<(Self::LogSinker, Option<u64>)> {
+        Ok((
             NatsSinkWriter::new(self.config.clone(), self.schema.clone())
                 .await?
                 .into_log_sinker(NATS_SEND_FUTURE_BUFFER_MAX_SIZE),
-        )
+            None,
+        ))
     }
 }
 

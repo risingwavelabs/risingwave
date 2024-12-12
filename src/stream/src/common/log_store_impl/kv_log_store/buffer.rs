@@ -211,10 +211,9 @@ impl LogStoreBufferInner {
 
     fn rewind(&mut self, log_store_rewind_start_epoch: Option<u64>) {
         while let Some((epoch, item)) = self.consumed_queue.pop_front() {
-            if epoch > log_store_rewind_start_epoch.unwrap_or(0){
+            if epoch > log_store_rewind_start_epoch.unwrap_or(0) {
                 self.unconsumed_queue.push_back((epoch, item));
             }
-           
         }
         self.update_unconsumed_buffer_metrics();
     }

@@ -239,7 +239,10 @@ impl LogReader for BoundedInMemLogStoreReader {
         Ok(())
     }
 
-    async fn rewind(&mut self) -> LogStoreResult<(bool, Option<Bitmap>)> {
+    async fn rewind(
+        &mut self,
+        _log_store_rewind_start_epoch: Option<u64>,
+    ) -> LogStoreResult<(bool, Option<Bitmap>)> {
         Ok((false, None))
     }
 }

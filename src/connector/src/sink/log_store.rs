@@ -169,7 +169,7 @@ pub trait LogReader: Send + Sized + 'static {
     /// The return flag means whether the log store support rewind
     fn rewind(
         &mut self,
-        log_store_rewind_start_epoch: Option<u64>
+        log_store_rewind_start_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
 }
 
@@ -210,8 +210,9 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
 
     fn rewind(
         &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.inner.rewind()
+        self.inner.rewind(log_store_rewind_start_epoch)
     }
 }
 
@@ -257,10 +258,13 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
 
     fn rewind(
         &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.inner.rewind().inspect_ok(|_| {
-            self.wait_new_future_start_time = None;
-        })
+        self.inner
+            .rewind(log_store_rewind_start_epoch)
+            .inspect_ok(|_| {
+                self.wait_new_future_start_time = None;
+            })
     }
 }
 
@@ -315,8 +319,11 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
 
     fn rewind(
         &mut self,
+        log_store_rewind_start_epoch: Option<u64>,
     ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
-        self.inner.rewind().instrument_await("log_reader_rewind")
+        self.inner
+            .rewind(log_store_rewind_start_epoch)
+            .instrument_await("log_reader_rewind")
     }
 }
 
