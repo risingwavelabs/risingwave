@@ -24,7 +24,7 @@ use std::time::Duration;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
+use risingwave_batch_executors::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
 };

@@ -132,7 +132,6 @@ impl BatchTaskContext for ComputeNodeContext {
 }
 
 impl ComputeNodeContext {
-    #[cfg(test)]
     pub fn for_test() -> Arc<dyn BatchTaskContext> {
         Arc::new(Self {
             env: BatchEnvironment::for_test(),

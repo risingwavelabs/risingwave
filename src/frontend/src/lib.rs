@@ -38,6 +38,8 @@
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+#[cfg(test)]
+risingwave_batch_executors::enable!();
 
 #[macro_use]
 mod catalog;

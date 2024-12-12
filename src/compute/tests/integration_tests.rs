@@ -23,7 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{btreemap, convert_args};
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{
+use risingwave_batch_executors::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
