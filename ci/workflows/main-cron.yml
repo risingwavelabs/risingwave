@@ -142,7 +142,7 @@ steps:
         - "build"
         - "docslt"
       plugins:
-        - seek-oss/aws-sm#v2.3.1:
+        - seek-oss/aws-sm#v2.3.2:
             env:
               BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
         - docker-compose#v5.5.0: *docker-compose-common
