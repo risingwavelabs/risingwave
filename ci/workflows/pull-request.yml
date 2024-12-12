@@ -35,8 +35,8 @@ other-sql-backend: &other-sql-backend
           endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
       - with:
           label: "mysql"
-          # mysql -h mysql -P 3306 -u root -p123456 -D rwmeta
-          endpoint: "mysql://root:123456@mysql:3306/rwmeta"
+          # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
+          endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
   env:
     RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
 
