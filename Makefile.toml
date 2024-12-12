@@ -636,11 +636,21 @@ echo "   $(tput setaf 4)source ${PREFIX_CONFIG}/psql-env$(tput sgr0)"
 
 [tasks.psql]
 category = "RiseDev - Start/Stop"
-description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+description = "Run local psql client for RisingWave with default connection parameters. You can pass extra arguments to psql."
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
 #!/usr/bin/env bash
 psql -h $RISEDEV_RW_FRONTEND_LISTEN_ADDRESS -p $RISEDEV_RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.pgpsql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client for postgres with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+source "${PREFIX_CONFIG}/risedev-env"
+PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE psql "$@"
 '''
 
 [tasks.ctl]
