@@ -24,7 +24,7 @@ mod test {
     #[tokio::test]
     async fn test_backward_merge_basic() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, _) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -32,7 +32,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, _) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -40,7 +40,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, _) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -77,7 +77,7 @@ mod test {
     #[tokio::test]
     async fn test_backward_merge_seek() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, _) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -85,7 +85,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, _) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -93,7 +93,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, _) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -152,7 +152,7 @@ mod test {
     #[tokio::test]
     async fn test_backward_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, _) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x + 1,
@@ -160,7 +160,7 @@ mod test {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, _) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT + x + 1,

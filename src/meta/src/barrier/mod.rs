@@ -95,6 +95,7 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<u32, DdlProgress>>),
+    AdhocRecovery(Sender<()>),
 }
 
 #[derive(Debug)]
@@ -184,7 +185,6 @@ impl BarrierWorkerRuntimeInfoSnapshot {
     }
 }
 
-#[expect(dead_code)]
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
     database_fragment_info: InflightDatabaseInfo,
@@ -196,7 +196,6 @@ struct DatabaseRuntimeInfoSnapshot {
 }
 
 impl DatabaseRuntimeInfoSnapshot {
-    #[expect(dead_code)]
     fn validate(
         &self,
         database_id: DatabaseId,

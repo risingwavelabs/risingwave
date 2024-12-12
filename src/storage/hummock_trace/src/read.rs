@@ -141,7 +141,7 @@ mod test {
         let resp = TracedSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
-                message: "abc".to_string(),
+                message: "abc".to_owned(),
             }),
             info: None,
             operation: 1,

@@ -58,10 +58,10 @@ fn pb_field_to_col_desc(
         *index += 1;
         Ok(ColumnDesc {
             column_id: *index,
-            name: field_descriptor.name().to_string(),
+            name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             field_descs,
-            type_name: m.full_name().to_string(),
+            type_name: m.full_name().to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
@@ -72,7 +72,7 @@ fn pb_field_to_col_desc(
         *index += 1;
         Ok(ColumnDesc {
             column_id: *index,
-            name: field_descriptor.name().to_string(),
+            name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             additional_column: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
@@ -145,7 +145,7 @@ pub fn from_protobuf_value<'a>(
                 let DataType::Struct(st) = type_expected else {
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
-                        got: desc.full_name().to_string(),
+                        got: desc.full_name().to_owned(),
                         value: value.to_string(), // Protobuf TEXT
                     });
                 };
@@ -258,12 +258,7 @@ fn protobuf_type_mapping(
             } else {
                 let fields = m
                     .fields()
-                    .map(|f| {
-                        Ok((
-                            f.name().to_string(),
-                            protobuf_type_mapping(&f, parse_trace)?,
-                        ))
-                    })
+                    .map(|f| Ok((f.name().to_owned(), protobuf_type_mapping(&f, parse_trace)?)))
                     .try_collect::<_, Vec<_>, _>()?;
                 StructType::new(fields).into()
             }

@@ -27,6 +27,7 @@ use futures::stream::BoxStream;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
+use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{
     CreateType as PbCreateType, HandleConflictBehavior as PbHandleConflictBehavior,
     StreamJobStatus as PbStreamJobStatus,
@@ -97,6 +98,7 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
+pub const RISINGWAVE_ICEBERG_ROW_ID: &str = "_risingwave_iceberg_row_id";
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }
@@ -542,10 +544,40 @@ impl ConflictBehavior {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            ConflictBehavior::NoCheck => "NoCheck".to_string(),
-            ConflictBehavior::Overwrite => "Overwrite".to_string(),
-            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
-            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+            ConflictBehavior::NoCheck => "NoCheck".to_owned(),
+            ConflictBehavior::Overwrite => "Overwrite".to_owned(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_owned(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_owned(),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Engine {
+    #[default]
+    Hummock,
+    Iceberg,
+}
+
+impl Engine {
+    pub fn from_protobuf(engine: &PbEngine) -> Self {
+        match engine {
+            PbEngine::Hummock | PbEngine::Unspecified => Engine::Hummock,
+            PbEngine::Iceberg => Engine::Iceberg,
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbEngine {
+        match self {
+            Engine::Hummock => PbEngine::Hummock,
+            Engine::Iceberg => PbEngine::Iceberg,
+        }
+    }
+
+    pub fn debug_to_string(self) -> String {
+        match self {
+            Engine::Hummock => "Hummock".to_owned(),
+            Engine::Iceberg => "Iceberg".to_owned(),
         }
     }
 }

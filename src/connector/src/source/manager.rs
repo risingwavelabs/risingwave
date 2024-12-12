@@ -182,7 +182,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: fields.clone(),
             additional_column: additional_column.clone(),
             // additional fields below
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             version: ColumnDescVersion::Pr13707,

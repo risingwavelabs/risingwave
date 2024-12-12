@@ -26,7 +26,7 @@ use futures::future::BoxFuture;
 use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use risingwave_common::error::tonic::extra::Score;
+use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCreateMviewProgress, PbLocalSstableInfo,
@@ -432,6 +432,9 @@ impl LocalBarrierWorker {
                 );
                 Ok(())
             }
+            Request::ResetDatabase(_) => {
+                unimplemented!("should not receive this request yet")
+            }
             Request::Init(_) => {
                 unreachable!()
             }
@@ -669,7 +672,7 @@ impl LocalBarrierWorker {
             {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
-                        request_id: "todo".to_string(),
+                        request_id: "todo".to_owned(),
                         partial_graph_id: partial_graph_id.into(),
                         epoch,
                         status: None,
@@ -858,7 +861,7 @@ impl LocalBarrierWorker {
 
         once(first_err)
             .chain(later_errs.into_iter())
-            .map(|e| ScoredStreamError::new(e.clone()))
+            .map(|e| e.with_score())
             .max_by_key(|e| e.score)
             .expect("non-empty")
     }
@@ -979,33 +982,11 @@ impl LocalBarrierManager {
 }
 
 /// A [`StreamError`] with a score, used to find the root cause of actor failures.
-#[derive(Debug, Clone)]
-struct ScoredStreamError {
-    error: StreamError,
-    score: Score,
-}
+type ScoredStreamError = ScoredError<StreamError>;
 
-impl std::fmt::Display for ScoredStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.error.fmt(f)
-    }
-}
-
-impl std::error::Error for ScoredStreamError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.error.source()
-    }
-
-    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
-        self.error.provide(request);
-        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
-        request.provide_value(self.score);
-    }
-}
-
-impl ScoredStreamError {
+impl StreamError {
     /// Score the given error based on hard-coded rules.
-    fn new(error: StreamError) -> Self {
+    fn with_score(self) -> ScoredStreamError {
         // Explicitly list all error kinds here to notice developers to update this function when
         // there are changes in error kinds.
 
@@ -1052,8 +1033,8 @@ impl ScoredStreamError {
             }
         }
 
-        let score = Score(stream_error_score(&error));
-        Self { error, score }
+        let score = Score(stream_error_score(&self));
+        ScoredStreamError { error: self, score }
     }
 }
 
@@ -1169,7 +1150,7 @@ pub(crate) mod barrier_test_utils {
                 .send(Ok(StreamingControlStreamRequest {
                     request: Some(streaming_control_stream_request::Request::InjectBarrier(
                         InjectBarrierRequest {
-                            request_id: "".to_string(),
+                            request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
                             database_id: TEST_DATABASE_ID.database_id,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),

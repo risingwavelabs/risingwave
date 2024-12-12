@@ -44,16 +44,16 @@ impl IcebergArrowConvert {
         FromArrow::from_record_batch(self, batch)
     }
 
+    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
+        FromArrow::from_field(self, field)
+    }
+
     pub fn to_arrow_field(
         &self,
         name: &str,
         data_type: &DataType,
     ) -> Result<arrow_schema::Field, ArrayError> {
         ToArrow::to_arrow_field(self, name, data_type)
-    }
-
-    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
-        FromArrow::from_field(self, field)
     }
 
     pub fn struct_from_fields(
@@ -81,6 +81,36 @@ impl IcebergArrowConvert {
 }
 
 impl ToArrow for IcebergArrowConvert {
+    fn to_arrow_field(
+        &self,
+        name: &str,
+        data_type: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        let data_type = match data_type {
+            DataType::Boolean => self.bool_type_to_arrow(),
+            DataType::Int16 => self.int32_type_to_arrow(),
+            DataType::Int32 => self.int32_type_to_arrow(),
+            DataType::Int64 => self.int64_type_to_arrow(),
+            DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::Float32 => self.float32_type_to_arrow(),
+            DataType::Float64 => self.float64_type_to_arrow(),
+            DataType::Date => self.date_type_to_arrow(),
+            DataType::Time => self.time_type_to_arrow(),
+            DataType::Timestamp => self.timestamp_type_to_arrow(),
+            DataType::Timestamptz => self.timestamptz_type_to_arrow(),
+            DataType::Interval => self.interval_type_to_arrow(),
+            DataType::Varchar => self.varchar_type_to_arrow(),
+            DataType::Bytea => self.bytea_type_to_arrow(),
+            DataType::Serial => self.serial_type_to_arrow(),
+            DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
+            DataType::Jsonb => self.varchar_type_to_arrow(),
+            DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
+            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
+            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+        };
+        Ok(arrow_schema::Field::new(name, data_type, true))
+    }
+
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
         // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
@@ -165,9 +195,9 @@ impl IcebergCreateTableArrowConvert {
 
         let mut metadata = HashMap::new();
         // for iceberg-rust
-        metadata.insert("PARQUET:field_id".to_string(), field_id.to_string());
+        metadata.insert("PARQUET:field_id".to_owned(), field_id.to_string());
         // for icelake
-        metadata.insert("column_id".to_string(), field_id.to_string());
+        metadata.insert("column_id".to_owned(), field_id.to_string());
         arrow_field.set_metadata(metadata);
     }
 }
@@ -187,6 +217,14 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         arrow_field
     }
 
+    fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        let data_type = arrow_schema::DataType::Utf8;
+
+        let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
+        self.add_field_id(&mut arrow_field);
+        arrow_field
+    }
+
     /// Convert RisingWave data type to Arrow data type.
     ///
     /// This function returns a `Field` instead of `DataType` because some may be converted to
@@ -199,10 +237,10 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         let data_type = match value {
             // using the inline function
             DataType::Boolean => self.bool_type_to_arrow(),
-            DataType::Int16 => self.int16_type_to_arrow(),
+            DataType::Int16 => self.int32_type_to_arrow(),
             DataType::Int32 => self.int32_type_to_arrow(),
             DataType::Int64 => self.int64_type_to_arrow(),
-            DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::Int256 => self.varchar_type_to_arrow(),
             DataType::Float32 => self.float32_type_to_arrow(),
             DataType::Float64 => self.float64_type_to_arrow(),
             DataType::Date => self.date_type_to_arrow(),
@@ -214,7 +252,7 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
-            DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
+            DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
             DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,

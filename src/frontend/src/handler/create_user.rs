@@ -41,12 +41,12 @@ fn make_prost_user_info(
             .any(|option| matches!(option, UserOption::SuperUser));
         if require_super {
             return Err(
-                PermissionDenied("must be superuser to create superusers".to_string()).into(),
+                PermissionDenied("must be superuser to create superusers".to_owned()).into(),
             );
         }
 
         if !session_user.can_create_user {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+            return Err(PermissionDenied("Do not have the privilege".to_owned()).into());
         }
     }
 
@@ -129,7 +129,7 @@ pub async fn handle_create_user(
 
         let session_user = user_reader
             .get_user_by_name(session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_string()))?;
+            .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
 
         make_prost_user_info(user_name, &stmt.with_options, session_user, database_id)?
     };
@@ -181,8 +181,8 @@ mod tests {
         assert!(frontend
             .run_user_sql(
                 "CREATE USER fail WITH PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
-                DEFAULT_DATABASE_NAME.to_string(),
-                "user".to_string(),
+                DEFAULT_DATABASE_NAME.to_owned(),
+                "user".to_owned(),
                 user_info.id
             )
             .await
@@ -191,8 +191,8 @@ mod tests {
         assert!(frontend
             .run_user_sql(
                 "CREATE USER success WITH NOSUPERUSER PASSWORD ''",
-                DEFAULT_DATABASE_NAME.to_string(),
-                "usercreator".to_string(),
+                DEFAULT_DATABASE_NAME.to_owned(),
+                "usercreator".to_owned(),
                 user_info.id
             )
             .await
@@ -200,8 +200,8 @@ mod tests {
         assert!(frontend
             .run_user_sql(
                 "CREATE USER fail2 WITH SUPERUSER PASSWORD ''",
-                DEFAULT_DATABASE_NAME.to_string(),
-                "usercreator".to_string(),
+                DEFAULT_DATABASE_NAME.to_owned(),
+                "usercreator".to_owned(),
                 user_info.id
             )
             .await

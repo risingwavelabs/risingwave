@@ -72,7 +72,7 @@ impl FeStartupMessage {
             ));
         }
         config.chunks(2).for_each(|chunk| {
-            map.insert(chunk[0].to_string(), chunk[1].to_string());
+            map.insert(chunk[0].to_owned(), chunk[1].to_owned());
         });
         Ok(FeStartupMessage { config: map })
     }

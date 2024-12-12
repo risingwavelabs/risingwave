@@ -32,6 +32,6 @@ pub fn report_event(
         connector_name,
         component,
         attributes,
-        TELEMETRY_COMPUTE_REPORT_TYPE.to_string(),
+        TELEMETRY_COMPUTE_REPORT_TYPE.to_owned(),
     );
 }

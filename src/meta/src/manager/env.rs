@@ -114,6 +114,7 @@ pub struct MetaOpts {
     pub enable_hummock_data_archive: bool,
     pub hummock_time_travel_snapshot_interval: u64,
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
+    pub hummock_time_travel_sst_info_insert_batch_size: usize,
     /// The minimum delta log number a new checkpoint should compact, otherwise the checkpoint
     /// attempt is rejected. Greater value reduces object store IO, meanwhile it results in
     /// more loss of in memory `HummockVersionCheckpoint::stale_objects` state when meta node is
@@ -272,6 +273,7 @@ impl MetaOpts {
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
+            hummock_time_travel_sst_info_insert_batch_size: 10,
             min_delta_log_num_for_hummock_version_checkpoint: 1,
             min_sst_retention_time_sec: 3600 * 24 * 7,
             full_gc_interval_sec: 3600 * 24 * 7,
@@ -303,7 +305,7 @@ impl MetaOpts {
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
-            advertise_addr: "".to_string(),
+            advertise_addr: "".to_owned(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,
             enable_trivial_move: true,
@@ -315,7 +317,7 @@ impl MetaOpts {
             secret_store_private_key: Some(
                 hex::decode("0123456789abcdef0123456789abcdef").unwrap(),
             ),
-            temp_secret_file_dir: "./secrets".to_string(),
+            temp_secret_file_dir: "./secrets".to_owned(),
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
             split_group_size_ratio: 0.9,

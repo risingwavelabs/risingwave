@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
 use risingwave_pb::catalog::connection_params::ConnectionType;
@@ -53,7 +54,7 @@ fn resolve_create_connection_payload(
 ) -> Result<create_connection_request::Payload> {
     if !with_properties.connection_ref().is_empty() {
         return Err(RwError::from(ErrorCode::InvalidParameterValue(
-            "Connection reference is not allowed in options in CREATE CONNECTION".to_string(),
+            "Connection reference is not allowed in options in CREATE CONNECTION".to_owned(),
         )));
     }
 
@@ -63,12 +64,13 @@ fn resolve_create_connection_payload(
     let connection_type = match connection_type.as_str() {
         PRIVATELINK_CONNECTION => {
             return Err(RwError::from(ErrorCode::Deprecated(
-            "CREATE CONNECTION to Private Link".to_string(),
-            "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_string(),
+            "CREATE CONNECTION to Private Link".to_owned(),
+            "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_owned(),
         )));
         }
         KAFKA_CONNECTOR => ConnectionType::Kafka,
         ICEBERG_CONNECTOR => ConnectionType::Iceberg,
+        SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"

@@ -125,10 +125,10 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                             tokens.next();
                             tokens.next();
                             tokens.next();
-                            let name = tokens.next()?.to_string();
+                            let name = tokens.next()?.to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         } else {
-                            let name = next.to_string();
+                            let name = next.to_owned();
                             SqlCmd::CreateMaterializedView { name }
                         }
                     }
@@ -219,7 +219,7 @@ pub async fn run_slt_task(
 ) {
     tracing::info!("background_ddl_rate: {}", background_ddl_rate);
     let seed = std::env::var("MADSIM_TEST_SEED")
-        .unwrap_or("0".to_string())
+        .unwrap_or("0".to_owned())
         .parse::<u64>()
         .unwrap();
     let mut rng = ChaChaRng::seed_from_u64(seed);
@@ -344,7 +344,7 @@ pub async fn run_slt_task(
                 && !manual_background_ddl_enabled
                 && conditions.iter().all(|c| {
                     *c != Condition::SkipIf {
-                        label: "madsim".to_string(),
+                        label: "madsim".to_owned(),
                     }
                 })
             {

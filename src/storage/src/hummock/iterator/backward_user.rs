@@ -330,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_user_basic() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, _) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -338,7 +338,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, _) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -346,7 +346,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, _) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -382,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_user_seek() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, _) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -390,7 +390,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, _) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -398,7 +398,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, _) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 3,
@@ -461,14 +461,14 @@ mod tests {
             (1, 300, HummockValue::delete()),
             (2, 100, HummockValue::put(iterator_test_value_of(2))),
         ];
-        let table0 =
+        let (table0, _) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
             (1, 400, HummockValue::put(iterator_test_value_of(1))),
             (2, 200, HummockValue::delete()),
         ];
-        let table1 =
+        let (table1, _) =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![
             BackwardSstableIterator::new(table0, sstable_store.clone()),
@@ -514,7 +514,7 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let sstable =
+        let (sstable, _) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
         let bmi = MergeIterator::new(backward_iters);
@@ -591,7 +591,7 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let sstable =
+        let (sstable, _) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(
             sstable.clone(),
@@ -692,7 +692,7 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let sstable =
+        let (sstable, _sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(
             sstable.clone(),
@@ -789,7 +789,7 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let handle =
+        let (handle, _sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = MergeIterator::new(backward_iters);
@@ -968,7 +968,7 @@ mod tests {
             }
         }
         let sstable_store = mock_sstable_store().await;
-        let sst = gen_test_sstable(
+        let (sst, _sstable_info) = gen_test_sstable(
             default_builder_opt_for_test(),
             0,
             truth.iter().flat_map(|(key, inserts)| {
@@ -1107,7 +1107,7 @@ mod tests {
     #[tokio::test]
     async fn test_min_epoch() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_with_incr_epoch(
+        let (table0, _) = gen_iterator_test_sstable_with_incr_epoch(
             0,
             default_builder_opt_for_test(),
             |x| x * 3,

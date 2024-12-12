@@ -654,7 +654,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "of".to_string(),
+                    name: "of".to_owned(),
                     sig: sig.into(),
                 }));
             };
@@ -704,7 +704,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "ofEpochSecond".to_string(),
+                    name: "ofEpochSecond".to_owned(),
                     sig: instant_sig.into(),
                 }));
             };
@@ -746,7 +746,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimestamp
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "ofInstant".to_string(),
+                    name: "ofInstant".to_owned(),
                     sig: sig.into(),
                 }));
             };
@@ -827,7 +827,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "ofEpochDay".to_string(),
+                    name: "ofEpochDay".to_owned(),
                     sig: sig.into(),
                 }));
             };
@@ -875,7 +875,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
             )?
             else {
                 return Err(BindingError::from(jni::errors::Error::MethodNotFound {
-                    name: "of".to_string(),
+                    name: "of".to_owned(),
                     sig: sig.into(),
                 }));
             };

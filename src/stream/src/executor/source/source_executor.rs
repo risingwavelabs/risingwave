@@ -20,7 +20,7 @@ use either::Either;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
@@ -123,6 +123,24 @@ impl<S: StateStore> SourceExecutor<S> {
         state: ConnectorState,
         seek_to_latest: bool,
     ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
+        let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
+        let (stream, latest_splits) = source_desc
+            .source
+            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
+            .await
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok((
+            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            latest_splits,
+        ))
+    }
+
+    /// build the source column ids and the source context which will be used to build the source stream
+    pub fn prepare_source_stream_build(
+        &self,
+        source_desc: &SourceDesc,
+    ) -> (Vec<ColumnId>, SourceContext) {
         let column_ids = source_desc
             .columns
             .iter()
@@ -130,7 +148,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         let (schema_change_tx, mut schema_change_rx) =
-            tokio::sync::mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
+            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
         let schema_change_tx = if self.is_auto_schema_change_enable() {
             let meta_client = self.actor_ctx.meta_client.clone();
             // spawn a task to handle schema change event from source parser
@@ -185,16 +203,8 @@ impl<S: StateStore> SourceExecutor<S> {
             source_desc.source.config.clone(),
             schema_change_tx,
         );
-        let (stream, latest_splits) = source_desc
-            .source
-            .build_stream(state, column_ids, Arc::new(source_ctx), seek_to_latest)
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
 
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            latest_splits,
-        ))
+        (column_ids, source_ctx)
     }
 
     fn is_auto_schema_change_enable(&self) -> bool {
@@ -424,7 +434,7 @@ impl<S: StateStore> SourceExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_with_stream_source(mut self) {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
-        let barrier = barrier_receiver
+        let first_barrier = barrier_receiver
             .recv()
             .instrument_await("source_recv_first_barrier")
             .await
@@ -435,17 +445,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_core.as_ref().unwrap().source_id
                 )
             })?;
-        let first_epoch = barrier.epoch;
+        let first_epoch = first_barrier.epoch;
         let mut boot_state =
-            if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
+            if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 tracing::debug!(?splits, "boot with splits");
                 splits.to_vec()
             } else {
                 Vec::default()
             };
-        let is_pause_on_startup = barrier.is_pause_on_startup();
+        let is_pause_on_startup = first_barrier.is_pause_on_startup();
 
-        yield Message::Barrier(barrier);
+        yield Message::Barrier(first_barrier);
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -942,7 +952,7 @@ mod tests {
             latest_split_info: HashMap::new(),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
-            source_name: MOCK_SOURCE_NAME.to_string(),
+            source_name: MOCK_SOURCE_NAME.to_owned(),
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();
@@ -1032,7 +1042,7 @@ mod tests {
             latest_split_info: HashMap::new(),
             split_state_store,
             updated_splits_in_epoch: HashMap::new(),
-            source_name: MOCK_SOURCE_NAME.to_string(),
+            source_name: MOCK_SOURCE_NAME.to_owned(),
         };
 
         let system_params_manager = LocalSystemParamsManager::for_test();

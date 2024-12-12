@@ -104,18 +104,18 @@ impl LevelHandler {
         });
     }
 
-    pub fn get_pending_file_count(&self) -> usize {
+    pub fn pending_file_count(&self) -> usize {
         self.compacting_files.len()
     }
 
-    pub fn get_pending_file_size(&self) -> u64 {
+    pub fn pending_file_size(&self) -> u64 {
         self.pending_tasks
             .iter()
             .map(|task| task.total_file_size)
             .sum::<u64>()
     }
 
-    pub fn get_pending_output_file_size(&self, target_level: u32) -> u64 {
+    pub fn pending_output_file_size(&self, target_level: u32) -> u64 {
         self.pending_tasks
             .iter()
             .filter(|task| task.target_level == target_level)
@@ -130,8 +130,12 @@ impl LevelHandler {
             .collect_vec()
     }
 
-    pub fn get_pending_tasks(&self) -> &[RunningCompactTask] {
+    pub fn pending_tasks(&self) -> &[RunningCompactTask] {
         &self.pending_tasks
+    }
+
+    pub fn compacting_files(&self) -> &HashMap<HummockSstableId, HummockCompactionTaskId> {
+        &self.compacting_files
     }
 }
 

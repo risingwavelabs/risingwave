@@ -135,7 +135,7 @@ impl LogicalSysScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::SysScan::new(
-            self.table_name().to_string(),
+            self.table_name().to_owned(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.ctx(),
@@ -152,7 +152,7 @@ impl LogicalSysScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::SysScan::new_inner(
-            self.table_name().to_string(),
+            self.table_name().to_owned(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.base.ctx().clone(),
@@ -164,7 +164,7 @@ impl LogicalSysScan {
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::SysScan::new_inner(
-            self.table_name().to_string(),
+            self.table_name().to_owned(),
             output_col_idx,
             self.core.table_desc.clone(),
             self.base.ctx().clone(),

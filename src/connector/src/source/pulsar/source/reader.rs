@@ -179,7 +179,7 @@ impl SplitReader for PulsarBrokerReader {
                 "{}-{}-{}",
                 props
                     .subscription_name_prefix
-                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_string()),
+                    .unwrap_or(PULSAR_DEFAULT_SUBSCRIPTION_PREFIX.to_owned()),
                 source_ctx.fragment_id,
                 source_ctx.actor_id
             ));
@@ -422,10 +422,10 @@ impl PulsarIcebergReader {
             .as_ref()
             .context("Iceberg bucket is not configured")?;
 
-        iceberg_configs.insert(CATALOG_TYPE.to_string(), "storage".to_string());
-        iceberg_configs.insert(CATALOG_NAME.to_string(), "pulsar".to_string());
+        iceberg_configs.insert(CATALOG_TYPE.to_owned(), "storage".to_owned());
+        iceberg_configs.insert(CATALOG_NAME.to_owned(), "pulsar".to_owned());
         iceberg_configs.insert(
-            "iceberg.catalog.pulsar.warehouse".to_string(),
+            "iceberg.catalog.pulsar.warehouse".to_owned(),
             format!(
                 "s3://{}/{}/{}",
                 bucket, self.split.topic.tenant, self.split.topic.namespace,
@@ -433,24 +433,24 @@ impl PulsarIcebergReader {
         );
 
         if let Some(region) = &self.props.aws_auth_props.region {
-            iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
+            iceberg_configs.insert("iceberg.table.io.region".to_owned(), region.to_string());
         }
         if let Some(access_key) = &self.props.aws_auth_props.access_key {
             iceberg_configs.insert(
-                "iceberg.table.io.access_key_id".to_string(),
+                "iceberg.table.io.access_key_id".to_owned(),
                 access_key.to_string(),
             );
         }
         if let Some(secret_key) = &self.props.aws_auth_props.secret_key {
             iceberg_configs.insert(
-                "iceberg.table.io.secret_access_key".to_string(),
+                "iceberg.table.io.secret_access_key".to_owned(),
                 secret_key.to_string(),
             );
         }
 
-        iceberg_configs.insert("iceberg.table.io.bucket".to_string(), bucket.to_string());
+        iceberg_configs.insert("iceberg.table.io.bucket".to_owned(), bucket.to_string());
         iceberg_configs.insert(
-            "iceberg.table.io.root".to_string(),
+            "iceberg.table.io.root".to_owned(),
             format!(
                 "/{}/{}",
                 self.split.topic.tenant, self.split.topic.namespace
@@ -459,8 +459,8 @@ impl PulsarIcebergReader {
         // #TODO
         // Support load config file
         iceberg_configs.insert(
-            "iceberg.table.io.disable_config_load".to_string(),
-            "true".to_string(),
+            "iceberg.table.io.disable_config_load".to_owned(),
+            "true".to_owned(),
         );
 
         Ok(iceberg_configs)

@@ -16,6 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -89,6 +90,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
+dhat =  "0.3"
 expect-test = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -98,12 +100,23 @@ risingwave_hummock_test = { path = "../storage/hummock_test", features = [
 serde_yaml = "0.9"
 tracing-test = "0.2"
 
+[features]
+dhat-heap = []
+
 [[bench]]
 name = "stream_hash_agg"
 harness = false
 
 [[bench]]
 name = "bench_state_table"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_rt"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_mem"
 harness = false
 
 [lints]

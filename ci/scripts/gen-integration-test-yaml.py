@@ -61,7 +61,7 @@ def gen_pipeline_steps():
    concurrency: 10
    concurrency_group: 'integration-test/run'
    plugins:
-     - seek-oss/aws-sm#v2.3.1:
+     - seek-oss/aws-sm#v2.3.2:
          env:
            GHCR_USERNAME: ghcr-username
            GHCR_TOKEN: ghcr-token

@@ -378,7 +378,13 @@ impl HummockManager {
             for (index, (group_id, match_ids)) in group_table_ids.into_iter().enumerate() {
                 if sst.sst_info.table_ids == match_ids {
                     // The SST contains all the tables in the group should be last key
-                    assert!(index == len - 1);
+                    assert!(
+                        index == len - 1,
+                        "SST should be the last key in the group {} index {} len {}",
+                        group_id,
+                        index,
+                        len
+                    );
                     commit_sstables
                         .entry(group_id)
                         .or_default()
@@ -395,7 +401,6 @@ impl HummockManager {
                     })
                     .sum();
 
-                // TODO(li0k): replace with `split_sst`
                 let (modified_sst_info, branch_sst) = split_sst_with_table_ids(
                     &sst.sst_info,
                     &mut new_sst_id,

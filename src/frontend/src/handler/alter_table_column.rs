@@ -18,7 +18,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Engine};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -82,7 +82,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         let pk_names: Vec<_> = original_catalog
             .pk
             .iter()
-            .map(|x| original_catalog.columns[x.column_index].name().to_string())
+            .map(|x| original_catalog.columns[x.column_index].name().to_owned())
             .collect();
 
         constraints.push(TableConstraint::Unique {
@@ -96,7 +96,7 @@ pub async fn get_new_table_definition_for_cdc_table(
         original_catalog
             .columns()
             .iter()
-            .map(|col| (col.name().to_string(), col.clone())),
+            .map(|col| (col.name().to_owned(), col.clone())),
     );
 
     // update the original columns with new version columns
@@ -181,6 +181,7 @@ pub async fn get_replace_table_plan(
         cdc_table_info,
         format_encode,
         include_column_options,
+        engine,
         ..
     } = new_definition
     else {
@@ -190,6 +191,11 @@ pub async fn get_replace_table_plan(
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
+
+    let engine = match engine {
+        risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
+    };
 
     let (mut graph, table, source, job_type) = generate_stream_graph_for_replace_table(
         session,
@@ -208,6 +214,7 @@ pub async fn get_replace_table_plan(
         cdc_table_info,
         new_version_columns,
         include_column_options,
+        engine,
     )
     .await?;
 
@@ -316,7 +323,7 @@ pub async fn handle_alter_table_column(
     if !original_catalog.incoming_sinks.is_empty() && original_catalog.has_generated_column() {
         return Err(RwError::from(ErrorCode::BindError(
             "Alter a table with incoming sink and generated column has not been implemented."
-                .to_string(),
+                .to_owned(),
         )));
     }
 
@@ -343,8 +350,8 @@ pub async fn handle_alter_table_column(
             && schema_has_schema_registry(format_encode)
         {
             Err(ErrorCode::NotSupported(
-                "alter table with schema registry".to_string(),
-                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+                "alter table with schema registry".to_owned(),
+                "try `ALTER TABLE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
             ))
         } else {
             Ok(())
@@ -353,8 +360,8 @@ pub async fn handle_alter_table_column(
 
     if columns.is_empty() {
         Err(ErrorCode::NotSupported(
-            "alter a table with empty column definitions".to_string(),
-            "Please recreate the table with column definitions.".to_string(),
+            "alter a table with empty column definitions".to_owned(),
+            "Please recreate the table with column definitions.".to_owned(),
         ))?
     }
 
@@ -362,7 +369,7 @@ pub async fn handle_alter_table_column(
         && matches!(operation, AlterTableOperation::DropColumn { .. })
     {
         return Err(ErrorCode::InvalidInputSyntax(
-            "dropping columns in target table of sinks is not supported".to_string(),
+            "dropping columns in target table of sinks is not supported".to_owned(),
         ))?;
     }
 
@@ -390,7 +397,7 @@ pub async fn handle_alter_table_column(
                 .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
             {
                 Err(ErrorCode::InvalidInputSyntax(
-                    "alter table add generated columns is not supported".to_string(),
+                    "alter table add generated columns is not supported".to_owned(),
                 ))?
             }
 

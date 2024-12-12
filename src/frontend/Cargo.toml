@@ -42,7 +42,7 @@ iceberg = { workspace = true }
 icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"
@@ -100,13 +100,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
+tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.6", features = [
   "add-extension",
   "cors",
   "compression-gzip",
 ] }
 tracing = "0.1"
+url = "2.5.0"
 uuid = "1"
 zstd = { version = "0.13", default-features = false }
 
@@ -116,6 +117,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
+risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 

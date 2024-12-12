@@ -667,8 +667,8 @@ impl Binder {
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
                 ("col_description", raw_call(ExprType::ColDescription)),
-                ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
-                ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_owned()))),
+                ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_owned()))),
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
@@ -769,7 +769,7 @@ impl Binder {
         if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }
@@ -779,7 +779,7 @@ impl Binder {
     fn ensure_proctime_function_allowed(&self) -> Result<()> {
         if !self.is_for_ddl() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_owned(),
             )
             .into());
         }
@@ -790,11 +790,11 @@ impl Binder {
 fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.is_empty() {
         Err(ErrorCode::BindError(
-            "Function `concat` takes at least 1 arguments (0 given)".to_string(),
+            "Function `concat` takes at least 1 arguments (0 given)".to_owned(),
         )
         .into())
     } else {
-        let inputs = std::iter::once(ExprImpl::literal_varchar("".to_string()))
+        let inputs = std::iter::once(ExprImpl::literal_varchar("".to_owned()))
             .chain(inputs)
             .collect();
         Ok(inputs)
@@ -805,7 +805,7 @@ fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
 /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
 fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.len() != 2 {
-        Err(ErrorCode::BindError("Function `nullif` must contain 2 arguments".to_string()).into())
+        Err(ErrorCode::BindError("Function `nullif` must contain 2 arguments".to_owned()).into())
     } else {
         let inputs = vec![
             FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
@@ -819,7 +819,7 @@ fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
 fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.len() != 2 {
         return Err(
-            ErrorCode::BindError("function must contain only 2 arguments".to_string()).into(),
+            ErrorCode::BindError("function must contain only 2 arguments".to_owned()).into(),
         );
     }
     let left = inputs.pop().unwrap();
