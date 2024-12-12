@@ -45,10 +45,11 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
 
-use super::rate_limiter::{AdaptiveRateLimiterConfig, BackfillRateLimiter};
+use super::rate_limiter::AdaptiveRateLimiterConfig;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+    Message, MonitoredBackfillRateLimiter, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Watermark,
 };
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -838,13 +839,14 @@ pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiterV1> {
 /// None => adaptive
 /// Some(0) => infinite
 /// Some(rate) => Fixed(rate)
-pub fn create_rate_limiter(
-    adaptive_rate_limit_config: AdaptiveRateLimiterConfig,
+pub fn update_rate_limiter(
+    rate_limiter: &mut MonitoredBackfillRateLimiter,
     rate_limit: Option<usize>,
-) -> BackfillRateLimiter {
+    adaptive_rate_limit_config: AdaptiveRateLimiterConfig,
+) {
     match rate_limit {
-        None => BackfillRateLimiter::adaptive(adaptive_rate_limit_config),
-        Some(0) => BackfillRateLimiter::infinite(),
-        Some(rate) => BackfillRateLimiter::fixed(NonZeroU32::new(rate as _).unwrap()),
+        None => rate_limiter.adaptive(adaptive_rate_limit_config),
+        Some(0) => rate_limiter.infinite(),
+        Some(rate) => rate_limiter.fixed(NonZeroU32::new(rate as _).unwrap()),
     }
 }

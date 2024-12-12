@@ -25,17 +25,18 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
-use super::rate_limiter::{AdaptiveRateLimiterConfig, BackfillRateLimiter};
+use super::rate_limiter::AdaptiveRateLimiterConfig;
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::backfill::rate_limiter::TickInfo;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, create_rate_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode,
-    update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
+    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
+    update_rate_limiter, BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::prelude::*;
+use crate::executor::MonitoredBackfillRateLimiter;
 use crate::task::CreateMviewProgressReporter;
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
@@ -213,8 +214,12 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
-            let mut rate_limiter =
-                create_rate_limiter(self.adaptive_rate_limit_config.clone(), rate_limit);
+            let mut rate_limiter = MonitoredBackfillRateLimiter::new(upstream_table_id.into());
+            update_rate_limiter(
+                &mut rate_limiter,
+                rate_limit,
+                self.adaptive_rate_limit_config.clone(),
+            );
 
             let metrics = self
                 .metrics
@@ -535,10 +540,11 @@ where
                                             (vnode, builder)
                                         })
                                         .collect();
-                                    rate_limiter = create_rate_limiter(
-                                        self.adaptive_rate_limit_config.clone(),
+                                    update_rate_limiter(
+                                        &mut rate_limiter,
                                         new_rate_limit,
-                                    )
+                                        self.adaptive_rate_limit_config.clone(),
+                                    );
                                 }
                             }
                         }
@@ -626,7 +632,7 @@ where
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
-        rate_limiter: &'a BackfillRateLimiter,
+        rate_limiter: &'a MonitoredBackfillRateLimiter,
     ) {
         if paused {
             #[for_await]

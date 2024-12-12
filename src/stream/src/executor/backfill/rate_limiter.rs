@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::num::NonZeroU32;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use governor::clock::MonotonicClock;
@@ -20,11 +21,69 @@ use governor::middleware::NoOpMiddleware;
 use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter as GovernorRateLimiter};
 use parking_lot::Mutex;
+use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::{LabelGuardedGauge, LabelGuardedGaugeVec};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_gauge_vec_with_registry;
 
 #[derive(Debug, Clone, Default)]
 pub struct TickInfo {
     pub processed_snapshot_rows: usize,
     pub processed_upstream_rows: usize,
+}
+
+static METRICS: LazyLock<LabelGuardedGaugeVec<1>> = LazyLock::new(|| {
+    register_guarded_gauge_vec_with_registry!(
+        "backfill_rate_limit_bytes",
+        "backfill rate limit bytes per second",
+        &["table_id"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+pub struct MonitoredBackfillRateLimiter {
+    inner: BackfillRateLimiter,
+    metric: LabelGuardedGauge<1>,
+}
+
+impl MonitoredBackfillRateLimiter {
+    pub fn new(table_id: TableId) -> Self {
+        Self {
+            inner: BackfillRateLimiter::infinite(),
+            metric: METRICS.with_guarded_label_values(&[&table_id.to_string()]),
+        }
+    }
+
+    pub fn infinite(&mut self) {
+        self.inner = BackfillRateLimiter::infinite()
+    }
+
+    pub fn fixed(&mut self, rate: NonZeroU32) {
+        self.inner = BackfillRateLimiter::fixed(rate)
+    }
+
+    pub fn adaptive(&mut self, config: AdaptiveRateLimiterConfig) {
+        self.inner = BackfillRateLimiter::adaptive(config)
+    }
+
+    pub fn tick(&self, info: TickInfo) {
+        self.inner.tick(info);
+        let rate = match &self.inner {
+            BackfillRateLimiter::Infinite(_) => 0.0,
+            BackfillRateLimiter::Fixed(f) => f.rate(),
+            BackfillRateLimiter::Adaptive(a) => a.rate(),
+        };
+        self.metric.set(rate);
+    }
+
+    pub fn check(&self) -> bool {
+        self.inner.check()
+    }
+
+    pub async fn wait(&self) {
+        self.inner.wait().await
+    }
 }
 
 pub enum BackfillRateLimiter {
@@ -102,28 +161,35 @@ impl RateLimiter for InfiniteRateLimiter {
     async fn wait(&self) {}
 }
 
-pub struct FixedRateLimiter(
-    GovernorRateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
-);
+pub struct FixedRateLimiter {
+    inner: GovernorRateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
+    rate: NonZeroU32,
+}
+
+impl FixedRateLimiter {
+    pub fn rate(&self) -> f64 {
+        self.rate.get() as _
+    }
+}
 
 impl RateLimiter for FixedRateLimiter {
     type Config = NonZeroU32;
 
     fn new(rate: NonZeroU32) -> Self {
-        FixedRateLimiter(GovernorRateLimiter::direct_with_clock(
-            Quota::per_second(rate),
-            &MonotonicClock,
-        ))
+        Self {
+            inner: GovernorRateLimiter::direct_with_clock(Quota::per_second(rate), &MonotonicClock),
+            rate,
+        }
     }
 
     fn tick(&self, _: TickInfo) {}
 
     fn check(&self) -> bool {
-        self.0.check().is_ok()
+        self.inner.check().is_ok()
     }
 
     async fn wait(&self) {
-        self.0.until_ready().await
+        self.inner.until_ready().await
     }
 }
 
@@ -190,6 +256,12 @@ impl AdaptiveRateLimiterInner {
             .clamp(config.min_rate_limit, config.max_rate_limit);
 
         self.last_update = now;
+    }
+}
+
+impl AdaptiveRateLimiter {
+    pub fn rate(&self) -> f64 {
+        self.inner.lock().rate
     }
 }
 
