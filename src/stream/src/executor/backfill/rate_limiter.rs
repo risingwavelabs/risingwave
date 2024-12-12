@@ -44,6 +44,7 @@ static METRICS: LazyLock<LabelGuardedGaugeVec<1>> = LazyLock::new(|| {
 
 pub struct MonitoredBackfillRateLimiter {
     inner: BackfillRateLimiter,
+    table_id: TableId,
     metric: LabelGuardedGauge<1>,
 }
 
@@ -52,19 +53,32 @@ impl MonitoredBackfillRateLimiter {
         Self {
             inner: BackfillRateLimiter::infinite(),
             metric: METRICS.with_guarded_label_values(&[&table_id.to_string()]),
+            table_id,
         }
     }
 
     pub fn infinite(&mut self) {
-        self.inner = BackfillRateLimiter::infinite()
+        self.inner = BackfillRateLimiter::infinite();
+        tracing::debug!(
+            "backfill adaptive rate limiter on table {table_id:?} is set to infinite",
+            table_id = self.table_id
+        );
     }
 
     pub fn fixed(&mut self, rate: NonZeroU32) {
-        self.inner = BackfillRateLimiter::fixed(rate)
+        self.inner = BackfillRateLimiter::fixed(rate);
+        tracing::debug!(
+            "backfill adaptive rate limiter on table {table_id:?} is set to fixed {rate}",
+            table_id = self.table_id
+        );
     }
 
     pub fn adaptive(&mut self, config: AdaptiveRateLimiterConfig) {
-        self.inner = BackfillRateLimiter::adaptive(config)
+        self.inner = BackfillRateLimiter::adaptive(config);
+        tracing::debug!(
+            "backfill adaptive rate limiter on table {table_id:?} is set to adaptive",
+            table_id = self.table_id
+        );
     }
 
     pub fn tick(&self, info: TickInfo) {
@@ -75,6 +89,10 @@ impl MonitoredBackfillRateLimiter {
             BackfillRateLimiter::Adaptive(a) => a.rate(),
         };
         self.metric.set(rate);
+        tracing::debug!(
+            "backfill adaptive rate limiter on table {table_id:?}: {rate}",
+            table_id = self.table_id
+        );
     }
 
     pub fn check(&self) -> bool {
@@ -230,12 +248,15 @@ impl AdaptiveRateLimiterInner {
         self.quota >= 1.0
     }
 
-    fn next(&self) -> Option<Duration> {
-        if self.check() {
+    fn consume(&mut self) -> Option<Duration> {
+        self.quota -= 1.0;
+
+        if self.quota >= 0.0 {
             return None;
         }
 
-        let gap = Duration::from_secs_f64((1.0 - self.quota) / self.rate);
+        let gap = Duration::from_secs_f64((0.0 - self.quota) / self.rate);
+
         Some(gap)
     }
 
@@ -297,7 +318,7 @@ impl RateLimiter for AdaptiveRateLimiter {
         let wait = {
             let mut inner = self.inner.lock();
             inner.tick();
-            inner.next()
+            inner.consume()
         };
 
         if let Some(wait) = wait {
