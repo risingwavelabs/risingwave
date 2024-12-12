@@ -16,15 +16,16 @@
 
 //! To run this benchmark you can use the following command:
 //! ```sh
-//! cargo bench --features dhat-heap --bench stream_hash_join
+//! cargo bench --features dhat-heap --bench stream_hash_join_mem
 //! ```
 //!
 //! You may also specify the amplification size, e.g. 40000
 //! ```sh
-//! cargo bench --features dhat-heap --bench stream_hash_join -- 40000
+//! cargo bench --features dhat-heap --bench stream_hash_join_mem -- 40000
 //! ```
 
 use std::env;
+use risingwave_stream::executor::JoinType;
 
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 
@@ -44,7 +45,7 @@ async fn main() {
     } else {
         100_000
     };
-    let (tx_l, tx_r, out) = setup_bench_stream_hash_join(amp).await;
+    let (tx_l, tx_r, out) = setup_bench_stream_hash_join(amp, HashJoinWorkload::NotInCache, JoinType::Inner).await;
     {
         // Start the profiler later, after we have ingested the data for hash join build-side.
         #[cfg(feature = "dhat-heap")]

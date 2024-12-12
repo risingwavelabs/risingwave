@@ -23,6 +23,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 use tokio::runtime::Runtime;
+use risingwave_stream::executor::JoinType;
 
 risingwave_expr_impl::enable!();
 
@@ -32,14 +33,18 @@ fn bench_hash_join(c: &mut Criterion) {
 
     let rt = Runtime::new().unwrap();
     for amp in [10_000, 20_000, 30_000, 40_000, 100_000, 200_000, 400_000] {
-        let name = format!("hash_join_rt_{}", amp);
-        group.bench_function(&name, |b| {
-            b.to_async(&rt).iter_batched(
-                || block_on(setup_bench_stream_hash_join(amp)),
-                |(tx_l, tx_r, out)| handle_streams(amp, tx_l, tx_r, out),
-                BatchSize::SmallInput,
-            )
-        });
+        for workload in [HashJoinWorkload::NotInCache, HashJoinWorkload::InCache] {
+            for join_type in [JoinType::Inner, JoinType::LeftOuter] {
+                let name = format!("hash_join_rt_{}_{}_{}", amp, workload, join_type);
+                group.bench_function(&name, |b| {
+                    b.to_async(&rt).iter_batched(
+                        || block_on(setup_bench_stream_hash_join(amp, workload, join_type)),
+                        |(tx_l, tx_r, out)| handle_streams(workload, join_type, amp, tx_l, tx_r, out),
+                        BatchSize::SmallInput,
+                    )
+                });
+            }
+        }
     }
 }
 
