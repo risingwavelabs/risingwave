@@ -1026,7 +1026,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut append_only_matched_row: Option<JoinRow<OwnedRow>> = None;
         let mut matched_rows_to_clean = vec![];
 
-        if MATCHED_ROWS_FROM_CACHE {
+        let entry_state = if MATCHED_ROWS_FROM_CACHE {
             let mut cached_rows = cached_rows.unwrap();
             for (matched_row_ref, matched_row) in cached_rows.values_mut(&side_match.all_data_types)
             {
@@ -1052,6 +1052,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     yield chunk;
                 }
             }
+            cached_rows
         } else {
             let (matched_rows, mut degree_table) = side_match
                 .ht
@@ -1090,7 +1091,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     yield chunk;
                 }
             }
-        }
+            Box::new(entry_state)
+        };
 
         // forward rows depending on join types
         let op = match JOIN_OP {
@@ -1108,7 +1110,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         // cache refill
         if entry_state_count <= entry_state_max_rows {
-            side_match.ht.update_state(key, Box::new(entry_state));
+            side_match.ht.update_state(key, entry_state);
         }
 
         // watermark state cleaning
