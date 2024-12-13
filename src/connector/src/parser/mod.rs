@@ -194,6 +194,10 @@ impl<'a> SourceStreamChunkRowWriter<'a> {
         self
     }
 
+    pub fn source_meta(&self) -> &'a SourceMeta {
+        self.row_meta.map(|m| m.meta).unwrap_or(&SourceMeta::Empty)
+    }
+
     /// Convert the row writer to invisible row writer.
     fn invisible(mut self) -> Self {
         self.visible = false;
@@ -919,7 +923,11 @@ impl AccessBuilderImpl {
         Ok(accessor)
     }
 
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    pub async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        source_meta: &SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
