@@ -1054,7 +1054,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
             cached_rows
         } else {
-            let (matched_rows, mut degree_table) = side_match
+            let (matched_rows, degree_table) = side_match
                 .ht
                 .fetch_matched_rows_and_get_degree_table_ref(key)
                 .await?;
