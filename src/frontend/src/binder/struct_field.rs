@@ -45,7 +45,7 @@ impl Binder {
         prefix: Vec<Ident>,
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let (expr, idents) = self.extract_struct_column(expr, prefix)?;
-        let fields = Self::bind_field("".to_string(), expr, &idents, true)?;
+        let fields = Self::bind_field("".to_owned(), expr, &idents, true)?;
         let (exprs, names) = fields.into_iter().map(|(e, s)| (e, Some(s))).unzip();
         Ok((exprs, names))
     }
@@ -55,7 +55,7 @@ impl Binder {
     /// Returns a `Field(expr, int)` expression.
     pub fn bind_single_field_column(&mut self, expr: Expr, idents: &[Ident]) -> Result<ExprImpl> {
         let (expr, idents) = self.extract_struct_column(expr, idents.to_vec())?;
-        let exprs = Self::bind_field("".to_string(), expr, &idents, false)?;
+        let exprs = Self::bind_field("".to_owned(), expr, &idents, false)?;
         Ok(exprs[0].clone().0)
     }
 
@@ -115,7 +115,7 @@ impl Binder {
                             ty.clone(),
                         )
                         .into(),
-                        name.to_string(),
+                        name.to_owned(),
                     )
                 })
                 .collect_vec())

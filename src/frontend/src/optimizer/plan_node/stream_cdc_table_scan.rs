@@ -188,7 +188,7 @@ impl StreamCdcTableScan {
             ],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "StreamCdcFilter".to_string(),
+            identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
@@ -203,7 +203,7 @@ impl StreamCdcTableScan {
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "Exchange".to_string(),
+            identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(ExchangeNode {
                 strategy: Some(DispatchStrategy {

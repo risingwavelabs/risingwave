@@ -26,7 +26,7 @@ use thiserror_ext::AsReport;
 use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extract_subject_from_meta, extreact_timestamp_from_meta,
+    extract_subject_from_meta, extract_timestamp_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceMeta};
 
@@ -216,7 +216,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 )?))
                             } else {
                                 Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_string(),
+                                    message: "CDC metadata not found in the message".to_owned(),
                                 })
                             }
                         }
@@ -224,9 +224,7 @@ impl SourceStreamChunkRowWriter<'_> {
                     }
                 }
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
-                    Some(row_meta) => {
-                        Ok(A::output_for(extreact_timestamp_from_meta(row_meta.meta)))
-                    }
+                    Some(row_meta) => Ok(A::output_for(extract_timestamp_from_meta(row_meta.meta))),
                     None => parse_field(desc), // parse from payload
                 },
                 (_, &Some(AdditionalColumnType::CollectionName(_))) => {

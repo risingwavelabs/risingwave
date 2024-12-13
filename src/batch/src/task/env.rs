@@ -100,7 +100,6 @@ impl BatchEnvironment {
     }
 
     // Create an instance for testing purpose.
-    #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;

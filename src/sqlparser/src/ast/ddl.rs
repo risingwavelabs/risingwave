@@ -683,7 +683,7 @@ impl fmt::Display for ColumnDef {
             if let Some(data_type) = &self.data_type {
                 data_type.to_string()
             } else {
-                "None".to_string()
+                "None".to_owned()
             }
         )?;
         for option in &self.options {

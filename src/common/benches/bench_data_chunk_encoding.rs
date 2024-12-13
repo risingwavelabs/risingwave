@@ -30,7 +30,7 @@ struct DataChunkBenchCase {
 impl DataChunkBenchCase {
     pub fn new(name: &str, data_types: Vec<DataType>) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_owned(),
             data_types,
         }
     }

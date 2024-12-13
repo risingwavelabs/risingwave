@@ -106,7 +106,7 @@ impl PostgresExternalTable {
         let table_schema = schema_discovery
             .discover_table(
                 TableInfo {
-                    name: table.to_string(),
+                    name: table.to_owned(),
                     of_type: None,
                 },
                 &empty_map,
