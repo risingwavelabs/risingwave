@@ -21,6 +21,7 @@ use super::{
     ProtobufAccessBuilder, ProtobufParserConfig,
 };
 use crate::error::ConnectorResult;
+use crate::source::SourceMeta;
 
 /// Parses raw bytes into a specific format (avro, json, protobuf, ...), and then builds an [`Access`](risingwave_connector_codec::decoder::Access) from the parsed data.
 pub trait AccessBuilder {
@@ -60,7 +61,11 @@ impl AccessBuilderImpl {
         Ok(accessor)
     }
 
-    pub async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    pub async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        source_meta: &SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         let accessor = match self {
             Self::Avro(builder) => builder.generate_accessor(payload).await?,
             Self::Protobuf(builder) => builder.generate_accessor(payload).await?,
