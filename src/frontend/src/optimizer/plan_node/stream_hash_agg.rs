@@ -126,9 +126,9 @@ impl StreamHashAgg {
 
         if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
             return Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_owned(),
                 "Please make sure there is one and only one watermark column in GROUP BY"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }

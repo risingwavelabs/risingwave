@@ -102,7 +102,7 @@ impl ConfigExpander {
 
         let all_profile_section = {
             let mut all = global_config
-                .get(&Yaml::String("profile".to_string()))
+                .get(&Yaml::String("profile".to_owned()))
                 .ok_or_else(|| anyhow!("expect `profile` section"))?
                 .as_hash()
                 .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?
@@ -128,21 +128,21 @@ impl ConfigExpander {
         };
 
         let template_section = global_config
-            .get(&Yaml::String("template".to_string()))
+            .get(&Yaml::String("template".to_owned()))
             .ok_or_else(|| anyhow!("expect `profile` section"))?;
 
         let profile_section = all_profile_section
-            .get(&Yaml::String(profile.to_string()))
+            .get(&Yaml::String(profile.to_owned()))
             .ok_or_else(|| anyhow!("profile '{}' not found", profile))?
             .as_hash()
             .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?;
 
         let config_path = profile_section
-            .get(&Yaml::String("config-path".to_string()))
+            .get(&Yaml::String("config-path".to_owned()))
             .and_then(|s| s.as_str())
-            .map(|s| s.to_string());
+            .map(|s| s.to_owned());
         let mut env = vec![];
-        if let Some(env_section) = profile_section.get(&Yaml::String("env".to_string())) {
+        if let Some(env_section) = profile_section.get(&Yaml::String("env".to_owned())) {
             let env_section = env_section
                 .as_hash()
                 .ok_or_else(|| anyhow!("expect `env` section to be a hashmap"))?;
@@ -159,7 +159,7 @@ impl ConfigExpander {
         }
 
         let steps = profile_section
-            .get(&Yaml::String("steps".to_string()))
+            .get(&Yaml::String("steps".to_owned()))
             .ok_or_else(|| anyhow!("expect `steps` section"))?
             .clone();
 
@@ -184,12 +184,12 @@ impl ConfigExpander {
                     .as_hash()
                     .ok_or_else(|| anyhow!("expect step to be a hashmap"))?;
                 let use_type = use_type
-                    .get(&Yaml::String("use".to_string()))
+                    .get(&Yaml::String("use".to_owned()))
                     .ok_or_else(|| anyhow!("expect `use` in step"))?;
                 let use_type = use_type
                     .as_str()
                     .ok_or_else(|| anyhow!("expect `use` to be a string"))?
-                    .to_string();
+                    .to_owned();
                 let mut out_str = String::new();
                 let mut emitter = YamlEmitter::new(&mut out_str);
                 emitter.dump(step)?;
@@ -223,7 +223,7 @@ impl ConfigExpander {
 
         let mut services = HashMap::new();
         for x in &config {
-            let id = x.id().to_string();
+            let id = x.id().to_owned();
             if services.insert(id.clone(), x).is_some() {
                 return Err(anyhow!("duplicate id: {}", id));
             }

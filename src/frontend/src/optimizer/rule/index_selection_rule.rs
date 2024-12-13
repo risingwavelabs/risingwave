@@ -334,7 +334,7 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
 
         let primary_table_scan = LogicalScan::create(
-            logical_scan.table_name().to_string(),
+            logical_scan.table_name().to_owned(),
             logical_scan.table_catalog(),
             vec![],
             logical_scan.ctx(),
@@ -564,7 +564,7 @@ impl IndexSelectionRule {
         }
 
         let primary_access = generic::TableScan::new(
-            logical_scan.table_name().to_string(),
+            logical_scan.table_name().to_owned(),
             primary_table_desc
                 .pk
                 .iter()
@@ -607,7 +607,7 @@ impl IndexSelectionRule {
 
         Some(
             generic::TableScan::new(
-                index.index_table.name.to_string(),
+                index.index_table.name.clone(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()

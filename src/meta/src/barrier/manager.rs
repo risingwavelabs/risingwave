@@ -73,6 +73,15 @@ impl GlobalBarrierManager {
         Ok(ddl_progress.into_values().collect())
     }
 
+    pub async fn adhoc_recovery(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::AdhocRecovery(tx))
+            .context("failed to send adhoc recovery request")?;
+        rx.await.context("failed to wait adhoc recovery")?;
+        Ok(())
+    }
+
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
         self.hummock_manager.get_version_id().await
     }

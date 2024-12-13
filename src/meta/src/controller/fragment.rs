@@ -373,7 +373,7 @@ impl CatalogController {
                 }
                 .into(),
             ),
-            node_label: "".to_string(),
+            node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(max_parallelism as _),
         };
@@ -483,7 +483,7 @@ impl CatalogController {
                 dispatcher: pb_dispatcher,
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
-                mview_definition: "".to_string(),
+                mview_definition: "".to_owned(),
                 expr_context: pb_expr_context,
             })
         }
@@ -1352,25 +1352,28 @@ impl CatalogController {
     /// Root fragment connects to downstream jobs.
     ///
     /// ## What can be the root fragment
+    /// - For sink, it should have one `Sink` fragment.
     /// - For MV, it should have one `MView` fragment.
     /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
     /// - For source, it should have one `Source` fragment.
     ///
-    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
+    /// In other words, it's the `MView` or `Sink` fragment if it exists, otherwise it's the `Source` fragment.
     pub async fn get_root_fragments(
         &self,
         job_ids: Vec<ObjectId>,
     ) -> MetaResult<(HashMap<ObjectId, PbFragment>, Vec<(ActorId, WorkerId)>)> {
         let inner = self.inner.read().await;
 
-        let all_upstream_fragments = Fragment::find()
+        let all_fragments = Fragment::find()
             .filter(fragment::Column::JobId.is_in(job_ids))
             .all(&inner.db)
             .await?;
         // job_id -> fragment
         let mut root_fragments = HashMap::<ObjectId, fragment::Model>::new();
-        for fragment in all_upstream_fragments {
-            if fragment.fragment_type_mask & PbFragmentTypeFlag::Mview as i32 != 0 {
+        for fragment in all_fragments {
+            if (fragment.fragment_type_mask & PbFragmentTypeFlag::Mview as i32) != 0
+                || (fragment.fragment_type_mask & PbFragmentTypeFlag::Sink as i32) != 0
+            {
                 _ = root_fragments.insert(fragment.job_id, fragment);
             } else if fragment.fragment_type_mask & PbFragmentTypeFlag::Source as i32 != 0 {
                 // look for Source fragment only if there's no MView fragment
@@ -1671,7 +1674,7 @@ mod tests {
                         .get(&actor_id)
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
-                    mview_definition: "".to_string(),
+                    mview_definition: "".to_owned(),
                     expr_context: Some(PbExprContext {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
@@ -1773,7 +1776,7 @@ mod tests {
             .map(|actor_id| {
                 let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
-                        split_type: "dummy".to_string(),
+                        split_type: "dummy".to_owned(),
                         ..Default::default()
                     }],
                 }));

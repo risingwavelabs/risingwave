@@ -656,7 +656,7 @@ impl Access for JsonAccess<'_> {
                 value = sub_value;
             } else {
                 Err(AccessError::Undefined {
-                    name: key.to_string(),
+                    name: key.to_owned(),
                     path: path.iter().take(idx).join("."),
                 })?;
             }

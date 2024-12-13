@@ -123,7 +123,7 @@ pub async fn prepare_start_parameters(
     let sstable_store = Arc::new(
         SstableStore::for_compactor(
             object_store,
-            storage_opts.data_directory.to_string(),
+            storage_opts.data_directory.clone(),
             0,
             meta_cache_capacity_bytes,
             system_params_reader.use_new_object_prefix_strategy(),

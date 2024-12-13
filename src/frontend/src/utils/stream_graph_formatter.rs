@@ -135,7 +135,7 @@ impl StreamGraphFormatter {
                 let s = if self.verbose {
                     format!("{}: {}", c.name(), c.data_type())
                 } else {
-                    c.name().to_string()
+                    c.name().to_owned()
                 };
                 Pretty::Text(s.into())
             })
@@ -177,9 +177,9 @@ impl StreamGraphFormatter {
                     match dist.r#type() {
                         DispatcherType::Unspecified => unreachable!(),
                         DispatcherType::Hash => format!("Hash({:?})", dist.dist_key_indices),
-                        DispatcherType::Broadcast => "Broadcast".to_string(),
-                        DispatcherType::Simple => "Single".to_string(),
-                        DispatcherType::NoShuffle => "NoShuffle".to_string(),
+                        DispatcherType::Broadcast => "Broadcast".to_owned(),
+                        DispatcherType::Simple => "Single".to_owned(),
+                        DispatcherType::NoShuffle => "NoShuffle".to_owned(),
                     },
                     upstream_fragment_id
                 )
@@ -195,7 +195,7 @@ impl StreamGraphFormatter {
             false,
             false,
             |table, table_name| {
-                tables.push((table_name.to_string(), self.add_table(table)));
+                tables.push((table_name.to_owned(), self.add_table(table)));
             },
         );
 
@@ -269,7 +269,7 @@ pub fn build_graph_from_pretty(
 
         if let Some(parent_label) = parent_label {
             if let Some(&parent_node) = nodes.get(parent_label) {
-                graph.add_edge(parent_node, current_node, "".to_string());
+                graph.add_edge(parent_node, current_node, "".to_owned());
             }
         }
 

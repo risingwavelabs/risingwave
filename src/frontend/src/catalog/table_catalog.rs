@@ -634,7 +634,7 @@ impl From<PbTable> for TableCatalog {
         }
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
-            if !col_names.insert(col_name.to_string()) {
+            if !col_names.insert(col_name.to_owned()) {
                 panic!("duplicated column name {} in table {} ", col_name, tb.name)
             }
 
@@ -736,7 +736,7 @@ mod tests {
             id: 0,
             schema_id: 0,
             database_id: 0,
-            name: "test".to_string(),
+            name: "test".to_owned(),
             table_type: PbTableType::Table as i32,
             columns: vec![
                 PbColumnCatalog {
@@ -759,7 +759,7 @@ mod tests {
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
-            distribution_key: vec![],
+            distribution_key: vec![0],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             append_only: false,
@@ -779,13 +779,13 @@ mod tests {
             }),
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 3,
-            dist_key_in_pk: vec![],
+            dist_key_in_pk: vec![0],
             cardinality: None,
             created_at_epoch: None,
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
-            description: Some("description".to_string()),
+            description: Some("description".to_owned()),
             incoming_sinks: vec![],
             created_at_cluster_version: None,
             initialized_at_cluster_version: None,
@@ -803,7 +803,7 @@ mod tests {
             TableCatalog {
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
-                name: "test".to_string(),
+                name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![
                     ColumnCatalog::row_id_column(),
@@ -815,12 +815,12 @@ mod tests {
                             ],)
                             .into(),
                             column_id: ColumnId::new(1),
-                            name: "country".to_string(),
+                            name: "country".to_owned(),
                             field_descs: vec![
                                 ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string(),
+                            type_name: ".test.Country".to_owned(),
                             description: None,
                             generated_or_default_column: None,
                             additional_column: AdditionalColumn { column_type: None },
@@ -833,7 +833,7 @@ mod tests {
                 ],
                 stream_key: vec![0],
                 pk: vec![ColumnOrder::new(0, OrderType::ascending())],
-                distribution_key: vec![],
+                distribution_key: vec![0],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 retention_seconds: Some(300),
@@ -847,14 +847,14 @@ mod tests {
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(3),
-                dist_key_in_pk: vec![],
+                dist_key_in_pk: vec![0],
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
-                description: Some("description".to_string()),
+                description: Some("description".to_owned()),
                 incoming_sinks: vec![],
                 created_at_cluster_version: None,
                 initialized_at_cluster_version: None,

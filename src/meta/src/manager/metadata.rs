@@ -409,17 +409,7 @@ impl MetadataManager {
     /// Get and filter the "**root**" fragments of the specified relations.
     /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
     ///
-    /// ## What can be the root fragment
-    /// - For MV, it should have one `MView` fragment.
-    /// - For table, it should have one `MView` fragment and one or two `Source` fragments. `MView` should be the root.
-    /// - For source, it should have one `Source` fragment.
-    ///
-    /// In other words, it's the `MView` fragment if it exists, otherwise it's the `Source` fragment.
-    ///
-    /// ## What do we expect to get for different creating streaming job
-    /// - MV/Sink/Index should have MV upstream fragments for upstream MV/Tables, and Source upstream fragments for upstream shared sources.
-    /// - CDC Table has a Source upstream fragment.
-    /// - Sources and other Tables shouldn't have an upstream fragment.
+    /// See also [`crate::controller::catalog::CatalogController::get_root_fragments`].
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,

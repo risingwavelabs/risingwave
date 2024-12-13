@@ -417,7 +417,7 @@ pub fn get_table_catalog_by_table_name(
     let (table, schema_name) =
         reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
-    Ok((table.clone(), schema_name.to_string()))
+    Ok((table.clone(), schema_name.to_owned()))
 }
 
 #[cfg(test)]

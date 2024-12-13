@@ -140,7 +140,7 @@ impl ElasticSearchOpenSearchFormatter {
                                 ))
                             })?
                             .into_utf8()
-                            .to_string(),
+                            .to_owned(),
                     )
                 })
                 .transpose()?;
@@ -149,7 +149,7 @@ impl ElasticSearchOpenSearchFormatter {
                     let key = self.key_encoder.encode(rows)?;
                     let value = self.value_encoder.encode(rows)?;
                     result_vec.push(BuildBulkPara {
-                        index: index.to_string(),
+                        index: index.to_owned(),
                         key,
                         value: Some(value),
                         mem_size_b: rows.value_estimate_size(),
@@ -160,7 +160,7 @@ impl ElasticSearchOpenSearchFormatter {
                     let key = self.key_encoder.encode(rows)?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
-                        index: index.to_string(),
+                        index: index.to_owned(),
                         key,
                         value: None,
                         mem_size_b,
