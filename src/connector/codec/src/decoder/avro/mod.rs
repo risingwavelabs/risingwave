@@ -16,10 +16,10 @@ mod schema;
 
 use apache_avro::schema::{DecimalSchema, NamesRef, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
-use apache_avro::{Decimal as AvroDecimal, Schema};
+use apache_avro::Schema;
 use chrono::Datelike;
 use itertools::Itertools;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
     DataType, Date, DatumCow, Interval, JsonbVal, MapValue, ScalarImpl, Time, Timestamp,
@@ -28,7 +28,7 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqFast;
 
 pub use self::schema::{avro_schema_to_column_descs, MapHandling, ResolvedAvroSchema};
-use super::utils::extract_decimal;
+use super::utils::scaled_bigint_to_rust_decimal;
 use super::{bail_uncategorized, uncategorized, Access, AccessError, AccessResult};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
 
@@ -176,13 +176,13 @@ impl<'a> AvroParseOptionsInner<'a> {
             (DataType::Float64, Value::Float(i)) => (*i as f64).into(),
             // ---- Decimal -----
             (DataType::Decimal, Value::Decimal(avro_decimal)) => {
-                let (precision, scale) = match self.lookup_ref(unresolved_schema) {
+                let (_precision, scale) = match self.lookup_ref(unresolved_schema) {
                     Schema::Decimal(DecimalSchema {
                         precision, scale, ..
                     }) => (*precision, *scale),
                     _ => Err(create_error())?,
                 };
-                let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
+                let decimal = scaled_bigint_to_rust_decimal(avro_decimal.clone().into(), scale)
                     .map_err(|_| create_error())?;
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
@@ -213,10 +213,7 @@ impl<'a> AvroParseOptionsInner<'a> {
                     ),
                 };
 
-                let negative = value.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1)?;
-                let decimal =
-                    rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
+                let decimal = scaled_bigint_to_rust_decimal(value, scale as _)?;
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
             // ---- Time -----
@@ -433,24 +430,6 @@ impl Access for AvroAccess<'_> {
             .inner
             .convert_to_datum(unresolved_schema, value, type_expected)
     }
-}
-
-pub(crate) fn avro_decimal_to_rust_decimal(
-    avro_decimal: AvroDecimal,
-    _precision: usize,
-    scale: usize,
-) -> AccessResult<rust_decimal::Decimal> {
-    let negative = !avro_decimal.is_positive();
-    let bytes = avro_decimal.to_vec_unsigned();
-
-    let (lo, mid, hi) = extract_decimal(bytes)?;
-    Ok(rust_decimal::Decimal::from_parts(
-        lo,
-        mid,
-        hi,
-        negative,
-        scale as u32,
-    ))
 }
 
 /// If the union schema is `[null, T]` or `[T, null]`, returns `Some(T)`; otherwise returns `None`.
@@ -902,20 +881,18 @@ mod tests {
         // 280
         let v = vec![1, 24];
         let avro_decimal = AvroDecimal::from(v);
-        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 0).unwrap();
+        let rust_decimal = scaled_bigint_to_rust_decimal(avro_decimal.into(), 0).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::from(280));
 
         // 28.1
         let v = vec![1, 25];
         let avro_decimal = AvroDecimal::from(v);
-        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
+        let rust_decimal = scaled_bigint_to_rust_decimal(avro_decimal.into(), 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
 
         // 1.1234567891
         let value = BigInt::from(11234567891_i64);
-        let negative = value.sign() == Sign::Minus;
-        let (lo, mid, hi) = extract_decimal(value.to_bytes_be().1).unwrap();
-        let decimal = rust_decimal::Decimal::from_parts(lo, mid, hi, negative, 10);
+        let decimal = scaled_bigint_to_rust_decimal(value, 10).unwrap();
         assert_eq!(
             decimal,
             rust_decimal::Decimal::try_from(1.1234567891).unwrap()
@@ -924,7 +901,7 @@ mod tests {
         // 1.123456789123456789123456789
         let v = vec![3, 161, 77, 58, 146, 180, 49, 220, 100, 4, 95, 21];
         let avro_decimal = AvroDecimal::from(v);
-        let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 27).unwrap();
+        let rust_decimal = scaled_bigint_to_rust_decimal(avro_decimal.into(), 27).unwrap();
         assert_eq!(
             rust_decimal,
             rust_decimal::Decimal::from_str("1.123456789123456789123456789").unwrap()
