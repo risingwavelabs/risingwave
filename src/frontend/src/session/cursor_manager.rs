@@ -1180,7 +1180,7 @@ fn get_pk_names(pks: &[ColumnOrder], table_catalog: &TableCatalog) -> HashMap<St
     pks.iter()
         .map(|f| {
             let column = table_catalog.columns.get(f.column_index).unwrap();
-            (column.name().to_string(), column.is_hidden)
+            (column.name().to_owned(), column.is_hidden)
         })
         .collect()
 }
