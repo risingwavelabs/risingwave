@@ -851,7 +851,10 @@ pub mod hash_join_executor {
         }
 
         // Push a chunk of records into tx_l, matches 100K records in the build side.
-        let chunk_size = 64;
+        let chunk_size = match hash_join_workload {
+            HashJoinWorkload::InCache => 64,
+            HashJoinWorkload::NotInCache => 1,
+        };
         let chunk = match join_type_primitive {
             // Make sure all match
             JoinType::Inner => build_chunk(chunk_size, 200_000),
