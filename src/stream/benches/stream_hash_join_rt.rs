@@ -18,6 +18,11 @@
 //! ```sh
 //! cargo bench --bench stream_hash_join_rt
 //! ```
+//!
+//! Generate flamegraph:
+//! ```sh
+//!  sudo cargo flamegraph --bench stream_hash_join_rt -- hash_join_rt_40000_InCache_Inner
+//! ```
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
