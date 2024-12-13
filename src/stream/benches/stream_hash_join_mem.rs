@@ -14,14 +14,9 @@
 
 #![feature(let_chains)]
 
-//! To run this benchmark you can use the following command:
+//! Specify the amplification_size,workload,join_type e.g. 40000
 //! ```sh
-//! cargo bench --features dhat-heap --bench stream_hash_join_mem
-//! ```
-//!
-//! You may also specify the amplification size, e.g. 40000
-//! ```sh
-//! cargo bench --features dhat-heap --bench stream_hash_join_mem -- 40000
+//! ARGS=40000,NotInCache,Inner cargo bench --features dhat-heap --bench stream_hash_join_mem
 //! ```
 
 use std::env;
@@ -37,16 +32,26 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[tokio::main]
 async fn main() {
-    let args: Vec<_> = env::args().collect();
-    let amp = if let Some(raw_arg) = args.get(1)
-        && let Ok(arg) = raw_arg.parse()
+    let arg = env::var("ARGS");
+    let (amp, workload, join_type) = if let Ok(raw_arg) = arg
     {
-        arg
+        let parts = raw_arg.split(',').collect::<Vec<_>>();
+        let amp = parts[0].parse::<usize>().expect(format!("invalid amplification_size: {}", parts[0]).as_str());
+        let workload = match parts[1] {
+            "NotInCache" => HashJoinWorkload::NotInCache,
+            "InCache" => HashJoinWorkload::InCache,
+            _ => panic!("Invalid workload: {}", parts[1]),
+        };
+        let join_type = match parts[2] {
+            "Inner" => JoinType::Inner,
+            "LeftOuter" => JoinType::LeftOuter,
+            _ => panic!("Invalid join type: {}", parts[2]),
+        };
+        (amp, workload, join_type)
     } else {
-        100_000
+        panic!("invalid ARGS: {:?}", arg);
     };
-    let workload = HashJoinWorkload::NotInCache;
-    let join_type = JoinType::Inner;
+
     let (tx_l, tx_r, out) = setup_bench_stream_hash_join(amp, workload, join_type).await;
     {
         // Start the profiler later, after we have ingested the data for hash join build-side.
@@ -54,5 +59,8 @@ async fn main() {
         let _profiler = dhat::Profiler::new_heap();
 
         handle_streams(workload, join_type, amp, tx_l, tx_r, out).await;
+        let stats= dhat::HeapStats::get();
+        println!("max_blocks: {}", stats.max_blocks);
+        println!("max_bytes: {}", stats.max_bytes);
     }
 }
