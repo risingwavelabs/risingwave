@@ -45,12 +45,14 @@ async fn main() {
     } else {
         100_000
     };
-    let (tx_l, tx_r, out) = setup_bench_stream_hash_join(amp, HashJoinWorkload::NotInCache, JoinType::Inner).await;
+    let workload = HashJoinWorkload::NotInCache;
+    let join_type = JoinType::Inner;
+    let (tx_l, tx_r, out) = setup_bench_stream_hash_join(amp, workload, join_type).await;
     {
         // Start the profiler later, after we have ingested the data for hash join build-side.
         #[cfg(feature = "dhat-heap")]
         let _profiler = dhat::Profiler::new_heap();
 
-        handle_streams(amp, tx_l, tx_r, out).await;
+        handle_streams(workload, join_type, amp, tx_l, tx_r, out).await;
     }
 }
