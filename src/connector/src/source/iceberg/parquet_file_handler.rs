@@ -108,10 +108,9 @@ pub fn new_s3_operator(
     s3_region: String,
     s3_access_key: String,
     s3_secret_key: String,
-    location: String,
+    bucket: String,
 ) -> ConnectorResult<Operator> {
     // Create s3 builder.
-    let bucket = extract_bucket(&location);
     let mut builder = S3::default().bucket(&bucket).region(&s3_region);
     builder = builder.secret_access_key(&s3_access_key);
     builder = builder.secret_access_key(&s3_secret_key);
@@ -130,13 +129,20 @@ pub fn new_s3_operator(
     Ok(op)
 }
 
-fn extract_bucket(location: &str) -> String {
-    let prefix = "s3://";
-    let start = prefix.len();
-    let end = location[start..]
-        .find('/')
-        .unwrap_or(location.len() - start);
-    location[start..start + end].to_string()
+pub fn extract_bucket_and_file_name(location: &str) -> ConnectorResult<(String, String)> {
+    let url = Url::parse(location)?;
+    let bucket = url
+        .host_str()
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::DataInvalid,
+                format!("Invalid s3 url: {}, missing bucket", location),
+            )
+        })?
+        .to_owned();
+    let prefix = format!("s3://{}/", bucket);
+    let file_name = location[prefix.len()..].to_string();
+    Ok((bucket, file_name))
 }
 
 pub async fn list_s3_directory(
@@ -145,14 +151,7 @@ pub async fn list_s3_directory(
     s3_secret_key: String,
     dir: String,
 ) -> Result<Vec<String>, anyhow::Error> {
-    let url = Url::parse(&dir)?;
-    let bucket = url.host_str().ok_or_else(|| {
-        Error::new(
-            ErrorKind::DataInvalid,
-            format!("Invalid s3 url: {}, missing bucket", dir),
-        )
-    })?;
-
+    let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
         let mut builder = S3::default();
@@ -160,12 +159,12 @@ pub async fn list_s3_directory(
             .region(&s3_region)
             .access_key_id(&s3_access_key)
             .secret_access_key(&s3_secret_key)
-            .bucket(bucket);
+            .bucket(&bucket);
         let op = Operator::new(builder)?
             .layer(RetryLayer::default())
             .finish();
 
-        op.list(&dir[prefix.len()..])
+        op.list(&file_name)
             .await
             .map_err(|e| anyhow!(e))
             .map(|list| {
