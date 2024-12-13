@@ -28,7 +28,7 @@ State Table provides the table operations by these APIs: `get_row`, `scan`, `ins
 
 ![Overview of Relational Table](../images/relational-table/relational-table-01.svg)
 ### Write Path
-To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, State Table will covert these operations into kv pairs and write to state store with specific epoch.
+To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, State Table will convert these operations into kv pairs and write to state store with specific epoch.
 
 For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, State Table converts these two operations into KV operations by row-based format, and writes these KV operations into state store (Hummock).
 

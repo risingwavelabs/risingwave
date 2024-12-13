@@ -163,7 +163,7 @@ impl SourceExecutor {
         #[for_await]
         for chunk in stream {
             let chunk = chunk.map_err(BatchError::connector)?;
-            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk)?;
+            let data_chunk = convert_stream_chunk_to_batch_chunk(chunk)?;
             if data_chunk.capacity() > 0 {
                 yield data_chunk;
             }
@@ -171,7 +171,7 @@ impl SourceExecutor {
     }
 }
 
-fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
+fn convert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     // chunk read from source must be compact
     assert!(chunk.data_chunk().is_compacted());
 
