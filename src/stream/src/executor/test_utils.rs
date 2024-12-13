@@ -635,6 +635,7 @@ pub mod hash_join_executor {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
     use risingwave_common::hash::Key128;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::plan_common::JoinType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -642,8 +643,7 @@ pub mod hash_join_executor {
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
     use crate::executor::test_utils::{MessageSender, MockSource};
-    use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType};
-    use crate::executor::join::JoinTypePrimitive;
+    use crate::executor::{ActorContext, HashJoinExecutor, JoinParams, JoinType as ConstJoinType};
 
     #[derive(Clone, Copy, Debug, Display)]
     pub enum HashJoinWorkload {
@@ -710,7 +710,7 @@ pub mod hash_join_executor {
     pub async fn setup_bench_stream_hash_join(
         amp: usize,
         workload: HashJoinWorkload,
-        join_type_primitive: JoinTypePrimitive,
+        join_type: JoinType,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let fields = vec![DataType::Int64, DataType::Int64, DataType::Int64];
         let orders = vec![OrderType::ascending(), OrderType::ascending()];
@@ -756,9 +756,9 @@ pub mod hash_join_executor {
         let params_l = JoinParams::new(vec![0], vec![1]);
         let params_r = JoinParams::new(vec![0], vec![1]);
 
-        match join_type_primitive {
+        match join_type {
             JoinType::Inner => {
-                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { JoinType::Inner }>::new(
+                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::Inner }>::new(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -782,7 +782,7 @@ pub mod hash_join_executor {
                 (tx_l, tx_r, executor.boxed().execute())
             }
             JoinType::LeftOuter => {
-                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { JoinType::LeftOuter }>::new(
+                let executor = HashJoinExecutor::<Key128, MemoryStateStore, { ConstJoinType::LeftOuter }>::new(
                     ActorContext::for_test(123),
                     info,
                     source_l,
@@ -834,7 +834,7 @@ pub mod hash_join_executor {
 
     pub async fn handle_streams(
         hash_join_workload: HashJoinWorkload,
-        join_type_primitive: JoinTypePrimitive,
+        join_type: JoinType,
         amp: usize,
         mut tx_l: MessageSender,
         mut tx_r: MessageSender,
@@ -855,7 +855,7 @@ pub mod hash_join_executor {
             HashJoinWorkload::InCache => 64,
             HashJoinWorkload::NotInCache => 1,
         };
-        let chunk = match join_type_primitive {
+        let chunk = match join_type {
             // Make sure all match
             JoinType::Inner => build_chunk(chunk_size, 200_000),
             // Make sure no match is found.
@@ -873,7 +873,7 @@ pub mod hash_join_executor {
             }
         }
 
-        let expected_count = match join_type_primitive {
+        let expected_count = match join_type {
             JoinType::LeftOuter => chunk_size,
             JoinType::Inner => amp * chunk_size,
             _ => panic!("Unsupported join type"),

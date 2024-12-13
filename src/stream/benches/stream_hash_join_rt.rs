@@ -23,7 +23,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use futures::executor::block_on;
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 use tokio::runtime::Runtime;
-use risingwave_stream::executor::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 risingwave_expr_impl::enable!();
 

@@ -25,7 +25,7 @@
 //! ```
 
 use std::env;
-use risingwave_stream::executor::JoinType;
+use risingwave_pb::plan_common::JoinType;
 
 use risingwave_stream::executor::test_utils::hash_join_executor::*;
 
