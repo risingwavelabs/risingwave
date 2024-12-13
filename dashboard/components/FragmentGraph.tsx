@@ -25,7 +25,8 @@ import {
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
 import { StreamNode } from "../proto/gen/stream_plan"
-import { backPressureColor, backPressureWidth } from "./utils/backPressure"
+import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
+import { FragmentStats } from "../proto/gen/monitor_service"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -95,11 +96,13 @@ export default function FragmentGraph({
   fragmentDependency,
   selectedFragmentId,
   backPressures,
+  fragmentStats,
 }: {
   planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: FragmentBox[]
   selectedFragmentId?: string
   backPressures?: Map<string, number>
+  fragmentStats?: { [fragmentId: number]: FragmentStats }
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -188,6 +191,7 @@ export default function FragmentGraph({
 
   useEffect(() => {
     if (fragmentLayout) {
+      const now_ms = Date.now()
       const svgNode = svgRef.current
       const svgSelection = d3.select(svgNode)
 
@@ -246,12 +250,51 @@ export default function FragmentGraph({
           .attr("height", ({ height }) => height - fragmentMarginY * 2)
           .attr("x", fragmentMarginX)
           .attr("y", fragmentMarginY)
-          .attr("fill", "white")
+          .attr("fill", fragmentStats ? ({ id }) => {
+            const fragmentId = parseInt(id)
+            if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
+              return "white";
+            }
+            let currentMs = epochToUnixMillis(fragmentStats[fragmentId].currentEpoch)
+            return latencyToColor(now_ms -currentMs);
+          } : "white")
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
             isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
           )
+          .on("mouseover", (event, { id, actorIds }) => {
+            const fragmentId = parseInt(id)
+            const stats = fragmentStats?.[fragmentId]
+            const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+            const epoch = stats?.currentEpoch ?? "N/A"
+            
+            // Remove existing tooltip if any
+            d3.selectAll(".tooltip").remove()
+            
+            // Create new tooltip
+            d3.select("body")
+              .append("div")
+              .attr("class", "tooltip")
+              .style("position", "absolute")
+              .style("background", "white")
+              .style("padding", "10px")
+              .style("border", "1px solid #ddd")
+              .style("border-radius", "4px")
+              .style("pointer-events", "none")
+              .style("left", event.pageX + 10 + "px")
+              .style("top", event.pageY + 10 + "px")
+              .style("font-size", "12px")
+              .html(`#Actors: ${actorIds.length}<br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`)
+          })
+          .on("mousemove", (event) => {
+            d3.select(".tooltip")
+              .style("left", event.pageX + 10 + "px")
+              .style("top", event.pageY + 10 + "px")
+          })
+          .on("mouseout", () => {
+            d3.selectAll(".tooltip").remove()
+          })
 
         // Stream node edges
         let edgeSelection = gSel.select<SVGGElement>(".edges")
