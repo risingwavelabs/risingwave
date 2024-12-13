@@ -26,8 +26,8 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
     },
     create_fn: |opts| {
         Ok(CreateFunctionOutput {
-            identifier: opts.name.to_string(),
-            body: Some(opts.as_.context("AS must be specified")?.to_string()),
+            identifier: opts.name.to_owned(),
+            body: Some(opts.as_.context("AS must be specified")?.to_owned()),
             compressed_binary: None,
         })
     },
@@ -60,7 +60,7 @@ static QUICKJS: UdfImplDescriptor = UdfImplDescriptor {
         }
         Ok(Box::new(QuickJsFunction {
             runtime,
-            identifier: opts.identifier.to_string(),
+            identifier: opts.identifier.to_owned(),
         }))
     },
 };

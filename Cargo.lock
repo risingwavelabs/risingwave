@@ -696,7 +696,7 @@ dependencies = [
  "arrow-schema 52.2.0",
  "chrono",
  "half 2.3.1",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "lexical-core 0.8.5",
  "num",
  "serde",
@@ -2278,7 +2278,7 @@ dependencies = [
  "base64 0.13.1",
  "bitvec",
  "hex",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "js-sys",
  "once_cell",
  "rand",
@@ -3581,7 +3581,7 @@ dependencies = [
  "glob",
  "half 2.3.1",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.12.1",
  "log",
  "num_cpus",
@@ -3766,7 +3766,7 @@ dependencies = [
  "datafusion-expr",
  "datafusion-physical-expr",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.12.1",
  "log",
  "paste",
@@ -3795,7 +3795,7 @@ dependencies = [
  "half 2.3.1",
  "hashbrown 0.14.5",
  "hex",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.12.1",
  "log",
  "paste",
@@ -3853,7 +3853,7 @@ dependencies = [
  "futures",
  "half 2.3.1",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.12.1",
  "log",
  "once_cell",
@@ -3962,7 +3962,7 @@ dependencies = [
  "delta_kernel_derive",
  "either",
  "fix-hidden-lifetime-bug",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.13.0",
  "lazy_static",
  "parquet 52.2.0",
@@ -4066,7 +4066,7 @@ dependencies = [
  "fix-hidden-lifetime-bug",
  "futures",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.13.0",
  "lazy_static",
  "libc",
@@ -4240,6 +4240,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.87",
+]
+
+[[package]]
+name = "dhat"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98cd11d84628e233de0ce467de10b8633f4ddaecafadefc86e13b84b8739b827"
+dependencies = [
+ "backtrace",
+ "lazy_static",
+ "mintex",
+ "parking_lot 0.12.1",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "thousands",
 ]
 
 [[package]]
@@ -5618,7 +5634,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fb8d784f27acf97159b40fc4db5ecd8aa23b9ad5ef69cdd136d3bc80665f0c0"
 dependencies = [
  "fallible-iterator 0.3.0",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "stable_deref_trait",
 ]
 
@@ -5825,7 +5841,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.9",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -5834,17 +5850,17 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.4"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "816ec7294445779408f36fe57bc5b7fc1cf59664059096c65f905c1c61f58069"
+checksum = "ccae279728d634d083c00f6099cb58f01cc99c145b84b8be2f6c74618d79922e"
 dependencies = [
+ "atomic-waker",
  "bytes",
  "fnv",
  "futures-core",
  "futures-sink",
- "futures-util",
  "http 1.1.0",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -6142,7 +6158,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "h2 0.4.4",
+ "h2 0.4.7",
  "http 1.1.0",
  "http-body 1.0.0",
  "httparse",
@@ -6452,13 +6468,20 @@ dependencies = [
 
 [[package]]
 name = "idna"
-version = "0.5.0"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "634d9b1461af396cad843f47fdba5597a4f9e6ddd4bfb6ff5d85028c25cb12f6"
+checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
- "unicode-bidi",
- "unicode-normalization",
+ "idna_adapter",
+ "smallvec",
+ "utf8_iter",
 ]
+
+[[package]]
+name = "idna_adapter"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfdf4f5d937a025381f5ab13624b1c5f51414bfe5c9885663226eae8d6d39560"
 
 [[package]]
 name = "indexmap"
@@ -6473,9 +6496,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.6.0"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "707907fe3c25f5424cce2cb7e1cbcafee6bdbe735ca90ef77c29e84591e5b9da"
+checksum = "62f822373a4fe84d4bb149bf54e584a7f4abec90e072ed49cda0edea5b95471f"
 dependencies = [
  "equivalent",
  "hashbrown 0.15.0",
@@ -6514,7 +6537,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73c0fefcb6d409a6587c07515951495d482006f89a21daa0f2f783aa4fd5e027"
 dependencies = [
  "ahash 0.8.11",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "is-terminal",
  "itoa",
  "log",
@@ -7590,6 +7613,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mintex"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
+
+[[package]]
 name = "mio"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8214,7 +8243,7 @@ checksum = "084f1a5821ac4c651660a94a7153d27ac9d8a53736203f58b31945ded098070a"
 dependencies = [
  "crc32fast",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "memchr",
 ]
 
@@ -8925,7 +8954,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset 0.4.2",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
 ]
 
 [[package]]
@@ -10266,7 +10295,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.4",
+ "h2 0.4.7",
  "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
@@ -10481,21 +10510,16 @@ name = "risingwave_batch"
 version = "2.2.0-alpha"
 dependencies = [
  "anyhow",
- "assert_matches",
  "async-recursion",
  "async-trait",
- "bytes",
- "chrono",
  "criterion",
  "either",
- "foyer",
  "futures",
  "futures-async-stream",
  "futures-util",
- "hashbrown 0.14.5",
- "hytra",
  "iceberg",
  "itertools 0.13.0",
+ "linkme",
  "madsim-tokio",
  "madsim-tonic",
  "memcomparable",
@@ -10503,10 +10527,53 @@ dependencies = [
  "opendal 0.49.2",
  "parking_lot 0.12.1",
  "parquet 53.2.0",
- "paste",
  "prometheus",
- "prost 0.13.1",
  "rand",
+ "risingwave_common",
+ "risingwave_connector",
+ "risingwave_dml",
+ "risingwave_expr",
+ "risingwave_hummock_sdk",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "scopeguard",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.63",
+ "thiserror-ext",
+ "tikv-jemallocator",
+ "tokio-postgres",
+ "tokio-stream 0.1.15",
+ "tracing",
+ "twox-hash 1.6.3",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_batch_executors"
+version = "2.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-trait",
+ "bytes",
+ "criterion",
+ "either",
+ "foyer",
+ "futures",
+ "futures-async-stream",
+ "futures-util",
+ "hashbrown 0.14.5",
+ "iceberg",
+ "itertools 0.13.0",
+ "linkme",
+ "madsim-tokio",
+ "mysql_async",
+ "opendal 0.49.2",
+ "prometheus",
+ "rand",
+ "risingwave_batch",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_connector",
@@ -10517,20 +10584,14 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
- "rust_decimal",
  "rw_futures_util",
  "scopeguard",
- "serde_json",
  "tempfile",
- "thiserror 1.0.63",
  "thiserror-ext",
  "tikv-jemallocator",
- "tokio-metrics",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "tokio-util",
  "tracing",
- "twox-hash 1.6.3",
  "uuid",
  "workspace-hack",
 ]
@@ -10584,6 +10645,7 @@ dependencies = [
  "clap",
  "madsim-tokio",
  "prometheus",
+ "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
@@ -10609,6 +10671,7 @@ dependencies = [
  "home",
  "madsim-tokio",
  "prometheus",
+ "risingwave_batch_executors",
  "risingwave_cmd",
  "risingwave_common",
  "risingwave_compactor",
@@ -10943,6 +11006,7 @@ dependencies = [
  "prost 0.13.1",
  "rand",
  "risingwave_batch",
+ "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
@@ -11019,7 +11083,7 @@ dependencies = [
  "iceberg-catalog-glue",
  "iceberg-catalog-rest",
  "icelake",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itertools 0.13.0",
  "jni",
  "jsonbb",
@@ -11390,6 +11454,7 @@ dependencies = [
  "quick-xml 0.36.1",
  "rand",
  "risingwave_batch",
+ "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
@@ -11417,7 +11482,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "tower 0.4.13",
+ "tower 0.5.0",
  "tower-http",
  "tracing",
  "url",
@@ -11887,6 +11952,7 @@ dependencies = [
  "easy-ext",
  "either",
  "futures",
+ "h2 0.4.7",
  "http 1.1.0",
  "hyper 1.4.1",
  "itertools 0.13.0",
@@ -11970,6 +12036,7 @@ dependencies = [
  "prometheus",
  "rand",
  "rand_chacha",
+ "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
@@ -12154,6 +12221,7 @@ dependencies = [
  "cfg-if",
  "criterion",
  "delta_btree_map",
+ "dhat",
  "educe",
  "either",
  "enum-as-inner 0.6.0",
@@ -12205,6 +12273,7 @@ dependencies = [
  "tokio-stream 0.1.15",
  "tracing",
  "tracing-test",
+ "url",
  "workspace-hack",
 ]
 
@@ -13141,7 +13210,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8de514ef58196f1fc96dcaef80fe6170a1ce6215df9687a93fe8300e773fefc5"
 dependencies = [
  "form_urlencoded",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itoa",
  "ryu",
  "serde",
@@ -13239,7 +13308,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "serde",
  "serde_derive",
  "serde_json",
@@ -13277,7 +13346,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "itoa",
  "ryu",
  "serde",
@@ -13779,7 +13848,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "hashlink",
  "hex",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "log",
  "madsim-tokio",
  "memchr",
@@ -14345,6 +14414,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "thousands"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
+
+[[package]]
 name = "thread-id"
 version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14730,7 +14805,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -14743,7 +14818,7 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "toml_datetime",
  "winnow 0.5.15",
 ]
@@ -14754,7 +14829,7 @@ version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e40bb779c5187258fd7aad0eb68cb8706a0a81fa712fbea808ab43c4b8374c4"
 dependencies = [
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -14773,7 +14848,7 @@ dependencies = [
  "base64 0.22.0",
  "bytes",
  "flate2",
- "h2 0.4.4",
+ "h2 0.4.7",
  "http 1.1.0",
  "http-body 1.0.0",
  "http-body-util",
@@ -15364,12 +15439,12 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.0"
+version = "2.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31e6302e3bb753d46e83516cae55ae196fc0c309407cf11ab35cc51a4c2a4633"
+checksum = "32f8b686cadd1473f4bd0117a5d28d36b1ade384ea9b5069a1c40aefed7fda60"
 dependencies = [
  "form_urlencoded",
- "idna 0.5.0",
+ "idna 1.0.3",
  "percent-encoding",
  "serde",
 ]
@@ -15379,6 +15454,12 @@ name = "urlencoding"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
+
+[[package]]
+name = "utf8_iter"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "utf8parse"
@@ -15646,7 +15727,7 @@ dependencies = [
  "ahash 0.8.11",
  "bitflags 2.6.0",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "semver 1.0.18",
  "serde",
 ]
@@ -15677,7 +15758,7 @@ dependencies = [
  "fxprof-processed-profile",
  "gimli",
  "hashbrown 0.14.5",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "ittapi",
  "libc",
  "libm",
@@ -15801,7 +15882,7 @@ dependencies = [
  "cpp_demangle",
  "cranelift-entity",
  "gimli",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "log",
  "object 0.36.4",
  "postcard",
@@ -15910,7 +15991,7 @@ checksum = "e6b893eec1dbf19e20beb6f2821ddd9672978db0e7c00ab8bb628afaad823783"
 dependencies = [
  "anyhow",
  "heck 0.4.1",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "wit-parser",
 ]
 
@@ -16456,7 +16537,7 @@ checksum = "3e79b9e3c0b6bb589dec46317e645851e0db2734c44e2be5e251b03ff4a51269"
 dependencies = [
  "anyhow",
  "id-arena",
- "indexmap 2.6.0",
+ "indexmap 2.7.0",
  "log",
  "semver 1.0.18",
  "serde",

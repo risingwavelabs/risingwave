@@ -161,8 +161,8 @@ impl CompleteBarrierTask {
                 .command
                 .as_ref()
                 .map(|command| command.to_string())
-                .unwrap_or_else(|| "barrier".to_string()),
-            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_string(),
+                .unwrap_or_else(|| "barrier".to_owned()),
+            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
         };
         env.event_log_manager_ref()
             .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
@@ -205,12 +205,31 @@ impl CompletingTask {
             }
         }
 
-        self.next_completed_barrier_inner()
+        async move {
+            if !matches!(self, CompletingTask::Completing { .. }) {
+                return pending().await;
+            };
+            self.next_completed_barrier_inner().await
+        }
+    }
+
+    pub(super) async fn wait_completing_task(
+        &mut self,
+    ) -> MetaResult<Option<BarrierCompleteOutput>> {
+        match self {
+            CompletingTask::None => Ok(None),
+            CompletingTask::Completing { .. } => {
+                self.next_completed_barrier_inner().await.map(Some)
+            }
+            CompletingTask::Err(_) => {
+                unreachable!("should not be called on previous err")
+            }
+        }
     }
 
     async fn next_completed_barrier_inner(&mut self) -> MetaResult<BarrierCompleteOutput> {
         let CompletingTask::Completing { join_handle, .. } = self else {
-            return pending().await;
+            unreachable!()
         };
 
         {

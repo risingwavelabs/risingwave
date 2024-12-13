@@ -10,7 +10,7 @@ steps:
     command: "CARGO_PROFILE=patch-production ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
@@ -25,7 +25,7 @@ steps:
     depends_on:
       - "build-aarch64"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token

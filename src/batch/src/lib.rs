@@ -29,6 +29,7 @@
 #![feature(error_generic_member_access)]
 #![feature(map_try_insert)]
 #![feature(iter_from_coroutine)]
+#![feature(used_with_arg)]
 
 pub mod error;
 pub mod exchange_source;
@@ -45,5 +46,4 @@ extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
 
-#[cfg(test)]
-risingwave_expr_impl::enable!();
+extern crate self as risingwave_batch;

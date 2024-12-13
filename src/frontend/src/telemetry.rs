@@ -39,7 +39,7 @@ pub(crate) fn report_event(
         connector_name,
         component,
         attributes,
-        TELEMETRY_FRONTEND_REPORT_TYPE.to_string(),
+        TELEMETRY_FRONTEND_REPORT_TYPE.to_owned(),
     );
 }
 
@@ -127,8 +127,8 @@ mod tests {
     #[tokio::test]
     async fn test_frontend_telemetry_report() {
         let mut report = super::FrontendTelemetryReport::new(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
+            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_owned(),
             100,
         );
         report.base.is_test = true;

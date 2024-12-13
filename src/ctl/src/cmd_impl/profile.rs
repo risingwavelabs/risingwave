@@ -37,7 +37,7 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
 
     let profile_root_path = std::env::var("PREFIX_PROFILING").unwrap_or_else(|_| {
         tracing::info!("PREFIX_PROFILING is not set, using current directory");
-        "./".to_string()
+        "./".to_owned()
     });
     let profile_root_path = PathBuf::from(&profile_root_path);
     let dir_name = Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();

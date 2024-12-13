@@ -122,7 +122,7 @@ impl Binder {
         // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
         // bind its arguments.
         if func_name == "obj_description" || func_name == "col_description" {
-            return Ok(ExprImpl::literal_varchar("".to_string()));
+            return Ok(ExprImpl::literal_varchar("".to_owned()));
         }
 
         // special binding logic for `array_transform`
@@ -179,7 +179,7 @@ impl Binder {
 
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "expect a scalar function after `AGGREGATE:`".to_string(),
+                        "expect a scalar function after `AGGREGATE:`".to_owned(),
                     )
                     .into());
                 }
@@ -209,36 +209,6 @@ impl Binder {
             ) {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
-
-            if func.language == "sql" {
-                let name = format!("SQL user-defined function `{}`", func.name);
-                reject_syntax!(
-                    scalar_as_agg,
-                    format!("`AGGREGATE:` prefix is not allowed for {}", name)
-                );
-                reject_syntax!(
-                    !arg_list.is_args_only(),
-                    format!(
-                        "keywords like `DISTINCT`, `ORDER BY` are not allowed in {} argument list",
-                        name
-                    )
-                );
-                reject_syntax!(
-                    within_group.is_some(),
-                    format!("`WITHIN GROUP` is not allowed in {} call", name)
-                );
-                reject_syntax!(
-                    filter.is_some(),
-                    format!("`FILTER` is not allowed in {} call", name)
-                );
-                reject_syntax!(
-                    over.is_some(),
-                    format!("`OVER` is not allowed in {} call", name)
-                );
-                return self.bind_sql_udf(func.clone(), args);
-            }
-
-            // now `func` is a non-SQL user-defined scalar/aggregate/table function
             Some(func.clone())
         } else {
             None
@@ -289,7 +259,7 @@ impl Binder {
             return self.bind_window_function(kind, args, arg_list.ignore_nulls, filter, over);
         }
 
-        // now it's a aggregate/scalar/table function call
+        // now it's an aggregate/scalar/table function call
         reject_syntax!(
             arg_list.ignore_nulls,
             "`IGNORE NULLS` is not allowed in aggregate/scalar/table function call"
@@ -371,6 +341,9 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
+                if udf.language == "sql" {
+                    return self.bind_sql_udf(udf.clone(), args);
+                }
                 return Ok(TableFunction::new_user_defined(udf.clone(), args).into());
             }
             // builtin table function
@@ -391,6 +364,9 @@ impl Binder {
                 arg_list.variadic,
                 "`VARIADIC` is not allowed in user-defined function call"
             );
+            if udf.language == "sql" {
+                return self.bind_sql_udf(udf.clone(), args);
+            }
             return Ok(UserDefinedFunction::new(udf.clone(), args).into());
         }
 
@@ -430,7 +406,7 @@ impl Binder {
         else {
             return Err(ErrorCode::BindError(
                 "The `lambda` argument for `array_transform` should be a lambda function"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         };
@@ -501,7 +477,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         if func.body.is_none() {
             return Err(
-                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_string()).into(),
+                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
             );
         }
 
@@ -570,7 +546,7 @@ impl Binder {
         Err(ErrorCode::InvalidInputSyntax(
             "failed to parse the input query and extract the udf expression,
                 please recheck the syntax"
-                .to_string(),
+                .to_owned(),
         )
         .into())
     }
