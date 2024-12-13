@@ -21,16 +21,17 @@ use std::time::Duration;
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
 use prometheus::core::Collector;
+use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::{AUTO_DUMP_SUFFIX, COLLAPSED_SUFFIX, MANUALLY_DUMP_SUFFIX};
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, GetBackPressureRequest,
-    GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, FragmentStats,
+    GetBackPressureRequest, GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -322,6 +323,41 @@ impl MonitorService for MonitorServiceImpl {
             })
             .collect();
 
+        let mut fragment_stats: HashMap<u32, FragmentStats> = HashMap::new();
+        for (&fragment_id, &actor_count) in &actor_count {
+            fragment_stats.insert(
+                fragment_id,
+                FragmentStats {
+                    actor_count,
+                    current_epoch: 0,
+                },
+            );
+        }
+
+        let actor_current_epoch = metrics
+            .actor_current_epoch
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+        for m in &actor_current_epoch {
+            let fragment_id = fragment_id_of(m).unwrap();
+            let epoch = m.get_gauge().get_value() as u64;
+            if let Some(s) = fragment_stats.get_mut(&fragment_id) {
+                s.current_epoch = if s.current_epoch == 0 {
+                    epoch
+                } else {
+                    u64::min(s.current_epoch, epoch)
+                }
+            } else {
+                warn!(
+                    fragment_id = fragment_id,
+                    "Miss corresponding actor count metrics"
+                );
+            }
+        }
+
         let mut back_pressure_infos: HashMap<_, BackPressureInfo> = HashMap::new();
 
         for label_pairs in actor_output_buffer_blocking_duration_ns {
@@ -360,6 +396,7 @@ impl MonitorService for MonitorServiceImpl {
 
         Ok(Response::new(GetBackPressureResponse {
             back_pressure_infos: back_pressure_infos.into_values().collect(),
+            fragment_stats,
         }))
     }
 
@@ -434,6 +471,16 @@ impl MonitorService for MonitorServiceImpl {
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
     }
+}
+
+fn fragment_id_of(metric: &Metric) -> Option<u32> {
+    metric
+        .get_label()
+        .iter()
+        .find(|lp| lp.get_name() == "fragment_id")?
+        .get_value()
+        .parse::<u32>()
+        .ok()
 }
 
 pub use grpc_middleware::*;

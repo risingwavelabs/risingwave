@@ -49,6 +49,7 @@ pub struct DashboardService {
 pub type Service = Arc<DashboardService>;
 
 pub(super) mod handlers {
+    use std::cmp::min;
     use std::collections::HashMap;
 
     use anyhow::Context;
@@ -488,7 +489,16 @@ pub(super) mod handlers {
             let result = result
                 .map_err(|_| anyhow!("Failed to get back pressure"))
                 .map_err(err)?;
+            // TODO(eric): aggregate here
             all.back_pressure_infos.extend(result.back_pressure_infos);
+            for (fragment_id, fragment_stats) in result.fragment_stats {
+                if let Some(s) = all.fragment_stats.get_mut(&fragment_id) {
+                    s.actor_count += fragment_stats.actor_count;
+                    s.current_epoch = min(s.current_epoch, fragment_stats.current_epoch);
+                } else {
+                    all.fragment_stats.insert(fragment_id, fragment_stats);
+                }
+            }
         }
 
         Ok(all.into())

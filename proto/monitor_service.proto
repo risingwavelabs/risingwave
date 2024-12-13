@@ -61,8 +61,14 @@ message BackPressureInfo {
   double value = 4;
 }
 
+message FragmentStats {
+  uint32 actor_count = 2;
+  uint64 current_epoch = 3;
+}
+
 message GetBackPressureResponse {
   repeated BackPressureInfo back_pressure_infos = 1;
+  map<uint32, FragmentStats> fragment_stats = 2;
 }
 
 message TieredCacheTracingRequest {
