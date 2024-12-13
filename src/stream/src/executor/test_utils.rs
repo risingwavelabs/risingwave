@@ -851,7 +851,7 @@ pub mod hash_join_executor {
         }
 
         // Push a chunk of records into tx_l, matches 100K records in the build side.
-        let chunk_size = 1024;
+        let chunk_size = 64;
         let chunk = match join_type_primitive {
             // Make sure all match
             JoinType::Inner => build_chunk(chunk_size, 200_000),
