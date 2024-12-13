@@ -1069,7 +1069,7 @@ dependencies = [
  "futures-lite",
  "parking",
  "polling",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "slab",
  "tracing",
  "windows-sys 0.52.0",
@@ -2420,7 +2420,7 @@ dependencies = [
  "io-lifetimes 2.0.3",
  "ipnet",
  "maybe-owned",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.52.0",
  "winx",
 ]
@@ -2444,7 +2444,7 @@ dependencies = [
  "cap-primitives",
  "io-extras",
  "io-lifetimes 2.0.3",
- "rustix 0.38.37",
+ "rustix 0.38.41",
 ]
 
 [[package]]
@@ -2457,7 +2457,7 @@ dependencies = [
  "cap-primitives",
  "iana-time-zone",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "winx",
 ]
 
@@ -4906,7 +4906,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b93f7a0db71c99f68398f80653ed05afb0b00e062e1a20c7ff849c4edfabbbcc"
 dependencies = [
  "cfg-if",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.52.0",
 ]
 
@@ -5307,7 +5307,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "033b337d725b97690d86893f9de22b67b80dcc4e9ad815f348254c38119db8fb"
 dependencies = [
  "io-lifetimes 2.0.3",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.52.0",
 ]
 
@@ -5327,7 +5327,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c29c30684418547d476f0b48e84f4821639119c483b1eccd566c8cd0cd05f521"
 dependencies = [
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.52.0",
 ]
 
@@ -6676,7 +6676,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi 0.3.9",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.48.0",
 ]
 
@@ -7050,9 +7050,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.159"
+version = "0.2.167"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
+checksum = "09d6582e104315a817dff97f75133544b2e094ee22447d2acf4a74e189ba06fc"
 
 [[package]]
 name = "libflate"
@@ -7527,7 +7527,7 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2cffa4ad52c6f791f4f8b15f0c05f9824b2ced1160e88cc393d64fff9a8ac64"
 dependencies = [
- "rustix 0.38.37",
+ "rustix 0.38.41",
 ]
 
 [[package]]
@@ -9186,7 +9186,7 @@ dependencies = [
  "concurrent-queue",
  "hermit-abi 0.4.0",
  "pin-project-lite",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "tracing",
  "windows-sys 0.52.0",
 ]
@@ -9520,7 +9520,7 @@ dependencies = [
  "bitflags 2.6.0",
  "hex",
  "procfs-core",
- "rustix 0.38.37",
+ "rustix 0.38.41",
 ]
 
 [[package]]
@@ -12556,9 +12556,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.37"
+version = "0.38.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8acb788b847c24f28525660c4d7758620a7210875711f79e7f663cc152726811"
+checksum = "d7f649912bc1495e167a6edee79151c84b1bad49748cb4f1f1167f459f6224f6"
 dependencies = [
  "bitflags 2.6.0",
  "errno",
@@ -14294,7 +14294,7 @@ dependencies = [
  "cap-std",
  "fd-lock",
  "io-lifetimes 2.0.3",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.52.0",
  "winx",
 ]
@@ -14325,14 +14325,14 @@ checksum = "e1fc403891a21bcfb7c37834ba66a547a8f402146eba7265b5a6d88059c9ff2f"
 
 [[package]]
 name = "tempfile"
-version = "3.13.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0f2c9fc62d0beef6951ccffd757e241266a2c833136efbe35af6cd2567dca5b"
+checksum = "28cce251fcbc87fac86a866eeb0d6c2d536fc16d06f184bb61aeae11aa4cee0c"
 dependencies = [
  "cfg-if",
  "fastrand",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "windows-sys 0.59.0",
 ]
 
@@ -15606,7 +15606,7 @@ dependencies = [
  "io-lifetimes 2.0.3",
  "log",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "system-interface",
  "thiserror 1.0.63",
  "tracing",
@@ -15772,7 +15772,7 @@ dependencies = [
  "postcard",
  "psm",
  "rayon",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "semver 1.0.18",
  "serde",
  "serde_derive",
@@ -15818,7 +15818,7 @@ dependencies = [
  "directories-next",
  "log",
  "postcard",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "serde",
  "serde_derive",
  "sha2",
@@ -15906,7 +15906,7 @@ dependencies = [
  "anyhow",
  "cc",
  "cfg-if",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "wasmtime-asm-macros",
  "wasmtime-versioned-export-macros",
  "windows-sys 0.52.0",
@@ -15920,7 +15920,7 @@ checksum = "3eb2b7545bf13c125d007fd1808cf4c6fb4688258e47f7a3ea96ffc04d173a15"
 dependencies = [
  "object 0.36.4",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 0.38.41",
  "wasmtime-versioned-export-macros",
 ]
 
@@ -16076,7 +16076,7 @@ dependencies = [
  "either",
  "home",
  "once_cell",
- "rustix 0.38.37",
+ "rustix 0.38.41",
 ]
 
 [[package]]
