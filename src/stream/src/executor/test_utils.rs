@@ -850,6 +850,9 @@ pub mod hash_join_executor {
             tx_r.push_chunk(chunk);
         }
 
+        tx_l.push_barrier(test_epoch(2), false);
+        tx_r.push_barrier(test_epoch(2), false);
+
         // Push a chunk of records into tx_l, matches 100K records in the build side.
         let chunk_size = match hash_join_workload {
             HashJoinWorkload::InCache => 64,
@@ -867,6 +870,15 @@ pub mod hash_join_executor {
         match stream.next().await {
             Some(Ok(Message::Barrier(b))) => {
                 assert_eq!(b.epoch.curr, test_epoch(1));
+            }
+            other => {
+                panic!("Expected a barrier, got {:?}", other);
+            }
+        }
+
+        match stream.next().await {
+            Some(Ok(Message::Barrier(b))) => {
+                assert_eq!(b.epoch.curr, test_epoch(2));
             }
             other => {
                 panic!("Expected a barrier, got {:?}", other);
