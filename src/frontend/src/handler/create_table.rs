@@ -847,12 +847,19 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (options, secret_refs) = cdc_with_options.into_parts();
 
+    let non_generated_column_descs = columns
+        .iter()
+        .filter(|&c| (!c.is_generated()))
+        .map(|c| c.column_desc.clone())
+        .collect_vec();
+    let non_generated_column_num = non_generated_column_descs.len();
+
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
-        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        columns: non_generated_column_descs,
         stream_key: pk_column_indices,
         connect_properties: options,
         secret_refs,
@@ -870,7 +877,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     );
 
     let scan_node: PlanRef = logical_scan.into();
-    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let required_cols = FixedBitSet::with_capacity(non_generated_column_num);
     let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
         RequiredDist::Any,
@@ -1157,18 +1164,6 @@ fn sanity_check_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
-    for c in column_defs {
-        for op in &c.options {
-            if let ColumnOption::GeneratedColumns(_) = op.option {
-                return Err(ErrorCode::NotSupported(
-                    "generated column defined on the table created from a CDC source".into(),
-                    "Remove the generated column in the column list".into(),
-                )
-                .into());
-            }
-        }
-    }
-
     // wildcard cannot be used with column definitions
     if wildcard_idx.is_some() && !column_defs.is_empty() {
         return Err(ErrorCode::NotSupported(
