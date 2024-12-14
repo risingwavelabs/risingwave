@@ -302,12 +302,71 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateSourceType {
+    SharedCdc,
+    /// e.g., shared Kafka source
+    SharedNonCdc,
+    NonShared,
+    /// create table with connector
+    Table,
+}
+
+impl CreateSourceType {
+    pub fn from_with_properties(
+        session: &SessionImpl,
+        with_properties: &impl WithPropertiesExt,
+    ) -> Self {
+        if with_properties.is_shareable_cdc_connector() {
+            CreateSourceType::SharedCdc
+        } else if with_properties.is_shareable_non_cdc_connector()
+            && session
+                .env()
+                .streaming_config()
+                .developer
+                .enable_shared_source
+            && session.config().streaming_use_shared_source()
+        {
+            CreateSourceType::SharedNonCdc
+        } else {
+            CreateSourceType::NonShared
+        }
+    }
+
+    pub fn is_shared(&self) -> bool {
+        matches!(
+            self,
+            CreateSourceType::SharedCdc | CreateSourceType::SharedNonCdc
+        )
+    }
+}
+
 /// Resolves the schema of the source from external schema file.
 /// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 ///
 /// Note: the returned schema strictly corresponds to the schema.
 /// Other special columns like additional columns (`INCLUDE`), and `row_id` column are not included.
-pub(crate) async fn bind_columns_from_source(
+pub async fn bind_columns_from_source(
+    session: &SessionImpl,
+    format_encode: &FormatEncodeOptions,
+    with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
+    create_source_type: CreateSourceType,
+) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
+    let (columns_from_resolve_source, mut source_info) =
+        if create_source_type == CreateSourceType::SharedCdc {
+            bind_columns_from_source_for_cdc(session, format_encode)?
+        } else {
+            bind_columns_from_source_for_non_cdc(session, format_encode, with_properties).await?
+        };
+    if create_source_type.is_shared() {
+        // Note: this field should be called is_shared. Check field doc for more details.
+        source_info.cdc_source_job = true;
+        source_info.is_distributed = create_source_type == CreateSourceType::SharedNonCdc;
+    }
+    Ok((columns_from_resolve_source, source_info))
+}
+
+async fn bind_columns_from_source_for_non_cdc(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
@@ -1542,9 +1601,7 @@ pub async fn bind_create_source_or_table_with_connector(
     source_info: StreamSourceInfo,
     include_column_options: IncludeOption,
     col_id_gen: &mut ColumnIdGenerator,
-    // `true` for "create source", `false` for "create table with connector"
-    is_create_source: bool,
-    is_shared_non_cdc: bool,
+    create_source_type: CreateSourceType,
     source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
@@ -1553,6 +1610,7 @@ pub async fn bind_create_source_or_table_with_connector(
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
+    let is_create_source = create_source_type != CreateSourceType::Table;
     if !is_create_source && with_properties.is_iceberg_connector() {
         return Err(ErrorCode::BindError(
             "can't CREATE TABLE with iceberg connector\n\nHint: use CREATE SOURCE instead"
@@ -1609,7 +1667,7 @@ pub async fn bind_create_source_or_table_with_connector(
 
         // For shared sources, we will include partition and offset cols in the SourceExecutor's *output*, to be used by the SourceBackfillExecutor.
         // For shared CDC source, the schema is different. See debezium_cdc_source_schema, CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS
-        if is_shared_non_cdc {
+        if create_source_type == CreateSourceType::SharedNonCdc {
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &columns,
                 &with_properties.get_connector().unwrap(),
@@ -1748,26 +1806,14 @@ pub async fn handle_create_source(
     let format_encode = stmt.format_encode.into_v2_with_warning();
     let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
 
-    let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
-    let is_shared_non_cdc = with_properties.is_shareable_non_cdc_connector()
-        && session
-            .env()
-            .streaming_config()
-            .developer
-            .enable_shared_source
-        && session.config().streaming_use_shared_source();
-    let is_shared = create_cdc_source_job || is_shared_non_cdc;
-
-    let (columns_from_resolve_source, mut source_info) = if create_cdc_source_job {
-        bind_columns_from_source_for_cdc(&session, &format_encode)?
-    } else {
-        bind_columns_from_source(&session, &format_encode, Either::Left(&with_properties)).await?
-    };
-    if is_shared {
-        // Note: this field should be called is_shared. Check field doc for more details.
-        source_info.cdc_source_job = true;
-        source_info.is_distributed = !create_cdc_source_job;
-    }
+    let create_source_type = CreateSourceType::from_with_properties(&session, &*with_properties);
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &format_encode,
+        Either::Left(&with_properties),
+        create_source_type,
+    )
+    .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     let (source_catalog, database_id, schema_id) = bind_create_source_or_table_with_connector(
@@ -1783,8 +1829,7 @@ pub async fn handle_create_source(
         source_info,
         stmt.include_column_options,
         &mut col_id_gen,
-        true,
-        is_shared_non_cdc,
+        create_source_type,
         overwrite_options.source_rate_limit,
     )
     .await?;
@@ -1802,7 +1847,7 @@ pub async fn handle_create_source(
 
     let catalog_writer = session.catalog_writer()?;
 
-    if is_shared {
+    if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
         catalog_writer.create_source(source, Some(graph)).await?;
     } else {

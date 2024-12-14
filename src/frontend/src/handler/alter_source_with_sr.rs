@@ -31,15 +31,14 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::alter_table_column::schema_has_schema_registry;
-use super::create_source::{
-    bind_columns_from_source, generate_stream_graph_for_source, validate_compatibility,
-};
+use super::create_source::{generate_stream_graph_for_source, validate_compatibility};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
+use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -164,8 +163,13 @@ pub async fn refresh_sr_and_get_columns_diff(
         bail_not_implemented!("altering a cdc source is not supported");
     }
 
-    let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, format_encode, Either::Right(&with_properties)).await?
+    let (Some(columns_from_resolve_source), source_info) = bind_columns_from_source(
+        session,
+        format_encode,
+        Either::Right(&with_properties),
+        CreateSourceType::from_with_properties(session, &with_properties),
+    )
+    .await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
@@ -277,7 +281,6 @@ pub async fn handle_alter_source_with_sr(
     source.version += 1;
 
     let pb_source = source.to_prost(schema_id, database_id);
-
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;

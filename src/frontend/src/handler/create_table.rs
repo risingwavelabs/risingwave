@@ -59,6 +59,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
+use super::create_source::{bind_columns_from_source, CreateSourceType};
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
@@ -68,8 +69,8 @@ use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
-    bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
+    handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -497,8 +498,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(session, &format_encode, Either::Left(&with_properties)).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        session,
+        &format_encode,
+        Either::Left(&with_properties),
+        CreateSourceType::Table,
+    )
+    .await?;
 
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
@@ -515,8 +521,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         source_info,
         include_column_options,
         &mut col_id_gen,
-        false,
-        false,
+        CreateSourceType::Table,
         rate_limit,
     )
     .await?;
