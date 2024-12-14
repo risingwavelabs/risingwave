@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::{Ordering, Reverse};
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -677,6 +677,7 @@ impl DiagnoseCommand {
             ("INDEX", indexes),
             ("SINK", sinks),
         ];
+        let mut obj_id_to_name = HashMap::new();
         for (title, items) in catalogs {
             use comfy_table::{Row, Table};
             let mut table = Table::new();
@@ -689,6 +690,7 @@ impl DiagnoseCommand {
                 row
             });
             for (id, (name, schema_id, definition)) in items {
+                obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
                 let may_redact =
                     redact_all_sql_options(&definition).unwrap_or_else(|| "[REDACTED]".into());
@@ -702,6 +704,55 @@ impl DiagnoseCommand {
             let _ = writeln!(s, "{title}");
             let _ = writeln!(s, "{table}");
         }
+
+        let actors = self
+            .metadata_manager
+            .catalog_controller
+            .list_actor_info()
+            .await?
+            .into_iter()
+            .map(|(actor_id, fragment_id, job_id, schema_id, obj_type)| {
+                (
+                    actor_id,
+                    (
+                        fragment_id,
+                        job_id,
+                        schema_id,
+                        obj_type,
+                        obj_id_to_name
+                            .get(&(job_id as _))
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        use comfy_table::{Row, Table};
+        let mut table = Table::new();
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("id".into());
+            row.add_cell("fragment_id".into());
+            row.add_cell("job_id".into());
+            row.add_cell("schema_id".into());
+            row.add_cell("type".into());
+            row.add_cell("name".into());
+            row
+        });
+        for (actor_id, (fragment_id, job_id, schema_id, ddl_type, name)) in actors {
+            let mut row = Row::new();
+            row.add_cell(actor_id.into());
+            row.add_cell(fragment_id.into());
+            row.add_cell(job_id.into());
+            row.add_cell(schema_id.into());
+            row.add_cell(ddl_type.as_str().into());
+            row.add_cell(name.into());
+            table.add_row(row);
+        }
+        let _ = writeln!(s);
+        let _ = writeln!(s, "ACTOR");
+        let _ = writeln!(s, "{table}");
         Ok(())
     }
 }

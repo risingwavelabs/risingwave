@@ -99,5 +99,5 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 30	104	0	1020
 
 
-# statement ok
-# DROP SOURCE src_user CASCADE;
+statement ok
+DROP SOURCE src_user CASCADE;
