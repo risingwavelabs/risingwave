@@ -629,7 +629,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 apply_rate_limit(source_chunk_reader, self.rate_limit_rps)
                     .boxed()
                     .map_err(StreamExecutorError::connector_error),
-                // source_chunk_reader.map_err(StreamExecutorError::connector_error),
                 latest_splits,
             )
         };
@@ -645,7 +644,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        // let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =
             StreamReaderWithPause::<true, StreamChunk>::new(barrier_stream, source_chunk_reader);
         let mut command_paused = false;
