@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -59,7 +59,7 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
-    PbSubscription, PbTable, PbView,
+    PbStreamSourceInfo, PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{
@@ -67,6 +67,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PbSystemParams;
+use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::user::grant_privilege::PbObject as GrantObject;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -468,6 +471,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             table.database_id = *db_rewrite.get(&table.database_id).unwrap();
             table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
         });
+        // rewrite secret ids.
+        visit_secret_ref_mut(&mut stream_node, &secret_rewrite);
+
         let mut fragment = fragment.into_active_model();
         fragment.stream_node = Set((&stream_node).into());
         Fragment::insert(fragment)
@@ -561,7 +567,12 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(info) = &mut src.info {
                     for secret_ref in info.format_encode_secret_refs.values_mut() {
                         secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                    if let Some(table) = &mut info.external_table {
+                        for secret_ref in table.secret_refs.values_mut() {
+                            secret_ref.secret_id =
+                                *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        }
                     }
                 }
                 object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
@@ -966,6 +977,62 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
 
     Ok(())
+}
+
+fn visit_secret_ref_mut(stream_node: &mut PbStreamNode, secret_rewrite: &HashMap<u32, u32>) {
+    let visit_map_secret_refs = |refs: &mut BTreeMap<String, PbSecretRef>| {
+        for secret_ref in refs.values_mut() {
+            secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+        }
+    };
+    let visit_info = |info: &mut PbStreamSourceInfo| {
+        for secret_ref in info.format_encode_secret_refs.values_mut() {
+            secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+        }
+        if let Some(table) = &mut info.external_table {
+            for secret_ref in table.secret_refs.values_mut() {
+                secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+            }
+        }
+    };
+
+    let visit_body = |body: &mut PbNodeBody| match body {
+        PbNodeBody::Source(node) => {
+            if let Some(inner) = &mut node.source_inner {
+                visit_map_secret_refs(&mut inner.secret_refs);
+                inner.info.as_mut().map(visit_info);
+            }
+        }
+        PbNodeBody::Sink(node) => {
+            if let Some(desc) = &mut node.sink_desc {
+                visit_map_secret_refs(&mut desc.secret_refs);
+                desc.format_desc
+                    .as_mut()
+                    .map(|desc| visit_map_secret_refs(&mut desc.secret_refs));
+            }
+        }
+        PbNodeBody::StreamFsFetch(node) => {
+            if let Some(inner) = &mut node.node_inner {
+                visit_map_secret_refs(&mut inner.secret_refs);
+                inner.info.as_mut().map(visit_info);
+            }
+        }
+        PbNodeBody::StreamCdcScan(node) => {
+            node.cdc_table_desc
+                .as_mut()
+                .map(|desc| visit_map_secret_refs(&mut desc.secret_refs));
+        }
+        PbNodeBody::CdcFilter(_) => {}
+        PbNodeBody::SourceBackfill(node) => {
+            visit_map_secret_refs(&mut node.secret_refs);
+            node.info.as_mut().map(visit_info);
+        }
+        _ => {}
+    };
+    visit_body(stream_node.node_body.as_mut().unwrap());
+    for input in &mut stream_node.input {
+        visit_secret_ref_mut(input, secret_rewrite);
+    }
 }
 
 async fn load_current_id(meta_store: &MetaStoreRef, category: &str, start: Option<u64>) -> u64 {
