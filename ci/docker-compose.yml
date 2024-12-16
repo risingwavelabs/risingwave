@@ -31,27 +31,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # TODO: reuse the same mysql instance for connector test and meta store
-  #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
-  mysql-meta:
-    image: mysql:8.0
-    command: --character-set-server=utf8 --collation-server=utf8_general_ci
-    ports:
-      - 3306
-    environment:
-      - MYSQL_ROOT_PASSWORD=123456
-      - MYSQL_USER=mysqluser
-      - MYSQL_PASSWORD=mysqlpw
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -u root -p123456"
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   message_queue:
     image: "redpandadata/redpanda:latest"
     command:
@@ -93,7 +72,6 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     depends_on:
       - mysql
-      - mysql-meta
       - sqlserver-server
       - db
       - message_queue
@@ -109,7 +87,6 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241030
     depends_on:
       - mysql
-      - mysql-meta
       - db
       - message_queue
       - schemaregistry
@@ -137,7 +114,7 @@ services:
   ci-standard-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
     depends_on:
-      - mysql-meta
+      - mysql
       - db
     volumes:
       - ..:/risingwave
