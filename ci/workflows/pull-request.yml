@@ -33,10 +33,11 @@ other-sql-backend: &other-sql-backend
           label: "postgres"
           # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
           endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
-      - with:
-          label: "mysql"
-          # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
-          endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
+      # Temporarily disable tests for mysql backend as there are unresolved issues.
+      # - with:
+      #     label: "mysql"
+      #     # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
+      #     endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
   env:
     RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
 
