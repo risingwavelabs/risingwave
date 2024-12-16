@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
+
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
@@ -108,8 +110,21 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
         // The sort is required to pass table's foreign key check.
+        use risingwave_meta_model::object::ObjectType;
         insert_models(
-            metadata.objects.iter().sorted_by_key(|o| o.oid).cloned(),
+            metadata
+                .objects
+                .iter()
+                .sorted_by(|a, b| match (a.obj_type, b.obj_type) {
+                    (ObjectType::Database, ObjectType::Database) => a.oid.cmp(&b.oid),
+                    (ObjectType::Database, _) => cmp::Ordering::Less,
+                    (_, ObjectType::Database) => cmp::Ordering::Greater,
+                    (ObjectType::Schema, ObjectType::Schema) => a.oid.cmp(&b.oid),
+                    (ObjectType::Schema, _) => cmp::Ordering::Less,
+                    (_, ObjectType::Schema) => cmp::Ordering::Greater,
+                    (_, _) => a.oid.cmp(&b.oid),
+                })
+                .cloned(),
             db,
         )
         .await?;

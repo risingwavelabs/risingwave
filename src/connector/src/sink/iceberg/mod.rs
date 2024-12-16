@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use iceberg::table::Table as TableV2;
 use iceberg::{Catalog as CatalogV2, NamespaceIdent, TableCreation, TableIdent};
 use icelake::catalog::CatalogRef;
 use icelake::io_v2::input_wrapper::{DeltaWriter, RecordBatchWriter};
@@ -181,6 +182,13 @@ impl IcebergConfig {
     pub async fn create_catalog_v2(&self) -> Result<Arc<dyn CatalogV2>> {
         self.common
             .create_catalog_v2(&self.java_catalog_props)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn load_table_v2(&self) -> Result<TableV2> {
+        self.common
+            .load_table_v2(&self.java_catalog_props)
             .await
             .map_err(Into::into)
     }
