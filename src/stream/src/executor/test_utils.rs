@@ -152,7 +152,7 @@ impl MockSource {
             ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "MockSource".to_string(),
+                identity: "MockSource".to_owned(),
             },
             self.boxed(),
         )
@@ -758,7 +758,7 @@ pub mod hash_join_executor {
         let info = ExecutorInfo {
             schema: Schema { fields: schema },
             pk_indices: vec![0, 1, 3, 4],
-            identity: "HashJoinExecutor".to_string(),
+            identity: "HashJoinExecutor".to_owned(),
         };
 
         // join-key is [0], primary-key is [1].

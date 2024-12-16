@@ -597,25 +597,25 @@ mod test {
         let props: BTreeMap<String, String> = btreemap! {
             // basic
             // "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
             // "type".to_string() => "append-only".to_string(),
             // RdKafkaPropertiesCommon
-            "properties.message.max.bytes".to_string() => "12345".to_string(),
-            "properties.receive.message.max.bytes".to_string() => "54321".to_string(),
+            "properties.message.max.bytes".to_owned() => "12345".to_owned(),
+            "properties.receive.message.max.bytes".to_owned() => "54321".to_owned(),
             // RdKafkaPropertiesProducer
-            "properties.queue.buffering.max.messages".to_string() => "114514".to_string(),
-            "properties.queue.buffering.max.kbytes".to_string() => "114514".to_string(),
-            "properties.queue.buffering.max.ms".to_string() => "114.514".to_string(),
-            "properties.enable.idempotence".to_string() => "false".to_string(),
-            "properties.message.send.max.retries".to_string() => "114514".to_string(),
-            "properties.retry.backoff.ms".to_string() => "114514".to_string(),
-            "properties.batch.num.messages".to_string() => "114514".to_string(),
-            "properties.batch.size".to_string() => "114514".to_string(),
-            "properties.compression.codec".to_string() => "zstd".to_string(),
-            "properties.message.timeout.ms".to_string() => "114514".to_string(),
-            "properties.max.in.flight.requests.per.connection".to_string() => "114514".to_string(),
-            "properties.request.required.acks".to_string() => "-1".to_string(),
+            "properties.queue.buffering.max.messages".to_owned() => "114514".to_owned(),
+            "properties.queue.buffering.max.kbytes".to_owned() => "114514".to_owned(),
+            "properties.queue.buffering.max.ms".to_owned() => "114.514".to_owned(),
+            "properties.enable.idempotence".to_owned() => "false".to_owned(),
+            "properties.message.send.max.retries".to_owned() => "114514".to_owned(),
+            "properties.retry.backoff.ms".to_owned() => "114514".to_owned(),
+            "properties.batch.num.messages".to_owned() => "114514".to_owned(),
+            "properties.batch.size".to_owned() => "114514".to_owned(),
+            "properties.compression.codec".to_owned() => "zstd".to_owned(),
+            "properties.message.timeout.ms".to_owned() => "114514".to_owned(),
+            "properties.max.in.flight.requests.per.connection".to_owned() => "114514".to_owned(),
+            "properties.request.required.acks".to_owned() => "-1".to_owned(),
         };
         let c = KafkaConfig::from_btreemap(props).unwrap();
         assert_eq!(
@@ -642,32 +642,32 @@ mod test {
 
         let props: BTreeMap<String, String> = btreemap! {
             // basic
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "append-only".to_string(),
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
 
-            "properties.enable.idempotence".to_string() => "True".to_string(), // can only be 'true' or 'false'
+            "properties.enable.idempotence".to_owned() => "True".to_owned(), // can only be 'true' or 'false'
         };
         assert!(KafkaConfig::from_btreemap(props).is_err());
 
         let props: BTreeMap<String, String> = btreemap! {
             // basic
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "properties.queue.buffering.max.kbytes".to_string() => "-114514".to_string(), // usize cannot be negative
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "properties.queue.buffering.max.kbytes".to_owned() => "-114514".to_owned(), // usize cannot be negative
         };
         assert!(KafkaConfig::from_btreemap(props).is_err());
 
         let props: BTreeMap<String, String> = btreemap! {
             // basic
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "properties.compression.codec".to_string() => "notvalid".to_string(), // has to be a valid CompressionCodec
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "properties.compression.codec".to_owned() => "notvalid".to_owned(), // has to be a valid CompressionCodec
         };
         assert!(KafkaConfig::from_btreemap(props).is_err());
     }
@@ -676,18 +676,18 @@ mod test {
     fn parse_kafka_config() {
         let properties: BTreeMap<String, String> = btreemap! {
             // "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
             // "type".to_string() => "append-only".to_string(),
             // "force_append_only".to_string() => "true".to_string(),
-            "properties.security.protocol".to_string() => "SASL".to_string(),
-            "properties.sasl.mechanism".to_string() => "SASL".to_string(),
-            "properties.sasl.username".to_string() => "test".to_string(),
-            "properties.sasl.password".to_string() => "test".to_string(),
-            "properties.retry.max".to_string() => "20".to_string(),
-            "properties.retry.interval".to_string() => "500ms".to_string(),
+            "properties.security.protocol".to_owned() => "SASL".to_owned(),
+            "properties.sasl.mechanism".to_owned() => "SASL".to_owned(),
+            "properties.sasl.username".to_owned() => "test".to_owned(),
+            "properties.sasl.password".to_owned() => "test".to_owned(),
+            "properties.retry.max".to_owned() => "20".to_owned(),
+            "properties.retry.interval".to_owned() => "500ms".to_owned(),
             // PrivateLink
-            "broker.rewrite.endpoints".to_string() => "{\"broker1\": \"10.0.0.1:8001\"}".to_string(),
+            "broker.rewrite.endpoints".to_owned() => "{\"broker1\": \"10.0.0.1:8001\"}".to_owned(),
         };
         let config = KafkaConfig::from_btreemap(properties).unwrap();
         assert_eq!(config.connection.brokers, "localhost:9092");
@@ -697,15 +697,15 @@ mod test {
 
         // PrivateLink fields
         let btreemap: BTreeMap<String, String> = btreemap! {
-            "broker1".to_string() => "10.0.0.1:8001".to_string()
+            "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };
         assert_eq!(config.privatelink_common.broker_rewrite_map, Some(btreemap));
 
         // Optional fields eliminated.
         let properties: BTreeMap<String, String> = btreemap! {
             // "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
             // "type".to_string() => "upsert".to_string(),
         };
         let config = KafkaConfig::from_btreemap(properties).unwrap();
@@ -714,21 +714,21 @@ mod test {
 
         // Invalid u32 input.
         let properties: BTreeMap<String, String> = btreemap! {
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "upsert".to_string(),
-            "properties.retry.max".to_string() => "-20".to_string(),  // error!
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "type".to_owned() => "upsert".to_owned(),
+            "properties.retry.max".to_owned() => "-20".to_owned(),  // error!
         };
         assert!(KafkaConfig::from_btreemap(properties).is_err());
 
         // Invalid duration input.
         let properties: BTreeMap<String, String> = btreemap! {
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
-            "topic".to_string() => "test".to_string(),
-            "type".to_string() => "upsert".to_string(),
-            "properties.retry.interval".to_string() => "500minutes".to_string(),  // error!
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "type".to_owned() => "upsert".to_owned(),
+            "properties.retry.interval".to_owned() => "500minutes".to_owned(),  // error!
         };
         assert!(KafkaConfig::from_btreemap(properties).is_err());
     }
@@ -740,11 +740,11 @@ mod test {
     async fn test_kafka_producer() -> Result<()> {
         // Create a dummy kafka properties
         let properties = btreemap! {
-            "connector".to_string() => "kafka".to_string(),
-            "properties.bootstrap.server".to_string() => "localhost:29092".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "topic".to_string() => "test_topic".to_string(),
-            "properties.compression.codec".to_string() => "zstd".to_string(),
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:29092".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "topic".to_owned() => "test_topic".to_owned(),
+            "properties.compression.codec".to_owned() => "zstd".to_owned(),
         };
 
         // Create a table with two columns (| id : INT32 | v2 : VARCHAR |) here

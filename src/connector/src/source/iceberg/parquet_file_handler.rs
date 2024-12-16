@@ -170,7 +170,7 @@ pub async fn list_s3_directory(
             .map_err(|e| anyhow!(e))
             .map(|list| {
                 list.into_iter()
-                    .map(|entry| prefix.to_string() + entry.path())
+                    .map(|entry| prefix.clone() + entry.path())
                     .collect()
             })
     } else {

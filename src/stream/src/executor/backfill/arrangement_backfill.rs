@@ -32,8 +32,8 @@ use crate::executor::backfill::rate_limiter::TickInfo;
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
     compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
-    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
-    update_rate_limiter, BackfillProgressPerVnode, BackfillState,
+    mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode, update_rate_limiter,
+    BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::prelude::*;
 use crate::executor::MonitoredBackfillRateLimiter;
@@ -737,8 +737,6 @@ where
                     PrefetchOptions::prefetch_for_small_range_scan(),
                 )
                 .await?;
-
-            let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
             let vnode_row_iter = vnode_row_iter.map_ok(move |row| (vnode, row));
 

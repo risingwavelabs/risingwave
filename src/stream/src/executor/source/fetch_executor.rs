@@ -325,7 +325,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             .rows()
                                             .map(|row| {
                                                 let filename = row.datum_at(0).unwrap().into_utf8();
-                                                filename.to_string()
+                                                filename.to_owned()
                                             })
                                             .collect();
                                         let mut parquet_file_assignment = vec![];

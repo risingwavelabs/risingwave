@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::future::poll_fn;
-use std::task::Poll;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -37,14 +37,13 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbDatabaseInitialPartialGraph, PbInitRequest, PbInitialPartialGraph,
-    RemovePartialGraphRequest,
+    RemovePartialGraphRequest, ResetDatabaseRequest,
 };
 use risingwave_pb::stream_service::{
-    streaming_control_stream_request, streaming_control_stream_response, BarrierCompleteResponse,
-    InjectBarrierRequest, StreamingControlStreamRequest,
+    streaming_control_stream_request, streaming_control_stream_response, InjectBarrierRequest,
+    StreamingControlStreamRequest,
 };
 use risingwave_rpc_client::StreamingControlHandle;
-use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::time::{sleep, timeout};
 use tokio_retry::strategy::ExponentialBackoff;
@@ -176,20 +175,22 @@ impl ControlStreamManager {
         *self = Self::new(self.env.clone());
     }
 
-    async fn next_response(
+    fn poll_next_response(
         &mut self,
-    ) -> Option<(
+        cx: &mut Context<'_>,
+    ) -> Poll<(
         WorkerId,
         MetaResult<streaming_control_stream_response::Response>,
     )> {
         if self.nodes.is_empty() {
-            return None;
+            return Poll::Pending;
         }
-        let (worker_id, result) = poll_fn(|cx| {
+        let mut poll_result: Poll<(WorkerId, MetaResult<_>)> = Poll::Pending;
+        {
             for (worker_id, node) in &mut self.nodes {
                 match node.handle.response_stream.poll_next_unpin(cx) {
                     Poll::Ready(result) => {
-                        return Poll::Ready((
+                        poll_result = Poll::Ready((
                             *worker_id,
                             result
                                 .ok_or_else(|| anyhow!("end of stream").into())
@@ -210,47 +211,35 @@ impl ControlStreamManager {
                                             resp => Ok(resp),
                                         }
                                     })
-                                }),
+                                })
                         ));
+                        break;
                     }
                     Poll::Pending => {
                         continue;
                     }
                 }
             }
-            Poll::Pending
-        })
-        .await;
+        };
 
-        if let Err(err) = &result {
+        if let Poll::Ready((worker_id, Err(err))) = &poll_result {
             let node = self
                 .nodes
-                .remove(&worker_id)
+                .remove(worker_id)
                 .expect("should exist when get shutdown resp");
             warn!(node = ?node.worker, err = %err.as_report(), "get error from response stream");
         }
 
-        Some((worker_id, result))
+        poll_result
     }
 
-    pub(super) async fn next_collect_barrier_response(
+    pub(super) async fn next_response(
         &mut self,
-    ) -> (WorkerId, MetaResult<BarrierCompleteResponse>) {
-        use streaming_control_stream_response::Response;
-
-        {
-            let (worker_id, result) = pending_on_none(self.next_response()).await;
-
-            (
-                worker_id,
-                result.map(|resp| match resp {
-                    Response::CompleteBarrier(resp) => resp,
-                    Response::Shutdown(_) | Response::Init(_) => {
-                        unreachable!("should be treated as error")
-                    }
-                }),
-            )
-        }
+    ) -> (
+        WorkerId,
+        MetaResult<streaming_control_stream_response::Response>,
+    ) {
+        poll_fn(|cx| self.poll_next_response(cx)).await
     }
 
     pub(super) async fn collect_errors(
@@ -261,14 +250,17 @@ impl ControlStreamManager {
         let mut errors = vec![(worker_id, first_err)];
         #[cfg(not(madsim))]
         {
-            let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
-                while let Some((worker_id, result)) = self.next_response().await {
-                    if let Err(e) = result {
-                        errors.push((worker_id, e));
+            {
+                let _ = timeout(COLLECT_ERROR_TIMEOUT, async {
+                    while !self.nodes.is_empty() {
+                        let (worker_id, result) = self.next_response().await;
+                        if let Err(e) = result {
+                            errors.push((worker_id, e));
+                        }
                     }
-                }
-            })
-            .await;
+                })
+                .await;
+            }
         }
         tracing::debug!(?errors, "collected stream errors");
         errors
@@ -612,6 +604,34 @@ impl ControlStreamManager {
                 warn!(worker_id = node.worker.id,node = ?node.worker.host,"failed to send remove partial graph request");
             }
         })
+    }
+
+    pub(super) fn reset_database(
+        &mut self,
+        database_id: DatabaseId,
+        reset_request_id: u32,
+    ) -> HashSet<WorkerId> {
+        self.nodes.iter().filter_map(|(worker_id, node)| {
+            if node.handle
+                .request_sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::ResetDatabase(
+                            ResetDatabaseRequest {
+                                database_id: database_id.database_id,
+                                reset_request_id,
+                            },
+                        ),
+                    ),
+                })
+                .is_err()
+            {
+                warn!(worker_id, node = ?node.worker.host,"failed to send reset database request");
+                None
+            } else {
+                Some(*worker_id)
+            }
+        }).collect()
     }
 }
 

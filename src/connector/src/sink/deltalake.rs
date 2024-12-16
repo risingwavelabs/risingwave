@@ -82,13 +82,13 @@ impl DeltaLakeCommon {
             DeltaTableUrl::S3(s3_path) => {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
-                    AWS_ACCESS_KEY_ID.to_string(),
+                    AWS_ACCESS_KEY_ID.to_owned(),
                     self.s3_access_key.clone().ok_or_else(|| {
                         SinkError::Config(anyhow!("s3.access.key is required with aws s3"))
                     })?,
                 );
                 storage_options.insert(
-                    AWS_SECRET_ACCESS_KEY.to_string(),
+                    AWS_SECRET_ACCESS_KEY.to_owned(),
                     self.s3_secret_key.clone().ok_or_else(|| {
                         SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
                     })?,
@@ -99,16 +99,16 @@ impl DeltaLakeCommon {
                     )));
                 }
                 storage_options.insert(
-                    AWS_REGION.to_string(),
+                    AWS_REGION.to_owned(),
                     self.s3_region
                         .clone()
-                        .unwrap_or_else(|| DEFAULT_REGION.to_string()),
+                        .unwrap_or_else(|| DEFAULT_REGION.to_owned()),
                 );
                 if let Some(s3_endpoint) = &self.s3_endpoint {
-                    storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
+                    storage_options.insert(AWS_ENDPOINT_URL.to_owned(), s3_endpoint.clone());
                 }
-                storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
-                storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                storage_options.insert(AWS_ALLOW_HTTP.to_owned(), "true".to_owned());
+                storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_owned(), "true".to_owned());
                 deltalake::aws::register_handlers(None);
                 deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
@@ -116,7 +116,7 @@ impl DeltaLakeCommon {
             DeltaTableUrl::Gcs(gcs_path) => {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
-                    GCS_SERVICE_ACCOUNT.to_string(),
+                    GCS_SERVICE_ACCOUNT.to_owned(),
                     self.gcs_service_account.clone().ok_or_else(|| {
                         SinkError::Config(anyhow!(
                             "gcs.service.account is required with Google Cloud Storage (GCS)"
@@ -133,11 +133,11 @@ impl DeltaLakeCommon {
 
     fn get_table_url(path: &str) -> Result<DeltaTableUrl> {
         if path.starts_with("s3://") || path.starts_with("s3a://") {
-            Ok(DeltaTableUrl::S3(path.to_string()))
+            Ok(DeltaTableUrl::S3(path.to_owned()))
         } else if path.starts_with("gs://") {
-            Ok(DeltaTableUrl::Gcs(path.to_string()))
+            Ok(DeltaTableUrl::Gcs(path.to_owned()))
         } else if let Some(path) = path.strip_prefix("file://") {
-            Ok(DeltaTableUrl::Local(path.to_string()))
+            Ok(DeltaTableUrl::Local(path.to_owned()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
                 "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
@@ -596,10 +596,10 @@ mod test {
             .unwrap();
 
         let properties = btreemap! {
-            "connector".to_string() => "deltalake".to_string(),
-            "force_append_only".to_string() => "true".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "location".to_string() => format!("file://{}", path),
+            "connector".to_owned() => "deltalake".to_owned(),
+            "force_append_only".to_owned() => "true".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => format!("file://{}", path),
         };
 
         let schema = Schema::new(vec![

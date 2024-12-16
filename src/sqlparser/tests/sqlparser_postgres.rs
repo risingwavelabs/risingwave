@@ -279,7 +279,7 @@ fn parse_alter_table_alter_column() {
         } => {
             assert_eq!("tab", name.to_string());
             assert_eq!("is_active", column_name.to_string());
-            let using_expr = Expr::Value(Value::SingleQuotedString("text".to_string()));
+            let using_expr = Expr::Value(Value::SingleQuotedString("text".to_owned()));
             assert_eq!(
                 op,
                 AlterColumnOperation::SetDataType {
@@ -526,7 +526,7 @@ fn parse_execute() {
             name: "a".into(),
             parameters: vec![
                 Expr::Value(number("1")),
-                Expr::Value(Value::SingleQuotedString("t".to_string()))
+                Expr::Value(Value::SingleQuotedString("t".to_owned()))
             ],
         }
     );

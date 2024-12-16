@@ -26,8 +26,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
-    mapping_chunk, mapping_message, mark_chunk, owned_row_iter, BackfillRateLimiterV1,
-    METADATA_STATE_LEN,
+    mapping_chunk, mapping_message, mark_chunk, BackfillRateLimiterV1, METADATA_STATE_LEN,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -687,7 +686,7 @@ where
 
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
-        let iter = upstream_table
+        let row_iter = upstream_table
             .batch_iter_with_pk_bounds(
                 epoch,
                 row::empty(),
@@ -697,7 +696,6 @@ where
                 PrefetchOptions::prefetch_for_small_range_scan(),
             )
             .await?;
-        let row_iter = owned_row_iter(iter);
 
         #[for_await]
         for row in row_iter {

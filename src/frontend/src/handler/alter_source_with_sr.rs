@@ -20,6 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{max_column_id, ColumnCatalog};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::{EncodeType, FormatType};
@@ -30,13 +31,14 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::alter_table_column::schema_has_schema_registry;
-use super::create_source::{bind_columns_from_source, validate_compatibility};
+use super::create_source::{generate_stream_graph_for_source, validate_compatibility};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
+use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -131,8 +133,8 @@ pub fn check_format_encode(
     ) else {
         return Err(ErrorCode::NotSupported(
             "altering a legacy source which is not created using `FORMAT .. ENCODE ..` Clause"
-                .to_string(),
-            "try this feature by creating a fresh source".to_string(),
+                .to_owned(),
+            "try this feature by creating a fresh source".to_owned(),
         )
         .into());
     };
@@ -161,8 +163,13 @@ pub async fn refresh_sr_and_get_columns_diff(
         bail_not_implemented!("altering a cdc source is not supported");
     }
 
-    let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, format_encode, Either::Right(&with_properties)).await?
+    let (Some(columns_from_resolve_source), source_info) = bind_columns_from_source(
+        session,
+        format_encode,
+        Either::Right(&with_properties),
+        CreateSourceType::from_with_properties(session, &with_properties),
+    )
+    .await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
@@ -214,27 +221,25 @@ pub async fn handle_alter_source_with_sr(
     name: ObjectName,
     format_encode: FormatEncodeOptions,
 ) -> Result<RwPgResponse> {
-    let session = handler_args.session;
+    let session = handler_args.session.clone();
     let (source, database_id, schema_id) = fetch_source_catalog_with_db_schema_id(&session, &name)?;
     let mut source = source.as_ref().clone();
+    let old_columns = source.columns.clone();
 
     if source.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
-            "alter table with connector using ALTER SOURCE statement".to_string(),
-            "try to use ALTER TABLE instead".to_string(),
+            "alter table with connector using ALTER SOURCE statement".to_owned(),
+            "try to use ALTER TABLE instead".to_owned(),
         )
         .into());
     };
-    if source.info.is_shared() {
-        bail_not_implemented!(issue = 16003, "alter shared source");
-    }
 
     check_format_encode(&source, &format_encode)?;
 
     if !schema_has_schema_registry(&format_encode) {
         return Err(ErrorCode::NotSupported(
-            "altering a source without schema registry".to_string(),
-            "try `ALTER SOURCE .. ADD COLUMN ...` instead".to_string(),
+            "altering a source without schema registry".to_owned(),
+            "try `ALTER SOURCE .. ADD COLUMN ...` instead".to_owned(),
         )
         .into());
     }
@@ -272,14 +277,33 @@ pub async fn handle_alter_source_with_sr(
         .format_encode_secret_refs
         .extend(format_encode_secret_ref);
 
-    let mut pb_source = source.to_prost(schema_id, database_id);
-
     // update version
-    pb_source.version += 1;
+    source.version += 1;
 
+    let pb_source = source.to_prost(schema_id, database_id);
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_source(pb_source).await?;
+    if source.info.is_shared() {
+        let graph = generate_stream_graph_for_source(handler_args, source.clone())?;
 
+        // Calculate the mapping from the original columns to the new columns.
+        let col_index_mapping = ColIndexMapping::new(
+            old_columns
+                .iter()
+                .map(|old_c| {
+                    source
+                        .columns
+                        .iter()
+                        .position(|new_c| new_c.column_id() == old_c.column_id())
+                })
+                .collect(),
+            source.columns.len(),
+        );
+        catalog_writer
+            .replace_source(pb_source, graph, col_index_mapping)
+            .await?
+    } else {
+        catalog_writer.alter_source(pb_source).await?;
+    }
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
 
