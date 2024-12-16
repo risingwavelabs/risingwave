@@ -444,7 +444,7 @@ impl ScaleController {
         &self,
         reschedule: &mut HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
-        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
+        table_parallelisms: &mut HashMap<TableId, TableParallelism>,
     ) -> MetaResult<RescheduleContext> {
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
             .metadata_manager
@@ -661,7 +661,7 @@ impl ScaleController {
                 &no_shuffle_target_fragment_ids,
             )?;
 
-            if let Some(table_parallelisms) = table_parallelisms {
+            if !table_parallelisms.is_empty() {
                 // We need to reiterate through the NO_SHUFFLE dependencies in order to ascertain which downstream table the custom modifications of the table have been propagated from.
                 Self::resolve_no_shuffle_upstream_tables(
                     original_reschedule_keys,
@@ -864,7 +864,7 @@ impl ScaleController {
         &self,
         mut reschedules: HashMap<FragmentId, WorkerReschedule>,
         options: RescheduleOptions,
-        table_parallelisms: Option<&mut HashMap<TableId, TableParallelism>>,
+        table_parallelisms: &mut HashMap<TableId, TableParallelism>,
     ) -> MetaResult<HashMap<FragmentId, Reschedule>> {
         tracing::debug!("build_reschedule_context, reschedules: {:#?}", reschedules);
         let ctx = self
@@ -1707,11 +1707,11 @@ impl ScaleController {
     pub async fn post_apply_reschedule(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
-        table_parallelism: &HashMap<TableId, TableParallelism>,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         // Update fragment info after rescheduling in meta store.
         self.metadata_manager
-            .post_apply_reschedules(reschedules.clone(), table_parallelism.clone())
+            .post_apply_reschedules(reschedules.clone(), post_updates)
             .await?;
 
         // Update serving fragment info after rescheduling in meta store.
@@ -1784,39 +1784,97 @@ impl ScaleController {
         Ok(())
     }
 
-    pub async fn generate_table_resize_plan(
+    pub async fn generate_job_reschedule_plan(
         &self,
-        policy: TableResizePolicy,
-    ) -> MetaResult<HashMap<FragmentId, WorkerReschedule>> {
+        policy: JobReschedulePolicy,
+    ) -> MetaResult<JobReschedulePlan> {
         type VnodeCount = usize;
 
-        let TableResizePolicy {
-            worker_ids,
-            table_parallelisms,
-        } = policy;
+        let JobReschedulePolicy { targets } = policy;
 
         let workers = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
             .await?;
 
-        let unschedulable_worker_ids = Self::filter_unschedulable_workers(&workers);
-
-        for worker_id in &worker_ids {
-            if unschedulable_worker_ids.contains(worker_id) {
-                bail!("Cannot include unschedulable worker {}", worker_id)
-            }
-        }
-
-        let workers = workers
-            .into_iter()
-            .filter(|worker| worker_ids.contains(&(worker.id as _)))
-            .collect::<Vec<_>>();
-
+        // The `schedulable` field should eventually be replaced by resource groups like `unschedulable`
         let workers: HashMap<_, _> = workers
             .into_iter()
+            .filter(|worker| worker.is_streaming_schedulable())
             .map(|worker| (worker.id, worker))
             .collect();
+
+        #[derive(Debug)]
+        struct JobUpdate {
+            filtered_worker_ids: BTreeSet<WorkerId>,
+            parallelism: TableParallelism,
+        }
+
+        let mut job_parallelism_updates = HashMap::new();
+
+        let mut job_reschedule_post_updates = JobReschedulePostUpdates {
+            parallelism_updates: Default::default(),
+            resource_group_updates: Default::default(),
+        };
+
+        for (
+            job_id,
+            JobRescheduleTarget {
+                parallelism,
+                resource_group: resource_group_update,
+            },
+        ) in &targets
+        {
+            job_reschedule_post_updates
+                .parallelism_updates
+                .insert(TableId::from(*job_id), *parallelism);
+            let current_resource_group = match resource_group_update {
+                JobResourceGroupUpdate::Update(Some(specific_resource_group)) => {
+                    job_reschedule_post_updates.resource_group_updates.insert(
+                        *job_id as ObjectId,
+                        Some(specific_resource_group.to_owned()),
+                    );
+
+                    specific_resource_group.to_owned()
+                }
+                JobResourceGroupUpdate::Update(None) => {
+                    let database_resource_group = self
+                        .metadata_manager
+                        .catalog_controller
+                        .get_existing_job_database_resource_group(*job_id as _)
+                        .await?;
+
+                    job_reschedule_post_updates
+                        .resource_group_updates
+                        .insert(*job_id as ObjectId, None);
+                    database_resource_group
+                }
+                JobResourceGroupUpdate::Keep => {
+                    let existing_resource_group = self
+                        .metadata_manager
+                        .catalog_controller
+                        .get_existing_job_resource_group(*job_id as _)
+                        .await?;
+
+                    existing_resource_group
+                }
+            };
+
+            let filtered_worker_ids =
+                filter_workers_by_resource_group(&workers, current_resource_group.as_str());
+
+            if filtered_worker_ids.is_empty() {
+                bail!("Cannot resize streaming_job {job_id} to empty worker set")
+            }
+
+            job_parallelism_updates.insert(
+                *job_id,
+                JobUpdate {
+                    filtered_worker_ids,
+                    parallelism: *parallelism,
+                },
+            );
+        }
 
         // index for no shuffle relation
         let mut no_shuffle_source_fragment_ids = HashSet::new();
@@ -1831,8 +1889,6 @@ impl ScaleController {
         // index for fragment_id -> [actor_id]
         let mut fragment_actor_id_map = HashMap::new();
 
-        let mut job_resource_groups = HashMap::new();
-
         async fn build_index(
             no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
             no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
@@ -1843,7 +1899,6 @@ impl ScaleController {
             actor_location: &mut HashMap<ActorId, WorkerId>,
             table_fragment_id_map: &mut HashMap<u32, HashSet<FragmentId>>,
             fragment_actor_id_map: &mut HashMap<FragmentId, HashSet<u32>>,
-            resource_groups: &mut HashMap<ObjectId, String>,
             mgr: &MetadataManager,
             table_ids: Vec<ObjectId>,
         ) -> Result<(), MetaError> {
@@ -1854,7 +1909,7 @@ impl ScaleController {
                 fragment_downstreams,
                 fragment_upstreams: _fragment_upstreams,
                 related_jobs: _related_jobs,
-                job_resource_groups,
+                job_resource_groups: _job_resource_groups,
             } = mgr
                 .catalog_controller
                 .resolve_working_set_for_reschedule_tables(table_ids)
@@ -1894,15 +1949,10 @@ impl ScaleController {
                     .insert(actor_id as ActorId);
             }
 
-            *resource_groups = job_resource_groups;
-
             Ok(())
         }
 
-        let table_ids = table_parallelisms
-            .keys()
-            .map(|id| *id as ObjectId)
-            .collect();
+        let table_ids = targets.keys().map(|id| *id as ObjectId).collect();
 
         build_index(
             &mut no_shuffle_source_fragment_ids,
@@ -1911,40 +1961,37 @@ impl ScaleController {
             &mut actor_location,
             &mut table_fragment_id_map,
             &mut fragment_actor_id_map,
-            &mut job_resource_groups,
             &self.metadata_manager,
             table_ids,
         )
         .await?;
         tracing::debug!(
-            ?worker_ids,
-            ?table_parallelisms,
+            ?job_reschedule_post_updates,
+            ?job_parallelism_updates,
             ?no_shuffle_source_fragment_ids,
             ?no_shuffle_target_fragment_ids,
             ?fragment_distribution_map,
             ?actor_location,
             ?table_fragment_id_map,
             ?fragment_actor_id_map,
-            ?job_resource_groups,
             "generate_table_resize_plan, after build_index"
         );
 
         let mut target_plan = HashMap::new();
 
-        for (table_id, parallelism) in table_parallelisms {
+        for (
+            table_id,
+            JobUpdate {
+                filtered_worker_ids,
+                parallelism,
+            },
+        ) in job_parallelism_updates
+        {
             let fragment_map = table_fragment_id_map.remove(&table_id).unwrap();
 
-            let resource_group = job_resource_groups
-                .get(&(table_id as ObjectId))
-                .cloned()
-                .expect("job resource group should exist");
-
-            let schedulable_worker_ids =
-                filter_workers_by_resource_group(&workers, resource_group.as_str());
-
-            let schedulable_worker_slots = workers
+            let available_worker_slots = workers
                 .iter()
-                .filter(|(id, _)| schedulable_worker_ids.contains(id))
+                .filter(|(id, _)| filtered_worker_ids.contains(&(**id as WorkerId)))
                 .map(|(_, worker)| (worker.id as WorkerId, worker.parallelism()))
                 .collect::<BTreeMap<_, _>>();
 
@@ -1961,9 +2008,9 @@ impl ScaleController {
                     *fragment_slots.entry(worker_id).or_default() += 1;
                 }
 
-                let all_available_slots: usize = schedulable_worker_slots.values().cloned().sum();
+                let available_slot_count: usize = available_worker_slots.values().cloned().sum();
 
-                if all_available_slots == 0 {
+                if available_slot_count == 0 {
                     bail!(
                         "No schedulable slots available for fragment {}",
                         fragment_id
@@ -1983,8 +2030,7 @@ impl ScaleController {
 
                         assert_eq!(*should_be_one, 1);
 
-                        let units =
-                            schedule_units_for_slots(&schedulable_worker_slots, 1, table_id)?;
+                        let units = schedule_units_for_slots(&available_worker_slots, 1, table_id)?;
 
                         let (chosen_target_worker_id, should_be_one) =
                             units.iter().exactly_one().ok().with_context(|| {
@@ -2012,11 +2058,11 @@ impl ScaleController {
                     }
                     FragmentDistributionType::Hash => match parallelism {
                         TableParallelism::Adaptive => {
-                            if all_available_slots > max_parallelism {
+                            if available_slot_count > max_parallelism {
                                 tracing::warn!("available parallelism for table {table_id} is larger than max parallelism, force limit to {max_parallelism}");
                                 // force limit to `max_parallelism`
                                 let target_worker_slots = schedule_units_for_slots(
-                                    &schedulable_worker_slots,
+                                    &available_worker_slots,
                                     max_parallelism,
                                     table_id,
                                 )?;
@@ -2033,7 +2079,7 @@ impl ScaleController {
                                     fragment_id,
                                     Self::diff_worker_slot_changes(
                                         &fragment_slots,
-                                        &schedulable_worker_slots,
+                                        &available_worker_slots,
                                     ),
                                 );
                             }
@@ -2045,7 +2091,7 @@ impl ScaleController {
                             }
 
                             let target_worker_slots =
-                                schedule_units_for_slots(&schedulable_worker_slots, n, table_id)?;
+                                schedule_units_for_slots(&available_worker_slots, n, table_id)?;
 
                             target_plan.insert(
                                 fragment_id,
@@ -2068,7 +2114,11 @@ impl ScaleController {
             ?target_plan,
             "generate_table_resize_plan finished target_plan"
         );
-        Ok(target_plan)
+
+        Ok(JobReschedulePlan {
+            reschedules: target_plan,
+            post_updates: job_reschedule_post_updates,
+        })
     }
 
     pub(crate) fn filter_unschedulable_workers(workers: &[WorkerNode]) -> HashSet<WorkerId> {
@@ -2296,6 +2346,34 @@ pub struct TableResizePolicy {
     pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
 }
 
+#[derive(Debug)]
+pub enum JobResourceGroupUpdate {
+    Update(Option<String>),
+    Keep,
+}
+
+#[derive(Debug)]
+pub struct JobRescheduleTarget {
+    pub(crate) parallelism: TableParallelism,
+    pub(crate) resource_group: JobResourceGroupUpdate,
+}
+
+pub struct JobReschedulePolicy {
+    pub(crate) targets: HashMap<u32, JobRescheduleTarget>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobReschedulePostUpdates {
+    pub parallelism_updates: HashMap<TableId, TableParallelism>,
+    pub resource_group_updates: HashMap<ObjectId, Option<String>>,
+}
+
+#[derive(Debug)]
+pub struct JobReschedulePlan {
+    pub reschedules: HashMap<FragmentId, WorkerReschedule>,
+    pub post_updates: JobReschedulePostUpdates,
+}
+
 impl GlobalStreamManager {
     pub async fn reschedule_lock_read_guard(&self) -> RwLockReadGuard<'_, ()> {
         self.scale_controller.reschedule_lock.read().await
@@ -2315,15 +2393,17 @@ impl GlobalStreamManager {
     pub async fn reschedule_actors(
         &self,
         database_id: DatabaseId,
-        reschedules: HashMap<FragmentId, WorkerReschedule>,
+        plan: JobReschedulePlan,
         options: RescheduleOptions,
-        table_parallelism: Option<HashMap<TableId, TableParallelism>>,
     ) -> MetaResult<()> {
-        let mut table_parallelism = table_parallelism;
+        let JobReschedulePlan {
+            reschedules,
+            mut post_updates,
+        } = plan;
 
         let reschedule_fragment = self
             .scale_controller
-            .analyze_reschedule_plan(reschedules, options, table_parallelism.as_mut())
+            .analyze_reschedule_plan(reschedules, options, &mut post_updates.parallelism_updates)
             .await?;
 
         tracing::debug!("reschedule plan: {:?}", reschedule_fragment);
@@ -2353,8 +2433,8 @@ impl GlobalStreamManager {
 
         let command = Command::RescheduleFragment {
             reschedules: reschedule_fragment,
-            table_parallelism: table_parallelism.unwrap_or_default(),
             fragment_actors,
+            post_updates,
         };
 
         tracing::debug!("pausing tick lock in source manager");
@@ -2462,47 +2542,52 @@ impl GlobalStreamManager {
         let mut reschedules = None;
 
         for batch in batches {
-            let parallelisms: HashMap<_, _> =
-                batch.into_iter().map(|(x, p)| (x as u32, p)).collect();
-            // `table_parallelisms` contains ALL created jobs.
-            // We rely on `generate_table_resize_plan` to check if there are
-            // any jobs that can be scaled.
+            let targets: HashMap<_, _> = batch
+                .into_iter()
+                .map(|(job_id, parallelism)| {
+                    (
+                        job_id as u32,
+                        JobRescheduleTarget {
+                            parallelism,
+                            resource_group: JobResourceGroupUpdate::Keep,
+                        },
+                    )
+                })
+                .collect();
+
             let plan = self
                 .scale_controller
-                .generate_table_resize_plan(TableResizePolicy {
-                    worker_ids: schedulable_worker_ids.clone(),
-                    table_parallelisms: parallelisms.clone(),
-                })
+                .generate_job_reschedule_plan(JobReschedulePolicy { targets })
                 .await?;
 
-            if !plan.is_empty() {
-                tracing::info!(
-                    "reschedule plan generated for streaming jobs {:?}",
-                    parallelisms
-                );
+            if !plan.reschedules.is_empty() {
+                tracing::info!("reschedule plan generated for streaming jobs {:?}", plan);
                 reschedules = Some(plan);
                 break;
             }
         }
 
-        let Some(reschedules) = reschedules else {
+        let Some(plan) = reschedules else {
             tracing::info!("no reschedule plan generated");
             return Ok(false);
         };
 
+        // todo
         for (database_id, reschedules) in self
             .metadata_manager
-            .split_fragment_map_by_database(reschedules)
+            .split_fragment_map_by_database(plan.reschedules)
             .await?
         {
             self.reschedule_actors(
                 database_id,
-                reschedules,
+                JobReschedulePlan {
+                    reschedules,
+                    post_updates: plan.post_updates.clone(),
+                },
                 RescheduleOptions {
                     resolve_no_shuffle_upstream: false,
                     skip_create_new_actors: false,
                 },
-                None,
             )
             .await?;
         }

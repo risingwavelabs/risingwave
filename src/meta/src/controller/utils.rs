@@ -1357,7 +1357,7 @@ where
 pub fn filter_workers_by_resource_group(
     workers: &HashMap<u32, WorkerNode>,
     resource_group: &str,
-) -> HashSet<u32> {
+) -> BTreeSet<WorkerId> {
     workers
         .iter()
         .filter(|&(_, worker)| {
@@ -1366,7 +1366,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id)
+        .map(|(id, _)| (*id as WorkerId))
         .collect()
 }
 

@@ -77,7 +77,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, JobResourceGroupUpdate, ReplaceStreamJobContext, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -415,7 +416,12 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(table_id, parallelism.into(), deferred)
+            .alter_table_parallelism(
+                table_id,
+                parallelism.into(),
+                JobResourceGroupUpdate::Keep,
+                deferred,
+            )
             .await
     }
 

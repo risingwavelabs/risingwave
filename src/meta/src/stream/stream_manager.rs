@@ -28,7 +28,10 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
-use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
+use super::{
+    JobReschedulePlan, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
+    JobResourceGroupUpdate, Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy,
+};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, SnapshotBackfillInfo,
@@ -613,6 +616,7 @@ impl GlobalStreamManager {
         &self,
         table_id: u32,
         parallelism: TableParallelism,
+        resource_group: JobResourceGroupUpdate,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
@@ -632,11 +636,6 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-
-        let worker_ids = worker_nodes
-            .iter()
-            .map(|node| node.id as WorkerId)
-            .collect::<BTreeSet<_>>();
 
         // Check if the provided parallelism is valid.
         let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
@@ -669,6 +668,12 @@ impl GlobalStreamManager {
         }
 
         let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
+        let resource_group_assignment = match &resource_group {
+            JobResourceGroupUpdate::Update(target) => {
+                HashMap::from([(table_id.table_id() as ObjectId, target.clone())])
+            }
+            JobResourceGroupUpdate::Keep => HashMap::new(),
+        };
 
         if deferred {
             tracing::debug!(
@@ -677,34 +682,41 @@ impl GlobalStreamManager {
                 parallelism
             );
             self.scale_controller
-                .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                .post_apply_reschedule(
+                    &HashMap::new(),
+                    &JobReschedulePostUpdates {
+                        parallelism_updates: table_parallelism_assignment,
+                        resource_group_updates: resource_group_assignment,
+                    },
+                )
                 .await?;
         } else {
-            let reschedules = self
+            let reschedule_plan = self
                 .scale_controller
-                .generate_table_resize_plan(TableResizePolicy {
-                    worker_ids,
-                    table_parallelisms: table_parallelism_assignment
-                        .iter()
-                        .map(|(id, parallelism)| (id.table_id, *parallelism))
-                        .collect(),
+                .generate_job_reschedule_plan(JobReschedulePolicy {
+                    targets: HashMap::from([(
+                        table_id.table_id,
+                        JobRescheduleTarget {
+                            parallelism,
+                            resource_group,
+                        },
+                    )]),
                 })
                 .await?;
 
-            if reschedules.is_empty() {
+            if reschedule_plan.reschedules.is_empty() {
                 tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
                 self.scale_controller
-                    .post_apply_reschedule(&HashMap::new(), &table_parallelism_assignment)
+                    .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
                     .await?;
             } else {
                 self.reschedule_actors(
                     database_id,
-                    reschedules,
+                    reschedule_plan,
                     RescheduleOptions {
                         resolve_no_shuffle_upstream: false,
                         skip_create_new_actors: false,
                     },
-                    Some(table_parallelism_assignment),
                 )
                 .await?;
             }
