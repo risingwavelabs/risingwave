@@ -20,17 +20,20 @@ use risingwave_common::util::tracing::TracingContext;
 use tonic::body::BoxBody;
 use tower::Service;
 
-/// A service wrapper that injects the [`TracingContext`] obtained from the current tracing span
-/// into the HTTP headers of the request.
+/// A service wrapper that hacks the gRPC request and response for observability.
 ///
-/// See also `TracingExtract` in the `common_service` crate.
+/// - Inject the [`TracingContext`] obtained from the current tracing span into the HTTP headers of the request.
+///   The server can then extract the [`TracingContext`] from the HTTP headers with the `TracingExtract` middleware.
+///   See also `TracingExtract` in the `common_service` crate.
+///
+/// - Add the path of the request (indicating the gRPC call) to the response headers.
 #[derive(Clone, Debug)]
-pub struct TracingInjectChannel {
+pub struct WrappedChannel {
     inner: tonic::transport::Channel,
 }
 
 #[cfg(not(madsim))]
-impl Service<http::Request<BoxBody>> for TracingInjectChannel {
+impl Service<http::Request<BoxBody>> for WrappedChannel {
     type Error = tonic::transport::Error;
     type Response = http::Response<BoxBody>;
 
@@ -68,24 +71,18 @@ impl Service<http::Request<BoxBody>> for TracingInjectChannel {
     }
 }
 
-/// A wrapper around tonic's `Channel` that injects the [`TracingContext`] obtained from the current
-/// tracing span when making gRPC requests.
 #[cfg(not(madsim))]
-pub type Channel = TracingInjectChannel;
+pub type Channel = WrappedChannel;
 #[cfg(madsim)]
 pub type Channel = tonic::transport::Channel;
 
-/// An extension trait for tonic's `Channel` that wraps it into a [`TracingInjectChannel`].
-#[easy_ext::ext(TracingInjectedChannelExt)]
+/// An extension trait for tonic's `Channel` that wraps it into a [`WrappedChannel`].
+#[easy_ext::ext(WrappedChannelExt)]
 impl tonic::transport::Channel {
-    /// Wraps the channel into a [`TracingInjectChannel`], so that the [`TracingContext`] obtained
-    /// from the current tracing span is injected into the HTTP headers of the request.
-    ///
-    /// The server can then extract the [`TracingContext`] from the HTTP headers with the
-    /// `TracingExtract` middleware.
-    pub fn tracing_injected(self) -> Channel {
+    /// Wraps the channel into a [`WrappedChannel`] for observability.
+    pub fn wrapped(self) -> Channel {
         #[cfg(not(madsim))]
-        return TracingInjectChannel { inner: self };
+        return WrappedChannel { inner: self };
         #[cfg(madsim)]
         return self;
     }
