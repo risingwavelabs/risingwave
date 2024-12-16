@@ -313,30 +313,33 @@ pub enum CreateSourceType {
 }
 
 impl CreateSourceType {
-    pub fn from_with_properties(
+    pub fn for_newly_created(
         session: &SessionImpl,
         with_properties: &impl WithPropertiesExt,
-        for_replace: bool,
     ) -> Self {
         if with_properties.is_shareable_cdc_connector() {
             CreateSourceType::SharedCdc
-        } else if with_properties.is_shareable_non_cdc_connector() {
-            if for_replace {
-                // for replace, respect original type. Do not check session variable.
-                CreateSourceType::SharedNonCdc
-            } else if session
+        } else if with_properties.is_shareable_non_cdc_connector()
+            && session
                 .env()
                 .streaming_config()
                 .developer
                 .enable_shared_source
-                && session.config().streaming_use_shared_source()
-            {
-                CreateSourceType::SharedNonCdc
-            } else {
-                CreateSourceType::NonShared
-            }
+            && session.config().streaming_use_shared_source()
+        {
+            CreateSourceType::SharedNonCdc
         } else {
             CreateSourceType::NonShared
+        }
+    }
+
+    pub fn for_replace(catalog: &SourceCatalog) -> Self {
+        if !catalog.info.is_shared() {
+            CreateSourceType::NonShared
+        } else if catalog.with_properties.is_shareable_cdc_connector() {
+            CreateSourceType::SharedCdc
+        } else {
+            CreateSourceType::SharedNonCdc
         }
     }
 
@@ -1813,8 +1816,7 @@ pub async fn handle_create_source(
     let format_encode = stmt.format_encode.into_v2_with_warning();
     let with_properties = bind_connector_props(&handler_args, &format_encode, true)?;
 
-    let create_source_type =
-        CreateSourceType::from_with_properties(&session, &*with_properties, false);
+    let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
         &format_encode,
