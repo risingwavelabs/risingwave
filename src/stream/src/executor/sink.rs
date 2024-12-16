@@ -330,7 +330,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
                                     tracing::info!(
                                         rate_limit = new_rate_limit,
-                                        "update actor {actor_id} sink rate limit"
+                                        "received sink rate limit on actor {actor_id}"
                                     );
                                     if let Err(e) = rate_limit_tx.send(*new_rate_limit) {
                                         error!(
