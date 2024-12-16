@@ -488,7 +488,7 @@ mod tests {
         let info = ExecutorInfo {
             schema: source.schema().clone(),
             pk_indices: source.pk_indices().to_vec(),
-            identity: "WatermarkFilterExecutor".to_string(),
+            identity: "WatermarkFilterExecutor".to_owned(),
         };
         let eval_error_report = ActorEvalErrorReport {
             actor_context: ctx.clone(),

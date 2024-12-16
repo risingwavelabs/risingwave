@@ -67,7 +67,7 @@ impl Planner {
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
         Ok(LogicalSysScan::create(
-            sys_table.sys_table_catalog.name().to_string(),
+            sys_table.sys_table_catalog.name().to_owned(),
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             self.ctx(),
             Cardinality::unknown(), // TODO(card): cardinality of system table
@@ -77,19 +77,9 @@ impl Planner {
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         let as_of = base_table.as_of.clone();
-        match as_of {
-            None
-            | Some(AsOf::ProcessTime)
-            | Some(AsOf::TimestampNum(_))
-            | Some(AsOf::TimestampString(_))
-            | Some(AsOf::ProcessTimeWithInterval(_)) => {}
-            Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
-                bail_not_implemented!("As Of Version is not supported yet.")
-            }
-        }
         let table_cardinality = base_table.table_catalog.cardinality;
         let scan = LogicalScan::create(
-            base_table.table_catalog.name().to_string(),
+            base_table.table_catalog.name().to_owned(),
             base_table.table_catalog.clone(),
             base_table
                 .table_indexes
@@ -102,8 +92,47 @@ impl Planner {
         );
 
         match (base_table.table_catalog.engine, self.plan_for()) {
-            (Engine::Hummock, _) | (Engine::Iceberg, PlanFor::Stream) => Ok(scan.into()),
+            (Engine::Hummock, PlanFor::Stream) | (Engine::Hummock, PlanFor::Batch) => {
+                match as_of {
+                    None
+                    | Some(AsOf::ProcessTime)
+                    | Some(AsOf::TimestampNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::ProcessTimeWithInterval(_)) => {}
+                    Some(AsOf::VersionNum(_)) | Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                };
+                Ok(scan.into())
+            }
+            (Engine::Iceberg, PlanFor::Stream) => {
+                match as_of {
+                    None
+                    | Some(AsOf::VersionNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::TimestampNum(_)) => {}
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                }
+                Ok(scan.into())
+            }
             (Engine::Iceberg, PlanFor::Batch) => {
+                match as_of {
+                    None
+                    | Some(AsOf::VersionNum(_))
+                    | Some(AsOf::TimestampString(_))
+                    | Some(AsOf::TimestampNum(_)) => {}
+                    Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                        bail_not_implemented!("As Of ProcessTime() is not supported yet.")
+                    }
+                    Some(AsOf::VersionString(_)) => {
+                        bail_not_implemented!("As Of Version is not supported yet.")
+                    }
+                }
                 let opt_ctx = self.ctx();
                 let session = opt_ctx.session_ctx();
                 let db_name = session.database();
@@ -126,7 +155,7 @@ impl Planner {
                         .clone()
                         .into_iter()
                         .enumerate()
-                        .map(|(i, column)| (column.name().to_string(), (i, column)))
+                        .map(|(i, column)| (column.name().to_owned(), (i, column)))
                         .collect();
                     let exprs = scan
                         .table_catalog()
@@ -188,7 +217,7 @@ impl Planner {
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
         if source.is_shareable_cdc_connector() {
             Err(ErrorCode::InternalError(
-                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_string(),
+                "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_owned(),
             )
             .into())
         } else {
@@ -444,7 +473,7 @@ impl Planner {
                 let project = LogicalProject::create(base, exprs);
                 Ok(project)
             }
-            _ => Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+            _ => Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into()),
         }
     }
 
@@ -459,23 +488,23 @@ impl Planner {
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
             args.next_tuple()
         else {
-            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into());
         };
 
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
-            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
-            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into());
         };
 
         let window_offset = match (args.next(), args.next()) {
             (Some(ExprImpl::Literal(window_offset)), None) => match *window_offset.get_data() {
                 Some(ScalarImpl::Interval(window_offset)) => window_offset,
-                _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+                _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into()),
             },
             (None, None) => Interval::from_month_day_usec(0, 0, 0),
-            _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+            _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_owned()).into()),
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {

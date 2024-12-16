@@ -475,7 +475,7 @@ impl BatchTaskExecution {
                 .send(TaskInfoResponse {
                     task_id: Some(self.task_id.to_prost()),
                     task_status: task_status.into(),
-                    error_message: err_str.unwrap_or("".to_string()),
+                    error_message: err_str.unwrap_or("".to_owned()),
                 })
                 .await
         } else {
@@ -685,7 +685,7 @@ mod tests {
         let task_id = TaskId {
             task_id: 1,
             stage_id: 2,
-            query_id: "abc".to_string(),
+            query_id: "abc".to_owned(),
         };
         let task_output_id = TaskOutputId {
             task_id,

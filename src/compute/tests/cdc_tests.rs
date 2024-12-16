@@ -24,7 +24,7 @@ use std::time::Duration;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_batch::executor::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
+use risingwave_batch_executors::{Executor as BatchExecutor, RowSeqScanExecutor, ScanRange};
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
 };
@@ -73,7 +73,7 @@ impl MockOffsetGenExecutor {
             source_offset: DebeziumSourceOffset {
                 last_snapshot_record: None,
                 snapshot: None,
-                file: Some("1.binlog".to_string()),
+                file: Some("1.binlog".to_owned()),
                 pos: Some(start_offset as _),
                 lsn: None,
                 txid: None,
@@ -153,14 +153,14 @@ async fn test_cdc_backfill() -> StreamResult<()> {
                 Field::unnamed(DataType::Varchar), // _rw_offset
             ]),
             pk_indices: vec![0],
-            identity: "MockOffsetGenExecutor".to_string(),
+            identity: "MockOffsetGenExecutor".to_owned(),
         },
         MockOffsetGenExecutor::new(source).boxed(),
     );
 
     let table_name = SchemaTableName {
-        schema_name: "public".to_string(),
-        table_name: "mock_table".to_string(),
+        schema_name: "public".to_owned(),
+        table_name: "mock_table".to_owned(),
     };
     let table_schema = Schema::new(vec![
         Field::with_name(DataType::Int64, "id"), // primary key
@@ -173,7 +173,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let external_table = ExternalStorageTable::new(
         TableId::new(1234),
         table_name,
-        "mydb".to_string(),
+        "mydb".to_owned(),
         config,
         CdcTableType::Mock,
         table_schema.clone(),
@@ -222,7 +222,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ExecutorInfo {
             schema: table_schema.clone(),
             pk_indices: table_pk_indices,
-            identity: "CdcBackfillExecutor".to_string(),
+            identity: "CdcBackfillExecutor".to_owned(),
         },
         CdcBackfillExecutor::new(
             ActorContext::for_test(actor_id),
@@ -374,7 +374,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqExecutor2".to_string(),
+        "RowSeqExecutor2".to_owned(),
         None,
         None,
         None,

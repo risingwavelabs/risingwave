@@ -72,7 +72,7 @@ impl<S, R: NodePeek> Ord for Node<S, R> {
 }
 
 #[try_stream(ok=KO, error=E)]
-pub async fn merge_sort<E, KO, R>(streams: Vec<R>)
+pub async fn merge_sort<E, KO, R>(streams: impl IntoIterator<Item = R>)
 where
     KO: NodePeek + Send + Sync,
     E: Error,

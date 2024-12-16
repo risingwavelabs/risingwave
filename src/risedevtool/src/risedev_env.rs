@@ -136,6 +136,14 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::MetaNode(meta_node_config) => {
+                writeln!(
+                    env,
+                    r#"RISEDEV_RW_META_DASHBOARD_ADDR="http://{}:{}""#,
+                    meta_node_config.address, meta_node_config.dashboard_port
+                )
+                .unwrap();
+            }
             _ => {}
         }
     }

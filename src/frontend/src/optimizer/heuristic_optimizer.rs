@@ -128,7 +128,7 @@ impl Stats {
 
     pub fn count_rule(&mut self, rule: &BoxedRule) {
         self.total_applied += 1;
-        match self.rule_counter.entry(rule.description().to_string()) {
+        match self.rule_counter.entry(rule.description().to_owned()) {
             Entry::Occupied(mut entry) => {
                 *entry.get_mut() += 1;
             }

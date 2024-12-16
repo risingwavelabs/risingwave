@@ -28,7 +28,8 @@ use risingwave_meta_model::prelude::{Actor, Fragment, Sink, StreamingJob};
 use risingwave_meta_model::{
     actor, actor_dispatcher, fragment, object, sink, source, streaming_job, table, ActorId,
     ActorUpstreamActors, ConnectorSplits, DatabaseId, ExprContext, FragmentId, I32Array, JobStatus,
-    ObjectId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap, WorkerId,
+    ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId, VnodeBitmap,
+    WorkerId,
 };
 use risingwave_meta_model_migration::{Alias, SelectStatement};
 use risingwave_pb::common::PbActorLocation;
@@ -373,7 +374,7 @@ impl CatalogController {
                 }
                 .into(),
             ),
-            node_label: "".to_string(),
+            node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(max_parallelism as _),
         };
@@ -483,7 +484,7 @@ impl CatalogController {
                 dispatcher: pb_dispatcher,
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
-                mview_definition: "".to_string(),
+                mview_definition: "".to_owned(),
                 expr_context: pb_expr_context,
             })
         }
@@ -879,6 +880,25 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let actor_locations: Vec<PartialActorLocation> =
             Actor::find().into_partial_model().all(&inner.db).await?;
+        Ok(actor_locations)
+    }
+
+    pub async fn list_actor_info(
+        &self,
+    ) -> MetaResult<Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)>> {
+        let inner = self.inner.read().await;
+        let actor_locations: Vec<(ActorId, FragmentId, ObjectId, SchemaId, ObjectType)> =
+            Actor::find()
+                .join(JoinType::LeftJoin, actor::Relation::Fragment.def())
+                .join(JoinType::LeftJoin, fragment::Relation::Object.def())
+                .select_only()
+                .columns([actor::Column::ActorId, actor::Column::FragmentId])
+                .column_as(object::Column::Oid, "job_id")
+                .column_as(object::Column::SchemaId, "schema_id")
+                .column_as(object::Column::ObjType, "type")
+                .into_tuple()
+                .all(&inner.db)
+                .await?;
         Ok(actor_locations)
     }
 
@@ -1674,7 +1694,7 @@ mod tests {
                         .get(&actor_id)
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
-                    mview_definition: "".to_string(),
+                    mview_definition: "".to_owned(),
                     expr_context: Some(PbExprContext {
                         time_zone: String::from("America/New_York"),
                         strict_mode: false,
@@ -1776,7 +1796,7 @@ mod tests {
             .map(|actor_id| {
                 let actor_splits = Some(ConnectorSplits::from(&PbConnectorSplits {
                     splits: vec![PbConnectorSplit {
-                        split_type: "dummy".to_string(),
+                        split_type: "dummy".to_owned(),
                         ..Default::default()
                     }],
                 }));

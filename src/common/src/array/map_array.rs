@@ -238,10 +238,10 @@ mod scalar {
             let struct_array = entries.into_array();
             for key in struct_array.as_struct().field_at(0).iter() {
                 let Some(key) = key else {
-                    return Err("map keys must not be NULL".to_string());
+                    return Err("map keys must not be NULL".to_owned());
                 };
                 if !keys.insert(key) {
-                    return Err("map keys must be unique".to_string());
+                    return Err("map keys must be unique".to_owned());
                 }
             }
             Ok(MapValue(ListValue::new(struct_array)))
@@ -250,14 +250,14 @@ mod scalar {
         /// Returns error if [map invariants](`super::MapArray`) are violated.
         pub fn try_from_kv(key: ListValue, value: ListValue) -> Result<Self, String> {
             if key.len() != value.len() {
-                return Err("map keys and values have different length".to_string());
+                return Err("map keys and values have different length".to_owned());
             }
             let unique_keys: HashSet<_> = key.iter().unique().collect();
             if unique_keys.len() != key.len() {
-                return Err("map keys must be unique".to_string());
+                return Err("map keys must be unique".to_owned());
             }
             if unique_keys.contains(&None) {
-                return Err("map keys must not be NULL".to_string());
+                return Err("map keys must not be NULL".to_owned());
             }
 
             let len = key.len();

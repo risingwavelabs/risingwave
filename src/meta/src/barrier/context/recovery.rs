@@ -275,7 +275,6 @@ impl GlobalBarrierWorkerContextImpl {
         }
     }
 
-    #[expect(dead_code)]
     pub(super) async fn reload_database_runtime_info_impl(
         &self,
         database_id: DatabaseId,

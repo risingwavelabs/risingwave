@@ -164,7 +164,7 @@ impl From<&BuiltinTable> for SystemTableCatalog {
     fn from(val: &BuiltinTable) -> Self {
         SystemTableCatalog {
             id: TableId::placeholder(),
-            name: val.name.to_string(),
+            name: val.name.to_owned(),
             columns: val
                 .columns
                 .iter()
@@ -185,7 +185,7 @@ impl From<&BuiltinView> for ViewCatalog {
     fn from(val: &BuiltinView) -> Self {
         ViewCatalog {
             id: 0,
-            name: val.name.to_string(),
+            name: val.name.to_owned(),
             columns: val
                 .columns
                 .iter()
@@ -222,12 +222,12 @@ fn extract_parallelism_from_table_state(state: &TableFragmentState) -> String {
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_string(),
+        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_owned(),
         Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
             format!("fixed({parallelism})")
         }
-        Some(PbParallelism::Custom(_)) => "custom".to_string(),
-        None => "unknown".to_string(),
+        Some(PbParallelism::Custom(_)) => "custom".to_owned(),
+        None => "unknown".to_owned(),
     }
 }
 

@@ -179,12 +179,11 @@ pub async fn gen_sink_plan(
     };
 
     if sink_into_table_name.is_some() {
-        let prev =
-            resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_string(), "table".to_string());
+        let prev = resolved_with_options.insert(CONNECTOR_TYPE_KEY.to_owned(), "table".to_owned());
 
         if prev.is_some() {
             return Err(RwError::from(ErrorCode::BindError(
-                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_string(),
+                "In the case of sinking into table, the 'connector' parameter should not be provided.".to_owned(),
             )));
         }
     }
@@ -231,7 +230,7 @@ pub async fn gen_sink_plan(
                 true
             } else {
                 return Err(ErrorCode::BindError(
-                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_string(),
+                    "`snapshot = false` only support `CREATE SINK FROM MV or TABLE`".to_owned(),
                 )
                 .into());
             }
@@ -473,7 +472,7 @@ pub async fn handle_create_sink(
         if has_order_by {
             plan.ctx().warn_to_user(
                 r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
-                    .to_string(),
+                    .to_owned(),
             );
         }
 
@@ -657,7 +656,7 @@ pub(crate) fn insert_merger_to_union_with_project(
             }],
             identity: uniq_identity
                 .unwrap_or(PbSink::UNIQUE_IDENTITY_FOR_CREATING_TABLE_SINK)
-                .to_string(),
+                .to_owned(),
             fields: node.fields.clone(),
             node_body: Some(project_node.clone()),
             ..Default::default()
@@ -944,7 +943,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'jdbc', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_owned();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
