@@ -272,6 +272,7 @@ impl DdlService for DdlServiceImpl {
                         CreateType::Foreground,
                         None,
                         HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbSource`
+                        None,
                     ))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -339,6 +340,7 @@ impl DdlService for DdlServiceImpl {
             CreateType::Foreground,
             affected_table_change,
             dependencies,
+            None,
         );
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -423,6 +425,7 @@ impl DdlService for DdlServiceImpl {
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
         let create_type = mview.get_create_type().unwrap_or(CreateType::Foreground);
+        let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req
             .get_dependencies()
@@ -439,6 +442,7 @@ impl DdlService for DdlServiceImpl {
                 create_type,
                 None,
                 dependencies,
+                specific_resource_group,
             ))
             .await?;
 
@@ -493,6 +497,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(),
+                None,
             ))
             .await?;
 
@@ -580,6 +585,7 @@ impl DdlService for DdlServiceImpl {
                 CreateType::Foreground,
                 None,
                 HashSet::new(), // TODO(rc): pass dependencies through this field instead of `PbTable`
+                None,
             ))
             .await?;
 

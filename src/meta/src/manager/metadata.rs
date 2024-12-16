@@ -720,6 +720,21 @@ impl MetadataManager {
             .await
     }
 
+    pub async fn get_existing_job_resource_group(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<String> {
+        self.catalog_controller
+            .get_existing_job_resource_group(streaming_job_id)
+            .await
+    }
+
+    pub async fn get_database_resource_group(&self, database_id: ObjectId) -> MetaResult<String> {
+        self.catalog_controller
+            .get_database_resource_group(database_id)
+            .await
+    }
+
     pub fn cluster_id(&self) -> &ClusterId {
         self.cluster_controller.cluster_id()
     }

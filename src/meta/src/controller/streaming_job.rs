@@ -87,6 +87,7 @@ impl CatalogController {
         ctx: &StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
+        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
     ) -> MetaResult<ObjectId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job = streaming_job::ActiveModel {
@@ -96,6 +97,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone.clone()),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
+            specific_resource_group: Set(specific_resource_group),
         };
         job.insert(txn).await?;
 
@@ -114,6 +116,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
+        specific_resource_group: Option<String>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -189,6 +192,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -222,6 +226,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 sink.id = job_id as _;
@@ -239,6 +244,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 table.id = job_id as _;
@@ -275,6 +281,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -306,6 +313,7 @@ impl CatalogController {
                     ctx,
                     streaming_parallelism,
                     max_parallelism,
+                    specific_resource_group,
                 )
                 .await?;
                 src.id = job_id as _;
@@ -754,6 +762,7 @@ impl CatalogController {
             ctx,
             parallelism,
             max_parallelism,
+            None,
         )
         .await?;
 
