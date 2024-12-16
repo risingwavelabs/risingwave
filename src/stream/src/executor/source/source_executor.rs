@@ -548,7 +548,6 @@ impl<S: StateStore> SourceExecutor<S> {
             // and can avoid the potential race with "seek to latest"
             let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> =
                 None;
-            let seek_to_latest = self.is_shared_non_cdc && is_uninitialized;
             let source_reader = source_desc.source.clone();
             let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
             let source_ctx = Arc::new(source_ctx);
@@ -560,7 +559,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             recover_state.clone(),
                             column_ids.clone(),
                             source_ctx.clone(),
-                            seek_to_latest,
+                            false,  // not need to seek to latest since source is initialized
                         )
                         .await {
                         Ok((stream, latest_splits)) => Ok((stream, latest_splits)),
