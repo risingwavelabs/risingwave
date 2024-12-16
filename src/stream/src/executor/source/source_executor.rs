@@ -533,7 +533,7 @@ impl<S: StateStore> SourceExecutor<S> {
         } else {
             // Build the source stream reader with retry during recovery.
             // We only build source stream reader with retry during recovery,
-            // becasue we can rely on the persisted source states to recover the source stream
+            // because we can rely on the persisted source states to recover the source stream
             // and can avoid the potential race with "seek to latest"
             let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> =
                 None;
