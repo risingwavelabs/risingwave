@@ -892,9 +892,7 @@ pub mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{
-        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
