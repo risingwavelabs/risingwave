@@ -168,7 +168,7 @@ pub async fn refresh_sr_and_get_columns_diff(
         session,
         format_encode,
         Either::Right(&with_properties),
-        CreateSourceType::from_with_properties(session, &with_properties),
+        CreateSourceType::for_replace(original_source),
     )
     .await?
     else {
