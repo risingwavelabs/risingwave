@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_meta_model::{ObjectId, WorkerId};
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::{CreateType, Subscription, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -29,8 +29,8 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
 use super::{
-    JobReschedulePlan, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
-    JobResourceGroupUpdate, Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy,
+    JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget, JobResourceGroupUpdate,
+    Locations, RescheduleOptions, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,

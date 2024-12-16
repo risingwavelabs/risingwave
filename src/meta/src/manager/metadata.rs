@@ -37,9 +37,7 @@ use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{
-    ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId, TableParallelism,
-};
+use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::telemetry::MetaTelemetryJobDesc;
 use crate::{MetaError, MetaResult};

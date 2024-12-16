@@ -1850,13 +1850,10 @@ impl ScaleController {
                     database_resource_group
                 }
                 JobResourceGroupUpdate::Keep => {
-                    let existing_resource_group = self
-                        .metadata_manager
+                    self.metadata_manager
                         .catalog_controller
                         .get_existing_job_resource_group(*job_id as _)
-                        .await?;
-
-                    existing_resource_group
+                        .await?
                 }
             };
 
@@ -2121,20 +2118,6 @@ impl ScaleController {
         })
     }
 
-    pub(crate) fn filter_unschedulable_workers(workers: &[WorkerNode]) -> HashSet<WorkerId> {
-        workers
-            .iter()
-            .filter(|worker| {
-                worker
-                    .property
-                    .as_ref()
-                    .map(|p| p.is_unschedulable)
-                    .unwrap_or(false)
-            })
-            .map(|worker| worker.id as WorkerId)
-            .collect()
-    }
-
     fn diff_worker_slot_changes(
         fragment_worker_slots: &BTreeMap<WorkerId, usize>,
         target_worker_slots: &BTreeMap<WorkerId, usize>,
@@ -2338,14 +2321,6 @@ impl ScaleController {
     }
 }
 
-/// At present, for table level scaling, we use the strategy `TableResizePolicy`.
-/// Currently, this is used as an internal interface, so it won’t be included in Protobuf.
-#[derive(Debug)]
-pub struct TableResizePolicy {
-    pub(crate) worker_ids: BTreeSet<WorkerId>,
-    pub(crate) table_parallelisms: HashMap<u32, TableParallelism>,
-}
-
 #[derive(Debug)]
 pub enum JobResourceGroupUpdate {
     Update(Option<String>),
@@ -2358,6 +2333,7 @@ pub struct JobRescheduleTarget {
     pub(crate) resource_group: JobResourceGroupUpdate,
 }
 
+#[derive(Debug)]
 pub struct JobReschedulePolicy {
     pub(crate) targets: HashMap<u32, JobRescheduleTarget>,
 }

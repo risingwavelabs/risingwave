@@ -238,8 +238,8 @@ impl CommandContext {
             }
             Command::RescheduleFragment {
                 reschedules,
-                fragment_actors,
                 post_updates,
+                ..
             } => {
                 barrier_manager_context
                     .scale_controller

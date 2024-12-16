@@ -250,7 +250,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 name: db_name.to_owned(),
                 id: 0,
                 owner,
-                resource_group: resource_group.to_string(),
+                resource_group: resource_group.to_owned(),
             })
             .await?;
         self.wait_version(version).await

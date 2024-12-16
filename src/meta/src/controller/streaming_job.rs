@@ -1878,7 +1878,9 @@ impl CatalogController {
                 TableParallelism::Custom => StreamingParallelism::Custom,
             });
 
-            if let Some(resource_group) = resource_group_updates.get(&(table_id.table_id() as ObjectId)) {
+            if let Some(resource_group) =
+                resource_group_updates.get(&(table_id.table_id() as ObjectId))
+            {
                 streaming_job.specific_resource_group = Set(resource_group.to_owned());
             }
 

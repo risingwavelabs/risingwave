@@ -49,8 +49,10 @@ use crate::barrier::InflightSubscriptionInfo;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments, TableParallelism};
-use crate::stream::{build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig};
+use crate::model::{ActorId, DispatcherId, FragmentId, StreamJobFragments};
+use crate::stream::{
+    build_actor_connector_splits, JobReschedulePostUpdates, SplitAssignment, ThrottleConfig,
+};
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.

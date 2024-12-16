@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::WorkerSlotId;
-use risingwave_meta_model::{StreamingParallelism, WorkerId};
+use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::stream_plan::StreamActor;
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
@@ -33,12 +33,10 @@ use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::{DatabaseRuntimeInfoSnapshot, InflightSubscriptionInfo};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::controller::utils::filter_workers_by_resource_group;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{
     JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupUpdate, RescheduleOptions,
-    TableResizePolicy,
 };
 use crate::{model, MetaResult};
 
@@ -582,11 +580,6 @@ impl GlobalBarrierWorkerContextImpl {
             let mut result = HashMap::new();
 
             for (object_id, streaming_parallelism) in streaming_parallelisms {
-                let resource_group = mgr
-                    .catalog_controller
-                    .get_existing_job_resource_group(object_id)
-                    .await?;
-
                 let actual_fragment_parallelism = mgr
                     .catalog_controller
                     .get_actual_job_fragment_parallelism(object_id)
@@ -613,9 +606,6 @@ impl GlobalBarrierWorkerContextImpl {
                         target_parallelism
                     );
                 }
-
-                let filtered_worker_ids =
-                    filter_workers_by_resource_group(&available_workers, resource_group.as_str());
 
                 result.insert(
                     object_id as u32,
