@@ -131,6 +131,7 @@ where
 pub struct TonicStatusWrapper {
     inner: tonic::Status,
 
+    /// The call name (path) of the gRPC request.
     call: Option<String>,
 
     /// Optional service name from the client side.

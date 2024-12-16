@@ -26,7 +26,8 @@ use tower::Service;
 ///   The server can then extract the [`TracingContext`] from the HTTP headers with the `TracingExtract` middleware.
 ///   See also `TracingExtract` in the `common_service` crate.
 ///
-/// - Add the path of the request (indicating the gRPC call) to the response headers.
+/// - Add the path of the request (indicating the gRPC call) to the response headers. The error reporting can then
+///   include the gRPC call name in the message.
 #[derive(Clone, Debug)]
 pub struct WrappedChannel {
     inner: tonic::transport::Channel,
