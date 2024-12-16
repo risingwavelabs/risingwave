@@ -499,15 +499,6 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        // Since DDL always accompany with a checkpoint barrier, we can assume that
-        // if initial_dispatch_num != 0, the source state must be initialized.
-        if self.actor_ctx.initial_dispatch_num != 0 {
-            assert!(
-                !is_uninitialized,
-                "is_uninitialized must be false if initial_dispatch_num != 0"
-            );
-        }
-
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
 
