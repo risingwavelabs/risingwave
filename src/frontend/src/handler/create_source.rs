@@ -313,6 +313,7 @@ pub enum CreateSourceType {
 }
 
 impl CreateSourceType {
+    /// Note: shouldn't be used for `ALTER SOURCE`, since session variables should not affect existing source. We should respect the original type instead.
     pub fn for_newly_created(
         session: &SessionImpl,
         with_properties: &impl WithPropertiesExt,
