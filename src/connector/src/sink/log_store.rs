@@ -410,12 +410,14 @@ impl<R: LogReader> RateLimitedLogReader<R> {
 }
 
 impl<R: LogReader> RateLimitedLogReader<R> {
-    fn update_rate_limit(&mut self, rate_limit: Option<u32>) {
+    // Returns old limit
+    fn update_rate_limit(&mut self, rate_limit: Option<u32>) -> Option<u32> {
+        let prev = self.rate_limit;
         self.rate_limit = rate_limit;
         if let Some(limit) = rate_limit {
             if limit == 0 {
                 self.rate_limiter = None;
-                return;
+                return prev;
             }
             let quota = Quota::per_second(NonZeroU32::new(limit).unwrap());
             let clock = MonotonicClock;
@@ -424,6 +426,7 @@ impl<R: LogReader> RateLimitedLogReader<R> {
         } else {
             self.rate_limiter = None;
         }
+        prev
     }
 
     async fn apply_rate_limit(
@@ -519,8 +522,9 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                 biased;
                 rate_limit_change = pin!(self.control_rx.recv()) => {
                     if let Some(new_rate_limit) = rate_limit_change {
-                        self.update_rate_limit(new_rate_limit);
+                        let prev = self.update_rate_limit(new_rate_limit);
                         paused = self.rate_limit == Some(0);
+                        tracing::info!("rate limit changed from {:?} to {:?}, paused = {paused}", prev, self.rate_limit);
                     } else {
                         tracing::warn!("rate limit control channel closed");
                     }
