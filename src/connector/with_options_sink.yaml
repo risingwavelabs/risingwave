@@ -57,6 +57,9 @@ BigQueryConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: bigquery.credentials
+    field_type: String
+    required: false
   - name: aws.region
     field_type: String
     required: false
