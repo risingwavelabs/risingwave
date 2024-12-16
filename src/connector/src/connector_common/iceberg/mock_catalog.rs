@@ -259,8 +259,8 @@ mod v2 {
         ) -> TableV2 {
             let file_io = FileIO::from_path("memory://").unwrap().build().unwrap();
             let table_creation = TableCreation {
-                name: "ignore".to_string(),
-                location: Some("1".to_string()),
+                name: "ignore".to_owned(),
+                location: Some("1".to_owned()),
                 schema,
                 partition_spec: Some(partition_spec),
                 sort_order: None,
@@ -268,8 +268,8 @@ mod v2 {
             };
             TableV2::builder()
                 .identifier(TableIdent::new(
-                    NamespaceIdent::new("mock_namespace".to_string()),
-                    name.to_string(),
+                    NamespaceIdent::new("mock_namespace".to_owned()),
+                    name.to_owned(),
                 ))
                 .file_io(file_io)
                 .metadata(
@@ -303,25 +303,25 @@ mod v2 {
                         UnboundPartitionField {
                             source_id: 1,
                             field_id: Some(5),
-                            name: "f1".to_string(),
+                            name: "f1".to_owned(),
                             transform: Transform::Identity,
                         },
                         UnboundPartitionField {
                             source_id: 2,
                             field_id: Some(6),
-                            name: "f2".to_string(),
+                            name: "f2".to_owned(),
                             transform: Transform::Bucket(1),
                         },
                         UnboundPartitionField {
                             source_id: 3,
                             field_id: Some(7),
-                            name: "f3".to_string(),
+                            name: "f3".to_owned(),
                             transform: Transform::Truncate(1),
                         },
                         UnboundPartitionField {
                             source_id: 4,
                             field_id: Some(8),
-                            name: "f4".to_string(),
+                            name: "f4".to_owned(),
                             transform: Transform::Void,
                         },
                     ])
@@ -362,25 +362,25 @@ mod v2 {
                         UnboundPartitionField {
                             source_id: 1,
                             field_id: Some(5),
-                            name: "f1".to_string(),
+                            name: "f1".to_owned(),
                             transform: Transform::Year,
                         },
                         UnboundPartitionField {
                             source_id: 2,
                             field_id: Some(6),
-                            name: "f2".to_string(),
+                            name: "f2".to_owned(),
                             transform: Transform::Month,
                         },
                         UnboundPartitionField {
                             source_id: 3,
                             field_id: Some(7),
-                            name: "f3".to_string(),
+                            name: "f3".to_owned(),
                             transform: Transform::Day,
                         },
                         UnboundPartitionField {
                             source_id: 4,
                             field_id: Some(8),
-                            name: "f4".to_string(),
+                            name: "f4".to_owned(),
                             transform: Transform::Hour,
                         },
                     ])
