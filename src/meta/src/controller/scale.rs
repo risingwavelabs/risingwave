@@ -421,7 +421,7 @@ impl CatalogController {
                         related_job_definitions
                             .get(&job_id)
                             .cloned()
-                            .unwrap_or("".to_string()),
+                            .unwrap_or("".to_owned()),
                     ),
                 )
             })
