@@ -1,92 +1,31 @@
 statement ok
+set streaming_parallelism = 2;
+
+statement ok
 create table fact(v1 int);
 
 statement ok
 create table dim(v1 int);
 
-statement ok
-create table dim2(v1 int);
+# Total backfill = 50_000 * 100 = 5M records
 
 statement ok
-insert into fact select 1 from generate_series(1, 1000000);
+insert into fact select v from generate_series(1, 100000) as v ;
 
 statement ok
-insert into dim select 1 from generate_series(1, 100);
-
-statement ok
-insert into dim2 select 1 from generate_series(1, 100);
+insert into dim select v from generate_series(1, 1000) as v, generate_series(1, 10000);
 
 statement ok
 flush;
-
-statement ok
-set background_ddl = true;
-
-statement ok
-create sink s1 as select fact.v1 from fact join dim on fact.v1 = dim.v1 join dim2 on fact.v1 = dim2.v1 with (connector = 'blackhole');
 
 statement ok
 set background_ddl = false;
 
-# Let at least 16 barriers pass through
-# Then we have 1 * 2^16 = 65536
+statement ok
+set BACKFILL_RATE_LIMIT = 0;
 
-skipif in-memory
-sleep 10s
+statement ok
+create materialized view m1 as select fact.v1 from fact join dim on fact.v1 = dim.v1;
 
 statement ok
 flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-# statement ok
-# drop sink s1;
-
-# statement ok
-# drop table fact;
-
-# statement ok
-# drop table dim;

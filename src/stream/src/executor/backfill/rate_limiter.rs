@@ -264,12 +264,27 @@ impl AdaptiveRateLimiterInner {
         let now = Instant::now();
         let dur = now.duration_since(self.last_update);
 
+        if dur.is_zero() {
+            return;
+        }
+
         let real_rate = info.processed_snapshot_rows as f64 / dur.as_secs_f64();
 
         let step = (self.rate * config.step_ratio).clamp(config.step_min, config.step_max);
+
+        // FIXME(MrCroxx): remove this.
+        tracing::trace!(
+            "=======================> rate: {}, real: {}, step: {}, dur: {:?}",
+            self.rate,
+            real_rate,
+            step,
+            dur,
+        );
+
         if real_rate >= self.rate {
             self.rate += step;
-        } else {
+        }
+        if real_rate <= self.rate * 0.9 {
             self.rate -= step;
         }
         self.rate = self
