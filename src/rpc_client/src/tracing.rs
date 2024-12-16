@@ -15,6 +15,7 @@
 use std::task::{Context, Poll};
 
 use futures::Future;
+use http::HeaderValue;
 use risingwave_common::util::tracing::TracingContext;
 use tonic::body::BoxBody;
 use tower::Service;
@@ -47,9 +48,22 @@ impl Service<http::Request<BoxBody>> for TracingInjectChannel {
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
         async move {
+            let path = req.uri().path().to_owned();
+
             let headers = TracingContext::from_current_span().to_http_headers();
             req.headers_mut().extend(headers);
-            inner.call(req).await
+
+            let mut response = inner.call(req).await;
+
+            if let Ok(response) = &mut response {
+                if let Ok(path) = HeaderValue::from_str(&path) {
+                    response
+                        .headers_mut()
+                        .insert(risingwave_error::tonic::CALL_KEY, path);
+                }
+            }
+
+            response
         }
     }
 }
