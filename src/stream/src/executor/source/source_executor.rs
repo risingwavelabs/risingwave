@@ -532,7 +532,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     // so don't waste work on it.
                     // For more details, see https://github.com/risingwavelabs/risingwave/issues/16576#issuecomment-2095413297
                     // Note that shared CDC source is special. It already starts from latest.
-                    self.is_shared_non_cdc && is_uninitialized,
+                    self.is_shared_non_cdc,
                 )
                 .instrument_await("source_build_reader")
                 .await?;
@@ -559,7 +559,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             recover_state.clone(),
                             column_ids.clone(),
                             source_ctx.clone(),
-                            false,  // not need to seek to latest since source is initialized
+                            false,  // not need to seek to latest since source state is initialized
                         )
                         .await {
                         Ok((stream, latest_splits)) => Ok((stream, latest_splits)),
