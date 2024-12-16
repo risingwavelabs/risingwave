@@ -363,6 +363,13 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         // If the source properties is created by share source, skip the following
         // check of publication
         if (isCdcSourceJob) {
+            if (!isPublicationExists) {
+                LOG.info(
+                        "creating cdc source job: publication '{}' doesn't exist, creating...",
+                        pubName);
+                DbzSourceUtils.createPostgresPublicationInValidate(userProps);
+                LOG.info("creating cdc source job: publication '{}' created successfully", pubName);
+            }
             return;
         }
 
