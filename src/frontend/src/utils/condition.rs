@@ -24,6 +24,7 @@ use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
+use risingwave_common::util::sort_util::{cmp_rows, OrderType};
 
 use crate::error::Result;
 use crate::expr::{
@@ -299,7 +300,7 @@ impl Condition {
         table_desc: Rc<TableDesc>,
         max_split_range_gap: u64,
         disjunctions: Vec<ExprImpl>,
-    ) -> Result<Option<(Vec<ScanRange>, Self)>> {
+    ) -> Result<Option<(Vec<ScanRange>, bool)>> {
         let disjunctions_result: Result<Vec<(Vec<ScanRange>, Self)>> = disjunctions
             .into_iter()
             .map(|x| {
@@ -352,9 +353,106 @@ impl Condition {
                 }
             }
 
-            Ok(Some((non_overlap_scan_ranges, Condition::true_cond())))
+            Ok(Some((non_overlap_scan_ranges, false)))
         } else {
-            Ok(None)
+            let scan_ranges = disjunctions_result
+                .into_iter()
+                .flat_map(|(scan_ranges, _)| scan_ranges)
+                // sort, small one first
+                .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
+                .collect_vec();
+
+            if scan_ranges.is_empty() {
+                return Ok(None);
+            }
+
+            if scan_ranges.len() == 1 {
+                return Ok(Some((scan_ranges, true)));
+            }
+
+            let mut output_scan_ranges: Vec<ScanRange> = vec![];
+            output_scan_ranges.push(scan_ranges[0].clone());
+            let order_types = table_desc.pk.iter().map(|x| x.order_type).collect_vec();
+            let mut idx = 1;
+            loop {
+                if idx >= scan_ranges.len() {
+                    break;
+                }
+
+                let scan_range_left = output_scan_ranges.last_mut().unwrap();
+                let scan_range_right = &scan_ranges[idx];
+
+                if scan_range_left.eq_conds == scan_range_right.eq_conds {
+                    // range merge
+
+                    if !ScanRange::is_overlap(scan_range_left, scan_range_right, &order_types) {
+                        // not merge
+                        output_scan_ranges.push(scan_range_right.clone());
+                        idx += 1;
+                        continue;
+                    }
+
+                    // merge range
+                    fn merge_bound(
+                        left_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
+                        right_scan_range: &Bound<Vec<Option<ScalarImpl>>>,
+                        order_types: &[OrderType],
+                        left_bound: bool,
+                    ) -> Bound<Vec<Option<ScalarImpl>>> {
+                        let left_scan_range = match left_scan_range {
+                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                            Bound::Unbounded => return Bound::Unbounded,
+                        };
+
+                        let right_scan_range = match right_scan_range {
+                            Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                            Bound::Unbounded => return Bound::Unbounded,
+                        };
+
+                        let cmp_len = left_scan_range.len().min(right_scan_range.len());
+
+                        let cmp = cmp_rows(
+                            &left_scan_range[..cmp_len],
+                            &right_scan_range[..cmp_len],
+                            &order_types[..cmp_len],
+                        );
+
+                        let bound = {
+                            if (cmp.is_le() && left_bound) || (cmp.is_ge() && !left_bound) {
+                                left_scan_range.to_vec()
+                            } else {
+                                right_scan_range.to_vec()
+                            }
+                        };
+
+                        Bound::Included(bound)
+                    }
+
+                    scan_range_left.range.0 = merge_bound(
+                        &scan_range_left.range.0,
+                        &scan_range_right.range.0,
+                        &order_types,
+                        true,
+                    );
+
+                    scan_range_left.range.1 = merge_bound(
+                        &scan_range_left.range.1,
+                        &scan_range_right.range.1,
+                        &order_types,
+                        false,
+                    );
+
+                    if scan_range_left.is_full_table_scan() {
+                        return Ok(None);
+                    }
+                } else {
+                    output_scan_ranges.push(scan_range_right.clone());
+                }
+
+                idx += 1;
+            }
+
+            Ok(Some((output_scan_ranges, true)))
         }
     }
 
@@ -470,12 +568,18 @@ impl Condition {
         // It's an OR.
         if self.conjunctions.len() == 1 {
             if let Some(disjunctions) = self.conjunctions[0].as_or_disjunctions() {
-                if let Some((scan_ranges, other_condition)) = Self::disjunctions_to_scan_ranges(
-                    table_desc,
-                    max_split_range_gap,
-                    disjunctions,
-                )? {
-                    return Ok((scan_ranges, other_condition));
+                if let Some((scan_ranges, maintaining_condition)) =
+                    Self::disjunctions_to_scan_ranges(
+                        table_desc,
+                        max_split_range_gap,
+                        disjunctions,
+                    )?
+                {
+                    if maintaining_condition {
+                        return Ok((scan_ranges, self));
+                    } else {
+                        return Ok((scan_ranges, Condition::true_cond()));
+                    }
                 } else {
                     return Ok((vec![], self));
                 }
