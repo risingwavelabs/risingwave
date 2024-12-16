@@ -22,6 +22,7 @@ use risingwave_common::types::{Datum, DatumCow, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector_codec::decoder::{AccessError, AccessResult};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
+use smallvec::SmallVec;
 use thiserror_ext::AsReport;
 
 use super::MessageMeta;
@@ -29,31 +30,121 @@ use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
     extract_subject_from_meta, extract_timestamp_from_meta,
 };
-use crate::source::{SourceColumnDesc, SourceColumnType, SourceMeta};
+use crate::source::{SourceColumnDesc, SourceColumnType, SourceCtrlOpts, SourceMeta};
+
+/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
+/// committed to avoid potential OOM.
+const MAX_TRANSACTION_SIZE: usize = 4096;
+
+/// Represents an ongoing transaction.
+struct Transaction {
+    id: Box<str>,
+    len: usize,
+}
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
-    descs: Vec<SourceColumnDesc>,
+    column_descs: Vec<SourceColumnDesc>,
+    source_ctrl_ops: SourceCtrlOpts,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
     vis_builder: BitmapBuilder,
+    ongoing_txn: Option<Transaction>,
+    ready_chunks: SmallVec<[StreamChunk; 1]>,
 }
 
 impl SourceStreamChunkBuilder {
-    pub fn with_capacity(descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
-        let builders = descs
+    // TODO(): remove
+    pub fn with_capacity(column_descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
+        let builders = column_descs
             .iter()
             .map(|desc| desc.data_type.create_array_builder(cap))
             .collect();
 
         Self {
-            descs,
+            column_descs,
+            source_ctrl_ops: SourceCtrlOpts {
+                chunk_size: 256,
+                split_txn: false,
+            },
             builders,
             op_builder: Vec::with_capacity(cap),
             vis_builder: BitmapBuilder::with_capacity(cap),
+            ongoing_txn: None,
+            ready_chunks: SmallVec::new(),
         }
     }
 
+    pub fn new(column_descs: Vec<SourceColumnDesc>, source_ctrl_ops: SourceCtrlOpts) -> Self {
+        let (builders, op_builder, vis_builder) =
+            Self::create_builders(&column_descs, source_ctrl_ops.chunk_size);
+
+        Self {
+            column_descs,
+            source_ctrl_ops,
+            builders,
+            op_builder,
+            vis_builder,
+            ongoing_txn: None,
+            ready_chunks: SmallVec::new(),
+        }
+    }
+
+    fn create_builders(
+        column_descs: &[SourceColumnDesc],
+        chunk_size: usize,
+    ) -> (Vec<ArrayBuilderImpl>, Vec<Op>, BitmapBuilder) {
+        let reserved_capacity = chunk_size + 1; // it's possible to have an additional `U-` at the end
+        let builders = column_descs
+            .iter()
+            .map(|desc| desc.data_type.create_array_builder(reserved_capacity))
+            .collect();
+        let op_builder = Vec::with_capacity(reserved_capacity);
+        let vis_builder = BitmapBuilder::with_capacity(reserved_capacity);
+        (builders, op_builder, vis_builder)
+    }
+
+    /// Begin a (CDC) transaction with the given `txn_id`.
+    pub fn begin_transaction(&mut self, txn_id: Box<str>) {
+        if let Some(ref txn) = self.ongoing_txn {
+            tracing::warn!(
+                ongoing_txn_id = txn.id,
+                new_txn_id = txn_id,
+                "already in a transaction"
+            );
+        }
+        tracing::debug!(txn_id, "begin upstream transaction");
+        self.ongoing_txn = Some(Transaction { id: txn_id, len: 0 });
+    }
+
+    /// Commit the ongoing transaction with the given `txn_id`.
+    pub fn commit_transaction(&mut self, txn_id: Box<str>) {
+        if let Some(txn) = self.ongoing_txn.take() {
+            if txn.id != txn_id {
+                tracing::warn!(
+                    expected_txn_id = txn.id,
+                    actual_txn_id = txn_id,
+                    "unexpected transaction id"
+                );
+            }
+            tracing::debug!(txn_id, "commit upstream transaction");
+
+            if self.current_chunk_len() >= self.source_ctrl_ops.chunk_size {
+                // if `split_txn` is on, we should've finished the chunk already
+                assert!(!self.source_ctrl_ops.split_txn);
+                self.finish_current_chunk();
+            }
+        } else {
+            tracing::warn!(txn_id, "no ongoing transaction to commit");
+        }
+    }
+
+    /// Check if the builder is in an ongoing transaction.
+    pub fn is_in_transaction(&self) -> bool {
+        self.ongoing_txn.is_some()
+    }
+
+    /// Get a row writer for parser to write records to the builder.
     pub fn row_writer(&mut self) -> SourceStreamChunkRowWriter<'_> {
         SourceStreamChunkRowWriter {
             builder: self,
@@ -62,6 +153,60 @@ impl SourceStreamChunkBuilder {
         }
     }
 
+    /// Write a heartbeat record to the builder. The builder will decide whether to finish the
+    /// current chunk or not. Currently it ensures that heartbeats are always in separate chunks.
+    pub fn heartbeat(&mut self, meta: MessageMeta<'_>) {
+        if self.current_chunk_len() > 0 {
+            // If there are records in the chunk, finish it first.
+            // If there's an ongoing transaction, `finish_current_chunk` will handle it properly.
+            // Note this
+            self.finish_current_chunk();
+        }
+
+        _ = self
+            .row_writer()
+            .invisible()
+            .with_meta(meta)
+            .do_insert(|_| Ok(Datum::None));
+        self.finish_current_chunk(); // each heartbeat should be a separate chunk
+    }
+
+    /// Finish and build a [`StreamChunk`] from the current pending records in the builder,
+    /// no matter whether the builder is in a transaction or not, `split_txn` or not. The
+    /// built chunk will be appended to the `ready_chunks` and the builder will be reset.
+    pub fn finish_current_chunk(&mut self) {
+        if self.op_builder.is_empty() {
+            return;
+        }
+
+        let (builders, op_builder, vis_builder) =
+            Self::create_builders(&self.column_descs, self.source_ctrl_ops.chunk_size);
+        let chunk = StreamChunk::with_visibility(
+            std::mem::replace(&mut self.op_builder, op_builder),
+            std::mem::replace(&mut self.builders, builders)
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect(),
+            std::mem::replace(&mut self.vis_builder, vis_builder).finish(),
+        );
+        self.ready_chunks.push(chunk);
+
+        if let Some(ref mut txn) = self.ongoing_txn {
+            tracing::warn!(
+                txn_id = txn.id,
+                len = txn.len,
+                "splitting an ongoing transaction"
+            );
+            txn.len = 0;
+        }
+    }
+
+    /// Consumes and returns the ready [`StreamChunk`]s.
+    pub fn consume_ready_chunks(&mut self) -> impl Iterator<Item = StreamChunk> + '_ {
+        self.ready_chunks.drain(..)
+    }
+
+    // TODO(): remove
     /// Consumes the builder and returns a [`StreamChunk`].
     pub fn finish(self) -> StreamChunk {
         StreamChunk::with_visibility(
@@ -74,21 +219,50 @@ impl SourceStreamChunkBuilder {
         )
     }
 
+    // TODO(): remove
     /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
     /// the builders of the next [`StreamChunk`].
     #[must_use]
     pub fn take_and_reserve(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.descs); // we don't use `descs` in `finish`
+        let descs = std::mem::take(&mut self.column_descs); // we don't use `descs` in `finish`
         let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
         builder.finish()
     }
 
+    // TODO(): remove
     pub fn len(&self) -> usize {
         self.op_builder.len()
     }
 
+    fn current_chunk_len(&self) -> usize {
+        self.op_builder.len()
+    }
+
+    // TODO(): remove
     pub fn is_empty(&self) -> bool {
         self.op_builder.is_empty()
+    }
+
+    /// Commit a newly-written record by appending `op` and `vis` to the corresponding builders.
+    /// This is supposed to be called via the `row_writer` only.
+    fn commit_record(&mut self, op: Op, vis: bool) {
+        self.op_builder.push(op);
+        self.vis_builder.append(vis);
+
+        let curr_chunk_size = self.current_chunk_len();
+        let max_chunk_size = self.source_ctrl_ops.chunk_size;
+
+        if let Some(ref mut txn) = self.ongoing_txn {
+            txn.len += 1;
+
+            if txn.len >= MAX_TRANSACTION_SIZE
+                || (self.source_ctrl_ops.split_txn && curr_chunk_size >= max_chunk_size)
+            {
+                self.finish_current_chunk();
+            }
+        } else if curr_chunk_size >= max_chunk_size {
+            self.finish_current_chunk();
+        }
     }
 }
 
@@ -286,7 +460,7 @@ impl SourceStreamChunkRowWriter<'_> {
         // Columns that changes have been applied to. Used to rollback when an error occurs.
         let mut applied_columns = 0;
 
-        let result = (self.builder.descs.iter())
+        let result = (self.builder.column_descs.iter())
             .zip_eq_fast(self.builder.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
                 wrapped_f(desc).map(|output| {
@@ -299,8 +473,7 @@ impl SourceStreamChunkRowWriter<'_> {
             Ok(_) => {
                 // commit the action by appending `Op`s and visibility
                 for op in A::RECORD_TYPE.ops() {
-                    self.builder.op_builder.push(*op);
-                    self.builder.vis_builder.append(self.visible);
+                    self.builder.commit_record(*op, self.visible);
                 }
 
                 Ok(())

@@ -31,7 +31,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, DatumCow, DatumRef};
+use risingwave_common::types::{DatumCow, DatumRef};
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
 use thiserror_ext::AsReport;
@@ -198,10 +198,6 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
-
-    fn append_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.do_insert(|_column| Ok(Datum::None));
-    }
 }
 
 #[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
@@ -251,10 +247,6 @@ impl<P: ByteStreamSourceParser> P {
     }
 }
 
-/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
-/// committed to avoid potential OOM.
-const MAX_TRANSACTION_SIZE: usize = 4096;
-
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
@@ -263,15 +255,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     msg_stream: BoxSourceStream,
     source_ctrl_ops: SourceCtrlOpts,
 ) {
-    let columns = parser.columns().to_vec();
+    let mut chunk_builder =
+        SourceStreamChunkBuilder::new(parser.columns().to_vec(), source_ctrl_ops);
 
-    let mut chunk_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
-
-    struct Transaction {
-        id: Box<str>,
-        len: usize,
-    }
-    let mut current_transaction = None;
     let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
@@ -296,49 +282,30 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             // heartbeat message. Note that all messages in `batch` should belong to the same
             // split, so we don't have to do a split to heartbeats mapping here.
 
-            if let Some(Transaction { id, len }) = &mut current_transaction {
-                // if there's an ongoing transaction, something may be wrong
-                tracing::warn!(
-                    id,
-                    len,
-                    "got a batch of empty messages during an ongoing transaction"
-                );
-                // for the sake of simplicity, let's force emit the partial transaction chunk
-                if *len > 0 {
-                    *len = 0; // reset `len` while keeping `id`
-                    yield chunk_builder.take_and_reserve(1); // next chunk will only contain the heartbeat
-                }
-            }
-
-            // According to the invariant we mentioned at the beginning of the `for batch` loop,
-            // there should be no data of previous batch in `chunk_builder`.
-            assert!(chunk_builder.is_empty());
-
             let heartbeat_msg = batch.last().unwrap();
             tracing::debug!(
                 offset = heartbeat_msg.offset,
-                "emitting a heartbeat message"
+                "handling a heartbeat message"
             );
-            // TODO(rc): should be `chunk_builder.append_heartbeat` instead, which is simpler
-            parser.append_empty_row(chunk_builder.row_writer().invisible().with_meta(
-                MessageMeta {
-                    meta: &heartbeat_msg.meta,
-                    split_id: &heartbeat_msg.split_id,
-                    offset: &heartbeat_msg.offset,
-                },
-            ));
-            yield chunk_builder.take_and_reserve(batch_len);
+            chunk_builder.heartbeat(MessageMeta {
+                meta: &heartbeat_msg.meta,
+                split_id: &heartbeat_msg.split_id,
+                offset: &heartbeat_msg.offset,
+            });
 
-            continue;
+            for chunk in chunk_builder.consume_ready_chunks() {
+                yield chunk;
+            }
+            continue; // continue to next batch
         }
 
         // When we reach here, there is at least one data message in the batch. We should ignore all
         // heartbeat messages.
 
-        let mut txn_started_in_last_batch = current_transaction.is_some();
+        let mut txn_started_in_last_batch = chunk_builder.is_in_transaction();
         let process_time_ms = chrono::Utc::now().timestamp_millis();
 
-        for (i, msg) in batch.into_iter().enumerate() {
+        for msg in batch.into_iter() {
             if msg.is_cdc_heartbeat() {
                 // ignore heartbeat messages
                 continue;
@@ -359,7 +326,9 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
-            let old_len = chunk_builder.len();
+            // Parse the message and write to the chunk builder, it's possible that the message
+            // contains multiple rows. When the chunk size reached the limit during parsing, the
+            // chunk builder may yield the chunk to `ready_chunks` and start a new chunk.
             match parser
                 .parse_one_with_txn(
                     msg.key,
@@ -375,12 +344,6 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 // It's possible that parsing multiple rows in a single message PARTIALLY failed.
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
-                    // Aggregate the number of new rows into the current transaction.
-                    if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        let n_new_rows = chunk_builder.len() - old_len;
-                        *len += n_new_rows;
-                    }
-
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
@@ -405,27 +368,29 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                             context.fragment_id.to_string(),
                         ]);
                     }
+
+                    for chunk in chunk_builder.consume_ready_chunks() {
+                        yield chunk;
+                    }
                 }
 
                 Ok(ParseResult::TransactionControl(txn_ctl)) => match txn_ctl {
                     TransactionControl::Begin { id } => {
-                        if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                            tracing::warn!(current_id, id, "already in transaction");
-                        }
-                        tracing::debug!(id, "begin upstream transaction");
-                        current_transaction = Some(Transaction { id, len: 0 });
+                        chunk_builder.begin_transaction(id);
                     }
                     TransactionControl::Commit { id } => {
-                        let current_id = current_transaction.as_ref().map(|t| &t.id);
-                        if current_id != Some(&id) {
-                            tracing::warn!(?current_id, id, "transaction id mismatch");
-                        }
-                        tracing::debug!(id, "commit upstream transaction");
-                        current_transaction = None;
+                        chunk_builder.commit_transaction(id);
+                        assert!(!chunk_builder.is_in_transaction());
 
                         if txn_started_in_last_batch {
-                            yield chunk_builder.take_and_reserve(batch_len - (i + 1));
+                            // If a transaction is across multiple batches, we yield the chunk
+                            // immediately after the transaction is committed.
+                            chunk_builder.finish_current_chunk();
                             txn_started_in_last_batch = false;
+                        }
+
+                        for chunk in chunk_builder.consume_ready_chunks() {
+                            yield chunk;
                         }
                     }
                 },
@@ -454,22 +419,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             }
         }
 
-        if let Some(Transaction { len, id }) = &mut current_transaction {
-            // in transaction, check whether it's too large
-            if *len > MAX_TRANSACTION_SIZE {
-                // force commit
-                tracing::warn!(
-                    id,
-                    len,
-                    "transaction is larger than {MAX_TRANSACTION_SIZE} rows, force commit"
-                );
-                *len = 0; // reset `len` while keeping `id`
-                yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
-            }
-            // TODO(rc): we will have better chunk size control later
-        } else if !chunk_builder.is_empty() {
-            // not in transaction, yield the chunk now
-            yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
+        // Finish the remaining records in the batch.
+        if !chunk_builder.is_in_transaction() {
+            chunk_builder.finish_current_chunk();
+        }
+        for chunk in chunk_builder.consume_ready_chunks() {
+            yield chunk;
         }
     }
 }
