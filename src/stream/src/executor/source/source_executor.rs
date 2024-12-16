@@ -499,6 +499,15 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        // Since DDL always accompany with a checkpoint barrier, we can assume that
+        // if initial_dispatch_num != 0, the source state must be initialized.
+        if self.actor_ctx.initial_dispatch_num != 0 {
+            assert!(
+                !is_uninitialized,
+                "is_uninitialized must be false if initial_dispatch_num != 0"
+            );
+        }
+
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
 
@@ -513,6 +522,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Build the source stream reader.
         let (source_chunk_reader, latest_splits) = if is_uninitialized {
+            tracing::info!("source uninitialized, build source stream reader w/o retry.");
             let (source_chunk_reader, latest_splits) = self
                 .build_stream_source_reader(
                     &source_desc,
@@ -531,6 +541,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 latest_splits,
             )
         } else {
+            tracing::info!("source initialized, build source stream reader with retry.");
             // Build the source stream reader with retry during recovery.
             // We only build source stream reader with retry during recovery,
             // because we can rely on the persisted source states to recover the source stream
