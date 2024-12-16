@@ -38,8 +38,8 @@ use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, CompatibleFormatEncode, Expr, FormatEncodeOptions, Ident, ObjectName,
-    OrderByExpr, Query, Select, SelectItem, SetExpr, TableFactor, TableWithJoins, Value,
+    CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
+    TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
 
@@ -238,113 +238,6 @@ pub fn gen_query_from_table_name(from_name: ObjectName) -> Query {
         offset: None,
         fetch: None,
     }
-}
-
-/// `from_name` is the table name,
-/// `pks` is the primary key columns’ `name` and `is_hidden`
-/// `seek_pk_rows` is the seek pk values for the cursor.
-/// So the query like `SELECT *, except(hidden pk) FROM table_name WHERE (pk1,pk2,pk3..) > (seek_pk1,seek_pk2,seek_pk3...) order by pk1,pk2,pk3..`
-pub fn gen_query_from_table_name_order_by(
-    from_name: ObjectName,
-    pks: Vec<(String, bool)>,
-    seek_pk_rows: Option<Vec<Option<Bytes>>>,
-) -> RwResult<Query> {
-    let select_pks = pks
-        .iter()
-        .filter_map(
-            |(name, is_hidden)| {
-                if *is_hidden {
-                    Some(name.clone())
-                } else {
-                    None
-                }
-            },
-        )
-        .collect_vec();
-    let order_pks = pks.iter().map(|(name, _)| name).collect_vec();
-
-    let table_factor = TableFactor::Table {
-        name: from_name,
-        alias: None,
-        as_of: None,
-    };
-    let from = vec![TableWithJoins {
-        relation: table_factor,
-        joins: vec![],
-    }];
-    let mut projection = vec![SelectItem::Wildcard(None)];
-    projection.extend(
-        select_pks.iter().map(|name| {
-            SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked(name.clone())))
-        }),
-    );
-    let selection = if let Some(seek_pk_rows) = seek_pk_rows {
-        let mut pk_rows = vec![];
-        let mut values = vec![];
-        for ((name, _), seek_pk) in pks.iter().zip_eq_fast(seek_pk_rows.iter()) {
-            if let Some(seek_pk) = seek_pk {
-                pk_rows.push(Expr::Identifier(Ident::with_quote_unchecked(
-                    '"',
-                    name.clone(),
-                )));
-                values.push(String::from_utf8(seek_pk.clone().into()).map_err(|e| {
-                    ErrorCode::InternalError(format!(
-                        "Convert cursor seek_pk to string error: {:?}",
-                        e.as_report()
-                    ))
-                })?);
-            }
-        }
-        if pk_rows.is_empty() {
-            None
-        } else if pk_rows.len() == 1 {
-            let left = pk_rows.pop().unwrap();
-            let right = Expr::Value(Value::SingleQuotedString(values.pop().unwrap()));
-            Some(Expr::BinaryOp {
-                left: Box::new(left),
-                op: BinaryOperator::Gt,
-                right: Box::new(right),
-            })
-        } else {
-            let left = Expr::Row(pk_rows);
-            let values = values.join(",");
-            let right = Expr::Value(Value::SingleQuotedString(format!("({})", values)));
-            Some(Expr::BinaryOp {
-                left: Box::new(left),
-                op: BinaryOperator::Gt,
-                right: Box::new(right),
-            })
-        }
-    } else {
-        None
-    };
-
-    let select = Select {
-        projection,
-        from,
-        selection,
-        ..Default::default()
-    };
-    let body = SetExpr::Select(Box::new(select));
-    let order_by = order_pks
-        .into_iter()
-        .map(|pk| {
-            let expr = Expr::Identifier(Ident::with_quote_unchecked('"', pk));
-            OrderByExpr {
-                expr,
-                asc: None,
-                nulls_first: None,
-            }
-        })
-        .collect();
-    Ok(Query {
-        with: None,
-        body,
-        order_by,
-        limit: None,
-        offset: None,
-        fetch: None,
-    })
 }
 
 pub fn convert_unix_millis_to_logstore_u64(unix_millis: u64) -> u64 {

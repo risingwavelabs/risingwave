@@ -34,7 +34,7 @@ use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::SessionImpl;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
@@ -42,17 +42,15 @@ use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
-use crate::handler::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchQueryPlanResult,
-};
+use crate::handler::query::{gen_batch_plan_fragmenter, BatchQueryPlanResult};
 use crate::handler::util::{
-    convert_logstore_u64_to_unix_millis, gen_query_from_table_name_order_by, pg_value_format,
-    to_pg_field, DataChunkToRowSetAdapter, StaticSessionData,
+    convert_logstore_u64_to_unix_millis, pg_value_format, to_pg_field, DataChunkToRowSetAdapter,
+    StaticSessionData,
 };
 use crate::handler::HandlerArgs;
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
-use crate::optimizer::plan_node::{generic, BatchFilter, BatchLogSeqScan};
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::plan_node::{generic, BatchFilter, BatchLogSeqScan, BatchSeqScan};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::utils::Condition;
@@ -645,46 +643,27 @@ impl SubscriptionCursor {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
         let context = OptimizerContext::from_handler_args(handler_args.clone());
-        if let Some(rw_timestamp) = rw_timestamp {
-            let version_id = {
-                let version = session.env.hummock_snapshot_manager.acquire();
-                let version = version.version();
-                if !version
-                    .state_table_info
-                    .info()
-                    .contains_key(dependent_table_id)
-                {
-                    return Err(anyhow!("table id {dependent_table_id} has been dropped").into());
-                }
-                version.id
-            };
-            Self::create_batch_plan_for_cursor(
-                &table_catalog,
-                &session,
-                context.into(),
-                rw_timestamp,
-                rw_timestamp,
-                version_id,
-                seek_pk_row,
-            )
-        } else {
-            let pks = table_catalog.pk();
-            let pks = pks
-                .iter()
-                .map(|f| {
-                    let pk = table_catalog.columns.get(f.column_index).unwrap();
-                    (pk.name().to_owned(), pk.is_hidden)
-                })
-                .collect_vec();
-            let subscription_from_table_name =
-                ObjectName(vec![Ident::from(table_catalog.name.as_ref())]);
-            let query_stmt = Statement::Query(Box::new(gen_query_from_table_name_order_by(
-                subscription_from_table_name,
-                pks,
-                seek_pk_row,
-            )?));
-            gen_batch_plan_by_statement(&session, context.into(), query_stmt)
-        }
+        let version_id = {
+            let version = session.env.hummock_snapshot_manager.acquire();
+            let version = version.version();
+            if !version
+                .state_table_info
+                .info()
+                .contains_key(dependent_table_id)
+            {
+                return Err(anyhow!("table id {dependent_table_id} has been dropped").into());
+            }
+            version.id
+        };
+        Self::create_batch_plan_for_cursor(
+            table_catalog,
+            &session,
+            context.into(),
+            rw_timestamp,
+            rw_timestamp,
+            version_id,
+            seek_pk_row,
+        )
     }
 
     async fn initiate_query(
@@ -818,11 +797,11 @@ impl SubscriptionCursor {
     }
 
     pub fn create_batch_plan_for_cursor(
-        table_catalog: &TableCatalog,
+        table_catalog: Arc<TableCatalog>,
         session: &SessionImpl,
         context: OptimizerContextRef,
-        old_epoch: u64,
-        new_epoch: u64,
+        old_epoch: Option<u64>,
+        new_epoch: Option<u64>,
         version_id: HummockVersionId,
         seek_pk_rows: Option<Vec<Option<Bytes>>>,
     ) -> Result<BatchQueryPlanResult> {
@@ -840,15 +819,6 @@ impl SubscriptionCursor {
             })
             .collect::<Vec<_>>();
         let max_split_range_gap = context.session_ctx().config().max_split_range_gap() as u64;
-        let core = generic::LogScan::new(
-            table_catalog.name.clone(),
-            output_col_idx,
-            Rc::new(table_catalog.table_desc()),
-            context,
-            old_epoch,
-            new_epoch,
-            version_id,
-        );
         let pks = table_catalog.pk();
         let pks = pks
             .iter()
@@ -911,16 +881,45 @@ impl SubscriptionCursor {
             (vec![], None)
         };
 
-        let batch_log_seq_scan = BatchLogSeqScan::new(core, scan);
-        let out_fields = batch_log_seq_scan.core().out_fields();
-        let out_names = batch_log_seq_scan.core().column_names();
+        let (seq_scan, out_fields, out_names) = if old_epoch.is_some() && new_epoch.is_some() {
+            let core = generic::LogScan::new(
+                table_catalog.name.clone(),
+                output_col_idx,
+                Rc::new(table_catalog.table_desc()),
+                context,
+                old_epoch.unwrap(),
+                new_epoch.unwrap(),
+                version_id,
+            );
+            let batch_log_seq_scan = BatchLogSeqScan::new(core, scan);
+            let out_fields = batch_log_seq_scan.core().out_fields();
+            let out_names = batch_log_seq_scan.core().column_names();
+            (batch_log_seq_scan.into(), out_fields, out_names)
+        } else {
+            let core = generic::TableScan::new(
+                table_catalog.name.clone(),
+                output_col_idx,
+                table_catalog.clone(),
+                vec![],
+                context,
+                Condition {
+                    conjunctions: vec![],
+                },
+                None,
+                Cardinality::default(),
+            );
+            let table_scan = BatchSeqScan::new(core, scan, None);
+            let out_fields = table_scan.core().out_fields();
+            let out_names = table_scan.core().column_names();
+            (table_scan.into(), out_fields, out_names)
+        };
 
         let plan = if let Some(predicate) = predicate
             && !predicate.always_true()
         {
-            BatchFilter::new(generic::Filter::new(predicate, batch_log_seq_scan.into())).into()
+            BatchFilter::new(generic::Filter::new(predicate, seq_scan)).into()
         } else {
-            batch_log_seq_scan.into()
+            seq_scan
         };
 
         // order by pk, so don't need to sort
