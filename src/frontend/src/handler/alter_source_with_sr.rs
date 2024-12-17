@@ -30,8 +30,9 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
-use super::alter_table_column::schema_has_schema_registry;
-use super::create_source::{generate_stream_graph_for_source, validate_compatibility};
+use super::create_source::{
+    generate_stream_graph_for_source, schema_has_schema_registry, validate_compatibility,
+};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
@@ -167,7 +168,7 @@ pub async fn refresh_sr_and_get_columns_diff(
         session,
         format_encode,
         Either::Right(&with_properties),
-        CreateSourceType::from_with_properties(session, &with_properties),
+        CreateSourceType::for_replace(original_source),
     )
     .await?
     else {

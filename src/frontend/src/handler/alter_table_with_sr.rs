@@ -21,7 +21,8 @@ use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
 use super::alter_source_with_sr::alter_definition_format_encode;
-use super::alter_table_column::{fetch_table_catalog_for_alter, schema_has_schema_registry};
+use super::alter_table_column::fetch_table_catalog_for_alter;
+use super::create_source::schema_has_schema_registry;
 use super::util::SourceSchemaCompatExt;
 use super::{get_replace_table_plan, HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
