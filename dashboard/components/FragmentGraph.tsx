@@ -263,12 +263,18 @@ export default function FragmentGraph({
           .attr("stroke", ({ id }) =>
             isSelected(id) ? theme.colors.blue[500] : theme.colors.gray[500]
           )
+
+        const getTooltipContent = (id: string) => {
+          const fragmentId = parseInt(id)
+          const stats = fragmentStats?.[fragmentId]
+          const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+          const epoch = stats?.currentEpoch ?? "N/A"
+          
+          return `<b>Fragment ${fragmentId}</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+        }
+
+        boundingBox
           .on("mouseover", (event, { id, actorIds }) => {
-            const fragmentId = parseInt(id)
-            const stats = fragmentStats?.[fragmentId]
-            const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
-            const epoch = stats?.currentEpoch ?? "N/A"
-            
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
             
@@ -285,7 +291,7 @@ export default function FragmentGraph({
               .style("left", event.pageX + 10 + "px")
               .style("top", event.pageY + 10 + "px")
               .style("font-size", "12px")
-              .html(`#Actors: ${actorIds.length}<br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`)
+              .html(getTooltipContent(id))
           })
           .on("mousemove", (event) => {
             d3.select(".tooltip")

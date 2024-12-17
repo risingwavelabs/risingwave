@@ -69,7 +69,7 @@ export default function RelationGraph({
   selectedId: string | undefined
   setSelectedId: (id: string) => void
   backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
-  relationStats: { [relationId: number]: RelationStats }
+  relationStats: { [relationId: number]: RelationStats } | undefined
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
 
@@ -246,12 +246,18 @@ export default function RelationGraph({
         .attr("font-weight", "bold")
 
       // Tooltip
-      g.on("mouseover", (event, { relation, id }) => {
+      const getTooltipContent = (relation: Relation, id: string) => {
         const relationId = parseInt(id)
         const stats = relationStats?.[relationId]
-        const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+        const latencySeconds = stats 
+          ? ((Date.now() - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) 
+          : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
         
+        return `<b>${relation.name} (${relationTypeTitleCase(relation)})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+      }
+
+      g.on("mouseover", (event, { relation, id }) => {
         // Remove existing tooltip if any
         d3.selectAll(".tooltip").remove()
         
@@ -268,7 +274,7 @@ export default function RelationGraph({
           .style("left", event.pageX + 10 + "px")
           .style("top", event.pageY + 10 + "px")
           .style("font-size", "12px")
-          .html(`<b>${relation.name} (${relationTypeTitleCase(relation)})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`)
+          .html(getTooltipContent(relation, id))
       })
       .on("mousemove", (event) => {
         d3.select(".tooltip")
@@ -300,7 +306,7 @@ export default function RelationGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures])
+  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures, relationStats])
 
   return (
     <>
