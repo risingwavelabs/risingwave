@@ -20,6 +20,7 @@ use futures::TryStreamExt;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
@@ -123,12 +124,17 @@ impl DmlExecutor {
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, reader);
+        let mut stream =
+            StreamReaderWithPause::<false, (TxnMsg, Option<oneshot::Sender<Epoch>>)>::new(
+                upstream, reader,
+            );
 
         // If the first barrier requires us to pause on startup, pause the stream.
         if barrier.is_pause_on_startup() {
             stream.pause_stream();
         }
+
+        let mut epoch = barrier.get_curr_epoch();
 
         yield Message::Barrier(barrier);
 
@@ -150,6 +156,7 @@ impl DmlExecutor {
                 Either::Left(msg) => {
                     // Stream messages.
                     if let Message::Barrier(barrier) = &msg {
+                        epoch = barrier.get_curr_epoch();
                         // We should handle barrier messages here to pause or resume the data from
                         // DML.
                         if let Some(mutation) = barrier.mutation.as_deref() {
@@ -195,7 +202,7 @@ impl DmlExecutor {
                     }
                     yield msg;
                 }
-                Either::Right(txn_msg) => {
+                Either::Right((txn_msg, epoch_notifier)) => {
                     // Batch data.
                     match txn_msg {
                         TxnMsg::Begin(txn_id) => {
@@ -206,6 +213,9 @@ impl DmlExecutor {
                                 });
                         }
                         TxnMsg::End(txn_id) => {
+                            if let Some(sender) = epoch_notifier {
+                                let _ = sender.send(epoch);
+                            }
                             let mut txn_buffer = active_txn_map.remove(&txn_id)
                                 .unwrap_or_else(|| panic!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
 
@@ -304,30 +314,31 @@ impl Execute for DmlExecutor {
     }
 }
 
-type BoxTxnMessageStream = BoxStream<'static, risingwave_dml::error::Result<TxnMsg>>;
-#[try_stream(ok = TxnMsg, error = risingwave_dml::error::DmlError)]
+type BoxTxnMessageStream =
+    BoxStream<'static, risingwave_dml::error::Result<(TxnMsg, Option<oneshot::Sender<Epoch>>)>>;
+#[try_stream(ok = (TxnMsg, Option<oneshot::Sender<Epoch>>), error = risingwave_dml::error::DmlError)]
 async fn apply_dml_rate_limit(
     stream: BoxTxnMessageStream,
     rate_limiter: Arc<MonitoredRateLimiter>,
 ) {
     #[for_await]
     for txn_msg in stream {
-        let txn_msg = txn_msg?;
+        let (txn_msg, epoch_notifier) = txn_msg?;
         match txn_msg {
             TxnMsg::Begin(txn_id) => {
-                yield TxnMsg::Begin(txn_id);
+                yield (TxnMsg::Begin(txn_id), epoch_notifier);
             }
             TxnMsg::End(txn_id) => {
-                yield TxnMsg::End(txn_id);
+                yield (TxnMsg::End(txn_id), epoch_notifier);
             }
             TxnMsg::Rollback(txn_id) => {
-                yield TxnMsg::Rollback(txn_id);
+                yield (TxnMsg::Rollback(txn_id), epoch_notifier);
             }
             TxnMsg::Data(txn_id, chunk) => {
                 let chunk_size = chunk.capacity();
                 if chunk_size == 0 {
                     // empty chunk
-                    yield TxnMsg::Data(txn_id, chunk);
+                    yield (TxnMsg::Data(txn_id, chunk), None);
                     continue;
                 }
 

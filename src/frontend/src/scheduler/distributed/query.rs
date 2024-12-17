@@ -232,6 +232,11 @@ impl QueryExecution {
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
     ) -> HashMap<StageId, Arc<StageExecution>> {
+        // println!(
+        //     "WKXLOG self.query.stage_graph.stages.len(): {}, self.query.stage_graph.stages: {:?}",
+        //     self.query.stage_graph.stages.len(),
+        //     self.query.stage_graph.stages
+        // );
         let mut stage_executions: HashMap<StageId, Arc<StageExecution>> =
             HashMap::with_capacity(self.query.stage_graph.stages.len());
 

@@ -570,6 +570,7 @@ impl Debug for QueryStage {
             .field("parallelism", &self.parallelism)
             .field("exchange_info", &self.exchange_info)
             .field("has_table_scan", &self.has_table_scan())
+            .field("stages", &self.root)
             .finish()
     }
 }
