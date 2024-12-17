@@ -274,7 +274,7 @@ export default function FragmentGraph({
         }
 
         boundingBox
-          .on("mouseover", (event, { id, actorIds }) => {
+          .on("mouseover", (event, { id }) => {
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
             
@@ -458,24 +458,39 @@ export default function FragmentGraph({
           .attr("stroke-width", width)
           .attr("stroke", color)
 
-        // Tooltip for back pressure rate
-        let title = gSel.select<SVGTitleElement>("title")
-        if (title.empty()) {
-          title = gSel.append<SVGTitleElement>("title")
-        }
-
-        const text = (d: Edge) => {
-          if (backPressures) {
-            let value = backPressures.get(`${d.target}_${d.source}`)
-            if (value) {
-              return `${value.toFixed(2)}%`
+        path
+          .on("mouseover", (event, d) => {
+            // Remove existing tooltip if any
+            d3.selectAll(".tooltip").remove()
+            
+            if (backPressures) {
+              const value = backPressures.get(`${d.target}_${d.source}`)
+              if (value) {
+                // Create new tooltip
+                d3.select("body")
+                  .append("div")
+                  .attr("class", "tooltip") 
+                  .style("position", "absolute")
+                  .style("background", "white")
+                  .style("padding", "10px")
+                  .style("border", "1px solid #ddd")
+                  .style("border-radius", "4px")
+                  .style("pointer-events", "none")
+                  .style("left", event.pageX + 10 + "px")
+                  .style("top", event.pageY + 10 + "px")
+                  .style("font-size", "12px")
+                  .html(`BP: ${value.toFixed(2)}%`)
+              }
             }
-          }
-
-          return ""
-        }
-
-        title.text(text)
+          })
+          .on("mousemove", (event) => {
+            d3.select(".tooltip")
+              .style("left", event.pageX + 10 + "px")
+              .style("top", event.pageY + 10 + "px")
+          })
+          .on("mouseout", () => {
+            d3.selectAll(".tooltip").remove()
+          })
 
         return gSel
       }

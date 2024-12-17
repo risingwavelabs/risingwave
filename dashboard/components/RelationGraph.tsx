@@ -154,24 +154,39 @@ export default function RelationGraph({
           isSelected(d.source) || isSelected(d.target) ? 1 : 0.5
         )
 
-      // Tooltip for back pressure rate
-      let title = sel.select<SVGTitleElement>("title")
-      if (title.empty()) {
-        title = sel.append<SVGTitleElement>("title")
-      }
-
-      const text = (d: Edge) => {
-        if (backPressures) {
-          let value = backPressures.get(`${d.target}_${d.source}`)
-          if (value) {
-            return `${value.toFixed(2)}%`
+      sel
+        .on("mouseover", (event, d) => {
+          // Remove existing tooltip if any
+          d3.selectAll(".tooltip").remove()
+          
+          if (backPressures) {
+            const value = backPressures.get(`${d.target}_${d.source}`)
+            if (value) {
+              // Create new tooltip
+              d3.select("body")
+                .append("div")
+                .attr("class", "tooltip")
+                .style("position", "absolute") 
+                .style("background", "white")
+                .style("padding", "10px")
+                .style("border", "1px solid #ddd")
+                .style("border-radius", "4px")
+                .style("pointer-events", "none")
+                .style("left", event.pageX + 10 + "px")
+                .style("top", event.pageY + 10 + "px")
+                .style("font-size", "12px")
+                .html(`BP: ${value.toFixed(2)}%`)
+            }
           }
-        }
-
-        return ""
-      }
-
-      title.text(text)
+        })
+        .on("mousemove", (event) => {
+          d3.select(".tooltip")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+        })
+        .on("mouseout", () => {
+          d3.selectAll(".tooltip").remove()
+        })
 
       return sel
     }
