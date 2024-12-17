@@ -1006,9 +1006,9 @@ fn visit_secret_ref_mut(stream_node: &mut PbStreamNode, secret_rewrite: &HashMap
         PbNodeBody::Sink(node) => {
             if let Some(desc) = &mut node.sink_desc {
                 visit_map_secret_refs(&mut desc.secret_refs);
-                desc.format_desc
-                    .as_mut()
-                    .map(|desc| visit_map_secret_refs(&mut desc.secret_refs));
+                if let Some(desc) = &mut desc.format_desc {
+                    visit_map_secret_refs(&mut desc.secret_refs)
+                }
             }
         }
         PbNodeBody::StreamFsFetch(node) => {
@@ -1018,11 +1018,10 @@ fn visit_secret_ref_mut(stream_node: &mut PbStreamNode, secret_rewrite: &HashMap
             }
         }
         PbNodeBody::StreamCdcScan(node) => {
-            node.cdc_table_desc
-                .as_mut()
-                .map(|desc| visit_map_secret_refs(&mut desc.secret_refs));
+            if let Some(desc) = &mut node.cdc_table_desc {
+                visit_map_secret_refs(&mut desc.secret_refs)
+            }
         }
-        PbNodeBody::CdcFilter(_) => {}
         PbNodeBody::SourceBackfill(node) => {
             visit_map_secret_refs(&mut node.secret_refs);
             node.info.as_mut().map(visit_info);
