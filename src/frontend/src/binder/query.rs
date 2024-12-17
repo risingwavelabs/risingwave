@@ -175,7 +175,7 @@ impl Binder {
                 with_ties = fetch_with_ties;
                 match quantity {
                     Some(v) => Some(v),
-                    None => Some(Expr::Value(Value::Number("1".to_string()))),
+                    None => Some(Expr::Value(Value::Number("1".to_owned()))),
                 }
             }
             (Some(limit), None) => Some(limit),

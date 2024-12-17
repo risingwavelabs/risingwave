@@ -207,7 +207,7 @@ fn parse_simple_select() {
     assert_eq!(3, select.projection.len());
     let select = verified_query(sql);
     assert_eq!(
-        Some(Expr::Value(Value::Number("5".to_string()))),
+        Some(Expr::Value(Value::Number("5".to_owned()))),
         select.limit
     );
 }
@@ -216,10 +216,10 @@ fn parse_simple_select() {
 fn parse_limit_is_not_an_alias() {
     // In dialects supporting LIMIT it shouldn't be parsed as a table alias
     let ast = verified_query("SELECT id FROM customer LIMIT 1");
-    assert_eq!(Some(Expr::Value(Value::Number("1".to_string()))), ast.limit);
+    assert_eq!(Some(Expr::Value(Value::Number("1".to_owned()))), ast.limit);
 
     let ast = verified_query("SELECT 1 LIMIT 5");
-    assert_eq!(Some(Expr::Value(Value::Number("5".to_string()))), ast.limit);
+    assert_eq!(Some(Expr::Value(Value::Number("5".to_owned()))), ast.limit);
 }
 
 #[test]
@@ -1072,7 +1072,7 @@ fn parse_select_order_by_limit() {
         select.order_by
     );
     assert_eq!(
-        Some(Expr::Value(Value::Number("2".to_string()))),
+        Some(Expr::Value(Value::Number("2".to_owned()))),
         select.limit
     );
 }
@@ -1098,7 +1098,7 @@ fn parse_select_order_by_nulls_order() {
         select.order_by
     );
     assert_eq!(
-        Some(Expr::Value(Value::Number("2".to_string()))),
+        Some(Expr::Value(Value::Number("2".to_owned()))),
         select.limit
     );
 }
@@ -3551,7 +3551,7 @@ fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
 
-        quantity: Some(Expr::Value(Value::Number("2".to_string()))),
+        quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3576,7 +3576,7 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            quantity: Some(Expr::Value(Value::Number("2".to_string()))),
+            quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
         })
     );
     let ast = verified_query(
