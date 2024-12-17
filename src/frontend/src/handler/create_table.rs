@@ -87,10 +87,10 @@ use crate::{Binder, TableCatalog, WithOptions};
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
 pub struct ColumnIdGenerator {
-    /// Existing column names and their IDs.
+    /// Existing column names and their IDs and data types.
     ///
     /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
-    /// exists, its ID is reused. Otherwise, a new ID is generated.
+    /// exists and the data type matches, its ID is reused. Otherwise, a new ID is generated.
     ///
     /// For a new table, this is empty.
     pub existing: HashMap<String, (ColumnId, DataType)>,
@@ -143,6 +143,8 @@ impl ColumnIdGenerator {
             // Intentionally not using `datatype_equals` here because we want nested types to be
             // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
             // of generated columns or downstream jobs.
+            // TODO: support compatible changes on types, typically for `STRUCT` types.
+            //       https://github.com/risingwavelabs/risingwave/issues/19755
             if original_type == field.data_type() {
                 return *id;
             } else {

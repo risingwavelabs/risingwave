@@ -97,7 +97,8 @@ impl From<&PbColumnDesc> for Field {
     }
 }
 
-#[auto_impl::auto_impl(&, &mut)]
+/// Something that has a data type and a name.
+#[auto_impl::auto_impl(&)]
 pub trait FieldLike {
     fn data_type(&self) -> &DataType;
     fn name(&self) -> &str;
