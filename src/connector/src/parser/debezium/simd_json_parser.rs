@@ -107,6 +107,7 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveTime};
+    use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
@@ -120,7 +121,7 @@ mod tests {
         DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties, ProtocolProperties,
         SourceColumnDesc, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceContext;
+    use crate::source::{SourceContext, SourceCtrlOpts};
 
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
@@ -153,15 +154,13 @@ mod tests {
         columns: Vec<SourceColumnDesc>,
         payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-        {
-            let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
-        }
-        let chunk = builder.finish();
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+        parser
+            .parse_inner(None, Some(payload), builder.row_writer())
+            .await
+            .unwrap();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         chunk
             .rows()
             .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
@@ -509,7 +508,8 @@ mod tests {
             ];
             let mut parser = build_parser(columns.clone()).await;
 
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
+            let mut dummy_builder =
+                SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
             let normal_values = ["111", "1", "33", "444", "555.0", "666.0"];
             let overflow_values = [
@@ -530,7 +530,7 @@ mod tests {
                 ).as_bytes().to_vec();
 
                 let res = parser
-                    .parse_inner(None, Some(data), builder.row_writer())
+                    .parse_inner(None, Some(data), dummy_builder.row_writer())
                     .await;
                 if i < 5 {
                     // For other overflow, the parsing succeeds but the type conversion fails

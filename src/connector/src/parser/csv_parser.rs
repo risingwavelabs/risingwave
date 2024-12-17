@@ -175,12 +175,15 @@ impl ByteStreamSourceParser for CsvParser {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ToOwnedDatum};
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::source::SourceCtrlOpts;
+
     #[tokio::test]
     async fn test_csv_without_headers() {
         let data = vec![
@@ -204,14 +207,15 @@ mod tests {
             SourceContext::dummy().into(),
         )
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
         for item in data {
             parser
                 .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await
                 .unwrap();
         }
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();
@@ -311,13 +315,14 @@ mod tests {
             SourceContext::dummy().into(),
         )
         .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
         for item in data {
             let _ = parser
                 .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await;
         }
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();

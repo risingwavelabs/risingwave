@@ -136,6 +136,7 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;
@@ -144,6 +145,7 @@ mod tests {
     use super::*;
     use crate::parser::unified::debezium::extract_bson_id;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::source::SourceCtrlOpts;
     #[test]
     fn test_parse_bson_value_id_int() {
         let data = r#"{"_id":{"$numberInt":"2345"}}"#;
@@ -183,13 +185,14 @@ mod tests {
         ];
         let mut parser =
             DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into()).unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
-        let writer = builder.row_writer();
+        let mut builder =
+            SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
         parser
-            .parse_inner(Some(key), Some(payload), writer)
+            .parse_inner(Some(key), Some(payload), builder.row_writer())
             .await
             .unwrap();
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
 
         let (op, row) = rows.next().unwrap();
@@ -221,11 +224,15 @@ mod tests {
                 DebeziumMongoJsonParser::new(columns.clone(), SourceContext::dummy().into())
                     .unwrap();
 
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 3);
+            let mut builder =
+                SourceStreamChunkBuilder::new(columns.clone(), SourceCtrlOpts::for_test());
 
-            let writer = builder.row_writer();
-            parser.parse_inner(None, Some(data), writer).await.unwrap();
-            let chunk = builder.finish();
+            parser
+                .parse_inner(None, Some(data), builder.row_writer())
+                .await
+                .unwrap();
+            builder.finish_current_chunk();
+            let chunk = builder.consume_ready_chunks().next().unwrap();
             let mut rows = chunk.rows();
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);

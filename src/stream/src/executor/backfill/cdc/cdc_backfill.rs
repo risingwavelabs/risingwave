@@ -22,14 +22,12 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::row::RowExt;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
     ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig,
 };
 use risingwave_connector::source::cdc::external::{CdcOffset, ExternalTableReaderImpl};
-use risingwave_connector::source::{SourceColumnDesc, SourceContext};
+use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
@@ -822,24 +820,31 @@ async fn parse_debezium_chunk(
     parser: &mut DebeziumParser,
     chunk: &StreamChunk,
 ) -> StreamExecutorResult<StreamChunk> {
-    // here we transform the input chunk in (payload varchar, _rw_offset varchar, _rw_table_name varchar) schema
+    // here we transform the input chunk in `(payload varchar, _rw_offset varchar, _rw_table_name varchar)` schema
     // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
     // table job with `_rw_offset` in the end
     // see `gen_create_table_plan_for_cdc_source` for details
-    let mut builder =
-        SourceStreamChunkBuilder::with_capacity(parser.columns().to_vec(), chunk.capacity());
 
-    // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)
+    // use `SourceStreamChunkBuilder` for convenience
+    let mut builder = SourceStreamChunkBuilder::new(
+        parser.columns().to_vec(),
+        SourceCtrlOpts {
+            chunk_size: chunk.capacity(),
+            split_txn: false,
+        },
+    );
+
+    // The schema of input chunk `(payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)`
     // We should use the debezium parser to parse the first column,
     // then chain the parsed row with `_rw_offset` row to get a new row.
-    let payloads = chunk.data_chunk().project(vec![0].as_slice());
-    let offset_columns = chunk.data_chunk().project(vec![1].as_slice());
+    let payloads = chunk.data_chunk().project(&[0]);
+    let offsets = chunk.data_chunk().project(&[1]).compact();
 
     // TODO: preserve the transaction semantics
     for payload in payloads.rows() {
         let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
         else {
-            unreachable!("payload must be jsonb");
+            panic!("payload must be jsonb");
         };
 
         parser
@@ -851,31 +856,23 @@ async fn parse_debezium_chunk(
             .await
             .unwrap();
     }
+    builder.finish_current_chunk();
 
-    let parsed_chunk = builder.finish();
-    let (data_chunk, ops) = parsed_chunk.into_parts();
+    let parsed_chunk = {
+        let mut iter = builder.consume_ready_chunks();
+        assert_eq!(1, iter.len());
+        iter.next().unwrap()
+    };
+    assert_eq!(parsed_chunk.capacity(), chunk.capacity()); // each payload is expected to generate one row
+    let (ops, mut columns, vis) = parsed_chunk.into_inner();
+    // note that `vis` is not necessarily the same as the original chunk's visibilities
 
-    // concat the rows in the parsed chunk with the _rw_offset column, we should also retain the Op column
-    let mut new_rows = Vec::with_capacity(chunk.capacity());
-    let offset_columns = offset_columns.compact();
-    for (data_row, offset_row) in data_chunk
-        .rows_with_holes()
-        .zip_eq_fast(offset_columns.rows_with_holes())
-    {
-        let combined = data_row.chain(offset_row);
-        new_rows.push(combined);
-    }
-
-    let data_types = parser
-        .columns()
-        .iter()
-        .map(|col| col.data_type.clone())
-        .chain(std::iter::once(DataType::Varchar)) // _rw_offset column
-        .collect_vec();
+    // concat the rows in the parsed chunk with the `_rw_offset` column
+    columns.extend(offsets.into_parts().0);
 
     Ok(StreamChunk::from_parts(
         ops,
-        DataChunk::from_rows(new_rows.as_slice(), data_types.as_slice()),
+        DataChunk::from_parts(columns.into(), vis),
     ))
 }
 

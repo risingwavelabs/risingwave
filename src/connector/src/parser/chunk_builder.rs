@@ -54,27 +54,6 @@ pub struct SourceStreamChunkBuilder {
 }
 
 impl SourceStreamChunkBuilder {
-    // TODO(): remove
-    pub fn with_capacity(column_descs: Vec<SourceColumnDesc>, cap: usize) -> Self {
-        let builders = column_descs
-            .iter()
-            .map(|desc| desc.data_type.create_array_builder(cap))
-            .collect();
-
-        Self {
-            column_descs,
-            source_ctrl_ops: SourceCtrlOpts {
-                chunk_size: 256,
-                split_txn: false,
-            },
-            builders,
-            op_builder: Vec::with_capacity(cap),
-            vis_builder: BitmapBuilder::with_capacity(cap),
-            ongoing_txn: None,
-            ready_chunks: SmallVec::new(),
-        }
-    }
-
     pub fn new(column_descs: Vec<SourceColumnDesc>, source_ctrl_ops: SourceCtrlOpts) -> Self {
         let (builders, op_builder, vis_builder) =
             Self::create_builders(&column_descs, source_ctrl_ops.chunk_size);
@@ -202,45 +181,12 @@ impl SourceStreamChunkBuilder {
     }
 
     /// Consumes and returns the ready [`StreamChunk`]s.
-    pub fn consume_ready_chunks(&mut self) -> impl Iterator<Item = StreamChunk> + '_ {
+    pub fn consume_ready_chunks(&mut self) -> impl ExactSizeIterator<Item = StreamChunk> + '_ {
         self.ready_chunks.drain(..)
-    }
-
-    // TODO(): remove
-    /// Consumes the builder and returns a [`StreamChunk`].
-    pub fn finish(self) -> StreamChunk {
-        StreamChunk::with_visibility(
-            self.op_builder,
-            self.builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect(),
-            self.vis_builder.finish(),
-        )
-    }
-
-    // TODO(): remove
-    /// Resets the builder and returns a [`StreamChunk`], while reserving `next_cap` capacity for
-    /// the builders of the next [`StreamChunk`].
-    #[must_use]
-    pub fn take_and_reserve(&mut self, next_cap: usize) -> StreamChunk {
-        let descs = std::mem::take(&mut self.column_descs); // we don't use `descs` in `finish`
-        let builder = std::mem::replace(self, Self::with_capacity(descs, next_cap));
-        builder.finish()
-    }
-
-    // TODO(): remove
-    pub fn len(&self) -> usize {
-        self.op_builder.len()
     }
 
     fn current_chunk_len(&self) -> usize {
         self.op_builder.len()
-    }
-
-    // TODO(): remove
-    pub fn is_empty(&self) -> bool {
-        self.op_builder.is_empty()
     }
 
     /// Commit a newly-written record by appending `op` and `vis` to the corresponding builders.

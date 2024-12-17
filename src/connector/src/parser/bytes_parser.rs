@@ -45,6 +45,7 @@ impl BytesAccessBuilder {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
@@ -54,7 +55,7 @@ mod tests {
         BytesProperties, EncodingProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceContext;
+    use crate::source::{SourceContext, SourceCtrlOpts};
 
     fn get_payload() -> Vec<Vec<u8>> {
         vec![br#"t"#.to_vec(), br#"random"#.to_vec()]
@@ -70,7 +71,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
 
         for payload in get_payload() {
             let writer = builder.row_writer();
@@ -80,7 +81,8 @@ mod tests {
                 .unwrap();
         }
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let mut rows = chunk.rows();
         {
             let (op, row) = rows.next().unwrap();

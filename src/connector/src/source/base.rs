@@ -154,6 +154,16 @@ pub struct SourceCtrlOpts {
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
 
+impl SourceCtrlOpts {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        SourceCtrlOpts {
+            chunk_size: 256,
+            split_txn: false,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SourceEnumeratorContext {
     pub info: SourceEnumeratorInfo,

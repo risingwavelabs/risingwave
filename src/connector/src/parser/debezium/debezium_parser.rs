@@ -208,6 +208,7 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, CDC_SOURCE_COLUMN_NUM};
     use risingwave_common::row::Row;
     use risingwave_common::types::Timestamptz;
@@ -217,7 +218,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{JsonProperties, SourceStreamChunkBuilder, TransactionControl};
-    use crate::source::{ConnectorProperties, DataType};
+    use crate::source::{ConnectorProperties, DataType, SourceCtrlOpts};
 
     #[tokio::test]
     async fn test_parse_transaction_metadata() {
@@ -249,7 +250,7 @@ mod tests {
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
             .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+        let mut dummy_builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         // "id":"35352:3962948040" Postgres transaction ID itself and LSN of given operation separated by colon, i.e. the format is txID:LSN
         let begin_msg = r#"{"schema":null,"payload":{"status":"BEGIN","id":"35352:3962948040","event_count":null,"data_collections":null,"ts_ms":1704269323180}}"#;
@@ -258,7 +259,7 @@ mod tests {
             .parse_one_with_txn(
                 None,
                 Some(begin_msg.as_bytes().to_vec()),
-                builder.row_writer(),
+                dummy_builder.row_writer(),
             )
             .await;
         match res {
@@ -271,7 +272,7 @@ mod tests {
             .parse_one_with_txn(
                 None,
                 Some(commit_msg.as_bytes().to_vec()),
-                builder.row_writer(),
+                dummy_builder.row_writer(),
             )
             .await;
         match res {
@@ -321,7 +322,7 @@ mod tests {
         let mut parser = DebeziumParser::new(props, columns.clone(), Arc::new(source_ctx))
             .await
             .unwrap();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
 
         let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "c", "ts_ms": 1695277757017, "transaction": null } }"#;
 
@@ -334,7 +335,8 @@ mod tests {
             .await;
         match res {
             Ok(ParseResult::Rows) => {
-                let chunk = builder.finish();
+                builder.finish_current_chunk();
+                let chunk = builder.consume_ready_chunks().next().unwrap();
                 for (_, row) in chunk.rows() {
                     let commit_ts = row.datum_at(5).unwrap().into_timestamptz();
                     assert_eq!(commit_ts, Timestamptz::from_millis(1695277757000).unwrap());
