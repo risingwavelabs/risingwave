@@ -305,7 +305,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
         let mut txn_started_in_last_batch = chunk_builder.is_in_transaction();
         let process_time_ms = chrono::Utc::now().timestamp_millis();
 
-        for msg in batch.into_iter() {
+        for msg in batch {
             if msg.is_cdc_heartbeat() {
                 // ignore heartbeat messages
                 continue;

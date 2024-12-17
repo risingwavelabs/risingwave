@@ -136,7 +136,6 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::Row;

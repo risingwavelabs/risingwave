@@ -107,7 +107,6 @@ impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, NaiveTime};
-    use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};

@@ -208,7 +208,6 @@ mod tests {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, CDC_SOURCE_COLUMN_NUM};
     use risingwave_common::row::Row;
     use risingwave_common::types::Timestamptz;

@@ -45,7 +45,6 @@ impl BytesAccessBuilder {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
