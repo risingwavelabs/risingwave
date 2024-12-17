@@ -30,7 +30,7 @@ pub struct Query {
     /// ORDER BY
     pub order_by: Vec<OrderByExpr>,
     /// `LIMIT { <N> | ALL }`
-    pub limit: Option<String>,
+    pub limit: Option<Expr>,
     /// `OFFSET <N> [ { ROW | ROWS } ]`
     ///
     /// `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
@@ -655,7 +655,7 @@ impl fmt::Display for OrderByExpr {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fetch {
     pub with_ties: bool,
-    pub quantity: Option<String>,
+    pub quantity: Option<Expr>,
 }
 
 impl fmt::Display for Fetch {
