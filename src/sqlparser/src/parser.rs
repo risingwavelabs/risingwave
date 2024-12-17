@@ -5333,16 +5333,12 @@ impl Parser<'_> {
     }
 
     /// Parse a LIMIT clause
-    pub fn parse_limit(&mut self) -> PResult<Option<String>> {
+    pub fn parse_limit(&mut self) -> PResult<Option<Expr>> {
         if self.parse_keyword(Keyword::ALL) {
             Ok(None)
         } else {
-            let number = self.parse_number_value()?;
-            // TODO(Kexiang): support LIMIT expr
-            if self.consume_token(&Token::DoubleColon) {
-                self.expect_keyword(Keyword::BIGINT)?
-            }
-            Ok(Some(number))
+            let expr = self.parse_expr()?;
+            Ok(Some(expr))
         }
     }
 
@@ -5366,7 +5362,7 @@ impl Parser<'_> {
         {
             None
         } else {
-            let quantity = self.parse_number_value()?;
+            let quantity = self.parse_expr()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
             Some(quantity)
         };

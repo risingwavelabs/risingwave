@@ -38,7 +38,7 @@ use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<ColumnOrder>,
-    pub limit: Option<u64>,
+    pub limit: Option<ExprImpl>,
     pub offset: Option<u64>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
@@ -174,13 +174,15 @@ impl Binder {
             ) => {
                 with_ties = fetch_with_ties;
                 match quantity {
-                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
-                    None => Some(1),
+                    Some(v) => Some(v),
+                    None => Some(Expr::Value(Value::Number("1".to_string()))),
                 }
             }
-            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
+            (Some(limit), None) => Some(limit),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
+        let limit = limit.map(|expr| self.bind_expr(expr)).transpose()?;
+
         let offset = offset
             .map(|s| parse_non_negative_i64("OFFSET", &s))
             .transpose()?
