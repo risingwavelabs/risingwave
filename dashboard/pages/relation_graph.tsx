@@ -141,7 +141,7 @@ export default function StreamingGraph() {
       toggleResetEmbeddedBackPressures()
     }
     if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
+      function refresh() {
         fetchEmbeddedBackPressure().then(
           (response) => {
             let newBP = response.backPressureInfos
@@ -172,7 +172,9 @@ export default function StreamingGraph() {
             toast(e, "error")
           }
         )
-      }, INTERVAL_MS)
+      }
+      refresh()
+      const interval = setInterval(refresh, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }

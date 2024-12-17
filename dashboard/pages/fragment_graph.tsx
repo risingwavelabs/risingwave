@@ -334,7 +334,7 @@ export default function Streaming() {
 
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
+      function refresh() {
         fetchEmbeddedBackPressure().then(
           (response) => {
             console.log(response)
@@ -366,7 +366,9 @@ export default function Streaming() {
             toast(e, "error")
           }
         )
-      }, INTERVAL_MS)
+      }
+      refresh()
+      const interval = setInterval(refresh, INTERVAL_MS)
       return () => {
         clearInterval(interval)
       }
