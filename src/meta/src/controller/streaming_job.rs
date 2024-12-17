@@ -73,7 +73,7 @@ use crate::controller::utils::{
 use crate::controller::ObjectModel;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
-use crate::stream::SplitAssignment;
+use crate::stream::{JobReschedulePostUpdates, SplitAssignment};
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
@@ -1563,10 +1563,7 @@ impl CatalogController {
     pub async fn post_apply_reschedules(
         &self,
         reschedules: HashMap<FragmentId, Reschedule>,
-        table_parallelism_assignment: HashMap<
-            risingwave_common::catalog::TableId,
-            TableParallelism,
-        >,
+        post_updates: &JobReschedulePostUpdates,
     ) -> MetaResult<()> {
         fn update_actors(
             actors: &mut Vec<ActorId>,
@@ -1863,7 +1860,12 @@ impl CatalogController {
             }
         }
 
-        for (table_id, parallelism) in table_parallelism_assignment {
+        let JobReschedulePostUpdates {
+            parallelism_updates,
+            resource_group_updates,
+        } = post_updates;
+
+        for (table_id, parallelism) in parallelism_updates {
             let mut streaming_job = StreamingJobModel::find_by_id(table_id.table_id() as ObjectId)
                 .one(&txn)
                 .await?
@@ -1872,9 +1874,15 @@ impl CatalogController {
 
             streaming_job.parallelism = Set(match parallelism {
                 TableParallelism::Adaptive => StreamingParallelism::Adaptive,
-                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(n as _),
+                TableParallelism::Fixed(n) => StreamingParallelism::Fixed(*n as _),
                 TableParallelism::Custom => StreamingParallelism::Custom,
             });
+
+            if let Some(resource_group) =
+                resource_group_updates.get(&(table_id.table_id() as ObjectId))
+            {
+                streaming_job.specific_resource_group = Set(resource_group.to_owned());
+            }
 
             streaming_job.update(&txn).await?;
         }
