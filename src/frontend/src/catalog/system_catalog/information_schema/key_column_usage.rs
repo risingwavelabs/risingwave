@@ -38,11 +38,11 @@ use risingwave_frontend_macro::system_catalog;
         WHERE rw_relations.relation_type != 'table' or (rw_relations.relation_type = 'table' and has_table_privilege(pg_constraint.conrelid, 'INSERT, UPDATE, DELETE'))
         ORDER BY constraint_catalog, constraint_schema, constraint_name
     )
-    SELECT constraint_catalog, constraint_schema, constraint_name, table_catalog, table_schema, table_name, 
+    SELECT constraint_catalog, constraint_schema, constraint_name, table_catalog, table_schema, table_name,
            name as column_name, rw_columns.position as ordinal_position, NULL::int as position_in_unique_constraint
     FROM key_column_usage_without_name
-    JOIN rw_catalog.rw_columns ON 
-        rw_columns.position = key_column_usage_without_name.col_id AND 
+    JOIN rw_catalog.rw_columns ON
+        rw_columns.position = key_column_usage_without_name.col_id AND
         rw_columns.relation_id = key_column_usage_without_name.table_id"
 )]
 #[derive(Fields)]

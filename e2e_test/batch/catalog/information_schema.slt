@@ -1,0 +1,10 @@
+statement ok
+create table t(a int, b int);
+
+query TTTT
+select schemaname, tablename, tablespace from pg_tables where tablename = 't';
+----
+public t NULL
+
+statement ok
+drop table t;
