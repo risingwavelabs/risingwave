@@ -43,13 +43,13 @@ pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrappe
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::upsert_parser::UpsertParser;
-use crate::error::{ConnectorError, ConnectorResult};
+use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
     BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceCtrlOpts, SourceMessage, SourceMeta,
+    SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
 
 mod access_builder;
