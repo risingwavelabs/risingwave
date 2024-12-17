@@ -200,21 +200,6 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     }
 }
 
-#[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
-async fn ensure_max_chunk_size(stream: BoxSourceStream, max_chunk_size: usize) {
-    #[for_await]
-    for batch in stream {
-        let mut batch = batch?;
-        let mut start = 0;
-        let end = batch.len();
-        while start < end {
-            let next = std::cmp::min(start + max_chunk_size, end);
-            yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
-            start = next;
-        }
-    }
-}
-
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
     /// Parse a stream of vectors of [`SourceMessage`] into a stream of [`StreamChunk`].
@@ -231,13 +216,6 @@ impl<P: ByteStreamSourceParser> P {
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
-
-        // TODO(): remove this later
-        // Ensure chunk size is smaller than rate limit
-        let msg_stream = Box::pin(ensure_max_chunk_size(
-            msg_stream,
-            self.source_ctx().source_ctrl_opts.chunk_size,
-        ));
 
         // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
