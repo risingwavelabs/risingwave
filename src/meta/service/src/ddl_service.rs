@@ -654,6 +654,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+
     async fn risectl_list_state_tables(
         &self,
         _request: Request<RisectlListStateTablesRequest>,
@@ -1128,6 +1129,20 @@ impl DdlService for DdlServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn alter_resource_group(&self, request: Request<AlterResourceGroupRequest>) -> Result<Response<AlterResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let table_id = req.get_table_id();
+        let deferred = req.get_deferred();
+        let parallelism = req.resource_group;
+        //
+        // self.ddl_controller
+        //     .alter_parallelism(table_id, parallelism, deferred)
+        //     .await?;
+
+        Ok(Response::new(AlterResourceGroupResponse {}))
     }
 }
 

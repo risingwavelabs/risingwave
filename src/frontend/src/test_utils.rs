@@ -684,6 +684,15 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         unreachable!()
     }
+
+    async fn alter_resource_group(
+        &self,
+        _table_id: u32,
+        _resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {

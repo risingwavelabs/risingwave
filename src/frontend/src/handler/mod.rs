@@ -102,6 +102,7 @@ mod transaction;
 pub mod util;
 pub mod variable;
 mod wait;
+mod alter_resource_group;
 
 pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 
@@ -821,6 +822,24 @@ pub async fn handle(
                 deferred,
             )
             .await
+        }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation:
+            AlterViewOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            },
+        } if materialized => {
+            alter_resource_group::handle_alter_resource_group(
+                handler_args,
+                name,
+                resource_group,
+                StatementType::ALTER_MATERIALIZED_VIEW,
+                deferred,
+            )
+                .await
         }
         Statement::AlterView {
             materialized,
