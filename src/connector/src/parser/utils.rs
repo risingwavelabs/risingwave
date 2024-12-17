@@ -157,3 +157,10 @@ pub fn extract_header_inner_from_meta<'a>(
         _ => None,
     }
 }
+
+pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Nats(nats_meta) => Some(nats_meta.extract_subject()),
+        _ => None,
+    }
+}

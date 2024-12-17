@@ -36,9 +36,24 @@ python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_S
 
 sleep 5s
 
+
+# set session variable shouldn't affect existing source.
+statement ok
+set streaming_use_shared_source to false;
+
 # Refresh source schema
 statement ok
 ALTER SOURCE src_user REFRESH SCHEMA;
+
+# Check it should still be shared source <https://github.com/risingwavelabs/risingwave/issues/19799>
+query
+EXPLAIN CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
+----
+StreamMaterialize { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id] }
+  └─StreamRowIdGen { row_id_index: 9 }
+    └─StreamSourceScan { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, age] }
+
 
 statement ok
 CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
@@ -85,5 +100,5 @@ SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 30	104	0	1020
 
 
-# statement ok
-# DROP SOURCE src_user CASCADE;
+statement ok
+DROP SOURCE src_user CASCADE;

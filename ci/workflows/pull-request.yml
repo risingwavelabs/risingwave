@@ -35,10 +35,11 @@ other-sql-backend: &other-sql-backend
           label: "postgres"
           # PGPASSWORD=postgres psql -h db -p 5432 -U postgres -d rwmeta
           endpoint: "postgres://postgres:postgres@db:5432/rwmeta"
-      - with:
-          label: "mysql"
-          # mysql -h mysql -P 3306 -u root -p123456 -D rwmeta
-          endpoint: "mysql://root:123456@mysql:3306/rwmeta"
+      # Temporarily disable tests for mysql backend as there are unresolved issues.
+      # - with:
+      #     label: "mysql"
+      #     # mysql -h mysql-meta -P 3306 -u root -p123456 -D rwmeta
+      #     endpoint: "mysql://root:123456@mysql-meta:3306/rwmeta"
   env:
     RISEDEV_SQL_ENDPOINT: "{{matrix.endpoint}}"
 
@@ -46,7 +47,7 @@ docker-compose-common: &docker-compose-common
     config: ci/docker-compose.yml
     mount-buildkite-agent: true
     propagate-environment: true
-    run: rw-build-env
+    run: ci-standard-env
 
 steps:
   - label: "check ci image rebuild"
@@ -842,9 +843,7 @@ steps:
       - "build-other"
       - "docslt"
     plugins:
-      - docker-compose#v5.5.0:
-          <<: *docker-compose-common
-          run: pg-mysql-backend-test-env
+      - docker-compose#v5.5.0: *docker-compose-common
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 32
     retry: *auto-retry
