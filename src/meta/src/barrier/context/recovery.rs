@@ -36,7 +36,8 @@ use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, StreamJobFragments, TableParallelism};
 use crate::stream::{
-    JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupUpdate, RescheduleOptions,
+    JobParallelismTarget, JobReschedulePolicy, JobRescheduleTarget, JobResourceGroupTarget,
+    RescheduleOptions,
 };
 use crate::{model, MetaResult};
 
@@ -571,6 +572,8 @@ impl GlobalBarrierWorkerContextImpl {
             .map(|worker_node| worker_node.parallelism())
             .sum();
 
+        let mut table_parallelisms = HashMap::new();
+
         let reschedule_targets: HashMap<_, _> = {
             let streaming_parallelisms = mgr
                 .catalog_controller
@@ -607,11 +610,15 @@ impl GlobalBarrierWorkerContextImpl {
                     );
                 }
 
+                table_parallelisms.insert(TableId::new(object_id as u32), target_parallelism);
+
+                let parallelism_change = JobParallelismTarget::Update(target_parallelism);
+
                 result.insert(
                     object_id as u32,
                     JobRescheduleTarget {
-                        parallelism: target_parallelism,
-                        resource_group: JobResourceGroupUpdate::Keep,
+                        parallelism: parallelism_change,
+                        resource_group: JobResourceGroupTarget::Keep,
                     },
                 );
             }
@@ -623,14 +630,6 @@ impl GlobalBarrierWorkerContextImpl {
             "target table parallelisms for offline scaling: {:?}",
             reschedule_targets
         );
-
-        let table_parallelisms: HashMap<_, _> = reschedule_targets
-            .iter()
-            .map(|(&table_id, &JobRescheduleTarget { parallelism, .. })| {
-                debug_assert_ne!(parallelism, TableParallelism::Custom);
-                (TableId::new(table_id), parallelism)
-            })
-            .collect();
 
         let plan = self
             .scale_controller

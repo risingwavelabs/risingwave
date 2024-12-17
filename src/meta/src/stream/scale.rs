@@ -1820,16 +1820,30 @@ impl ScaleController {
         for (
             job_id,
             JobRescheduleTarget {
-                parallelism,
+                parallelism: parallelism_update,
                 resource_group: resource_group_update,
             },
         ) in &targets
         {
+            let parallelism = match parallelism_update {
+                JobParallelismTarget::Update(parallelism) => *parallelism,
+                JobParallelismTarget::Refresh => {
+                    let parallelism = self
+                        .metadata_manager
+                        .catalog_controller
+                        .get_job_streaming_parallelisms(*job_id as _)
+                        .await?;
+
+                    parallelism.into()
+                }
+            };
+
             job_reschedule_post_updates
                 .parallelism_updates
-                .insert(TableId::from(*job_id), *parallelism);
+                .insert(TableId::from(*job_id), parallelism);
+
             let current_resource_group = match resource_group_update {
-                JobResourceGroupUpdate::Update(Some(specific_resource_group)) => {
+                JobResourceGroupTarget::Update(Some(specific_resource_group)) => {
                     job_reschedule_post_updates.resource_group_updates.insert(
                         *job_id as ObjectId,
                         Some(specific_resource_group.to_owned()),
@@ -1837,7 +1851,7 @@ impl ScaleController {
 
                     specific_resource_group.to_owned()
                 }
-                JobResourceGroupUpdate::Update(None) => {
+                JobResourceGroupTarget::Update(None) => {
                     let database_resource_group = self
                         .metadata_manager
                         .catalog_controller
@@ -1849,7 +1863,7 @@ impl ScaleController {
                         .insert(*job_id as ObjectId, None);
                     database_resource_group
                 }
-                JobResourceGroupUpdate::Keep => {
+                JobResourceGroupTarget::Keep => {
                     self.metadata_manager
                         .catalog_controller
                         .get_existing_job_resource_group(*job_id as _)
@@ -1868,7 +1882,7 @@ impl ScaleController {
                 *job_id,
                 JobUpdate {
                     filtered_worker_ids,
-                    parallelism: *parallelism,
+                    parallelism,
                 },
             );
         }
@@ -2322,15 +2336,21 @@ impl ScaleController {
 }
 
 #[derive(Debug)]
-pub enum JobResourceGroupUpdate {
+pub enum JobParallelismTarget {
+    Update(TableParallelism),
+    Refresh,
+}
+
+#[derive(Debug)]
+pub enum JobResourceGroupTarget {
     Update(Option<String>),
     Keep,
 }
 
 #[derive(Debug)]
 pub struct JobRescheduleTarget {
-    pub(crate) parallelism: TableParallelism,
-    pub(crate) resource_group: JobResourceGroupUpdate,
+    pub parallelism: JobParallelismTarget,
+    pub resource_group: JobResourceGroupTarget,
 }
 
 #[derive(Debug)]
@@ -2338,6 +2358,7 @@ pub struct JobReschedulePolicy {
     pub(crate) targets: HashMap<u32, JobRescheduleTarget>,
 }
 
+// final updates for `post_collect`
 #[derive(Debug, Clone)]
 pub struct JobReschedulePostUpdates {
     pub parallelism_updates: HashMap<TableId, TableParallelism>,
@@ -2452,25 +2473,27 @@ impl GlobalStreamManager {
 
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
 
-        let table_parallelisms: HashMap<_, _> = {
+        let job_ids: HashSet<_> = {
             let streaming_parallelisms = self
                 .metadata_manager
                 .catalog_controller
                 .get_all_created_streaming_parallelisms()
                 .await?;
 
-            streaming_parallelisms
-                .into_iter()
-                .map(|(table_id, parallelism)| {
-                    let table_parallelism = match parallelism {
-                        StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                        StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
-                        StreamingParallelism::Custom => TableParallelism::Custom,
-                    };
+            // streaming_parallelisms
+            //     .into_iter()
+            //     .map(|(table_id, parallelism)| {
+            //         let table_parallelism = match parallelism {
+            //             StreamingParallelism::Adaptive => TableParallelism::Adaptive,
+            //             StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n),
+            //             StreamingParallelism::Custom => TableParallelism::Custom,
+            //         };
+            //
+            //         (table_id, table_parallelism)
+            //     })
+            //     .collect()
 
-                    (table_id, table_parallelism)
-                })
-                .collect()
+            streaming_parallelisms.into_keys().collect()
         };
 
         let workers = self
@@ -2491,24 +2514,24 @@ impl GlobalStreamManager {
             .map(|worker| worker.id as WorkerId)
             .collect();
 
-        if table_parallelisms.is_empty() {
+        if job_ids.is_empty() {
             tracing::info!("no streaming jobs for scaling, maybe an empty cluster");
             return Ok(false);
         }
 
         let batch_size = match self.env.opts.parallelism_control_batch_size {
-            0 => table_parallelisms.len(),
+            0 => job_ids.len(),
             n => n,
         };
 
         tracing::info!(
             "total {} streaming jobs, batch size {}, schedulable worker ids: {:?}",
-            table_parallelisms.len(),
+            job_ids.len(),
             batch_size,
             schedulable_worker_ids
         );
 
-        let batches: Vec<_> = table_parallelisms
+        let batches: Vec<_> = job_ids
             .into_iter()
             .chunks(batch_size)
             .into_iter()
@@ -2520,12 +2543,12 @@ impl GlobalStreamManager {
         for batch in batches {
             let targets: HashMap<_, _> = batch
                 .into_iter()
-                .map(|(job_id, parallelism)| {
+                .map(|job_id| {
                     (
                         job_id as u32,
                         JobRescheduleTarget {
-                            parallelism,
-                            resource_group: JobResourceGroupUpdate::Keep,
+                            parallelism: JobParallelismTarget::Refresh,
+                            resource_group: JobResourceGroupTarget::Keep,
                         },
                     )
                 })

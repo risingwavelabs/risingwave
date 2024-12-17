@@ -3141,6 +3141,23 @@ impl CatalogController {
             .collect::<HashMap<ObjectId, StreamingParallelism>>())
     }
 
+    pub async fn get_job_streaming_parallelisms(
+        &self,
+        streaming_job_id: ObjectId,
+    ) -> MetaResult<StreamingParallelism> {
+        let inner = self.inner.read().await;
+
+        let job_parallelism: StreamingParallelism = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::Parallelism)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        Ok(job_parallelism)
+    }
+
     pub async fn get_table_name_type_mapping(
         &self,
     ) -> MetaResult<HashMap<TableId, (String, String)>> {

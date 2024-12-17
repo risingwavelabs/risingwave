@@ -77,8 +77,8 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobResourceGroupUpdate, ReplaceStreamJobContext, SourceManagerRef,
-    StreamFragmentGraph,
+    GlobalStreamManagerRef, JobRescheduleTarget, JobResourceGroupTarget, ReplaceStreamJobContext,
+    SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -391,10 +391,10 @@ impl DdlController {
     }
 
     #[tracing::instrument(skip(self), level = "debug")]
-    pub async fn alter_parallelism(
+    pub async fn reschedule_streaming_job(
         &self,
         table_id: u32,
-        parallelism: PbTableParallelism,
+        target: JobRescheduleTarget,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("alter parallelism");
@@ -416,12 +416,7 @@ impl DdlController {
         }
 
         self.stream_manager
-            .alter_table_parallelism(
-                table_id,
-                parallelism.into(),
-                JobResourceGroupUpdate::Keep,
-                deferred,
-            )
+            .reschedule_streaming_job(table_id, target, deferred)
             .await
     }
 

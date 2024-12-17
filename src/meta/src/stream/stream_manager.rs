@@ -29,8 +29,8 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::Instrument;
 
 use super::{
-    JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget, JobResourceGroupUpdate,
-    Locations, RescheduleOptions, ScaleControllerRef,
+    JobParallelismTarget, JobReschedulePolicy, JobReschedulePostUpdates, JobRescheduleTarget,
+    JobResourceGroupTarget, Locations, RescheduleOptions, ScaleControllerRef,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -612,14 +612,18 @@ impl GlobalStreamManager {
         cancelled_ids
     }
 
-    pub(crate) async fn alter_table_parallelism(
+    pub(crate) async fn reschedule_streaming_job(
         &self,
         table_id: u32,
-        parallelism: TableParallelism,
-        resource_group: JobResourceGroupUpdate,
+        target: JobRescheduleTarget,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let JobRescheduleTarget {
+            parallelism: parallelism_change,
+            resource_group: resource_group_change,
+        } = target;
 
         let database_id = DatabaseId::new(
             self.metadata_manager
@@ -644,42 +648,48 @@ impl GlobalStreamManager {
             .get_job_max_parallelism(table_id)
             .await?;
 
-        match parallelism {
-            TableParallelism::Adaptive => {
-                if available_parallelism > max_parallelism {
-                    tracing::warn!(
+        if let JobParallelismTarget::Update(parallelism) = parallelism_change {
+            match parallelism {
+                TableParallelism::Adaptive => {
+                    if available_parallelism > max_parallelism {
+                        tracing::warn!(
                         "too many parallelism available, use max parallelism {} will be limited",
                         max_parallelism
                     );
+                    }
                 }
-            }
-            TableParallelism::Fixed(parallelism) => {
-                if parallelism > max_parallelism {
-                    bail_invalid_parameter!(
-                        "specified parallelism {} should not exceed max parallelism {}",
-                        parallelism,
-                        max_parallelism
-                    );
+                TableParallelism::Fixed(parallelism) => {
+                    if parallelism > max_parallelism {
+                        bail_invalid_parameter!(
+                            "specified parallelism {} should not exceed max parallelism {}",
+                            parallelism,
+                            max_parallelism
+                        );
+                    }
                 }
-            }
-            TableParallelism::Custom => {
-                bail_invalid_parameter!("should not alter parallelism to custom")
+                TableParallelism::Custom => {
+                    bail_invalid_parameter!("should not alter parallelism to custom")
+                }
             }
         }
 
-        let table_parallelism_assignment = HashMap::from([(table_id, parallelism)]);
-        let resource_group_assignment = match &resource_group {
-            JobResourceGroupUpdate::Update(target) => {
+        let table_parallelism_assignment = match &parallelism_change {
+            JobParallelismTarget::Update(parallelism) => HashMap::from([(table_id, *parallelism)]),
+            JobParallelismTarget::Refresh => HashMap::new(),
+        };
+        let resource_group_assignment = match &resource_group_change {
+            JobResourceGroupTarget::Update(target) => {
                 HashMap::from([(table_id.table_id() as ObjectId, target.clone())])
             }
-            JobResourceGroupUpdate::Keep => HashMap::new(),
+            JobResourceGroupTarget::Keep => HashMap::new(),
         };
 
         if deferred {
             tracing::debug!(
-                "deferred mode enabled for job {}, set the parallelism directly to {:?}",
+                "deferred mode enabled for job {}, set the parallelism directly to parallelism {:?}, resource group {:?}",
                 table_id,
-                parallelism
+                parallelism_change,
+                resource_group_change,
             );
             self.scale_controller
                 .post_apply_reschedule(
@@ -697,15 +707,15 @@ impl GlobalStreamManager {
                     targets: HashMap::from([(
                         table_id.table_id,
                         JobRescheduleTarget {
-                            parallelism,
-                            resource_group,
+                            parallelism: parallelism_change,
+                            resource_group: resource_group_change,
                         },
                     )]),
                 })
                 .await?;
 
             if reschedule_plan.reschedules.is_empty() {
-                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, parallelism);
+                tracing::debug!("empty reschedule plan generated for job {}, set the parallelism directly to {:?}", table_id, reschedule_plan.post_updates);
                 self.scale_controller
                     .post_apply_reschedule(&HashMap::new(), &reschedule_plan.post_updates)
                     .await?;

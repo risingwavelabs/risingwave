@@ -24,7 +24,9 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager};
+use risingwave_meta::model::TableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
+use risingwave_meta::stream::{JobParallelismTarget, JobRescheduleTarget, JobResourceGroupTarget};
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::{Comment, Connection, CreateType, Secret, Table};
@@ -654,7 +656,6 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-
     async fn risectl_list_state_tables(
         &self,
         _request: Request<RisectlListStateTablesRequest>,
@@ -902,9 +903,15 @@ impl DdlService for DdlServiceImpl {
         let table_id = req.get_table_id();
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
-
         self.ddl_controller
-            .alter_parallelism(table_id, parallelism, deferred)
+            .reschedule_streaming_job(
+                table_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Update(TableParallelism::from(parallelism)),
+                    resource_group: JobResourceGroupTarget::Keep,
+                },
+                deferred,
+            )
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
@@ -1131,16 +1138,26 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    async fn alter_resource_group(&self, request: Request<AlterResourceGroupRequest>) -> Result<Response<AlterResourceGroupResponse>, Status> {
+    async fn alter_resource_group(
+        &self,
+        request: Request<AlterResourceGroupRequest>,
+    ) -> Result<Response<AlterResourceGroupResponse>, Status> {
         let req = request.into_inner();
 
         let table_id = req.get_table_id();
         let deferred = req.get_deferred();
-        let parallelism = req.resource_group;
-        //
-        // self.ddl_controller
-        //     .alter_parallelism(table_id, parallelism, deferred)
-        //     .await?;
+        let resource_group = req.resource_group;
+
+        self.ddl_controller
+            .reschedule_streaming_job(
+                table_id,
+                JobRescheduleTarget {
+                    parallelism: JobParallelismTarget::Refresh,
+                    resource_group: JobResourceGroupTarget::Update(resource_group),
+                },
+                deferred,
+            )
+            .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
     }
