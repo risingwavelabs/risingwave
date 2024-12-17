@@ -57,7 +57,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
             // Assumption: Key will not contain reference, so unresolved schema can work here.
             AvroParseOptions::create(match self.encoding_type {
                 EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema.resolved_schema,
+                EncodingType::Value => &self.schema.original_schema,
             }),
         )))
     }

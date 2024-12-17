@@ -39,7 +39,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
-icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
@@ -117,6 +116,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
+risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 

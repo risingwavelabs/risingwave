@@ -94,7 +94,7 @@ fn check(
     // manually implement some logic in AvroAccessBuilder, and some in PlainParser::parse_inner
     let mut data_str = vec![];
     for data in avro_data {
-        let parser = AvroParseOptions::create(&resolved_schema.resolved_schema);
+        let parser = AvroParseOptions::create(&resolved_schema.original_schema);
 
         match config.data_encoding {
             TestDataEncoding::Json => todo!(),
