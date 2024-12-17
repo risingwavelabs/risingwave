@@ -190,7 +190,7 @@ pub struct StreamingMetrics {
     materialize_cache_hit_count: RelabeledGuardedIntCounterVec<3>,
     materialize_cache_total_count: RelabeledGuardedIntCounterVec<3>,
     materialize_input_row_count: RelabeledGuardedIntCounterVec<3>,
-    materialize_current_epoch: RelabeledGuardedIntGaugeVec<3>,
+    pub materialize_current_epoch: RelabeledGuardedIntGaugeVec<3>,
 }
 
 pub static GLOBAL_STREAMING_METRICS: OnceLock<StreamingMetrics> = OnceLock::new();

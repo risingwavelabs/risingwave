@@ -47,7 +47,7 @@ import {
   relationIsStreamingJob,
 } from "../lib/api/streaming"
 import { RelationPoint } from "../lib/layout"
-import { BackPressureInfo } from "../proto/gen/monitor_service"
+import { BackPressureInfo, RelationStats } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
@@ -133,6 +133,8 @@ export default function StreamingGraph() {
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
+  const [relationStats, setRelationStats] = useState<{ [key: number]: RelationStats }>();
+
   useEffect(() => {
     if (resetEmbeddedBackPressures) {
       setEmbeddedBackPressureInfo(undefined)
@@ -141,7 +143,8 @@ export default function StreamingGraph() {
     if (backPressureDataSource === "Embedded") {
       const interval = setInterval(() => {
         fetchEmbeddedBackPressure().then(
-          (newBP) => {
+          (response) => {
+            let newBP = response.backPressureInfos
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
@@ -162,6 +165,7 @@ export default function StreamingGraph() {
                     totalDurationNs: 0,
                   }
             )
+            setRelationStats(response.relationStats);
           },
           (e) => {
             console.error(e)
@@ -308,6 +312,7 @@ export default function StreamingGraph() {
               selectedId={selectedId?.toString()}
               setSelectedId={(id) => setSelectedId(parseInt(id))}
               backPressures={backPressures}
+              relationStats={relationStats}
             />
           )}
         </Box>

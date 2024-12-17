@@ -66,9 +66,15 @@ message FragmentStats {
   uint64 current_epoch = 3;
 }
 
+message RelationStats {
+  uint32 actor_count = 2;
+  uint64 current_epoch = 3;
+}
+
 message GetBackPressureResponse {
   repeated BackPressureInfo back_pressure_infos = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
+  map<uint32, RelationStats> relation_stats = 3;
 }
 
 message TieredCacheTracingRequest {

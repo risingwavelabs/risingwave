@@ -34,7 +34,8 @@ import {
   generateRelationEdges,
 } from "../lib/layout"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
-import { backPressureColor, backPressureWidth } from "./utils/backPressure"
+import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
+import { RelationStats } from "../proto/gen/monitor_service"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -62,11 +63,13 @@ export default function RelationGraph({
   selectedId,
   setSelectedId,
   backPressures,
+  relationStats,
 }: {
   nodes: RelationPoint[]
   selectedId: string | undefined
   setSelectedId: (id: string) => void
   backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
+  relationStats: { [relationId: number]: RelationStats }
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
 
@@ -99,6 +102,7 @@ export default function RelationGraph({
   const { layoutMap, width, height, links } = layoutMapCallback()
 
   useEffect(() => {
+    const now_ms = Date.now()
     const svgNode = svgRef.current
     const svgSelection = d3.select(svgNode)
 
@@ -189,9 +193,17 @@ export default function RelationGraph({
 
       circle.attr("r", nodeRadius).attr("fill", ({ id, relation }) => {
         const weight = relationIsStreamingJob(relation) ? "500" : "400"
-        return isSelected(id)
+        const baseColor = isSelected(id)
           ? theme.colors.blue[weight]
           : theme.colors.gray[weight]
+        if (relationStats) {
+          const relationId = parseInt(id)
+          if (!isNaN(relationId) && relationStats[relationId]) {
+            const currentMs = epochToUnixMillis(relationStats[relationId].currentEpoch)
+            return latencyToColor(now_ms - currentMs, baseColor)
+          }
+        }
+        return baseColor
       })
 
       // Relation name
@@ -233,16 +245,39 @@ export default function RelationGraph({
         .attr("font-size", 16)
         .attr("font-weight", "bold")
 
-      // Relation type tooltip
-      let typeTooltip = g.select<SVGTitleElement>("title")
-      if (typeTooltip.empty()) {
-        typeTooltip = g.append<SVGTitleElement>("title")
-      }
-
-      typeTooltip.text(
-        ({ relation }) =>
-          `${relation.name} (${relationTypeTitleCase(relation)})`
-      )
+      // Tooltip
+      g.on("mouseover", (event, { relation, id }) => {
+        const relationId = parseInt(id)
+        const stats = relationStats?.[relationId]
+        const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+        const epoch = stats?.currentEpoch ?? "N/A"
+        
+        // Remove existing tooltip if any
+        d3.selectAll(".tooltip").remove()
+        
+        // Create new tooltip
+        d3.select("body")
+          .append("div")
+          .attr("class", "tooltip")
+          .style("position", "absolute")
+          .style("background", "white")
+          .style("padding", "10px")
+          .style("border", "1px solid #ddd")
+          .style("border-radius", "4px")
+          .style("pointer-events", "none")
+          .style("left", event.pageX + 10 + "px")
+          .style("top", event.pageY + 10 + "px")
+          .style("font-size", "12px")
+          .html(`<b>${relation.name} (${relationTypeTitleCase(relation)})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`)
+      })
+      .on("mousemove", (event) => {
+        d3.select(".tooltip")
+          .style("left", event.pageX + 10 + "px")
+          .style("top", event.pageY + 10 + "px")
+      })
+      .on("mouseout", () => {
+        d3.selectAll(".tooltip").remove()
+      })
 
       // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {

@@ -256,7 +256,7 @@ export default function FragmentGraph({
               return "white";
             }
             let currentMs = epochToUnixMillis(fragmentStats[fragmentId].currentEpoch)
-            return latencyToColor(now_ms -currentMs);
+            return latencyToColor(now_ms - currentMs, "white");
           } : "white")
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)

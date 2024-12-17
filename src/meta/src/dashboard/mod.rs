@@ -489,14 +489,26 @@ pub(super) mod handlers {
             let result = result
                 .map_err(|_| anyhow!("Failed to get back pressure"))
                 .map_err(err)?;
-            // TODO(eric): aggregate here
+            // TODO(eric): aggregate back_pressure_infos here
             all.back_pressure_infos.extend(result.back_pressure_infos);
+
+            // Aggregate fragment_stats
             for (fragment_id, fragment_stats) in result.fragment_stats {
                 if let Some(s) = all.fragment_stats.get_mut(&fragment_id) {
                     s.actor_count += fragment_stats.actor_count;
                     s.current_epoch = min(s.current_epoch, fragment_stats.current_epoch);
                 } else {
                     all.fragment_stats.insert(fragment_id, fragment_stats);
+                }
+            }
+
+            // Aggregate relation_stats
+            for (relation_id, relation_stats) in result.relation_stats {
+                if let Some(s) = all.relation_stats.get_mut(&relation_id) {
+                    s.actor_count += relation_stats.actor_count;
+                    s.current_epoch = min(s.current_epoch, relation_stats.current_epoch);
+                } else {
+                    all.relation_stats.insert(relation_id, relation_stats);
                 }
             }
         }

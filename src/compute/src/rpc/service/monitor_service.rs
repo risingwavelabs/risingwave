@@ -31,7 +31,8 @@ use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, BackPressureInfo, FragmentStats,
     GetBackPressureRequest, GetBackPressureResponse, HeapProfilingRequest, HeapProfilingResponse,
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    RelationStats, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
+    TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -310,16 +311,10 @@ impl MonitorService for MonitorServiceImpl {
 
         let actor_count: HashMap<_, _> = actor_count
             .iter()
-            .filter_map(|m| {
-                let fragment_id = m
-                    .get_label()
-                    .iter()
-                    .find(|lp| lp.get_name() == "fragment_id")?
-                    .get_value()
-                    .parse::<u32>()
-                    .unwrap();
+            .map(|m| {
+                let fragment_id = get_label(m, "fragment_id").unwrap();
                 let count = m.get_gauge().get_value() as u32;
-                Some((fragment_id, count))
+                (fragment_id, count)
             })
             .collect();
 
@@ -342,7 +337,7 @@ impl MonitorService for MonitorServiceImpl {
             .unwrap()
             .take_metric();
         for m in &actor_current_epoch {
-            let fragment_id = fragment_id_of(m).unwrap();
+            let fragment_id = get_label(m, "fragment_id").unwrap();
             let epoch = m.get_gauge().get_value() as u64;
             if let Some(s) = fragment_stats.get_mut(&fragment_id) {
                 s.current_epoch = if s.current_epoch == 0 {
@@ -354,6 +349,36 @@ impl MonitorService for MonitorServiceImpl {
                 warn!(
                     fragment_id = fragment_id,
                     "Miss corresponding actor count metrics"
+                );
+            }
+        }
+
+        let mut relation_stats: HashMap<u32, RelationStats> = HashMap::new();
+        let mview_current_epoch = metrics
+            .materialize_current_epoch
+            .collect()
+            .into_iter()
+            .next()
+            .unwrap()
+            .take_metric();
+        dbg!(&mview_current_epoch);
+        for m in &mview_current_epoch {
+            let table_id = get_label(m, "table_id").unwrap();
+            let epoch = m.get_gauge().get_value() as u64;
+            if let Some(s) = relation_stats.get_mut(&table_id) {
+                s.current_epoch = if s.current_epoch == 0 {
+                    epoch
+                } else {
+                    u64::min(s.current_epoch, epoch)
+                };
+                s.actor_count += 1;
+            } else {
+                relation_stats.insert(
+                    table_id,
+                    RelationStats {
+                        actor_count: 1,
+                        current_epoch: epoch,
+                    },
                 );
             }
         }
@@ -397,6 +422,7 @@ impl MonitorService for MonitorServiceImpl {
         Ok(Response::new(GetBackPressureResponse {
             back_pressure_infos: back_pressure_infos.into_values().collect(),
             fragment_stats,
+            relation_stats,
         }))
     }
 
@@ -473,11 +499,11 @@ impl MonitorService for MonitorServiceImpl {
     }
 }
 
-fn fragment_id_of(metric: &Metric) -> Option<u32> {
+fn get_label(metric: &Metric, label: &str) -> Option<u32> {
     metric
         .get_label()
         .iter()
-        .find(|lp| lp.get_name() == "fragment_id")?
+        .find(|lp| lp.get_name() == label)?
         .get_value()
         .parse::<u32>()
         .ok()
