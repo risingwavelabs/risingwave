@@ -244,6 +244,7 @@ pub async fn handle(
     sql: Arc<str>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    tracing::info!("Handling statement: {}", sql.as_ref());
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;

@@ -518,6 +518,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         let mut paused = false;
         loop {
+            tracing::info!("enter next_item loop {}", paused);
             select! {
                 biased;
                 rate_limit_change = pin!(self.control_rx.recv()) => {
@@ -533,9 +534,11 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                     let item = item?;
                     match item {
                         Either::Left(split_chunk) => {
+                            tracing::info!("apply_rate_limit {:?}", split_chunk.chunk);
                             return self.apply_rate_limit(split_chunk).await;
                         },
                         Either::Right(item) => {
+                            tracing::info!("item {:?}", item);
                             assert!(matches!(item.1, LogStoreReadItem::Barrier{..} | LogStoreReadItem::UpdateVnodeBitmap(_)));
                             return Ok(item);
                         },
@@ -546,6 +549,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        tracing::info!("truncate {:?}", offset);
         let mut truncate_offset = None;
         while let Some((downstream_offset, upstream_offset)) =
             self.core.consumed_offset_queue.pop_back()
