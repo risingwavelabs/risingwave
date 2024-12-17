@@ -81,12 +81,7 @@ impl Planner {
                 ))
             })?;
             let limit = match limit_cast_to_bigint.fold_const() {
-                Ok(datum) => match datum {
-                    Some(datum) => datum.as_integral() as u64,
-                    None => {
-                        return Err(limit_err.into());
-                    }
-                },
+                Ok(Some(datum)) => datum.as_integral() as u64,
                 _ => return Err(limit_err.into()),
             };
 
