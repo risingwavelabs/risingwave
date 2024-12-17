@@ -201,15 +201,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .chain(subscriptions.iter().map(|s| s.id))
         .collect::<BTreeSet<_>>();
 
-    // Helper function to get next available id.
-    let mut next_available_id = || -> u32 {
-        let id = inuse_obj_ids
+    // Helper function to get the next available id.
+    let next_available_id = |objs: &mut BTreeSet<u32>| -> u32 {
+        let id = objs
             .iter()
             .enumerate()
             .find(|(i, id)| i + 1 != **id as usize)
             .map(|(i, _)| i + 1)
-            .unwrap_or(inuse_obj_ids.len() + 1) as u32;
-        inuse_obj_ids.insert(id);
+            .unwrap_or(objs.len() + 1) as u32;
+        objs.insert(id);
         id
     };
 
@@ -236,7 +236,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // database
     let mut db_rewrite = HashMap::new();
     for mut db in databases {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
         db_rewrite.insert(db.id, id);
         db.id = id as _;
 
@@ -256,7 +256,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // schema
     let mut schema_rewrite = HashMap::new();
     for mut schema in schemas {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
         schema_rewrite.insert(schema.id, id);
         schema.id = id as _;
 
@@ -277,7 +277,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // function
     let mut function_rewrite = HashMap::new();
     for mut function in functions {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
         function_rewrite.insert(function.id, id);
         function.id = id as _;
 
@@ -299,7 +299,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // connection mapping
     let mut connection_rewrite = HashMap::new();
     for mut connection in connections {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
         connection_rewrite.insert(connection.id, id);
         connection.id = id as _;
 
@@ -323,7 +323,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // secret mapping
     let mut secret_rewrite = HashMap::new();
     for mut secret in secrets {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
         secret_rewrite.insert(secret.id, id);
         secret.id = id as _;
 
@@ -471,7 +471,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             table.database_id = *db_rewrite.get(&table.database_id).unwrap();
             // Note: The schema could be altered and not updated here.
             // It's safe to leave it as 0 if not found.
-            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap_or(0);
+            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap_or(&0);
         });
         // rewrite secret ids.
         visit_secret_ref_mut(&mut stream_node, &secret_rewrite);
@@ -720,9 +720,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     for user in users {
         for gp in user.grant_privileges {
             let id = match gp.get_object()? {
-                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap_or(0),
-                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap_or(0),
-                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap_or(0),
+                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap_or(&0),
+                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap_or(&0),
+                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap_or(&0),
                 GrantObject::TableId(id)
                 | GrantObject::SourceId(id)
                 | GrantObject::SinkId(id)
@@ -944,7 +944,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     format!("ALTER TABLE worker AUTO_INCREMENT = {next_worker_id};"),
                 ))
                 .await?;
-            let next_object_id = next_available_id();
+            let next_object_id = next_available_id(&mut inuse_obj_ids);
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
