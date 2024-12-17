@@ -537,6 +537,7 @@ impl<S: StateStore> SourceExecutor<S> {
             // We only build source stream reader with retry during recovery,
             // because we can rely on the persisted source states to recover the source stream
             // and can avoid the potential race with "seek to latest"
+            // https://github.com/risingwavelabs/risingwave/issues/19681#issuecomment-2532183002
             let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> =
                 None;
             let source_reader = source_desc.source.clone();
