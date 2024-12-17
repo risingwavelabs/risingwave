@@ -97,6 +97,22 @@ impl From<&PbColumnDesc> for Field {
     }
 }
 
+#[auto_impl::auto_impl(&, &mut)]
+pub trait FieldLike {
+    fn data_type(&self) -> &DataType;
+    fn name(&self) -> &str;
+}
+
+impl FieldLike for Field {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 pub struct FieldDisplay<'a>(pub &'a Field);
 
 impl std::fmt::Debug for FieldDisplay<'_> {
