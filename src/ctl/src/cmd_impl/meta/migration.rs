@@ -469,7 +469,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let mut stream_node = fragment.stream_node.to_protobuf();
         visit_stream_node_tables(&mut stream_node, |table, _| {
             table.database_id = *db_rewrite.get(&table.database_id).unwrap();
-            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
+            // Note: The schema could be altered and not updated here.
+            // It's safe to leave it as 0 if not found.
+            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap_or(0);
         });
         // rewrite secret ids.
         visit_secret_ref_mut(&mut stream_node, &secret_rewrite);
@@ -718,9 +720,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     for user in users {
         for gp in user.grant_privileges {
             let id = match gp.get_object()? {
-                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap(),
-                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap(),
-                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap(),
+                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap_or(0),
+                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap_or(0),
+                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap_or(0),
                 GrantObject::TableId(id)
                 | GrantObject::SourceId(id)
                 | GrantObject::SinkId(id)
@@ -728,6 +730,14 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 | GrantObject::SubscriptionId(id) => *id,
                 ty => unreachable!("invalid object type: {:?}", ty),
             };
+            if id == 0 {
+                tracing::warn!("grant object not found");
+                continue;
+            } else if !inuse_obj_ids.contains(&id) {
+                tracing::warn!("grant object id {} not found", id);
+                continue;
+            }
+
             for action_with_opt in &gp.action_with_opts {
                 privileges.push(user_privilege::ActiveModel {
                     user_id: Set(user.id as _),
