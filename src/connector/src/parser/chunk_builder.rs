@@ -45,7 +45,7 @@ struct Transaction {
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     column_descs: Vec<SourceColumnDesc>,
-    source_ctrl_ops: SourceCtrlOpts,
+    source_ctrl_opts: SourceCtrlOpts,
     builders: Vec<ArrayBuilderImpl>,
     op_builder: Vec<Op>,
     vis_builder: BitmapBuilder,
@@ -54,13 +54,13 @@ pub struct SourceStreamChunkBuilder {
 }
 
 impl SourceStreamChunkBuilder {
-    pub fn new(column_descs: Vec<SourceColumnDesc>, source_ctrl_ops: SourceCtrlOpts) -> Self {
+    pub fn new(column_descs: Vec<SourceColumnDesc>, source_ctrl_opts: SourceCtrlOpts) -> Self {
         let (builders, op_builder, vis_builder) =
-            Self::create_builders(&column_descs, source_ctrl_ops.chunk_size);
+            Self::create_builders(&column_descs, source_ctrl_opts.chunk_size);
 
         Self {
             column_descs,
-            source_ctrl_ops,
+            source_ctrl_opts,
             builders,
             op_builder,
             vis_builder,
@@ -108,9 +108,9 @@ impl SourceStreamChunkBuilder {
             }
             tracing::debug!(txn_id, "commit upstream transaction");
 
-            if self.current_chunk_len() >= self.source_ctrl_ops.chunk_size {
+            if self.current_chunk_len() >= self.source_ctrl_opts.chunk_size {
                 // if `split_txn` is on, we should've finished the chunk already
-                assert!(!self.source_ctrl_ops.split_txn);
+                assert!(!self.source_ctrl_opts.split_txn);
                 self.finish_current_chunk();
             }
         } else {
@@ -159,7 +159,7 @@ impl SourceStreamChunkBuilder {
         }
 
         let (builders, op_builder, vis_builder) =
-            Self::create_builders(&self.column_descs, self.source_ctrl_ops.chunk_size);
+            Self::create_builders(&self.column_descs, self.source_ctrl_opts.chunk_size);
         let chunk = StreamChunk::with_visibility(
             std::mem::replace(&mut self.op_builder, op_builder),
             std::mem::replace(&mut self.builders, builders)
@@ -196,13 +196,13 @@ impl SourceStreamChunkBuilder {
         self.vis_builder.append(vis);
 
         let curr_chunk_size = self.current_chunk_len();
-        let max_chunk_size = self.source_ctrl_ops.chunk_size;
+        let max_chunk_size = self.source_ctrl_opts.chunk_size;
 
         if let Some(ref mut txn) = self.ongoing_txn {
             txn.len += 1;
 
             if txn.len >= MAX_TRANSACTION_SIZE
-                || (self.source_ctrl_ops.split_txn && curr_chunk_size >= max_chunk_size)
+                || (self.source_ctrl_opts.split_txn && curr_chunk_size >= max_chunk_size)
             {
                 self.finish_current_chunk();
             }

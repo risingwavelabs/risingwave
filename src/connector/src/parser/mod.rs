@@ -253,10 +253,10 @@ impl<P: ByteStreamSourceParser> P {
 async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
     mut parser: P,
     msg_stream: BoxSourceStream,
-    source_ctrl_ops: SourceCtrlOpts,
+    source_ctrl_opts: SourceCtrlOpts,
 ) {
     let mut chunk_builder =
-        SourceStreamChunkBuilder::new(parser.columns().to_vec(), source_ctrl_ops);
+        SourceStreamChunkBuilder::new(parser.columns().to_vec(), source_ctrl_opts);
 
     let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
