@@ -14,18 +14,11 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
-use risingwave_pb::meta::table_parallelism::{
-    AdaptiveParallelism, FixedParallelism, PbParallelism,
-};
-use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
-use risingwave_sqlparser::keywords::Keyword;
-use thiserror_ext::AsReport;
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::Binder;
 
@@ -43,9 +36,6 @@ pub async fn handle_alter_resource_group(
     let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-    println!("resource group {:#?}", resource_group);
-    println!("resource group {}", resource_group.unwrap());
 
     let table_id = {
         let reader = session.env().catalog_reader().read_guard();
@@ -71,7 +61,6 @@ pub async fn handle_alter_resource_group(
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
                 table.id.table_id()
             }
-            // TODO: support alter parallelism for shared source
             _ => bail!(
                 "invalid statement type for alter resource group: {:?}",
                 stmt_type
@@ -79,14 +68,28 @@ pub async fn handle_alter_resource_group(
         }
     };
 
-    // let target_parallelism = extract_table_parallelism(parallelism)?;
+    let resource_group = match resource_group {
+        None => None,
+        Some(SetVariableValue::Single(SetVariableValueSingle::Ident(ident))) => {
+            Some(ident.real_value())
+        }
+        Some(SetVariableValue::Single(SetVariableValueSingle::Literal(
+            Value::SingleQuotedString(v),
+        ))) => Some(v),
+        _ => {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "target parallelism must be a valid number or adaptive".to_owned(),
+            )
+            .into());
+        }
+    };
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
-    // let catalog_writer = session.catalog_writer()?;
-    // catalog_writer
-    //     .alter_parallelism(table_id, target_parallelism, deferred)
-    //     .await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .alter_resource_group(table_id, resource_group, deferred)
+        .await?;
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());

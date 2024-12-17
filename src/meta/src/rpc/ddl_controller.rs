@@ -52,7 +52,6 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::PbMergeUpdate;
 use risingwave_pb::stream_plan::{
@@ -77,7 +76,7 @@ use crate::model::{StreamContext, StreamJobFragments, TableParallelism};
 use crate::stream::{
     create_source_worker_handle, validate_sink, ActorGraphBuildResult, ActorGraphBuilder,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    GlobalStreamManagerRef, JobRescheduleTarget, JobResourceGroupTarget, ReplaceStreamJobContext,
+    GlobalStreamManagerRef, JobRescheduleTarget, ReplaceStreamJobContext,
     SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};

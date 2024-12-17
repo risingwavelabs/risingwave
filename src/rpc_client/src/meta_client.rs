@@ -596,7 +596,6 @@ impl MetaClient {
         Ok(())
     }
 
-
     pub async fn alter_swap_rename(
         &self,
         object: alter_swap_rename_request::Object,

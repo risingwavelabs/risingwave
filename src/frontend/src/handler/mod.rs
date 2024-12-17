@@ -43,6 +43,7 @@ use crate::utils::WithOptions;
 mod alter_owner;
 mod alter_parallelism;
 mod alter_rename;
+mod alter_resource_group;
 mod alter_secret;
 mod alter_set_schema;
 mod alter_source_column;
@@ -102,7 +103,6 @@ mod transaction;
 pub mod util;
 pub mod variable;
 mod wait;
-mod alter_resource_group;
 
 pub use alter_table_column::{get_new_table_definition_for_cdc_table, get_replace_table_plan};
 
@@ -827,10 +827,10 @@ pub async fn handle(
             materialized,
             name,
             operation:
-            AlterViewOperation::SetResourceGroup {
-                resource_group,
-                deferred,
-            },
+                AlterViewOperation::SetResourceGroup {
+                    resource_group,
+                    deferred,
+                },
         } if materialized => {
             alter_resource_group::handle_alter_resource_group(
                 handler_args,
@@ -839,7 +839,7 @@ pub async fn handle(
                 StatementType::ALTER_MATERIALIZED_VIEW,
                 deferred,
             )
-                .await
+            .await
         }
         Statement::AlterView {
             materialized,
