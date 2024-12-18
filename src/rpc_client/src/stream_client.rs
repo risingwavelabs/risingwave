@@ -28,8 +28,8 @@ use risingwave_pb::stream_service::*;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
 
+use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
-use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{stream_rpc_client_method_impl, RpcClient, RpcClientPool, UnboundedBidiStreamHandle};
 
 #[derive(Clone)]
@@ -55,7 +55,7 @@ impl StreamClient {
                 },
             )
             .await?
-            .tracing_injected();
+            .wrapped();
 
         Ok(Self(
             StreamServiceClient::new(channel).max_decoding_message_size(usize::MAX),
