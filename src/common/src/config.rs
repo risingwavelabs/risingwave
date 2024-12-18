@@ -1163,6 +1163,10 @@ pub struct StreamingDeveloperConfig {
     pub backfill_adaptive_rate_limit_step_max: f64,
     #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_ratio")]
     pub backfill_adaptive_rate_limit_step_ratio: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_up_threshold")]
+    pub backfill_adaptive_rate_limit_step_up_threshold: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_down_threshold")]
+    pub backfill_adaptive_rate_limit_step_down_threshold: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2149,6 +2153,14 @@ pub mod default {
 
         pub fn backfill_adaptive_rate_limit_step_ratio() -> f64 {
             0.1
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_up_threshold() -> f64 {
+            0.99
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_down_threshold() -> f64 {
+            0.9
         }
     }
 

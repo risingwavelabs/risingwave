@@ -145,6 +145,16 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                         .streaming_config
                         .developer
                         .backfill_adaptive_rate_limit_step_ratio,
+                    step_up_threshold: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_up_threshold,
+                    step_down_threshold: params
+                        .actor_context
+                        .streaming_config
+                        .developer
+                        .backfill_adaptive_rate_limit_step_down_threshold,
                 };
 
                 macro_rules! new_executor {

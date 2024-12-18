@@ -89,10 +89,6 @@ impl MonitoredBackfillRateLimiter {
             BackfillRateLimiter::Adaptive(a) => a.rate(),
         };
         self.metric.set(rate);
-        tracing::debug!(
-            "backfill adaptive rate limiter on table {table_id:?}: {rate}",
-            table_id = self.table_id
-        );
     }
 
     pub fn check(&self) -> bool {
@@ -219,6 +215,8 @@ pub struct AdaptiveRateLimiterConfig {
     pub step_min: f64,
     pub step_max: f64,
     pub step_ratio: f64,
+    pub step_up_threshold: f64,
+    pub step_down_threshold: f64,
 }
 
 struct AdaptiveRateLimiterInner {
@@ -272,19 +270,10 @@ impl AdaptiveRateLimiterInner {
 
         let step = (self.rate * config.step_ratio).clamp(config.step_min, config.step_max);
 
-        // FIXME(MrCroxx): remove this.
-        tracing::trace!(
-            "=======================> rate: {}, real: {}, step: {}, dur: {:?}",
-            self.rate,
-            real_rate,
-            step,
-            dur,
-        );
-
-        if real_rate >= self.rate {
+        if real_rate >= self.rate * config.step_up_threshold {
             self.rate += step;
         }
-        if real_rate <= self.rate * 0.9 {
+        if real_rate <= self.rate * config.step_down_threshold {
             self.rate -= step;
         }
         self.rate = self

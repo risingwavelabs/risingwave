@@ -153,6 +153,8 @@ stream_backfill_adaptive_rate_limit_init = 1000.0
 stream_backfill_adaptive_rate_limit_step_min = 10.0
 stream_backfill_adaptive_rate_limit_step_max = 10000.0
 stream_backfill_adaptive_rate_limit_step_ratio = 0.1
+stream_backfill_adaptive_rate_limit_step_up_threshold = 0.99
+stream_backfill_adaptive_rate_limit_step_down_threshold = 0.9
 
 [storage]
 share_buffers_sync_parallelism = 1
