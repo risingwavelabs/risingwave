@@ -207,6 +207,7 @@ async fn extract_protobuf_table_schema(
         ..Default::default()
     };
     let parser_config = SpecificParserConfig::new(&info, with_properties)?;
+    try_consume_string_from_options(format_encode_options, "pulsar_schema_topic");
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_USERNAME);
     try_consume_string_from_options(format_encode_options, SCHEMA_REGISTRY_PASSWORD);
     consume_aws_config_from_options(format_encode_options);
@@ -363,15 +364,27 @@ pub(crate) async fn bind_columns_from_source(
         | (Format::Plain, Encode::Bytes)
         | (Format::DebeziumMongo, Encode::Json) => None,
         (Format::Plain, Encode::Protobuf) | (Format::Upsert, Encode::Protobuf) => {
-            let (row_schema_location, use_schema_registry) =
-                get_schema_location(&mut format_encode_options_to_consume)?;
-            let protobuf_schema = ProtobufSchema {
-                message_name: consume_string_from_options(
-                    &mut format_encode_options_to_consume,
-                    MESSAGE_NAME_KEY,
-                )?,
-                row_schema_location,
-                use_schema_registry,
+            let protobuf_schema = match try_consume_string_from_options(
+                &mut format_encode_options_to_consume,
+                "pulsar_rest_base",
+            ) {
+                Some(pulsar_rest_base) => ProtobufSchema {
+                    message_name: AstString("INFERRED".to_owned()),
+                    row_schema_location: pulsar_rest_base,
+                    use_schema_registry: false,
+                },
+                None => {
+                    let (row_schema_location, use_schema_registry) =
+                        get_schema_location(&mut format_encode_options_to_consume)?;
+                    ProtobufSchema {
+                        message_name: consume_string_from_options(
+                            &mut format_encode_options_to_consume,
+                            MESSAGE_NAME_KEY,
+                        )?,
+                        row_schema_location,
+                        use_schema_registry,
+                    }
+                }
             };
             let name_strategy = get_sr_name_strategy_check(
                 &mut format_encode_options_to_consume,
@@ -1155,8 +1168,13 @@ pub fn validate_compatibility(
         let res = match (&source_schema.format, &source_schema.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = WithOptions::try_from(source_schema.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
+                match try_consume_string_from_options(options.inner_mut(), "pulsar_rest_base") {
+                    Some(_) => false,
+                    None => {
+                        let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+                        use_schema_registry
+                    }
+                }
             }
             (Format::Debezium, Encode::Avro) => true,
             (_, _) => false,
