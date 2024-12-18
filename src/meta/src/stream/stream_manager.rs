@@ -639,7 +639,10 @@ impl GlobalStreamManager {
             .collect::<BTreeSet<_>>();
 
         // Check if the provided parallelism is valid.
-        let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
+        let available_parallelism = worker_nodes
+            .iter()
+            .map(|w| w.compute_parallelism())
+            .sum::<usize>();
         let max_parallelism = self
             .metadata_manager
             .get_job_max_parallelism(table_id)
