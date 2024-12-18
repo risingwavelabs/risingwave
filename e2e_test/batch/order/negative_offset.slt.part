@@ -15,28 +15,26 @@ SELECT * FROM generate_series(0,10,1) LIMIT -3;
 statement error
 SELECT * FROM generate_series(0,10,1) LIMIT -1%;
 
-statement ok
+query I
 SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1+2;
 ----
 0
 1
 2
 
-
-statement ok
+query I
 SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2;
 ---
 0
 1
 2
 
-
-statement ok
+query I
 SELECT * FROM generate_series(0,10,1) as t(v) order by v limit -3+4;
 ---
 0
 
-statement ok
+query I
 SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2 OFFSET 2;
 ---
 2
