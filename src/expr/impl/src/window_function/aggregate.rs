@@ -208,22 +208,19 @@ where
                     // filter out NULLs
                     self.buffer
                         .curr_window_values()
-                        .filter(|args| args[0].is_some())
-                        .next()
+                        .find(|args| args[0].is_some())
                         .and_then(|args| args[0].clone())
                 }),
                 Shortcut::LastValue => Ok(if !self.ignore_nulls {
                     self.buffer
                         .curr_window_values()
-                        .rev()
-                        .next()
+                        .next_back()
                         .and_then(|args| args[0].clone())
                 } else {
                     self.buffer
                         .curr_window_values()
                         .rev()
-                        .filter(|args| args[0].is_some())
-                        .next()
+                        .find(|args| args[0].is_some())
                         .and_then(|args| args[0].clone())
                 }),
             },
