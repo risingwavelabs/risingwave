@@ -69,10 +69,6 @@ impl Binder {
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
 
-        // TODO()
-        // if ignore_nulls {
-        //     bail_not_implemented!(issue = 17601, "`IGNORE NULLS` is not supported yet");
-        // }
         if ignore_nulls {
             match &kind {
                 WindowFuncKind::Aggregate(AggType::Builtin(
@@ -80,7 +76,9 @@ impl Binder {
                 )) => {
                     // pass
                 }
-                // TODO(rc): support `LAG`/`LEAD` with `IGNORE NULLS`
+                WindowFuncKind::Lag | WindowFuncKind::Lead => {
+                    bail_not_implemented!("`IGNORE NULLS` is not supported for `{}` yet", kind);
+                }
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "`IGNORE NULLS` is not allowed for `{}`",
