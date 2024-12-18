@@ -5709,7 +5709,7 @@ dependencies = [
  "bigdecimal 0.4.5",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.15.0",
  "google-cloud-token",
  "num-bigint",
  "reqwest 0.12.4",
@@ -5750,6 +5750,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "google-cloud-googleapis"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0edfdfb507593d47605b3bb2fb36628b391e3d397e520b85852dea2412c8e2d1"
+dependencies = [
+ "prost 0.13.1",
+ "prost-types 0.13.1",
+ "tonic",
+]
+
+[[package]]
 name = "google-cloud-metadata"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5770,7 +5781,7 @@ dependencies = [
  "async-stream",
  "google-cloud-auth",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.15.0",
  "google-cloud-token",
  "prost-types 0.13.1",
  "thiserror 1.0.63",
@@ -11076,7 +11087,7 @@ dependencies = [
  "glob",
  "google-cloud-bigquery",
  "google-cloud-gax",
- "google-cloud-googleapis",
+ "google-cloud-googleapis 0.16.0",
  "google-cloud-pubsub",
  "http 0.2.9",
  "iceberg",
