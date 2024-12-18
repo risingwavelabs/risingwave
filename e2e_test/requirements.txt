@@ -1,4 +1,4 @@
--r source_legacy/requirements.txt
+-r source/requirements.txt
 -r source_inline/requirements.txt
 requests
 confluent_kafka==2.6.2
