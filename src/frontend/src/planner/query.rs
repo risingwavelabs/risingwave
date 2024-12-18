@@ -55,10 +55,7 @@ impl Planner {
             let limit = limit.unwrap_or(ExprImpl::literal_bigint(LIMIT_ALL_COUNT as i64));
             if !limit.is_const() {
                 return Err(ErrorCode::ExprError(
-                    format!(
-                        "expects an integer or expression after LIMIT, but found:{:?}",
-                        limit
-                    )
+                        "expects an integer or expression that can be evaluated to an integer after LIMIT"
                     .into(),
                 )
                 .into());
