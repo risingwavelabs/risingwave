@@ -93,6 +93,23 @@ impl ProtobufParserConfig {
                 .await
                 .context("load schema failed")?;
             root_file_descriptor.parent_pool().clone()
+        } else if let Some(pulsar_topic) = protobuf_config.pulsar_topic {
+            let base = url.first().unwrap();
+            let client = crate::schema::pulsar_schema::Client::new(
+                base.clone(),
+                protobuf_config.pulsar_token,
+            );
+            let schema_info = client.get_schema(&pulsar_topic).await;
+            let crate::schema::pulsar_schema::PulsarSchema::ProtobufNative(message_descriptor) =
+                schema_info.schema
+            else {
+                unreachable!("expect PROTOBUF_NATIVE but got {:#?}", schema_info.schema);
+            };
+
+            return Ok(Self {
+                message_descriptor,
+                confluent_wire_type: protobuf_config.use_schema_registry,
+            });
         } else {
             let url = url.first().unwrap();
             let schema_bytes = bytes_from_url(url, protobuf_config.aws_auth_props.as_ref()).await?;

@@ -212,6 +212,13 @@ impl SpecificParserConfig {
                         )
                         .map_err(|e| anyhow::anyhow!(e))?,
                     );
+                    config.pulsar_rest_base = format_encode_options_with_secret
+                        .get("pulsar_rest_base")
+                        .cloned();
+                    config.pulsar_token = options_with_secret.get("auth.token").cloned();
+                    config.pulsar_topic = format_encode_options_with_secret
+                        .get("pulsar_schema_topic")
+                        .cloned();
                 }
                 EncodingProperties::Protobuf(config)
             }
@@ -322,6 +329,9 @@ pub struct ProtobufProperties {
     pub topic: String,
     pub key_message_name: Option<String>,
     pub name_strategy: PbSchemaRegistryNameStrategy,
+    pub pulsar_rest_base: Option<String>,
+    pub pulsar_token: Option<String>,
+    pub pulsar_topic: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
