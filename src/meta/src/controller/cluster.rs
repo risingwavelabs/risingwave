@@ -400,7 +400,7 @@ impl StreamingClusterInfo {
     pub fn parallelism(&self) -> usize {
         self.worker_nodes
             .values()
-            .map(|worker| worker.parallelism())
+            .map(|worker| worker.compute_parallelism())
             .sum()
     }
 }
