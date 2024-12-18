@@ -5386,7 +5386,7 @@ impl Parser<'_> {
         {
             None
         } else {
-            let quantity = self.parse_expr()?;
+            let quantity = self.parse_number_value()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
             Some(quantity)
         };

@@ -3551,7 +3551,7 @@ fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
 
-        quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
+        quantity: Some("2".to_owned()),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3576,7 +3576,7 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
+            quantity: Some("2".to_owned()),
         })
     );
     let ast = verified_query(
