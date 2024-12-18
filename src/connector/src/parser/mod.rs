@@ -496,9 +496,9 @@ impl ByteStreamSourceParserImpl {
 #[cfg(test)]
 pub mod test_utils {
     use futures::StreamExt as _;
-    use itertools::Itertools as _;
 
     use super::*;
+    use crate::source::SourceMessage;
 
     #[easy_ext::ext(ByteStreamSourceParserImplTestExt)]
     pub(crate) impl ByteStreamSourceParserImpl {
