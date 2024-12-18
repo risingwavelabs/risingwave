@@ -19,6 +19,7 @@ use risingwave_pb::user::grant_privilege::Object;
 use serde_json::{json, Map as JsonMap};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::system_catalog::rw_catalog::reduct_props::REDUCT_PROPS;
 use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
@@ -125,7 +126,11 @@ pub fn serialize_props_with_secret(
     let mut result: JsonMap<String, serde_json::Value> = JsonMap::new();
 
     for (k, v) in inner {
-        result.insert(k, json!({"type": "plaintext", "value": v}));
+        if REDUCT_PROPS.contains(&k) {
+            result.insert(k, json!({"type": "reducted", "value": "******"}));
+        } else {
+            result.insert(k, json!({"type": "plaintext", "value": v}));
+        }
     }
     for (k, v) in secret_ref {
         let secret_name = schema
