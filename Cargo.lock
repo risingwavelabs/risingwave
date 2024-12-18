@@ -7808,7 +7808,7 @@ dependencies = [
  "lazy_static",
  "lru 0.12.0",
  "mio 0.8.11",
- "mysql_common",
+ "mysql_common 0.32.4",
  "native-tls",
  "once_cell",
  "pem",
@@ -7828,9 +7828,9 @@ dependencies = [
 
 [[package]]
 name = "mysql_common"
-version = "0.32.1"
+version = "0.32.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a60cb978c0a1d654edcc1460f8d6092dacf21346ed6017d81fb76a23ef5a8de"
+checksum = "478b0ff3f7d67b79da2b96f56f334431aef65e15ba4b29dd74a4236e29582bdc"
 dependencies = [
  "base64 0.21.7",
  "bigdecimal 0.4.5",
@@ -7841,7 +7841,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "cc",
- "chrono",
  "cmake",
  "crc32fast",
  "flate2",
@@ -7862,6 +7861,39 @@ dependencies = [
  "subprocess",
  "thiserror 1.0.63",
  "time",
+ "uuid",
+ "zstd 0.13.0",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccd1b5ad6509b04758ae5e339345baa6992c1fc11f45e4b9edae044417cac302"
+dependencies = [
+ "base64 0.22.0",
+ "bindgen",
+ "bitflags 2.6.0",
+ "btoi",
+ "byteorder",
+ "bytes",
+ "cc",
+ "chrono",
+ "cmake",
+ "crc32fast",
+ "flate2",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "rand",
+ "regex",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "subprocess",
+ "thiserror 1.0.63",
  "uuid",
  "zstd 0.13.0",
 ]
@@ -11095,7 +11127,7 @@ dependencies = [
  "moka",
  "mongodb",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.33.0",
  "nexmark",
  "num-bigint",
  "opendal 0.49.2",
