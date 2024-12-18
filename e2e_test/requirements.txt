@@ -9,3 +9,4 @@ fastavro==1.9.4
 httpx==0.27.2
 attrs
 cachetools
+jsonschema
