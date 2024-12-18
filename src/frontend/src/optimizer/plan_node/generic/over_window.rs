@@ -74,6 +74,9 @@ impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
                     }
                 )?;
             }
+            if window_function.ignore_nulls {
+                write!(f, " IGNORE NULLS")?;
+            }
             write!(f, ") OVER(")?;
             let mut delim = "";
             if !window_function.partition_by.is_empty() {
