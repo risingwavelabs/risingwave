@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{AggType, PbAggKind};
+use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -96,26 +96,19 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 
     fn try_rewrite_window_function(&mut self, window_func: WindowFunction) -> Result<ExprImpl> {
-        let (kind, args, return_type, partition_by, order_by, frame) = (
-            window_func.kind,
-            window_func.args,
-            window_func.return_type,
-            window_func.partition_by,
-            window_func.order_by,
-            window_func.frame,
-        );
+        let WindowFunction {
+            kind,
+            args,
+            return_type,
+            partition_by,
+            order_by,
+            ignore_nulls,
+            frame,
+        } = window_func;
 
         let new_expr = if let WindowFuncKind::Aggregate(agg_type) = &kind
-            && matches!(
-                agg_type,
-                AggType::Builtin(
-                    PbAggKind::Avg
-                        | PbAggKind::StddevPop
-                        | PbAggKind::StddevSamp
-                        | PbAggKind::VarPop
-                        | PbAggKind::VarSamp
-                )
-            ) {
+            && matches!(agg_type, agg_types::rewritten!())
+        {
             let agg_call = AggCall::new(
                 agg_type.clone(),
                 args,
@@ -129,9 +122,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                     // AggCall -> WindowFunction
                     WindowFunction::new(
                         WindowFuncKind::Aggregate(agg_call.agg_type),
+                        agg_call.args.clone(),
+                        false, // we don't support `IGNORE NULLS` for these functions now
                         partition_by.clone(),
                         agg_call.order_by.clone(),
-                        agg_call.args.clone(),
                         frame.clone(),
                     )?,
                 ))
@@ -139,9 +133,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
         } else {
             ExprImpl::from(self.push_window_func(WindowFunction::new(
                 kind,
+                args,
+                ignore_nulls,
                 partition_by,
                 order_by,
-                args,
                 frame,
             )?))
         };
