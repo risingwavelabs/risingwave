@@ -8,3 +8,4 @@ protobuf==5.28.0
 fastavro==1.9.4
 httpx==0.27.2
 attrs
+cachetools
