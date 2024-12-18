@@ -173,7 +173,7 @@ serde_with::with_prefix!(batch_prefix "batch_");
 pub enum MetaBackend {
     #[default]
     Mem,
-    Sql, // keep for backward compatibility
+    Sql, // any database url
     Sqlite,
     Postgres,
     Mysql,
@@ -422,6 +422,7 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
     pub periodic_scheduling_compaction_group_merge_interval_sec: u64,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_store_config: MetaStoreConfig,
@@ -446,7 +447,7 @@ impl Serialize for DefaultParallelism {
             Int(usize),
         }
         match self {
-            DefaultParallelism::Full => Parallelism::Str("Full".to_string()).serialize(serializer),
+            DefaultParallelism::Full => Parallelism::Str("Full".to_owned()).serialize(serializer),
             DefaultParallelism::Default(val) => {
                 Parallelism::Int(val.get() as _).serialize(serializer)
             }
@@ -527,6 +528,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_sst_info_fetch_batch_size")]
     /// Max number of SSTs fetched from meta store per SELECT, during time travel Hummock version replay.
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
+
+    #[serde(default = "default::developer::hummock_time_travel_sst_info_insert_batch_size")]
+    /// Max number of SSTs inserted into meta store per INSERT, during time travel metadata writing.
+    pub hummock_time_travel_sst_info_insert_batch_size: usize,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -864,7 +869,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 
-    /// The concurrent uploading number of `SSTables` of buidler
+    /// The concurrent uploading number of `SSTables` of builder
     #[serde(default = "default::storage::compactor_concurrent_uploading_sst_count")]
     pub compactor_concurrent_uploading_sst_count: Option<usize>,
 
@@ -1140,6 +1145,11 @@ pub struct StreamingDeveloperConfig {
     /// even if session variable set.
     /// If true, it's decided by session variable `streaming_use_shared_source` (default true)
     pub enable_shared_source: bool,
+
+    #[serde(default = "default::developer::switch_jdbc_pg_to_native")]
+    /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
+    /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
+    pub switch_jdbc_pg_to_native: bool,
 }
 
 /// The subsections `[batch.developer]`.
@@ -1390,7 +1400,7 @@ impl SystemConfig {
                 if let Some(hummock_state_store) = state_store.strip_prefix("hummock+") {
                     system_params.backup_storage_url = Some(hummock_state_store.to_owned());
                 } else {
-                    system_params.backup_storage_url = Some("memory".to_string());
+                    system_params.backup_storage_url = Some("memory".to_owned());
                 }
                 tracing::info!("initialize backup_storage_url based on state_store");
             }
@@ -1432,7 +1442,7 @@ pub mod default {
         use crate::config::{DefaultParallelism, MetaBackend};
 
         pub fn min_sst_retention_time_sec() -> u64 {
-            3600 * 3
+            3600 * 6
         }
 
         pub fn gc_history_retention_time_sec() -> u64 {
@@ -1440,7 +1450,7 @@ pub mod default {
         }
 
         pub fn full_gc_interval_sec() -> u64 {
-            600
+            3600
         }
 
         pub fn full_gc_object_limit() -> u64 {
@@ -1852,7 +1862,7 @@ pub mod default {
         use foyer::{Compression, RecoverMode, RuntimeOptions, TokioRuntimeOptions};
 
         pub fn dir() -> String {
-            "".to_string()
+            "".to_owned()
         }
 
         pub fn capacity_mb() -> usize {
@@ -1940,7 +1950,7 @@ pub mod default {
         }
 
         pub fn dir() -> String {
-            "./".to_string()
+            "./".to_owned()
         }
     }
 
@@ -2035,6 +2045,10 @@ pub mod default {
             10_000
         }
 
+        pub fn hummock_time_travel_sst_info_insert_batch_size() -> usize {
+            100
+        }
+
         pub fn memory_controller_threshold_aggressive() -> f64 {
             0.9
         }
@@ -2094,6 +2108,10 @@ pub mod default {
 
         pub fn stream_enable_auto_schema_change() -> bool {
             true
+        }
+
+        pub fn switch_jdbc_pg_to_native() -> bool {
+            false
         }
     }
 
@@ -2236,6 +2254,10 @@ pub mod default {
 
         pub fn disable_auto_group_scheduling() -> bool {
             false
+        }
+
+        pub fn max_overlapping_level_size() -> u64 {
+            256 * MB
         }
     }
 
@@ -2677,7 +2699,7 @@ mod tests {
 
     fn rw_config_to_markdown() -> String {
         let mut config_rustdocs = BTreeMap::<String, Vec<(String, String)>>::new();
-        RwConfig::config_docs("".to_string(), &mut config_rustdocs);
+        RwConfig::config_docs("".to_owned(), &mut config_rustdocs);
 
         // Section -> Config Name -> ConfigItemDoc
         let mut configs: BTreeMap<String, BTreeMap<String, ConfigItemDoc>> = config_rustdocs
@@ -2690,7 +2712,7 @@ mod tests {
                             name,
                             ConfigItemDoc {
                                 desc,
-                                default: "".to_string(), // unset
+                                default: "".to_owned(), // unset
                             },
                         )
                     })
@@ -2702,10 +2724,10 @@ mod tests {
         let toml_doc: BTreeMap<String, toml::Value> =
             toml::from_str(&toml::to_string(&default_config_for_docs()).unwrap()).unwrap();
         toml_doc.into_iter().for_each(|(name, value)| {
-            set_default_values("".to_string(), name, value, &mut configs);
+            set_default_values("".to_owned(), name, value, &mut configs);
         });
 
-        let mut markdown = "# RisingWave System Configurations\n\n".to_string()
+        let mut markdown = "# RisingWave System Configurations\n\n".to_owned()
             + "This page is automatically generated by `./risedev generate-example-config`\n";
         for (section, configs) in configs {
             if configs.is_empty() {
@@ -2793,7 +2815,7 @@ mod tests {
                     .s3
                     .developer
                     .retryable_service_error_codes,
-                vec!["dummy".to_string()]
+                vec!["dummy".to_owned()]
             );
         }
 
@@ -2839,7 +2861,7 @@ mod tests {
                     .s3
                     .developer
                     .retryable_service_error_codes,
-                vec!["dummy".to_string()]
+                vec!["dummy".to_owned()]
             );
         }
     }

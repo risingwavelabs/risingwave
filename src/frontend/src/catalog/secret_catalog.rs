@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbSecret;
 
-use crate::catalog::{DatabaseId, OwnedByUserCatalog, SecretId};
+use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, SecretId};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -22,6 +22,7 @@ pub struct SecretCatalog {
     pub id: SecretId,
     pub name: String,
     pub database_id: DatabaseId,
+    pub schema_id: SchemaId,
     pub value: Vec<u8>,
     pub owner: UserId,
 }
@@ -34,6 +35,7 @@ impl From<&PbSecret> for SecretCatalog {
             owner: value.owner,
             name: value.name.clone(),
             value: value.value.clone(),
+            schema_id: value.schema_id,
         }
     }
 }

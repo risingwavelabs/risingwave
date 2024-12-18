@@ -14,7 +14,9 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::{poll_fn, Future};
 use std::mem::take;
+use std::task::Poll;
 
 use anyhow::anyhow;
 use fail::fail_point;
@@ -24,10 +26,15 @@ use risingwave_meta_model::WorkerId;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
+use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, warn};
 
 use crate::barrier::checkpoint::creating_job::{CompleteJobType, CreatingStreamingJobControl};
+use crate::barrier::checkpoint::recovery::{
+    DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
+    RecoveringStateAction,
+};
 use crate::barrier::checkpoint::state::BarrierWorkerState;
 use crate::barrier::command::CommandContext;
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
@@ -47,17 +54,25 @@ use crate::{MetaError, MetaResult};
 
 #[derive(Default)]
 pub(crate) struct CheckpointControl {
-    databases: HashMap<DatabaseId, DatabaseCheckpointControl>,
-    hummock_version_stats: HummockVersionStats,
+    pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
+    pub(super) hummock_version_stats: HummockVersionStats,
 }
 
 impl CheckpointControl {
     pub(crate) fn new(
-        databases: HashMap<DatabaseId, DatabaseCheckpointControl>,
+        databases: impl IntoIterator<Item = (DatabaseId, DatabaseCheckpointControl)>,
         hummock_version_stats: HummockVersionStats,
     ) -> Self {
         Self {
-            databases,
+            databases: databases
+                .into_iter()
+                .map(|(database_id, control)| {
+                    (
+                        database_id,
+                        DatabaseCheckpointControlStatus::Running(control),
+                    )
+                })
+                .collect(),
             hummock_version_stats,
         }
     }
@@ -68,6 +83,7 @@ impl CheckpointControl {
             self.databases
                 .get_mut(&database_id)
                 .expect("should exist")
+                .expect_running("should have wait for completing command before enter recovery")
                 .ack_completed(command_prev_epoch, creating_job_epochs);
         }
     }
@@ -78,6 +94,9 @@ impl CheckpointControl {
     ) -> Option<CompleteBarrierTask> {
         let mut task = None;
         for database in self.databases.values_mut() {
+            let Some(database) = database.running_state_mut() else {
+                continue;
+            };
             let context = context.as_mut().map(|(s, c)| (&mut **s, &mut **c));
             database.next_complete_barrier_task(&mut task, context, &self.hummock_version_stats);
         }
@@ -89,23 +108,36 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<()> {
-        let database_id = from_partial_graph_id(resp.partial_graph_id).0;
-        self.databases
-            .get_mut(&database_id)
-            .expect("should exist")
-            .barrier_collected(resp, control_stream_manager)
+        let database_id = DatabaseId::new(resp.database_id);
+        let database_status = self.databases.get_mut(&database_id).expect("should exist");
+        match database_status {
+            DatabaseCheckpointControlStatus::Running(database) => {
+                database.barrier_collected(resp, control_stream_manager)
+            }
+            DatabaseCheckpointControlStatus::Recovering(state) => {
+                state.barrier_collected(resp);
+                Ok(())
+            }
+        }
     }
 
     pub(crate) fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        self.databases
-            .values()
-            .all(|database| database.can_inject_barrier(in_flight_barrier_nums))
+        self.databases.values().all(|database| {
+            database
+                .running_state()
+                .map(|database| database.can_inject_barrier(in_flight_barrier_nums))
+                .unwrap_or(true)
+        })
     }
 
     pub(crate) fn max_prev_epoch(&self) -> Option<TracedEpoch> {
         self.databases
             .values()
-            .map(|database| database.state.in_flight_prev_epoch())
+            .flat_map(|database| {
+                database
+                    .running_state()
+                    .map(|database| database.state.in_flight_prev_epoch())
+            })
             .max_by_key(|epoch| epoch.value())
             .cloned()
     }
@@ -126,7 +158,9 @@ impl CheckpointControl {
             let max_prev_epoch = self.max_prev_epoch();
             let (database, max_prev_epoch) = match self.databases.entry(database_id) {
                 Entry::Occupied(entry) => (
-                    entry.into_mut(),
+                    entry
+                        .into_mut()
+                        .expect_running("should not have command when not running"),
                     max_prev_epoch.expect("should exist when having some database"),
                 ),
                 Entry::Vacant(entry) => match &command {
@@ -147,7 +181,12 @@ impl CheckpointControl {
                             new_database.state.in_flight_prev_epoch().clone()
                         };
                         control_stream_manager.add_partial_graph(database_id, None)?;
-                        (entry.insert(new_database), max_prev_epoch)
+                        (
+                            entry
+                                .insert(DatabaseCheckpointControlStatus::Running(new_database))
+                                .expect_running("just initialized as running"),
+                            max_prev_epoch,
+                        )
                     }
                     Command::Flush
                     | Command::Pause(PausedReason::Manual)
@@ -177,6 +216,9 @@ impl CheckpointControl {
                 curr_epoch.clone(),
             )?;
             for database in self.databases.values_mut() {
+                let Some(database) = database.running_state_mut() else {
+                    continue;
+                };
                 if database.database_id == database_id {
                     continue;
                 }
@@ -192,11 +234,13 @@ impl CheckpointControl {
             }
         } else {
             let Some(max_prev_epoch) = self.max_prev_epoch() else {
-                assert!(self.databases.is_empty());
                 return Ok(());
             };
             let curr_epoch = max_prev_epoch.next();
             for database in self.databases.values_mut() {
+                let Some(database) = database.running_state_mut() else {
+                    continue;
+                };
                 database.handle_new_barrier(
                     None,
                     checkpoint,
@@ -214,12 +258,16 @@ impl CheckpointControl {
     pub(crate) fn update_barrier_nums_metrics(&self) {
         self.databases
             .values()
+            .flat_map(|database| database.running_state())
             .for_each(|database| database.update_barrier_nums_metrics());
     }
 
     pub(crate) fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
         let mut progress = HashMap::new();
-        for database_checkpoint_control in self.databases.values() {
+        for status in self.databases.values() {
+            let Some(database_checkpoint_control) = status.running_state() else {
+                continue;
+            };
             // Progress of normal backfill
             progress.extend(
                 database_checkpoint_control
@@ -245,7 +293,16 @@ impl CheckpointControl {
     }
 
     pub(crate) fn is_failed_at_worker_err(&self, worker_id: WorkerId) -> bool {
-        for database_checkpoint_control in self.databases.values() {
+        for database_status in self.databases.values() {
+            let database_checkpoint_control = match database_status {
+                DatabaseCheckpointControlStatus::Running(control) => control,
+                DatabaseCheckpointControlStatus::Recovering(state) => {
+                    if state.remaining_workers().contains(&worker_id) {
+                        return true;
+                    }
+                    continue;
+                }
+            };
             let failed_barrier =
                 database_checkpoint_control.barrier_wait_collect_from_worker(worker_id as _);
             if failed_barrier.is_some()
@@ -265,27 +322,131 @@ impl CheckpointControl {
     }
 
     pub(crate) fn clear_on_err(&mut self, err: &MetaError) {
-        for (_, node) in self
-            .databases
-            .values_mut()
-            .flat_map(|database| take(&mut database.command_ctx_queue))
-        {
+        for (_, node) in self.databases.values_mut().flat_map(|status| {
+            status
+                .running_state_mut()
+                .map(|database| take(&mut database.command_ctx_queue))
+                .into_iter()
+                .flatten()
+        }) {
             for notifier in node.notifiers {
                 notifier.notify_failed(err.clone());
             }
             node.enqueue_time.observe_duration();
         }
-        self.databases
-            .values_mut()
-            .for_each(|database| database.create_mview_tracker.abort_all());
+        self.databases.values_mut().for_each(|database| {
+            if let Some(database) = database.running_state_mut() {
+                database.create_mview_tracker.abort_all()
+            }
+        });
     }
 
     pub(crate) fn subscriptions(
         &self,
     ) -> impl Iterator<Item = (DatabaseId, &InflightSubscriptionInfo)> + '_ {
-        self.databases.iter().map(|(database_id, database)| {
-            (*database_id, &database.state.inflight_subscription_info)
+        self.databases.iter().flat_map(|(database_id, database)| {
+            database
+                .checkpoint_control()
+                .map(|database| (*database_id, &database.state.inflight_subscription_info))
         })
+    }
+}
+
+pub(crate) enum CheckpointControlEvent<'a> {
+    EnteringInitializing(DatabaseStatusAction<'a, EnterInitializing>),
+    EnteringRunning(DatabaseStatusAction<'a, EnterRunning>),
+}
+
+impl CheckpointControl {
+    pub(crate) fn on_reset_database_resp(
+        &mut self,
+        worker_id: WorkerId,
+        resp: ResetDatabaseResponse,
+    ) {
+        let database_id = DatabaseId::new(resp.database_id);
+        match self.databases.get_mut(&database_id).expect("should exist") {
+            DatabaseCheckpointControlStatus::Running(_) => {
+                unreachable!("should not receive reset database resp when running")
+            }
+            DatabaseCheckpointControlStatus::Recovering(state) => {
+                state.on_reset_database_resp(worker_id, resp)
+            }
+        }
+    }
+
+    pub(crate) fn next_event(
+        &mut self,
+    ) -> impl Future<Output = CheckpointControlEvent<'_>> + Send + '_ {
+        let mut this = Some(self);
+        poll_fn(move |cx| {
+            let Some(this_mut) = this.as_mut() else {
+                unreachable!("should not be polled after poll ready")
+            };
+            for (&database_id, database_status) in &mut this_mut.databases {
+                match database_status {
+                    DatabaseCheckpointControlStatus::Running(_) => {}
+                    DatabaseCheckpointControlStatus::Recovering(state) => {
+                        let poll_result = state.poll_next_event(cx);
+                        if let Poll::Ready(action) = poll_result {
+                            let this = this.take().expect("checked Some");
+                            return Poll::Ready(match action {
+                                RecoveringStateAction::EnterInitializing(reset_workers) => {
+                                    CheckpointControlEvent::EnteringInitializing(
+                                        this.new_database_status_action(
+                                            database_id,
+                                            EnterInitializing(reset_workers),
+                                        ),
+                                    )
+                                }
+                                RecoveringStateAction::EnterRunning => {
+                                    CheckpointControlEvent::EnteringRunning(
+                                        this.new_database_status_action(database_id, EnterRunning),
+                                    )
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            Poll::Pending
+        })
+    }
+}
+
+pub(crate) enum DatabaseCheckpointControlStatus {
+    Running(DatabaseCheckpointControl),
+    Recovering(DatabaseRecoveringState),
+}
+
+impl DatabaseCheckpointControlStatus {
+    fn running_state(&self) -> Option<&DatabaseCheckpointControl> {
+        match self {
+            DatabaseCheckpointControlStatus::Running(state) => Some(state),
+            DatabaseCheckpointControlStatus::Recovering(_) => None,
+        }
+    }
+
+    fn running_state_mut(&mut self) -> Option<&mut DatabaseCheckpointControl> {
+        match self {
+            DatabaseCheckpointControlStatus::Running(state) => Some(state),
+            DatabaseCheckpointControlStatus::Recovering(_) => None,
+        }
+    }
+
+    fn checkpoint_control(&self) -> Option<&DatabaseCheckpointControl> {
+        match self {
+            DatabaseCheckpointControlStatus::Running(control) => Some(control),
+            DatabaseCheckpointControlStatus::Recovering(state) => state.checkpoint_control(),
+        }
+    }
+
+    fn expect_running(&mut self, reason: &'static str) -> &mut DatabaseCheckpointControl {
+        match self {
+            DatabaseCheckpointControlStatus::Running(state) => state,
+            DatabaseCheckpointControlStatus::Recovering(_) => {
+                panic!("should be at running: {}", reason)
+            }
+        }
     }
 }
 
@@ -435,8 +596,7 @@ impl DatabaseCheckpointControl {
             partial_graph_id = resp.partial_graph_id,
             "barrier collected"
         );
-        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
-        assert_eq!(database_id, self.database_id);
+        let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
@@ -643,7 +803,7 @@ impl DatabaseCheckpointControl {
                         node.state.resps.extend(resps);
                         finished_jobs.push(TrackingJob::New(TrackingCommand {
                             info,
-                            replace_table_info: None,
+                            replace_stream_job: None,
                         }));
                     });
                 let task = task.get_or_insert_default();

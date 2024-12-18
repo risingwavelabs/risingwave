@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use ddl::WebhookSourceInfo;
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{alt, cut_err, dispatch, fail, opt, peek, preceded, repeat, separated};
@@ -37,6 +38,11 @@ use crate::tokenizer::*;
 use crate::{impl_parse_to, parser_v2};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const WEBHOOK_CONNECTOR: &str = "webhook";
+// reserve i32::MIN for pause.
+pub const SOURCE_RATE_LIMIT_PAUSED: i32 = i32::MIN;
+// reserve i32::MIN + 1 for resume.
+pub const SOURCE_RATE_LIMIT_RESUMED: i32 = i32::MIN + 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
@@ -583,7 +589,7 @@ impl Parser<'_> {
             Token::Word(w) => match w.keyword {
                 Keyword::TRUE | Keyword::FALSE | Keyword::NULL => {
                     *self = checkpoint;
-                    Ok(Expr::Value(self.parse_value()?))
+                    Ok(Expr::Value(self.ensure_parse_value()?))
                 }
                 Keyword::CASE => self.parse_case_expr(),
                 Keyword::CAST => self.parse_cast_expr(),
@@ -706,7 +712,7 @@ impl Parser<'_> {
             | Token::HexStringLiteral(_)
             | Token::CstyleEscapesString(_) => {
                 *self = checkpoint;
-                Ok(Expr::Value(self.parse_value()?))
+                Ok(Expr::Value(self.ensure_parse_value()?))
             }
             Token::Parameter(number) => self.parse_param(number),
             Token::Pipe => {
@@ -2556,8 +2562,13 @@ impl Parser<'_> {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
+        let contain_webhook =
+            connector.is_some() && connector.as_ref().unwrap().contains(WEBHOOK_CONNECTOR);
 
-        let format_encode = if let Some(connector) = connector {
+        // webhook connector does not require row format
+        let format_encode = if let Some(connector) = connector
+            && !contain_webhook
+        {
             Some(self.parse_format_encode_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
@@ -2584,6 +2595,42 @@ impl Parser<'_> {
             None
         };
 
+        let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
+            if !contain_webhook {
+                parser_err!("VALIDATE is only supported for tables created with webhook source");
+            }
+
+            self.expect_keyword(Keyword::SECRET)?;
+            let secret_ref = self.parse_secret_ref()?;
+            if secret_ref.ref_as == SecretRefAsType::File {
+                parser_err!("Secret for SECURE_COMPARE() does not support AS FILE");
+            };
+
+            self.expect_keyword(Keyword::AS)?;
+            let signature_expr = self.parse_function()?;
+
+            Some(WebhookSourceInfo {
+                secret_ref,
+                signature_expr,
+            })
+        } else {
+            None
+        };
+
+        let engine = if self.parse_keyword(Keyword::ENGINE) {
+            self.expect_token(&Token::Eq)?;
+            let engine_name = self.parse_object_name()?;
+            if "iceberg".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Iceberg
+            } else if "hummock".eq_ignore_ascii_case(&engine_name.real_value()) {
+                Engine::Hummock
+            } else {
+                parser_err!("Unsupported engine: {}", engine_name);
+            }
+        } else {
+            Engine::Hummock
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2601,6 +2648,8 @@ impl Parser<'_> {
             query,
             cdc_table_info,
             include_column_options: include_options,
+            webhook_info,
+            engine,
         })
     }
 
@@ -2941,7 +2990,15 @@ impl Parser<'_> {
     pub fn parse_sql_option(&mut self) -> PResult<SqlOption> {
         let name = self.parse_object_name()?;
         self.expect_token(&Token::Eq)?;
-        let value = self.parse_value()?;
+        let value = {
+            const CONNECTION_REF_KEY: &str = "connection";
+            if name.real_value().eq_ignore_ascii_case(CONNECTION_REF_KEY) {
+                let connection_name = self.parse_object_name()?;
+                SqlOptionValue::ConnectionRef(ConnectionRefValue { connection_name })
+            } else {
+                self.parse_value_and_obj_ref::<false>()?
+            }
+        };
         Ok(SqlOption { name, value })
     }
 
@@ -3026,9 +3083,11 @@ impl Parser<'_> {
             self.parse_alter_system()
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
             self.parse_alter_subscription()
+        } else if self.parse_keyword(Keyword::SECRET) {
+            self.parse_alter_secret()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER or SYSTEM after ALTER"
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3147,8 +3206,11 @@ impl Parser<'_> {
                 AlterTableOperation::SetSourceRateLimit { rate_limit }
             } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
                 AlterTableOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
+                AlterTableOperation::SetDmlRateLimit { rate_limit }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT after SET");
+                return self
+                    .expected("SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT after SET");
             }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
@@ -3212,6 +3274,28 @@ impl Parser<'_> {
         }
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
             return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+        }
+        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
+            -1
+        } else {
+            let s = self.parse_number_value()?;
+            if let Ok(n) = s.parse::<i32>() {
+                n
+            } else {
+                return self.expected("number or DEFAULT");
+            }
+        };
+        Ok(Some(rate_limit))
+    }
+
+    /// DML_RATE_LIMIT = default | NUMBER
+    /// DML_RATE_LIMIT TO default | NUMBER
+    pub fn parse_alter_dml_rate_limit(&mut self) -> PResult<Option<i32>> {
+        if !self.parse_word("DML_RATE_LIMIT") {
+            return Ok(None);
+        }
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER TABLE SET DML_RATE_LIMIT");
         }
         let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
             -1
@@ -3475,9 +3559,17 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_source = self.parse_object_name()?;
             AlterSourceOperation::SwapRenameSource { target_source }
+        } else if self.parse_keyword(Keyword::PAUSE) {
+            AlterSourceOperation::SetSourceRateLimit {
+                rate_limit: SOURCE_RATE_LIMIT_PAUSED,
+            }
+        } else if self.parse_keyword(Keyword::RESUME) {
+            AlterSourceOperation::SetSourceRateLimit {
+                rate_limit: SOURCE_RATE_LIMIT_RESUMED,
+            }
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN, OWNER TO, SET or SOURCE_RATE_LIMIT after ALTER SOURCE",
+                "RENAME, ADD COLUMN, OWNER TO, SET, PAUSE, RESUME, or SOURCE_RATE_LIMIT after ALTER SOURCE",
             );
         };
 
@@ -3541,6 +3633,19 @@ impl Parser<'_> {
         Ok(Statement::AlterSystem { param, value })
     }
 
+    pub fn parse_alter_secret(&mut self) -> PResult<Statement> {
+        let secret_name = self.parse_object_name()?;
+        let with_options = self.parse_with_properties()?;
+        self.expect_keyword(Keyword::AS)?;
+        let new_credential = self.ensure_parse_value()?;
+        let operation = AlterSecretOperation::ChangeCredential { new_credential };
+        Ok(Statement::AlterSecret {
+            name: secret_name,
+            with_options,
+            operation,
+        })
+    }
+
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> PResult<Statement> {
         let table_name = self.parse_object_name()?;
@@ -3567,11 +3672,11 @@ impl Parser<'_> {
         while let Some(t) = self.next_token_no_skip() {
             match t.token {
                 Token::Whitespace(Whitespace::Tab) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Whitespace(Whitespace::Newline) => {
-                    values.push(Some(content.to_string()));
+                    values.push(Some(content.clone()));
                     content.clear();
                 }
                 Token::Backslash => {
@@ -3592,42 +3697,64 @@ impl Parser<'_> {
         values
     }
 
+    pub fn ensure_parse_value(&mut self) -> PResult<Value> {
+        match self.parse_value_and_obj_ref::<true>()? {
+            SqlOptionValue::Value(value) => Ok(value),
+            SqlOptionValue::SecretRef(_) | SqlOptionValue::ConnectionRef(_) => unreachable!(),
+        }
+    }
+
     /// Parse a literal value (numbers, strings, date/time, booleans)
-    pub fn parse_value(&mut self) -> PResult<Value> {
+    pub fn parse_value_and_obj_ref<const FORBID_OBJ_REF: bool>(
+        &mut self,
+    ) -> PResult<SqlOptionValue> {
         let checkpoint = *self;
         let token = self.next_token();
         match token.token {
             Token::Word(w) => match w.keyword {
-                Keyword::TRUE => Ok(Value::Boolean(true)),
-                Keyword::FALSE => Ok(Value::Boolean(false)),
-                Keyword::NULL => Ok(Value::Null),
+                Keyword::TRUE => Ok(Value::Boolean(true).into()),
+                Keyword::FALSE => Ok(Value::Boolean(false).into()),
+                Keyword::NULL => Ok(Value::Null.into()),
                 Keyword::NoKeyword if w.quote_style.is_some() => match w.quote_style {
-                    Some('"') => Ok(Value::DoubleQuotedString(w.value)),
-                    Some('\'') => Ok(Value::SingleQuotedString(w.value)),
+                    Some('"') => Ok(Value::DoubleQuotedString(w.value).into()),
+                    Some('\'') => Ok(Value::SingleQuotedString(w.value).into()),
                     _ => self.expected_at(checkpoint, "A value")?,
                 },
                 Keyword::SECRET => {
-                    let secret_name = self.parse_object_name()?;
-                    let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
-                        SecretRefAsType::File
-                    } else {
-                        SecretRefAsType::Text
-                    };
-                    Ok(Value::Ref(SecretRef {
-                        secret_name,
-                        ref_as,
-                    }))
+                    if FORBID_OBJ_REF {
+                        return self.expected_at(
+                            checkpoint,
+                            "a concrete value rather than a secret reference",
+                        );
+                    }
+                    let secret = self.parse_secret_ref()?;
+                    Ok(SqlOptionValue::SecretRef(secret))
                 }
                 _ => self.expected_at(checkpoint, "a concrete value"),
             },
-            Token::Number(ref n) => Ok(Value::Number(n.clone())),
-            Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
-            Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
-            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapedString(s.clone())),
-            Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
-            Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
+            Token::Number(ref n) => Ok(Value::Number(n.clone()).into()),
+            Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string()).into()),
+            Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone()).into()),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapedString(s.clone()).into()),
+            Token::NationalStringLiteral(ref s) => {
+                Ok(Value::NationalStringLiteral(s.to_string()).into())
+            }
+            Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string()).into()),
             _ => self.expected_at(checkpoint, "a value"),
         }
+    }
+
+    fn parse_secret_ref(&mut self) -> PResult<SecretRefValue> {
+        let secret_name = self.parse_object_name()?;
+        let ref_as = if self.parse_keywords(&[Keyword::AS, Keyword::FILE]) {
+            SecretRefAsType::File
+        } else {
+            SecretRefAsType::Text
+        };
+        Ok(SecretRefValue {
+            secret_name,
+            ref_as,
+        })
     }
 
     fn parse_set_variable(&mut self) -> PResult<SetVariableValue> {
@@ -3636,7 +3763,7 @@ impl Parser<'_> {
             separated(
                 1..,
                 alt((
-                    Self::parse_value.map(SetVariableValueSingle::Literal),
+                    Self::ensure_parse_value.map(SetVariableValueSingle::Literal),
                     |parser: &mut Self| {
                         let checkpoint = *parser;
                         let ident = parser.parse_identifier()?;
@@ -3663,7 +3790,7 @@ impl Parser<'_> {
 
     pub fn parse_number_value(&mut self) -> PResult<String> {
         let checkpoint = *self;
-        match self.parse_value()? {
+        match self.ensure_parse_value()? {
             Value::Number(v) => Ok(v),
             _ => self.expected_at(checkpoint, "literal number"),
         }
@@ -4339,7 +4466,7 @@ impl Parser<'_> {
                                 }
                                 Ok(SetTimeZoneValue::Ident(Ident::with_quote_unchecked(
                                     '\'',
-                                    "UTC".to_string(),
+                                    "UTC".to_owned(),
                                 )))
                             }
                             _ => Err(StrError("expect Value::Interval".into())),
@@ -4348,7 +4475,7 @@ impl Parser<'_> {
                     })),
                 ),
                 Self::parse_identifier.map(SetTimeZoneValue::Ident),
-                Self::parse_value.map(SetTimeZoneValue::Literal),
+                Self::ensure_parse_value.map(SetTimeZoneValue::Literal),
             ))
             .expect("variable")
             .parse_next(self)?;
@@ -4367,7 +4494,7 @@ impl Parser<'_> {
             })
         } else if self.parse_keyword(Keyword::TRANSACTION) && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
-                let snapshot_id = self.parse_value()?;
+                let snapshot_id = self.ensure_parse_value()?;
                 return Ok(Statement::SetTransaction {
                     modes: vec![],
                     snapshot: Some(snapshot_id),
@@ -5064,7 +5191,6 @@ impl Parser<'_> {
 
         let source = Box::new(self.parse_query()?);
         let returning = self.parse_returning(Optional)?;
-
         Ok(Statement::Insert {
             table_name,
             columns,
@@ -5432,7 +5558,7 @@ mod tests {
         run_parser_method(min_bigint, |parser| {
             assert_eq!(
                 parser.parse_expr().unwrap(),
-                Expr::Value(Value::Number("-9223372036854775808".to_string()))
+                Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
         });
     }

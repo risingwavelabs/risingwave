@@ -228,7 +228,7 @@
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
-  binder_error: 'Bind error: cannot cast type "character varying" to "character varying[]" in Assign context'
+  binder_error: cannot cast type "character varying" to "character varying[]" in Assign context
 - name: string to varchar[] in explicit context
   sql: |
     select ('{c,' || 'd}')::varchar[];

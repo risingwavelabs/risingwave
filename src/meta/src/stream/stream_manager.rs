@@ -31,10 +31,12 @@ use tracing::Instrument;
 use super::{Locations, RescheduleOptions, ScaleControllerRef, TableResizePolicy};
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceTablePlan, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::error::bail_invalid_parameter;
-use crate::manager::{DdlType, MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob};
+use crate::manager::{
+    MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
+};
 use crate::model::{ActorId, FragmentId, StreamJobFragments, TableParallelism};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -74,10 +76,10 @@ pub struct CreateStreamingJobContext {
 
     pub create_type: CreateType,
 
-    pub ddl_type: DdlType,
+    pub job_type: StreamingJobType,
 
     /// Context provided for potential replace table, typically used when sinking into a table.
-    pub replace_table_job_info: Option<(StreamingJob, ReplaceTableContext, StreamJobFragments)>,
+    pub replace_table_job_info: Option<(StreamingJob, ReplaceStreamJobContext, StreamJobFragments)>,
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
 
@@ -164,10 +166,10 @@ impl CreatingStreamingJobInfo {
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
-/// [`ReplaceTableContext`] carries one-time infos for replacing the plan of an existing table.
+/// [`ReplaceStreamJobContext`] carries one-time infos for replacing the plan of an existing stream job.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
-pub struct ReplaceTableContext {
+pub struct ReplaceStreamJobContext {
     /// The old job fragments to be replaced.
     pub old_fragments: StreamJobFragments,
 
@@ -177,7 +179,7 @@ pub struct ReplaceTableContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
-    /// The locations of the actors to build in the new table to replace.
+    /// The locations of the actors to build in the new job to replace.
     pub building_locations: Locations,
 
     /// The locations of the existing actors, essentially the downstream chain actors to update.
@@ -287,7 +289,10 @@ impl GlobalStreamManager {
                         .await
                     {
                         // try to cancel buffered creating command.
-                        if self.barrier_scheduler.try_cancel_scheduled_create(table_id) {
+                        if self
+                            .barrier_scheduler
+                            .try_cancel_scheduled_create(database_id, table_id)
+                        {
                             tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
                         } else if !table_fragments.is_created() {
                             tracing::debug!(
@@ -331,7 +336,7 @@ impl GlobalStreamManager {
             upstream_root_actors,
             definition,
             create_type,
-            ddl_type,
+            job_type,
             replace_table_job_info,
             internal_tables,
             snapshot_backfill_info,
@@ -359,7 +364,7 @@ impl GlobalStreamManager {
 
             replace_table_id = Some(tmp_table_id);
 
-            replace_table_command = Some(ReplaceTablePlan {
+            replace_table_command = Some(ReplaceStreamJobPlan {
                 old_fragments: context.old_fragments,
                 new_fragments: stream_job_fragments,
                 merge_updates: context.merge_updates,
@@ -388,10 +393,10 @@ impl GlobalStreamManager {
             upstream_root_actors,
             dispatchers,
             init_split_assignment,
-            definition: definition.to_string(),
+            definition: definition.clone(),
             streaming_job: streaming_job.clone(),
             internal_tables: internal_tables.into_values().collect_vec(),
-            ddl_type,
+            job_type,
             create_type,
         };
 
@@ -457,32 +462,39 @@ impl GlobalStreamManager {
         }
     }
 
-    pub async fn replace_table(
+    /// Send replace job command to barrier scheduler.
+    pub async fn replace_stream_job(
         &self,
-        stream_job_fragments: StreamJobFragments,
-        ReplaceTableContext {
+        new_fragments: StreamJobFragments,
+        ReplaceStreamJobContext {
             old_fragments,
             merge_updates,
             dispatchers,
             tmp_id,
             streaming_job,
             ..
-        }: ReplaceTableContext,
+        }: ReplaceStreamJobContext,
     ) -> MetaResult<()> {
-        let tmp_table_id = stream_job_fragments.stream_job_id();
-        let init_split_assignment = self.source_manager.allocate_splits(&tmp_table_id).await?;
+        let tmp_table_id = new_fragments.stream_job_id();
+        let init_split_assignment = if streaming_job.is_source() {
+            self.source_manager
+                .allocate_splits_for_replace_source(&tmp_table_id, &merge_updates)
+                .await?
+        } else {
+            self.source_manager.allocate_splits(&tmp_table_id).await?
+        };
 
         self.barrier_scheduler
             .run_config_change_command_with_pause(
                 streaming_job.database_id().into(),
-                Command::ReplaceTable(ReplaceTablePlan {
+                Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                     old_fragments,
-                    new_fragments: stream_job_fragments,
+                    new_fragments,
                     merge_updates,
                     dispatchers,
                     init_split_assignment,
-                    tmp_id,
                     streaming_job,
+                    tmp_id,
                 }),
             )
             .await?;
@@ -627,10 +639,7 @@ impl GlobalStreamManager {
             .collect::<BTreeSet<_>>();
 
         // Check if the provided parallelism is valid.
-        let available_parallelism = worker_nodes
-            .iter()
-            .map(|w| w.parallelism as usize)
-            .sum::<usize>();
+        let available_parallelism = worker_nodes.iter().map(|w| w.parallelism()).sum::<usize>();
         let max_parallelism = self
             .metadata_manager
             .get_job_max_parallelism(table_id)

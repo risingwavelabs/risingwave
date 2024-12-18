@@ -34,6 +34,7 @@ pub mod mock_coordination_client;
 pub mod mongodb;
 pub mod mqtt;
 pub mod nats;
+pub mod postgres;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
@@ -133,6 +134,8 @@ macro_rules! for_all_sinks {
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink },
                 { Mongodb, $crate::sink::mongodb::MongodbSink },
                 { SqlServer, $crate::sink::sqlserver::SqlServerSink },
+                { Postgres, $crate::sink::postgres::PostgresSink },
+
                 { Test, $crate::sink::test_sink::TestSink },
                 { Table, $crate::sink::trivial::TableSink }
             }
@@ -314,6 +317,7 @@ pub struct SinkMetrics {
     // Log store reader metrics
     pub log_store_latest_read_epoch: LabelGuardedIntGaugeVec<4>,
     pub log_store_read_rows: LabelGuardedIntCounterVec<4>,
+    pub log_store_read_bytes: LabelGuardedIntCounterVec<4>,
     pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounterVec<4>,
 
     // Iceberg metrics
@@ -378,6 +382,14 @@ impl SinkMetrics {
         let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_rows",
             "The read rate of rows",
+            &["actor_id", "connector", "sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
+        let log_store_read_bytes = register_guarded_int_counter_vec_with_registry!(
+            "log_store_read_bytes",
+            "Total size of chunks read by log reader",
             &["actor_id", "connector", "sink_id", "sink_name"],
             registry
         )
@@ -448,6 +460,7 @@ impl SinkMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            log_store_read_bytes,
             log_store_reader_wait_new_future_duration_ns,
             iceberg_write_qps,
             iceberg_write_latency,
@@ -568,8 +581,8 @@ impl SinkWriterParam {
 
             actor_id: 1,
             sink_id: SinkId::new(1),
-            sink_name: "test_sink".to_string(),
-            connector: "test_connector".to_string(),
+            sink_name: "test_sink".to_owned(),
+            connector: "test_connector".to_owned(),
         }
     }
 }
@@ -604,13 +617,13 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
                 None => match user_specified {
                     SinkDecouple::Default | SinkDecouple::Enable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     SinkDecouple::Disable => {
                         desc.properties.insert(
-                            COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }
@@ -866,6 +879,12 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
+    #[error("Postgres error: {0}")]
+    Postgres(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error(transparent)]
     Connector(
         #[from]
@@ -949,5 +968,11 @@ impl From<::elasticsearch::Error> for SinkError {
 impl From<::opensearch::Error> for SinkError {
     fn from(err: ::opensearch::Error) -> Self {
         SinkError::ElasticSearchOpenSearch(anyhow!(err))
+    }
+}
+
+impl From<tokio_postgres::Error> for SinkError {
+    fn from(err: tokio_postgres::Error) -> Self {
+        SinkError::Postgres(anyhow!(err))
     }
 }

@@ -23,9 +23,12 @@ use risingwave_pb::plan_common::{
     AdditionalColumn, ColumnDescVersion, DefaultColumnDesc, PbColumnCatalog, PbColumnDesc,
 };
 
-use super::{row_id_column_desc, rw_timestamp_column_desc, USER_COLUMN_ID_OFFSET};
+use super::{
+    iceberg_sequence_num_column_desc, row_id_column_desc, rw_timestamp_column_desc,
+    USER_COLUMN_ID_OFFSET,
+};
 use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
-use crate::types::DataType;
+use crate::types::{DataType, StructType};
 use crate::util::value_encoding::DatumToProtoExt;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -253,9 +256,9 @@ impl ColumnDesc {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: vec![],
-            type_name: "".to_string(),
+            type_name: "".to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -270,16 +273,14 @@ impl ColumnDesc {
         type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
-        let data_type = DataType::new_struct(
-            fields.iter().map(|f| f.data_type.clone()).collect_vec(),
-            fields.iter().map(|f| f.name.clone()).collect_vec(),
-        );
+        let data_type =
+            StructType::new(fields.iter().map(|f| (&f.name, f.data_type.clone()))).into();
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
-            name: name.to_string(),
+            name: name.to_owned(),
             field_descs: fields,
-            type_name: type_name.to_string(),
+            type_name: type_name.to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column: AdditionalColumn { column_type: None },
@@ -463,6 +464,10 @@ impl ColumnCatalog {
         }
     }
 
+    pub fn is_rw_sys_column(&self) -> bool {
+        self.column_desc.system_column.is_some()
+    }
+
     pub fn rw_timestamp_column() -> Self {
         Self {
             column_desc: rw_timestamp_column_desc(),
@@ -480,6 +485,13 @@ impl ColumnCatalog {
     pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn iceberg_sequence_num_column() -> Self {
+        Self {
+            column_desc: iceberg_sequence_num_column_desc(),
             is_hidden: true,
         }
     }
@@ -542,7 +554,7 @@ pub fn debug_assert_column_ids_distinct(columns: &[ColumnCatalog]) {
     );
 }
 
-/// FIXME: perhapts we should use sth like `ColumnIdGenerator::new_alter`,
+/// FIXME: Perhaps we should use sth like `ColumnIdGenerator::new_alter`,
 /// However, the `SourceVersion` is problematic: It doesn't contain `next_col_id`.
 /// (But for now this isn't a large problem, since drop column is not allowed for source yet..)
 ///

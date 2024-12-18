@@ -32,6 +32,8 @@ use risedev::{
 };
 use tempfile::tempdir;
 use thiserror_ext::AsReport;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::EnvFilter;
 use yaml_rust::YamlEmitter;
 
 #[derive(Default)]
@@ -100,7 +102,7 @@ fn task_main(
 
     for service in services {
         if let Some(port) = service.port() {
-            ports.push((port, service.id().to_string(), service.user_managed()));
+            ports.push((port, service.id().to_owned(), service.user_managed()));
         }
     }
 
@@ -365,7 +367,7 @@ fn task_main(
             }
         }
 
-        let service_id = service.id().to_string();
+        let service_id = service.id().to_owned();
         let duration = Instant::now() - start_time;
         stat.push((service_id, duration));
     }
@@ -378,11 +380,21 @@ fn main() -> Result<()> {
     // Backtraces for RisingWave components are enabled in `Task::execute`.
     std::env::set_var("RUST_BACKTRACE", "0");
 
+    // Init logger from a customized env var.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .with_env_var("RISEDEV_RUST_LOG")
+                .from_env_lossy(),
+        )
+        .init();
+
     preflight_check()?;
 
     let task_name = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "default".to_string());
+        .unwrap_or_else(|| "default".to_owned());
 
     let (config_path, env, risedev_config) = ConfigExpander::expand(".", &task_name)?;
 

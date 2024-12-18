@@ -951,7 +951,7 @@ def section_streaming(outer_panels):
                 # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
                 # Let's remove them when all sinks are migrated to Log Store
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) *",
+                    "Sink Throughput(rows/s)",
                     "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
@@ -961,11 +961,31 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Sink Throughput(rows/s) per Partition *",
+                    "Sink Throughput(rows/s) per Partition",
                     "The number of rows streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
                     [
                         panels.target(
                             f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Sink Throughput(MB/s)",
+                    "The figure shows the number of bytes written each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Sink Throughput(MB/s) per Partition",
+                    "The number of bytes streamed into each sink per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
@@ -1129,6 +1149,18 @@ def section_streaming(outer_panels):
                             "{{%s}}" % NODE_LABEL,
                         ),
                     ],
+                ),
+                panels.timeseries_epoch(
+                    "Current Epoch of Materialize Views",
+                    "The current epoch that the Materialize Executors are processing. If an MV's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
+                            f"min({metric('stream_mview_current_epoch')} != 0) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "{{table_id}} {{table_name}}",
+                            ),
+                    ]
                 ),
                 panels.timeseries_latency(
                     "Snapshot Backfill Lag",
@@ -1717,6 +1749,18 @@ def section_streaming_actors(outer_panels: Panels):
                             "{{executor_identity}} actor {{actor_id}}",
                         ),
                     ],
+                ),
+                panels.timeseries_epoch(
+                    "Current Epoch of Actors",
+                    "The current epoch that the actors are processing. If an actor's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled epochs makes sense.
+                            f"min({metric('stream_actor_current_epoch')} != 0) by (fragment_id)",
+                            "fragment {{fragment_id}}",
+                            ),
+                    ]
                 ),
             ],
         )
@@ -3253,7 +3297,7 @@ def section_hummock_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Version Id",
                     "",
                     [
@@ -3275,7 +3319,7 @@ def section_hummock_manager(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Epoch",
                     "",
                     [
@@ -4179,7 +4223,7 @@ def section_iceberg_metrics(outer_panels):
                             "read @ {{table_name}}",
                         ),
                         panels.target(
-                            f"sum({metric('nimtable_read_bytes')})",
+                            f"sum({metric('iceberg_read_bytes')})",
                             "total read",
                         ),
                     ],
@@ -4338,7 +4382,7 @@ def section_sink_metrics(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_id(
+                panels.timeseries_epoch(
                     "Log Store Read/Write Epoch",
                     "",
                     [
@@ -4404,6 +4448,27 @@ def section_sink_metrics(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('log_store_read_rows')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Log Store Consume Throughput(MB/s)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_bytes')}[$__rate_interval])) by (connector, sink_id, sink_name) / (1000*1000)",
+                            "{{sink_id}} {{sink_name}} ({{connector}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Executor Log Store Consume Throughput(MB/s)",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('log_store_read_bytes')}[$__rate_interval])) by ({NODE_LABEL}, connector, sink_id, actor_id, sink_name) / (1000*1000)",
                             "{{sink_id}} {{sink_name}} ({{connector}}) actor {{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),

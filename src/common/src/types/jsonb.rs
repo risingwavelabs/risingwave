@@ -479,7 +479,7 @@ impl<'a> JsonbRef<'a> {
             .as_object()
             .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
         if !matches!(ty.key(), DataType::Varchar) {
-            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+            return Err("cannot convert jsonb to a map with non-string keys".to_owned());
         }
 
         let mut keys: Vec<Datum> = Vec::with_capacity(object.len());
@@ -617,5 +617,24 @@ impl<'a> FromSql<'a> for JsonbVal {
 
     fn accepts(ty: &Type) -> bool {
         matches!(*ty, Type::JSONB)
+    }
+}
+
+impl ToSql for JsonbRef<'_> {
+    accepts!(JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        out.put_u8(1);
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
     }
 }

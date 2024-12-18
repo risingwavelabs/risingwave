@@ -210,7 +210,7 @@ impl Binder {
                 ("scale", raw_call(ExprType::Scale)),
                 ("min_scale", raw_call(ExprType::MinScale)),
                 ("trim_scale", raw_call(ExprType::TrimScale)),
-
+                // date and time
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -223,8 +223,16 @@ impl Binder {
                 ("make_date", raw_call(ExprType::MakeDate)),
                 ("make_time", raw_call(ExprType::MakeTime)),
                 ("make_timestamp", raw_call(ExprType::MakeTimestamp)),
-                ("to_date", raw_call(ExprType::CharToDate)),
                 ("make_timestamptz", raw_call(ExprType::MakeTimestamptz)),
+                ("timezone", rewrite(ExprType::AtTimeZone, |mut inputs|{
+                    if inputs.len() == 2 {
+                        inputs.swap(0, 1);
+                        Ok(inputs)
+                    } else {
+                        Err(ErrorCode::ExprError("unexpected arguments number".into()).into())
+                    }
+                })),
+                ("to_date", raw_call(ExprType::CharToDate)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -294,6 +302,8 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
+                ("hmac", raw_call(ExprType::Hmac)),
+                ("secure_compare",raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
                 ("inet_aton", raw_call(ExprType::InetAton)),
@@ -523,6 +533,13 @@ impl Binder {
                         .into())
                     }
                 })),
+                ("pg_my_temp_schema", guard_by_len(0, raw(|_binder, _inputs| {
+                    // Returns the OID of the current session's temporary schema, or zero if it has none (because it has not created any temporary tables).
+                    Ok(ExprImpl::literal_int(
+                        // always return 0, as we haven't supported temporary tables nor temporary schema yet
+                        0,
+                    ))
+                }))),
                 ("current_setting", guard_by_len(1, raw(|binder, inputs| {
                     let input = &inputs[0];
                     let input = if let ExprImpl::Literal(literal) = input &&
@@ -657,8 +674,8 @@ impl Binder {
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
                 ("col_description", raw_call(ExprType::ColDescription)),
-                ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
-                ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_owned()))),
+                ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_owned()))),
                 ("pg_is_in_recovery", raw_call(ExprType::PgIsInRecovery)),
                 ("rw_recovery_status", raw_call(ExprType::RwRecoveryStatus)),
                 ("rw_epoch_to_ts", raw_call(ExprType::RwEpochToTs)),
@@ -759,7 +776,7 @@ impl Binder {
         if matches!(self.context.clause, Some(Clause::GeneratedColumn)) {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Cannot use `NOW()` function in generated columns. Do you want `PROCTIME()`?"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         }
@@ -769,7 +786,7 @@ impl Binder {
     fn ensure_proctime_function_allowed(&self) -> Result<()> {
         if !self.is_for_ddl() {
             return Err(ErrorCode::InvalidInputSyntax(
-                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_owned(),
             )
             .into());
         }
@@ -780,11 +797,11 @@ impl Binder {
 fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.is_empty() {
         Err(ErrorCode::BindError(
-            "Function `concat` takes at least 1 arguments (0 given)".to_string(),
+            "Function `concat` takes at least 1 arguments (0 given)".to_owned(),
         )
         .into())
     } else {
-        let inputs = std::iter::once(ExprImpl::literal_varchar("".to_string()))
+        let inputs = std::iter::once(ExprImpl::literal_varchar("".to_owned()))
             .chain(inputs)
             .collect();
         Ok(inputs)
@@ -795,7 +812,7 @@ fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
 /// Nullif(expr1,expr2) -> Case(Equal(expr1 = expr2),null,expr1).
 fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.len() != 2 {
-        Err(ErrorCode::BindError("Function `nullif` must contain 2 arguments".to_string()).into())
+        Err(ErrorCode::BindError("Function `nullif` must contain 2 arguments".to_owned()).into())
     } else {
         let inputs = vec![
             FunctionCall::new(ExprType::Equal, inputs.clone())?.into(),
@@ -809,7 +826,7 @@ fn rewrite_nullif_to_case_when(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
 fn rewrite_two_bool_inputs(mut inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {
     if inputs.len() != 2 {
         return Err(
-            ErrorCode::BindError("function must contain only 2 arguments".to_string()).into(),
+            ErrorCode::BindError("function must contain only 2 arguments".to_owned()).into(),
         );
     }
     let left = inputs.pop().unwrap();

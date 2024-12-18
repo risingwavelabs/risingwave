@@ -172,7 +172,7 @@ impl AwsAuthProps {
 
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
-pub struct KafkaConnection {
+pub struct KafkaConnectionProps {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
@@ -253,6 +253,7 @@ pub struct KafkaConnection {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
+    // connection related props are moved to `KafkaConnection`
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
@@ -265,7 +266,7 @@ pub struct KafkaCommon {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq)]
+#[derive(Debug, Clone, Deserialize, WithOptions, PartialEq, Hash, Eq)]
 pub struct KafkaPrivateLinkCommon {
     /// This is generated from `private_link_targets` and `private_link_endpoint` in frontend, instead of given by users.
     #[serde(rename = "broker.rewrite.endpoints")]
@@ -330,7 +331,32 @@ impl RdKafkaPropertiesCommon {
     }
 }
 
-impl KafkaConnection {
+impl KafkaConnectionProps {
+    #[cfg(test)]
+    pub fn test_default() -> Self {
+        Self {
+            brokers: "localhost:9092".to_owned(),
+            security_protocol: None,
+            ssl_ca_location: None,
+            ssl_certificate_location: None,
+            ssl_key_location: None,
+            ssl_ca_pem: None,
+            ssl_certificate_pem: None,
+            ssl_key_pem: None,
+            ssl_key_password: None,
+            ssl_endpoint_identification_algorithm: None,
+            sasl_mechanism: None,
+            sasl_username: None,
+            sasl_password: None,
+            sasl_kerberos_service_name: None,
+            sasl_kerberos_keytab: None,
+            sasl_kerberos_principal: None,
+            sasl_kerberos_kinit_cmd: None,
+            sasl_kerberos_min_time_before_relogin: None,
+            sasl_oathbearer_config: None,
+        }
+    }
+
     pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
         // AWS_MSK_IAM
         if self.is_aws_msk_iam() {
@@ -499,7 +525,7 @@ impl PulsarCommon {
                         .path()
                         .to_str()
                         .unwrap()
-                        .to_string();
+                        .to_owned();
                     raw_path.insert_str(0, "file://");
                     raw_path
                 },
@@ -511,7 +537,7 @@ impl PulsarCommon {
                 .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
         } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
+                name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
         }
@@ -704,7 +730,7 @@ impl NatsCommon {
                     config.deliver_policy = deliver_policy;
                     config.durable_name = Some(durable_consumer_name);
                     config.filter_subjects =
-                        self.subject.split(',').map(|s| s.to_string()).collect();
+                        self.subject.split(',').map(|s| s.to_owned()).collect();
                     config
                 })
                 .await?
@@ -717,7 +743,7 @@ impl NatsCommon {
         jetstream: jetstream::Context,
         stream: String,
     ) -> ConnectorResult<jetstream::stream::Stream> {
-        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_owned()).collect();
         if let Ok(mut stream_instance) = jetstream.get_stream(&stream).await {
             tracing::info!(
                 "load existing nats stream ({:?}) with config {:?}",

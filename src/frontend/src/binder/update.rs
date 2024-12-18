@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::StructType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, AssignmentValue, Expr, ObjectName, SelectItem};
 
@@ -134,7 +134,7 @@ impl Binder {
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
             return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
             )));
         }
 
@@ -161,8 +161,8 @@ impl Binder {
 
         for Assignment { id, value } in assignments {
             let ids: Vec<_> = id
-                .into_iter()
-                .map(|id| self.bind_expr(Expr::Identifier(id)))
+                .iter()
+                .map(|id| self.bind_expr(Expr::Identifier(id.clone())))
                 .try_collect()?;
 
             match (ids.as_slice(), value) {
@@ -206,9 +206,12 @@ impl Binder {
                         bail_bind_error!("number of columns does not match number of values");
                     }
 
-                    let target_type = DataType::new_unnamed_struct(
-                        ids.iter().map(|id| id.return_type()).collect(),
-                    );
+                    let target_type = StructType::new(
+                        id.iter()
+                            .zip_eq_fast(ids)
+                            .map(|(id, expr)| (id.real_value(), expr.return_type())),
+                    )
+                    .into();
                     let expr = expr.cast_assign(target_type)?;
 
                     exprs.push(expr);

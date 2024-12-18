@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -34,6 +34,7 @@ use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
+use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
@@ -58,6 +59,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
 mod transaction;
@@ -95,7 +97,8 @@ pub struct HummockManager {
     version_checkpoint_path: String,
     version_archive_dir: String,
     pause_version_checkpoint: AtomicBool,
-    history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<u64>>>,
+    table_write_throughput_statistic_manager:
+        parking_lot::RwLock<TableWriteThroughputStatisticManager>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
@@ -245,6 +248,12 @@ impl HummockManager {
             state_store_dir,
             use_new_object_prefix_strategy,
         );
+
+        let max_table_statistic_expired_time = std::cmp::max(
+            env.opts.table_stat_throuput_window_seconds_for_split,
+            env.opts.table_stat_throuput_window_seconds_for_merge,
+        ) as i64;
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -276,7 +285,9 @@ impl HummockManager {
             version_checkpoint_path,
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
-            history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
+            table_write_throughput_statistic_manager: parking_lot::RwLock::new(
+                TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+            ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
             full_gc_state: FullGcState::new().into(),

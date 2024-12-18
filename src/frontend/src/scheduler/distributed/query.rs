@@ -284,7 +284,7 @@ impl Debug for QueryRunner {
                     graph.add_edge(
                         *stage_id_to_node_id.get(stage_id).unwrap(),
                         *stage_id_to_node_id.get(child_stage).unwrap(),
-                        "".to_string(),
+                        "".to_owned(),
                     );
                 }
             }
@@ -470,7 +470,7 @@ pub(crate) mod tests {
         WorkerNodeManager, WorkerNodeSelector,
     };
     use risingwave_common::catalog::{
-        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, StreamJobStatus,
+        ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, StreamJobStatus,
         DEFAULT_SUPER_USER_ID,
     };
     use risingwave_common::hash::{VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping};
@@ -543,7 +543,7 @@ pub(crate) mod tests {
         let table_catalog: TableCatalog = TableCatalog {
             id: table_id,
             associated_source_id: None,
-            name: "test".to_string(),
+            name: "test".to_owned(),
             dependent_relations: vec![],
             columns: vec![
                 ColumnCatalog {
@@ -571,7 +571,7 @@ pub(crate) mod tests {
             vnode_col_index: None,
             row_id_index: None,
             value_indices: vec![0, 1, 2],
-            definition: "".to_string(),
+            definition: "".to_owned(),
             conflict_behavior: ConflictBehavior::NoCheck,
             version_column_index: None,
             read_prefix_len_hint: 0,
@@ -590,9 +590,12 @@ pub(crate) mod tests {
             created_at_cluster_version: None,
             cdc_table_id: None,
             vnode_count: VnodeCount::set(vnode_count),
+            webhook_info: None,
+            job_id: None,
+            engine: Engine::Hummock,
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
-            "".to_string(),
+            "".to_owned(),
             table_catalog.into(),
             vec![],
             ctx,
@@ -665,16 +668,16 @@ pub(crate) mod tests {
             id: 0,
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "127.0.0.1".to_owned(),
                 port: 5687,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(0),
             ..Default::default()
@@ -683,16 +686,16 @@ pub(crate) mod tests {
             id: 1,
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "127.0.0.1".to_owned(),
                 port: 5688,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(1),
             ..Default::default()
@@ -701,16 +704,16 @@ pub(crate) mod tests {
             id: 2,
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "127.0.0.1".to_owned(),
                 port: 5689,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallelism: 8,
             property: Some(Property {
+                parallelism: 8,
                 is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
-                internal_rpc_host_addr: "".to_string(),
+                ..Default::default()
             }),
             transactional_id: Some(2),
             ..Default::default()

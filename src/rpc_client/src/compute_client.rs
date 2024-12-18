@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
@@ -24,7 +25,9 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
-use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
+use risingwave_pb::compute::{
+    ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
+};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetBackPressureRequest, GetBackPressureResponse,
@@ -115,6 +118,7 @@ impl ComputeClient {
         down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
+        database_id: DatabaseId,
     ) -> Result<(
         Streaming<GetStreamResponse>,
         mpsc::UnboundedSender<permits::Value>,
@@ -132,6 +136,7 @@ impl ComputeClient {
                     down_actor_id,
                     up_fragment_id,
                     down_fragment_id,
+                    database_id: database_id.database_id,
                 })),
             },
         ))
@@ -270,6 +275,16 @@ impl ComputeClient {
             .config_client
             .to_owned()
             .show_config(ShowConfigRequest {})
+            .await
+            .map_err(RpcError::from_compute_status)?
+            .into_inner())
+    }
+
+    pub async fn resize_cache(&self, request: ResizeCacheRequest) -> Result<ResizeCacheResponse> {
+        Ok(self
+            .config_client
+            .to_owned()
+            .resize_cache(request)
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())

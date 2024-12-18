@@ -21,6 +21,7 @@ async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
@@ -38,10 +39,9 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
-icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 maplit = "1"
 md5 = "0.7.0"
 memcomparable = "0.2"
@@ -60,7 +60,7 @@ pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
-quick-xml = { version = "0.35", features = ["serialize"] }
+quick-xml = { version = "0.36", features = ["serialize"] }
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
@@ -99,7 +99,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
+tower = { version = "0.5", features = ["util", "load-shed"] }
+tower-http = { version = "0.6", features = [
+  "add-extension",
+  "cors",
+  "compression-gzip",
+] }
 tracing = "0.1"
+url = "2.5.0"
 uuid = "1"
 zstd = { version = "0.13", default-features = false }
 
@@ -109,6 +116,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
+risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 

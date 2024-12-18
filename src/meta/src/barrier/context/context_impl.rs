@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::future::try_join_all;
+use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PausedReason;
@@ -27,7 +28,8 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::{
     BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, RecoveryReason, ReplaceTablePlan, Scheduled,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
+    Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::{MetaError, MetaResult};
@@ -42,17 +44,25 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(&self, recovery_reason: RecoveryReason) {
-        self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+    fn abort_and_mark_blocked(
+        &self,
+        database_id: Option<DatabaseId>,
+        recovery_reason: RecoveryReason,
+    ) {
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
-            .abort_and_mark_blocked("cluster is under recovering");
+            .abort_and_mark_blocked(database_id, "cluster is under recovering");
     }
 
-    fn mark_ready(&self) {
-        self.scheduled_barriers.mark_ready();
-        self.set_status(BarrierManagerStatus::Running);
+    fn mark_ready(&self, database_id: Option<DatabaseId>) {
+        self.scheduled_barriers.mark_ready(database_id);
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Running);
+        }
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
@@ -77,6 +87,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot> {
         self.reload_runtime_info_impl().await
+    }
+
+    async fn reload_database_runtime_info(
+        &self,
+        database_id: DatabaseId,
+    ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>> {
+        self.reload_database_runtime_info_impl(database_id).await
     }
 }
 
@@ -148,7 +165,7 @@ impl CommandContext {
                     .await?;
                 barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, None, Some(split_assignment.clone()), None, None)
                     .await;
             }
 
@@ -180,12 +197,16 @@ impl CommandContext {
                     )
                     .await?;
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceTablePlan {
-                    new_fragments,
-                    dispatchers,
-                    init_split_assignment,
-                    ..
-                }) = job_type
+                let mut fragment_replacements = None;
+                let mut dropped_actors = None;
+                if let CreateStreamingJobType::SinkIntoTable(
+                    replace_plan @ ReplaceStreamJobPlan {
+                        new_fragments,
+                        dispatchers,
+                        init_split_assignment,
+                        ..
+                    },
+                ) = job_type
                 {
                     barrier_manager_context
                         .metadata_manager
@@ -197,6 +218,8 @@ impl CommandContext {
                             init_split_assignment,
                         )
                         .await?;
+                    fragment_replacements = Some(replace_plan.fragment_replacements());
+                    dropped_actors = Some(replace_plan.dropped_actors());
                 }
 
                 // Extract the fragments that include source operators.
@@ -208,7 +231,8 @@ impl CommandContext {
                         Some(source_fragments),
                         Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
-                        None,
+                        dropped_actors,
+                        fragment_replacements,
                     )
                     .await;
             }
@@ -223,13 +247,15 @@ impl CommandContext {
                     .await?;
             }
 
-            Command::ReplaceTable(ReplaceTablePlan {
-                old_fragments,
-                new_fragments,
-                dispatchers,
-                init_split_assignment,
-                ..
-            }) => {
+            Command::ReplaceStreamJob(
+                replace_plan @ ReplaceStreamJobPlan {
+                    old_fragments,
+                    new_fragments,
+                    dispatchers,
+                    init_split_assignment,
+                    ..
+                },
+            ) => {
                 // Update actors and actor_dispatchers for new table fragments.
                 barrier_manager_context
                     .metadata_manager
@@ -256,7 +282,8 @@ impl CommandContext {
                         Some(source_fragments),
                         Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
-                        None,
+                        Some(replace_plan.dropped_actors()),
+                        Some(replace_plan.fragment_replacements()),
                     )
                     .await;
             }

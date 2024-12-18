@@ -17,7 +17,8 @@ use itertools::Itertools;
 use prost_reflect::{Cardinality, FieldDescriptor, Kind, MessageDescriptor, ReflectMessage, Value};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
-    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, ToOwnedDatum, F32, F64,
+    DataType, DatumCow, Decimal, JsonbVal, MapType, MapValue, ScalarImpl, StructType, ToOwnedDatum,
+    F32, F64,
 };
 use risingwave_pb::plan_common::{AdditionalColumn, ColumnDesc, ColumnDescVersion};
 use thiserror::Error;
@@ -57,10 +58,10 @@ fn pb_field_to_col_desc(
         *index += 1;
         Ok(ColumnDesc {
             column_id: *index,
-            name: field_descriptor.name().to_string(),
+            name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             field_descs,
-            type_name: m.full_name().to_string(),
+            type_name: m.full_name().to_owned(),
             generated_or_default_column: None,
             description: None,
             additional_column_type: 0, // deprecated
@@ -71,7 +72,7 @@ fn pb_field_to_col_desc(
         *index += 1;
         Ok(ColumnDesc {
             column_id: *index,
-            name: field_descriptor.name().to_string(),
+            name: field_descriptor.name().to_owned(),
             column_type: Some(field_type.to_protobuf()),
             additional_column: Some(AdditionalColumn { column_type: None }),
             version: ColumnDescVersion::Pr13707 as i32,
@@ -144,7 +145,7 @@ pub fn from_protobuf_value<'a>(
                 let DataType::Struct(st) = type_expected else {
                     return Err(AccessError::TypeError {
                         expected: type_expected.to_string(),
-                        got: desc.full_name().to_string(),
+                        got: desc.full_name().to_owned(),
                         value: value.to_string(), // Protobuf TEXT
                     });
                 };
@@ -257,10 +258,9 @@ fn protobuf_type_mapping(
             } else {
                 let fields = m
                     .fields()
-                    .map(|f| protobuf_type_mapping(&f, parse_trace))
-                    .try_collect()?;
-                let field_names = m.fields().map(|f| f.name().to_string()).collect_vec();
-                DataType::new_struct(fields, field_names)
+                    .map(|f| Ok((f.name().to_owned(), protobuf_type_mapping(&f, parse_trace)?)))
+                    .try_collect::<_, Vec<_>, _>()?;
+                StructType::new(fields).into()
             }
         }
         Kind::Enum(_) => DataType::Varchar,

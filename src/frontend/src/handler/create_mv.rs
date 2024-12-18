@@ -125,7 +125,7 @@ pub fn gen_create_mv_plan_bound(
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let mut plan_root = Planner::new(context).plan_query(query)?;
+    let mut plan_root = Planner::new_for_stream(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_valid_column_name(name)?;
@@ -217,7 +217,7 @@ pub async fn handle_create_mv_bound(
         if has_order_by {
             context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#.to_string());
+"#.to_owned());
         }
 
         let (plan, table) =
@@ -272,7 +272,7 @@ pub mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
@@ -314,16 +314,16 @@ pub mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::new_struct(
-            vec![DataType::Varchar, DataType::Varchar],
-            vec!["address".to_string(), "zipcode".to_string()],
-        );
+        let city_type = StructType::new(vec![
+            ("address", DataType::Varchar),
+            ("zipcode", DataType::Varchar),
+        ])
+        .into();
         let expected_columns = maplit::hashmap! {
             ROWID_PREFIX => DataType::Serial,
-            "country" => DataType::new_struct(
-                 vec![DataType::Varchar,city_type,DataType::Varchar],
-                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
-            ),
+            "country" => StructType::new(
+                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
+            ).into(),
             RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
         assert_eq!(columns, expected_columns);

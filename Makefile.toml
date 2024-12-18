@@ -196,6 +196,19 @@ script = '''
 watch -n 1 "${TMUX} list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
+[tasks.diagnose]
+category = "Misc"
+description = "Dump diagnose info"
+dependencies = ["check-and-load-risedev-env-file"]
+script = '''
+#!/usr/bin/env bash
+set -e
+file_name=${PREFIX_LOG}/diagnose-$(date -u +%Y-%m-%dT%H:%M:%SZ).txt
+curl -s ${RISEDEV_RW_META_DASHBOARD_ADDR}/api/monitor/diagnose/ > ${file_name}
+echo "Diagnose info has been dumped to ${file_name}"
+'''
+
+
 [tasks.del]
 alias = "delete"
 
@@ -369,7 +382,11 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 [tasks.post-build-risingwave]
 category = "RiseDev - Build"
 description = "Copy RisingWave binaries to bin"
-condition = { env_set = ["ENABLE_BUILD_RUST"], env_not_set = ["USE_SYSTEM_RISINGWAVE"] }
+condition = { env_set = [
+    "ENABLE_BUILD_RUST",
+], env_not_set = [
+    "USE_SYSTEM_RISINGWAVE",
+] }
 dependencies = [
     "link-all-in-one-binaries",
     "link-user-bin",
@@ -846,6 +863,11 @@ script = """
 #!/usr/bin/env bash
 set -e
 
+echo "Running Planner Test requires larger stack size, setting RUST_MIN_STACK to 8388608 (8MB) as default."
+if [[ -z "${RUST_MIN_STACK}" ]]; then
+  export RUST_MIN_STACK=8388608
+fi
+
 cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
 description = "🌟 Run unit tests"
@@ -1158,7 +1180,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.23.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.28.2", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1281,7 +1303,8 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 [tasks.ci-start]
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
-command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+command = "target/debug/risedev-dev"                                                 # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
@@ -1317,7 +1340,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.21.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.23.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]

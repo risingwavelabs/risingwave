@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, StreamJobStatus, TableId};
+use risingwave_common::catalog::{FunctionId, IndexId, StreamJobStatus, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 pub use risingwave_expr::sig::*;
@@ -46,7 +46,9 @@ pub struct SchemaCatalog {
     id: SchemaId,
     pub name: String,
     pub database_id: DatabaseId,
+    /// Contains [all types of "tables"](super::table_catalog::TableType), not only user tables.
     table_by_name: HashMap<String, Arc<TableCatalog>>,
+    /// Contains [all types of "tables"](super::table_catalog::TableType), not only user tables.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
     source_by_name: HashMap<String, Arc<SourceCatalog>>,
     source_by_id: HashMap<SourceId, Arc<SourceCatalog>>,
@@ -101,7 +103,7 @@ impl SchemaCatalog {
 
     pub fn create_sys_view(&mut self, sys_view: Arc<ViewCatalog>) {
         self.view_by_name
-            .try_insert(sys_view.name().to_string(), sys_view.clone())
+            .try_insert(sys_view.name().to_owned(), sys_view.clone())
             .unwrap();
         self.view_by_id
             .try_insert(sys_view.id, sys_view.clone())
@@ -564,40 +566,33 @@ impl SchemaCatalog {
         self.table_by_name.values()
     }
 
-    pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
-        self.table_by_name
-            .iter()
-            .filter(|(_, v)| v.is_table())
-            .map(|(_, v)| v)
+    pub fn iter_user_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name.values().filter(|v| v.is_user_table())
     }
 
     pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
-            .iter()
-            .filter(|(_, v)| v.is_internal_table())
-            .map(|(_, v)| v)
+            .values()
+            .filter(|v| v.is_internal_table())
     }
 
-    pub fn iter_valid_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+    /// Iterate all non-internal tables, including user tables, materialized views and indices.
+    pub fn iter_table_mv_indices(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
-            .iter()
-            .filter_map(|(key, v)| valid_table_name(key).then_some(v))
+            .values()
+            .filter(|v| !v.is_internal_table())
     }
 
     /// Iterate all materialized views, excluding the indices.
     pub fn iter_all_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
-        self.table_by_name
-            .iter()
-            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
-            .map(|(_, v)| v)
+        self.table_by_name.values().filter(|v| v.is_mview())
     }
 
     /// Iterate created materialized views, excluding the indices.
     pub fn iter_created_mvs(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
-            .iter()
-            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name) && v.is_created())
-            .map(|(_, v)| v)
+            .values()
+            .filter(|v| v.is_mview() && v.is_created())
     }
 
     /// Iterate all indices
@@ -731,7 +726,7 @@ impl SchemaCatalog {
         inputs: &mut [ExprImpl],
     ) -> Option<&Arc<FunctionCatalog>> {
         infer_type_with_sigmap(
-            FuncName::Udf(name.to_string()),
+            FuncName::Udf(name.to_owned()),
             inputs,
             &self.function_registry,
         )
@@ -748,7 +743,7 @@ impl SchemaCatalog {
         let args = args.iter().map(|x| Some(x.clone())).collect_vec();
         let func = infer_type_name(
             &self.function_registry,
-            FuncName::Udf(name.to_string()),
+            FuncName::Udf(name.to_owned()),
             &args,
         )
         .ok()?;

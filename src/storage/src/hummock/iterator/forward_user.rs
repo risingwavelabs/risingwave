@@ -274,6 +274,7 @@ mod tests {
 
     use bytes::Bytes;
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -294,7 +295,7 @@ mod tests {
     async fn test_basic() {
         let sstable_store = mock_sstable_store().await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3,
@@ -302,7 +303,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -310,7 +311,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, sstable_info_2) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -319,9 +320,19 @@ mod tests {
         )
         .await;
         let iters = vec![
-            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
-            SstableIterator::create(table1, sstable_store.clone(), read_options.clone()),
-            SstableIterator::create(table2, sstable_store, read_options.clone()),
+            SstableIterator::create(
+                table0,
+                sstable_store.clone(),
+                read_options.clone(),
+                &sstable_info_0,
+            ),
+            SstableIterator::create(
+                table1,
+                sstable_store.clone(),
+                read_options.clone(),
+                &sstable_info_1,
+            ),
+            SstableIterator::create(table2, sstable_store, read_options.clone(), &sstable_info_2),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -347,7 +358,7 @@ mod tests {
     #[tokio::test]
     async fn test_seek() {
         let sstable_store = mock_sstable_store().await;
-        let table0 = gen_iterator_test_sstable_base(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
             |x| x * 3,
@@ -355,7 +366,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let (table1, sstable_info_1) = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 3 + 1,
@@ -363,7 +374,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let (table2, sstable_info_2) = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 3 + 2,
@@ -373,9 +384,19 @@ mod tests {
         .await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![
-            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
-            SstableIterator::create(table1, sstable_store.clone(), read_options.clone()),
-            SstableIterator::create(table2, sstable_store, read_options),
+            SstableIterator::create(
+                table0,
+                sstable_store.clone(),
+                read_options.clone(),
+                &sstable_info_0,
+            ),
+            SstableIterator::create(
+                table1,
+                sstable_store.clone(),
+                read_options.clone(),
+                &sstable_info_1,
+            ),
+            SstableIterator::create(table2, sstable_store, read_options, &sstable_info_2),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -428,20 +449,25 @@ mod tests {
             (1, 100, HummockValue::put(iterator_test_value_of(1))),
             (2, 300, HummockValue::delete()),
         ];
-        let table0 =
+        let (table0, sstable_info_0) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
             (1, 200, HummockValue::delete()),
             (2, 400, HummockValue::put(iterator_test_value_of(2))),
         ];
-        let table1 =
+        let (table1, sstable_info_1) =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![
-            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
-            SstableIterator::create(table1, sstable_store.clone(), read_options),
+            SstableIterator::create(
+                table0,
+                sstable_store.clone(),
+                read_options.clone(),
+                &sstable_info_0,
+            ),
+            SstableIterator::create(table1, sstable_store.clone(), read_options, &sstable_info_1),
         ];
 
         let mi = MergeIterator::new(iters);
@@ -459,7 +485,7 @@ mod tests {
         assert!(!ui.is_valid());
     }
 
-    async fn generate_test_data(sstable_store: SstableStoreRef) -> TableHolder {
+    async fn generate_test_data(sstable_store: SstableStoreRef) -> (TableHolder, SstableInfo) {
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
             (0, 100, HummockValue::put(iterator_test_value_of(0))),
@@ -479,10 +505,13 @@ mod tests {
         let sst_info =
             gen_iterator_test_sstable_with_range_tombstones(0, kv_pairs, sstable_store.clone())
                 .await;
-        sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap()
+        (
+            sstable_store
+                .sstable(&sst_info, &mut StoreLocalStatistic::default())
+                .await
+                .unwrap(),
+            sst_info,
+        )
     }
 
     // left..=end
@@ -490,9 +519,14 @@ mod tests {
     async fn test_range_inclusive() {
         let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
-        let table = generate_test_data(sstable_store.clone()).await;
+        let (table, sstable_info) = generate_test_data(sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table,
+            sstable_store,
+            read_options,
+            &sstable_info,
+        )];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -567,13 +601,14 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let table =
+        let (table, sstable_info) =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(
             table.clone(),
             sstable_store.clone(),
             read_options.clone(),
+            &sstable_info,
         )];
         let mi = MergeIterator::new(iters);
 
@@ -628,7 +663,12 @@ mod tests {
             .unwrap();
         assert!(!ui.is_valid());
 
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table,
+            sstable_store,
+            read_options,
+            &sstable_info,
+        )];
         let mi = MergeIterator::new(iters);
 
         let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
@@ -664,9 +704,14 @@ mod tests {
         let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
 
-        let table = generate_test_data(sstable_store.clone()).await;
+        let (table, sstable_info) = generate_test_data(sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table,
+            sstable_store,
+            read_options,
+            &sstable_info,
+        )];
         let mi = MergeIterator::new(iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
@@ -728,9 +773,14 @@ mod tests {
     async fn test_range_from() {
         let sstable_store = mock_sstable_store().await;
         // key=[idx, epoch], value
-        let table = generate_test_data(sstable_store.clone()).await;
+        let (table, sstable_info) = generate_test_data(sstable_store.clone()).await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
+        let iters = vec![SstableIterator::create(
+            table,
+            sstable_store,
+            read_options,
+            &sstable_info,
+        )];
         let mi = MergeIterator::new(iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
@@ -795,7 +845,7 @@ mod tests {
     async fn test_min_epoch() {
         let sstable_store = mock_sstable_store().await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let table0 = gen_iterator_test_sstable_with_incr_epoch(
+        let (table0, sstable_info_0) = gen_iterator_test_sstable_with_incr_epoch(
             0,
             default_builder_opt_for_test(),
             |x| x * 3,
@@ -808,6 +858,7 @@ mod tests {
             table0,
             sstable_store.clone(),
             read_options.clone(),
+            &sstable_info_0,
         )];
 
         let min_count = (TEST_KEYS_COUNT / 5) as u64;

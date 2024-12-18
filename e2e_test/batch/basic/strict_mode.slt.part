@@ -1,0 +1,38 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v int);
+
+statement ok
+insert into t values(-1), (0), (1);
+
+statement ok
+SET batch_expr_strict_mode = false;
+
+query I
+SELECT 1/v FROM unnest(ARRAY[-1, 0, 1]) v;
+----
+-1
+NULL
+1
+
+# This plan consists of a BatchExchange.
+query I
+SELECT 1/v FROM t order by v;
+----
+-1
+NULL
+1
+
+statement ok
+SET batch_expr_strict_mode = DEFAULT;
+
+statement error Division by zero
+SELECT 1/v FROM unnest(ARRAY[-1, 0, 1]) v;
+
+statement error Division by zero
+SELECT 1/v FROM t order by v;
+
+statement ok
+drop table t;

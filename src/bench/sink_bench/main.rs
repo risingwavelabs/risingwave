@@ -15,6 +15,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(let_chains)]
+#![recursion_limit = "256"]
 
 use core::str::FromStr;
 use core::sync::atomic::Ordering;
@@ -120,7 +121,7 @@ impl LogReader for MockRangeLogReader {
                             },
                         ))
                     }
-                    _ => Err(anyhow!("Can't assert message type".to_string())),
+                    _ => Err(anyhow!("Can't assert message type".to_owned())),
                 }
             }
         }
@@ -347,7 +348,7 @@ impl MockDatagenSource {
                 Either::Right(Message::Chunk(chunk)) => yield Message::Chunk(chunk),
                 _ => {
                     return Err(StreamExecutorError::from(
-                        "Can't assert message type".to_string(),
+                        "Can't assert message type".to_owned(),
                     ))
                 }
             }
@@ -384,7 +385,7 @@ where
     }
     let log_sinker = sink.new_log_sinker(sink_writer_param).await.unwrap();
     match log_sinker.consume_log_and_sink(&mut log_reader).await {
-        Ok(_) => Err("Stream closed".to_string()),
+        Ok(_) => Err("Stream closed".to_owned()),
         Err(e) => Err(e.to_report_string()),
     }
 }
@@ -487,6 +488,7 @@ fn mock_from_legacy_type(
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }))
     } else {
         SinkFormatDesc::from_legacy_type(connector, r#type)
@@ -513,7 +515,7 @@ async fn main() {
         stop_rx,
         data_size_tx,
     );
-    if cfg.sink.eq(&BENCH_TEST.to_string()) {
+    if cfg.sink.eq(&BENCH_TEST.to_owned()) {
         println!("Start Sink Bench!, Wait {:?}s", BENCH_TIME);
         tokio::spawn(async move {
             mock_range_log_reader.init().await.unwrap();
@@ -530,7 +532,7 @@ async fn main() {
         let connector = properties.get("connector").unwrap().clone();
         let format_desc = mock_from_legacy_type(
             &connector.clone(),
-            properties.get("type").unwrap_or(&"append-only".to_string()),
+            properties.get("type").unwrap_or(&"append-only".to_owned()),
         )
         .unwrap();
         let sink_param = SinkParam {
@@ -541,8 +543,8 @@ async fn main() {
             downstream_pk: table_schema.pk_indices,
             sink_type: SinkType::AppendOnly,
             format_desc,
-            db_name: "not_need_set".to_string(),
-            sink_from_name: "not_need_set".to_string(),
+            db_name: "not_need_set".to_owned(),
+            sink_from_name: "not_need_set".to_owned(),
         };
         let sink = build_sink(sink_param).unwrap();
         let sink_writer_param = SinkWriterParam::for_test();

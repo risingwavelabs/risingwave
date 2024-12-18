@@ -14,6 +14,7 @@
 
 use std::fmt::Debug;
 
+use constant_time_eq::constant_time_eq;
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::Row;
@@ -423,6 +424,11 @@ fn batch_is_null(a: &impl Array) -> BoolArray {
 
 fn batch_is_not_null(a: &impl Array) -> BoolArray {
     BoolArray::new(a.null_bitmap().clone(), Bitmap::ones(a.len()))
+}
+
+#[function("secure_compare(varchar, varchar) -> boolean")]
+pub fn secure_compare(left: &str, right: &str) -> bool {
+    constant_time_eq(left.as_bytes(), right.as_bytes())
 }
 
 #[cfg(test)]

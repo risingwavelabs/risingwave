@@ -26,6 +26,8 @@ use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
 use thiserror::Error;
 use tokio::task::JoinError;
 
+use crate::expr::CastError;
+
 /// The error type for the frontend crate, acting as the top-level error type for the
 /// entire RisingWave project.
 // TODO(error-handling): this is migrated from the `common` crate, and there could
@@ -114,6 +116,12 @@ pub enum ErrorCode {
         #[backtrace]
         error: BoxedError,
     },
+    #[error(transparent)]
+    CastError(
+        #[from]
+        #[backtrace]
+        CastError,
+    ),
     #[error("Catalog error: {0}")]
     CatalogError(
         #[source]
@@ -186,9 +194,9 @@ impl From<TonicStatusWrapper> for RwError {
 
         // TODO(error-handling): `message` loses the source chain.
         match status.inner().code() {
-            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_owned()),
             Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
-            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_owned()),
             Code::Cancelled => ErrorCode::SchedulerError(status.into()),
             _ => ErrorCode::RpcError(status.into()),
         }

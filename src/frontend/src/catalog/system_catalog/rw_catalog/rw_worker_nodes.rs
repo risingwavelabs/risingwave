@@ -38,6 +38,7 @@ struct RwWorkerNode {
     system_total_memory_bytes: Option<i64>,
     system_total_cpu_cores: Option<i64>,
     started_at: Option<Timestamptz>,
+    label: Option<String>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_worker_nodes")]
@@ -58,7 +59,11 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),
                 state: worker.get_state().unwrap().as_str_name().into(),
-                parallelism: worker.parallelism() as i32,
+                parallelism: if is_compute {
+                    worker.parallelism() as i32
+                } else {
+                    0
+                },
                 is_streaming: if is_compute {
                     property.map(|p| p.is_streaming)
                 } else {
@@ -81,6 +86,11 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 started_at: worker
                     .started_at
                     .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),
+                label: if is_compute {
+                    property.and_then(|p| p.node_label.clone())
+                } else {
+                    None
+                },
             }
         })
         .collect())

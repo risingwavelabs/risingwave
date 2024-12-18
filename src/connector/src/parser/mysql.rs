@@ -20,7 +20,7 @@ use risingwave_common::log::LogSuppresser;
 use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 
-use crate::parser::util::log_error;
+use crate::parser::utils::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 use anyhow::anyhow;

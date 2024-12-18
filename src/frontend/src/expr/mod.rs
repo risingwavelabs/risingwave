@@ -66,10 +66,7 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
-pub use type_inference::{
-    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, infer_type_name,
-    infer_type_with_sigmap, CastContext, CastSig, FuncSign,
-};
+pub use type_inference::*;
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
 pub use window_function::WindowFunction;
@@ -300,7 +297,7 @@ impl ExprImpl {
             ))),
             DataType::Int32 => Ok(self),
             dt if dt.is_int() => Ok(self.cast_explicit(DataType::Int32)?),
-            _ => Err(CastError("Unsupported input type".to_string())),
+            _ => bail_cast_error!("unsupported input type"),
         }
     }
 
@@ -1171,7 +1168,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 
-use self::function_call::CastError;
 use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 

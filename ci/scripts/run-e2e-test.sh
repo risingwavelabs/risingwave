@@ -48,13 +48,6 @@ cluster_start() {
     # Give it a while to make sure the single-node is ready.
     sleep 10
   else
-    # Initialize backends.
-    if [[ $mode == *"mysql-backend" ]]; then
-      mysql -h mysql -P 3306 -u root -p123456 -e "DROP DATABASE IF EXISTS metadata; CREATE DATABASE metadata;"
-    elif [[ $mode == *"pg-backend" ]]; then
-      PGPASSWORD=postgres psql -h db -p 5432 -U postgres -c "DROP DATABASE IF EXISTS metadata;" -c "CREATE DATABASE metadata;"
-    fi
-
     risedev ci-start "$mode"
   fi
 }
@@ -106,6 +99,7 @@ if [[ $mode != "single-node" ]]; then
 fi
 
 sqllogictest -p 4566 -d dev './e2e_test/ttl/ttl.slt'
+sqllogictest -p 4566 -d dev './e2e_test/dml/*.slt'
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 

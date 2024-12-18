@@ -14,7 +14,7 @@
 
 use anyhow::Context;
 use risingwave_common::catalog::FunctionId;
-use risingwave_common::types::DataType;
+use risingwave_common::types::StructType;
 use risingwave_expr::sig::{CreateFunctionOptions, UdfKind};
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
@@ -56,13 +56,13 @@ pub async fn handle_create_function(
         }
         // Empty language is acceptable since we only require the external server implements the
         // correct protocol.
-        None => "".to_string(),
+        None => "".to_owned(),
     };
 
     let runtime = match params.runtime {
         Some(_) => {
             return Err(ErrorCode::InvalidParameterValue(
-                "runtime selection is currently not supported".to_string(),
+                "runtime selection is currently not supported".to_owned(),
             )
             .into());
         }
@@ -83,15 +83,15 @@ pub async fn handle_create_function(
                 // return type is a struct for multiple columns
                 let it = columns
                     .into_iter()
-                    .map(|c| bind_data_type(&c.data_type).map(|ty| (ty, c.name.real_value())));
-                let (datatypes, names) = itertools::process_results(it, |it| it.unzip())?;
-                return_type = DataType::new_struct(datatypes, names);
+                    .map(|c| bind_data_type(&c.data_type).map(|ty| (c.name.real_value(), ty)));
+                let fields = it.try_collect::<_, Vec<_>, _>()?;
+                return_type = StructType::new(fields).into();
             }
             Kind::Table(TableFunction {})
         }
         None => {
             return Err(ErrorCode::InvalidParameterValue(
-                "return type must be specified".to_string(),
+                "return type must be specified".to_owned(),
             )
             .into())
         }
@@ -100,7 +100,7 @@ pub async fn handle_create_function(
     let mut arg_names = vec![];
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arg_names.push(arg.name.map_or("".to_string(), |n| n.real_value()));
+        arg_names.push(arg.name.map_or("".to_owned(), |n| n.real_value()));
         arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
@@ -167,7 +167,7 @@ pub async fn handle_create_function(
         language,
         runtime,
         identifier: Some(output.identifier),
-        link: link.map(|s| s.to_string()),
+        link: link.map(|s| s.to_owned()),
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),

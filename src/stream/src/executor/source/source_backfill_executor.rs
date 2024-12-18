@@ -204,7 +204,7 @@ impl BackfillStage {
             }
         }
         if matches!(state_inner, BackfillState::Backfilling(_)) {
-            state.target_offset = Some(offset.to_string());
+            state.target_offset = Some(offset.to_owned());
         }
         if vis {
             debug_assert_eq!(*state_inner, BackfillState::Finished);
@@ -231,9 +231,9 @@ impl BackfillStage {
                     //
                     // Note3: if target_offset is None (e.g., when upstream doesn't emit messages at all), we will
                     // keep backfilling.
-                    *state_inner = BackfillState::SourceCachingUp(offset.to_string());
+                    *state_inner = BackfillState::SourceCachingUp(offset.to_owned());
                 } else {
-                    *state_inner = BackfillState::Backfilling(Some(offset.to_string()));
+                    *state_inner = BackfillState::Backfilling(Some(offset.to_owned()));
                 }
                 true
             }

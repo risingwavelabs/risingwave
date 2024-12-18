@@ -91,7 +91,7 @@ impl SourceDescBuilder {
             .map(|s| s.to_lowercase())
             .unwrap();
         let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name);
+            source_add_partition_offset_cols(&self.columns, &connector_name, false);
 
         let mut columns: Vec<_> = self
             .columns
@@ -117,13 +117,13 @@ impl SourceDescBuilder {
     pub fn build(self) -> ConnectorResult<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let source = SourceReader::new(
             self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
-            psrser_config,
+            parser_config,
         )?;
 
         Ok(SourceDesc {

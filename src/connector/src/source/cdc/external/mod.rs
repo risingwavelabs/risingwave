@@ -16,12 +16,9 @@ pub mod mock_external_table;
 pub mod postgres;
 pub mod sql_server;
 
-#[cfg(not(madsim))]
-mod maybe_tls_connector;
 pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
-use std::fmt;
 
 use anyhow::anyhow;
 use futures::pin_mut;
@@ -34,24 +31,24 @@ use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::secret::PbSecretRef;
 use serde_derive::{Deserialize, Serialize};
 
+use crate::connector_common::{PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::cdc::external::mock_external_table::MockExternalTableReader;
 use crate::source::cdc::external::mysql::{
     MySqlExternalTable, MySqlExternalTableReader, MySqlOffset,
 };
-use crate::source::cdc::external::postgres::{
-    PostgresExternalTable, PostgresExternalTableReader, PostgresOffset,
-};
+use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
 use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 use crate::source::cdc::CdcSourceType;
 use crate::WithPropertiesExt;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CdcTableType {
     Undefined,
+    Mock,
     MySql,
     Postgres,
     SqlServer,
@@ -101,6 +98,7 @@ impl CdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
         }
     }
@@ -218,7 +216,7 @@ pub enum ExternalTableReaderImpl {
     Mock(MockExternalTableReader),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct ExternalTableConfig {
     pub connector: String,
 
@@ -236,7 +234,7 @@ pub struct ExternalTableConfig {
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.
     /// Choices include `disabled`, `preferred`, and `required`.
     /// This field is optional.
-    #[serde(rename = "ssl.mode", default = "Default::default")]
+    #[serde(rename = "ssl.mode", default = "postgres_ssl_mode_default")]
     #[serde(alias = "debezium.database.sslmode")]
     pub ssl_mode: SslMode,
 
@@ -250,6 +248,11 @@ pub struct ExternalTableConfig {
     pub encrypt: String,
 }
 
+fn postgres_ssl_mode_default() -> SslMode {
+    // NOTE(StrikeW): Default to `disabled` for backward compatibility
+    SslMode::Disabled
+}
+
 impl ExternalTableConfig {
     pub fn try_from_btreemap(
         connect_properties: BTreeMap<String, String>,
@@ -260,44 +263,6 @@ impl ExternalTableConfig {
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SslMode {
-    #[serde(alias = "disable")]
-    Disabled,
-    #[serde(alias = "prefer")]
-    Preferred,
-    #[serde(alias = "require")]
-    Required,
-    /// verify that the server is trustworthy by checking the certificate chain
-    /// up to the root certificate stored on the client.
-    #[serde(alias = "verify-ca")]
-    VerifyCa,
-    /// Besides verify the certificate, will also verify that the serverhost name
-    /// matches the name stored in the server certificate.
-    #[serde(alias = "verify-full")]
-    VerifyFull,
-}
-
-impl Default for SslMode {
-    fn default() -> Self {
-        // default to `disabled` for backward compatibility
-        Self::Disabled
-    }
-}
-
-impl fmt::Display for SslMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            SslMode::Disabled => "disabled",
-            SslMode::Preferred => "preferred",
-            SslMode::Required => "required",
-            SslMode::VerifyCa => "verify-ca",
-            SslMode::VerifyFull => "verify-full",
-        })
     }
 }
 
@@ -382,7 +347,19 @@ impl ExternalTableImpl {
                 MySqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
-                PostgresExternalTable::connect(config).await?,
+                PostgresExternalTable::connect(
+                    &config.username,
+                    &config.password,
+                    &config.host,
+                    config.port.parse::<u16>().unwrap(),
+                    &config.database,
+                    &config.schema,
+                    &config.table,
+                    &config.ssl_mode,
+                    &config.ssl_root_cert,
+                    false,
+                )
+                .await?,
             )),
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,

@@ -56,7 +56,7 @@ impl SpillOp {
         assert!(path.ends_with('/'));
 
         let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
         let root = format!("/{}/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR, path);
 
         let op = match spill_backend {
@@ -81,7 +81,7 @@ impl SpillOp {
         let _guard = LOCK.lock().await;
 
         let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
         let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
 
         let builder = Fs::default().root(&root);

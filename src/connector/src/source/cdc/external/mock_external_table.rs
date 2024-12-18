@@ -31,7 +31,19 @@ pub struct MockExternalTableReader {
 }
 
 impl MockExternalTableReader {
-    pub fn new(binlog_watermarks: Vec<MySqlOffset>) -> Self {
+    pub fn new() -> Self {
+        let binlog_file = String::from("1.binlog");
+        // mock binlog watermarks for backfill
+        // initial low watermark: 1.binlog, pos=2 and expected behaviors:
+        // - ignore events before (1.binlog, pos=2);
+        // - apply events in the range of (1.binlog, pos=2, 1.binlog, pos=4) to the snapshot
+        let binlog_watermarks = vec![
+            MySqlOffset::new(binlog_file.clone(), 2), // binlog low watermark
+            MySqlOffset::new(binlog_file.clone(), 4),
+            MySqlOffset::new(binlog_file.clone(), 6),
+            MySqlOffset::new(binlog_file.clone(), 8),
+            MySqlOffset::new(binlog_file.clone(), 10),
+        ];
         Self {
             binlog_watermarks,
             snapshot_cnt: AtomicUsize::new(0),
@@ -39,7 +51,7 @@ impl MockExternalTableReader {
     }
 
     pub fn get_normalized_table_name(_table_name: &SchemaTableName) -> String {
-        "`mock_table`".to_string()
+        "`mock_table`".to_owned()
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -106,7 +118,7 @@ impl ExternalTableReader for MockExternalTableReader {
             Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
         } else {
             Ok(CdcOffset::MySql(MySqlOffset {
-                filename: "1.binlog".to_string(),
+                filename: "1.binlog".to_owned(),
                 position: u64::MAX,
             }))
         }

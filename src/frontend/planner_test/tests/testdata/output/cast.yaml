@@ -80,3 +80,36 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count] }
         └─BatchScan { table: t, columns: [], distribution: SomeShard }
+- name: composite type cast error message (array)
+  sql: |
+    select '[]'::int[]::bytea[];
+  binder_error: |
+    Failed to bind expression: CAST(CAST('[]' AS INT[]) AS BYTEA[])
+
+    Caused by these errors (recent errors listed first):
+      1: cannot cast type "integer[]" to "bytea[]"
+      2: cannot cast type "integer" to "bytea" in Explicit context
+- name: composite type cast error message (struct)
+  sql: |
+    create table t (v struct<a struct<b int>, c bool>);
+    select v::struct<d struct<e bytea>, f bool> from t;
+  binder_error: |
+    Failed to bind expression: CAST(v AS STRUCT<d STRUCT<e BYTEA>, f BOOLEAN>)
+
+    Caused by these errors (recent errors listed first):
+      1: cannot cast type "struct<a struct<b integer>, c boolean>" to "struct<d struct<e bytea>, f boolean>"
+      2: cannot cast struct field "a" to struct field "d"
+      3: cannot cast type "struct<b integer>" to "struct<e bytea>"
+      4: cannot cast struct field "b" to struct field "e"
+      5: cannot cast type "integer" to "bytea" in Explicit context
+- name: composite type cast error message (map)
+  sql: |
+    create table t (v map(int, int));
+    select v::map(int, bytea) from t;
+  binder_error: |
+    Failed to bind expression: CAST(v AS MAP(INT,BYTEA))
+
+    Caused by these errors (recent errors listed first):
+      1: cannot cast type "map(integer,integer)" to "map(integer,bytea)"
+      2: cannot cast map value
+      3: cannot cast type "integer" to "bytea" in Explicit context

@@ -27,6 +27,7 @@ use either::Either;
 use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
+use replace_job_plan::ReplaceJob;
 use risingwave_common::catalog::{FunctionId, IndexId, ObjectId, SecretId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
 use risingwave_common::hash::WorkerSlotMapping;
@@ -54,6 +55,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
@@ -68,7 +70,6 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
-use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -104,10 +105,10 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Endpoint;
 use tonic::{Code, Request, Streaming};
 
+use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 use crate::meta_rpc_client_method_impl;
-use crate::tracing::{Channel, TracingInjectedChannelExt};
 
 type ConnectionId = u32;
 type DatabaseId = u32;
@@ -283,7 +284,7 @@ impl MetaClient {
                         host: Some(addr.to_protobuf()),
                         property: Some(property.clone()),
                         resource: Some(risingwave_pb::common::worker_node::Resource {
-                            rw_version: RW_VERSION.to_string(),
+                            rw_version: RW_VERSION.to_owned(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
                         }),
@@ -443,7 +444,7 @@ impl MetaClient {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
         dependencies: HashSet<ObjectId>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
@@ -517,7 +518,7 @@ impl MetaClient {
     ) -> Result<WaitVersion> {
         let request = AlterNameRequest {
             object: Some(object),
-            new_name: name.to_string(),
+            new_name: name.to_owned(),
         };
         let resp = self.inner.alter_name(request).await?;
         Ok(resp
@@ -590,24 +591,43 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn replace_table(
+    pub async fn alter_secret(
         &self,
-        source: Option<PbSource>,
-        table: PbTable,
+        secret_id: u32,
+        secret_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
+        value: Vec<u8>,
+    ) -> Result<WaitVersion> {
+        let request = AlterSecretRequest {
+            secret_id,
+            name: secret_name,
+            database_id,
+            schema_id,
+            owner_id,
+            value,
+        };
+        let resp = self.inner.alter_secret(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn replace_job(
+        &self,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
-        job_type: PbTableJobType,
+        replace_job: ReplaceJob,
     ) -> Result<WaitVersion> {
-        let request = ReplaceTablePlanRequest {
-            plan: Some(ReplaceTablePlan {
-                source,
-                table: Some(table),
+        let request = ReplaceJobPlanRequest {
+            plan: Some(ReplaceJobPlan {
                 fragment_graph: Some(graph),
                 table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
-                job_type: job_type as _,
+                replace_job: Some(replace_job),
             }),
         };
-        let resp = self.inner.replace_table_plan(request).await?;
+        let resp = self.inner.replace_job_plan(request).await?;
         // TODO: handle error in `resp.status` here
         Ok(resp
             .version
@@ -687,7 +707,7 @@ impl MetaClient {
         &self,
         sink_id: u32,
         cascade: bool,
-        affected_table_change: Option<ReplaceTablePlan>,
+        affected_table_change: Option<ReplaceJobPlan>,
     ) -> Result<WaitVersion> {
         let request = DropSinkRequest {
             sink_id,
@@ -1227,6 +1247,12 @@ impl MetaClient {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
+    }
+
+    pub async fn get_meta_store_endpoint(&self) -> Result<String> {
+        let req = GetMetaStoreInfoRequest {};
+        let resp = self.inner.get_meta_store_info(req).await?;
+        Ok(resp.meta_store_endpoint)
     }
 
     pub async fn set_system_param(
@@ -2007,7 +2033,7 @@ impl GrpcMetaClient {
             .connect_timeout(Duration::from_secs(5))
             .monitored_connect("grpc-meta-client", Default::default())
             .await?
-            .tracing_injected();
+            .wrapped();
 
         Ok(channel)
     }
@@ -2043,6 +2069,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
+            ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
@@ -2083,7 +2110,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
-            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
+            ,{ ddl_client, replace_job_plan, ReplaceJobPlanRequest, ReplaceJobPlanResponse }
             ,{ ddl_client, alter_source, AlterSourceRequest, AlterSourceResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
@@ -2095,6 +2122,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ ddl_client, auto_schema_change, AutoSchemaChangeRequest, AutoSchemaChangeResponse }
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
+            ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

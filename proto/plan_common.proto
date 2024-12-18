@@ -236,6 +236,7 @@ message Cardinality {
 // Provide statement-local context, e.g. session info like time zone, for execution.
 message ExprContext {
   string time_zone = 1;
+  bool strict_mode = 2;
 }
 
 message AdditionalColumnKey {}
@@ -267,6 +268,8 @@ message AdditionalColumnPayload {}
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
+message AdditionalSubject {}
+
 message AdditionalColumn {
   oneof column_type {
     AdditionalColumnKey key = 1;
@@ -281,6 +284,7 @@ message AdditionalColumn {
     AdditionalTableName table_name = 10;
     AdditionalCollectionName collection_name = 11;
     AdditionalColumnPayload payload = 12;
+    AdditionalSubject subject = 13;
   }
 }
 

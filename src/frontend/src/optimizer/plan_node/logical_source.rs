@@ -185,10 +185,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "filename".to_string(),
+                            name: "filename".to_owned(),
                             data_type: DataType::Varchar,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -197,10 +197,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "last_edit_time".to_string(),
+                            name: "last_edit_time".to_owned(),
                             data_type: DataType::Timestamptz,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         1,
                     ),
@@ -209,10 +209,10 @@ impl LogicalSource {
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
-                            name: "file_size".to_string(),
+                            name: "file_size".to_owned(),
                             data_type: DataType::Int64,
                             sub_fields: vec![],
-                            type_name: "".to_string(),
+                            type_name: "".to_owned(),
                         },
                         0,
                     ),
@@ -247,6 +247,21 @@ impl LogicalSource {
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
+    }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Result<Self> {
+        let row_id_index = self.core.row_id_index;
+        let kind = self.core.kind.clone();
+        let ctx = self.core.ctx.clone();
+        let as_of = self.core.as_of.clone();
+        Self::new(
+            self.source_catalog(),
+            column_catalog,
+            row_id_index,
+            kind,
+            ctx,
+            as_of,
+        )
     }
 }
 

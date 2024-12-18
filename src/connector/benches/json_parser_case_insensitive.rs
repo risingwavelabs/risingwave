@@ -41,7 +41,7 @@ fn gen_input(mode: &str, chunk_size: usize, chunk_num: usize) -> Input {
                 "mismatch" => {
                     let convert_case = |s: &str| -> String {
                         let mut rng = rand::thread_rng();
-                        let mut result = "".to_string();
+                        let mut result = "".to_owned();
                         for char in s.chars() {
                             if rng.gen_bool(0.5) {
                                 result.push(char.to_uppercase().to_string().parse().unwrap());

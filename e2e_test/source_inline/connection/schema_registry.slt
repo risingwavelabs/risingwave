@@ -1,0 +1,56 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO false;
+
+statement error unknown field `aws.region`, expected one of `schema.registry`, `schema.registry.username`, `schema.registry.password`
+CREATE CONNECTION schema_registry_conn with ( type = 'schema_registry', aws.region = 'us-east-1');
+
+statement ok
+CREATE CONNECTION schema_registry_conn with ( type = 'schema_registry', schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+# cleanup
+system ok
+rpk topic delete 'sr_conn_test' || true; \
+(rpk sr subject delete 'sr_conn_test-value' && rpk sr subject delete 'sr_conn_test-value' --permanent) || true;
+
+# create topic and sr subject
+system ok
+rpk topic create 'sr_conn_test'
+
+system ok
+sr_register sr_conn_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+
+system ok
+echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic sr_conn_test
+
+statement error Invalid Parameter Value: Glue related options/secrets are not allowed when using schema registry connection
+create table t
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_conn_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    connection = schema_registry_conn,
+    aws.region = 'us-east-1'
+);
+
+statement ok
+create table t
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'sr_conn_test'
+)
+FORMAT PLAIN ENCODE AVRO (
+    connection = schema_registry_conn
+);
+
+# clean up
+
+statement ok
+drop table t;
+
+statement ok
+drop connection schema_registry_conn;
+
+

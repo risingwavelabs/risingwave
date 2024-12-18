@@ -22,6 +22,7 @@ normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 [dependencies]
 clap = { workspace = true }
 prometheus = { version = "0.13" }
+risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_compute = { workspace = true }

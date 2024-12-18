@@ -101,7 +101,7 @@ impl ObserverState for FrontendObserverNode {
             Info::SessionParam(p) => {
                 self.session_params
                     .write()
-                    .set(&p.param, p.value().to_string(), &mut ())
+                    .set(&p.param, p.value().to_owned(), &mut ())
                     .unwrap();
             }
             Info::HummockStats(stats) => {
@@ -480,6 +480,9 @@ impl FrontendObserverNode {
             }
             Operation::Delete => {
                 LocalSecretManager::global().remove_secret(secret.id);
+            }
+            Operation::Update => {
+                LocalSecretManager::global().update_secret(secret.id, secret.value);
             }
             _ => {
                 panic!("error type notification");

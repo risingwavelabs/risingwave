@@ -89,6 +89,7 @@ pub enum StatementType {
     ALTER_FUNCTION,
     ALTER_CONNECTION,
     ALTER_SYSTEM,
+    ALTER_SECRET,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
@@ -321,7 +322,7 @@ impl StatementType {
             Statement::CloseCursor { .. } => Ok(StatementType::CLOSE_CURSOR),
             Statement::Flush => Ok(StatementType::FLUSH),
             Statement::Wait => Ok(StatementType::WAIT),
-            _ => Err("unsupported statement type".to_string()),
+            _ => Err("unsupported statement type".to_owned()),
         }
     }
 

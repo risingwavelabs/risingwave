@@ -36,6 +36,7 @@ use risingwave_meta_model::{
     SourceId, StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, UserId,
     ViewId,
 };
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
@@ -51,6 +52,7 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbRelation, PbRelationGroup};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
+use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::ActiveValue::Set;
@@ -78,11 +80,11 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{
-    get_referred_secret_ids_from_source, MetaSrvEnv, NotificationVersion,
-    IGNORED_NOTIFICATION_VERSION,
+    get_referred_connection_ids_from_source, get_referred_secret_ids_from_source, MetaSrvEnv,
+    NotificationVersion, IGNORED_NOTIFICATION_VERSION,
 };
 use crate::rpc::ddl_controller::DropMode;
-use crate::telemetry::MetaTelemetryJobDesc;
+use crate::telemetry::{report_event, MetaTelemetryJobDesc};
 use crate::{MetaError, MetaResult};
 
 pub type Catalog = (
@@ -497,7 +499,7 @@ impl CatalogController {
             ensure_schema_empty(schema_id, &txn).await?;
         } else {
             return Err(MetaError::permission_denied(
-                "drop schema cascade is not supported yet".to_string(),
+                "drop schema cascade is not supported yet".to_owned(),
             ));
         }
 
@@ -640,25 +642,33 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn clean_dirty_subscription(&self) -> MetaResult<()> {
+    pub async fn clean_dirty_subscription(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let filter_condition = object::Column::ObjType.eq(ObjectType::Subscription).and(
+            object::Column::Oid.not_in_subquery(
+                Query::select()
+                    .column(subscription::Column::SubscriptionId)
+                    .from(Subscription)
+                    .and_where(
+                        subscription::Column::SubscriptionState
+                            .eq(SubscriptionState::Created as i32),
+                    )
+                    .take(),
+            ),
+        );
+
+        let filter_condition = if let Some(database_id) = database_id {
+            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        } else {
+            filter_condition
+        };
 
         Object::delete_many()
-            .filter(
-                object::Column::ObjType.eq(ObjectType::Subscription).and(
-                    object::Column::Oid.not_in_subquery(
-                        Query::select()
-                            .column(subscription::Column::SubscriptionId)
-                            .from(Subscription)
-                            .and_where(
-                                subscription::Column::SubscriptionState
-                                    .eq(SubscriptionState::Created as i32),
-                            )
-                            .take(),
-                    ),
-                ),
-            )
+            .filter(filter_condition)
             .exec(&txn)
             .await?;
         txn.commit().await?;
@@ -820,9 +830,24 @@ impl CatalogController {
     }
 
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
-    pub async fn clean_dirty_creating_jobs(&self) -> MetaResult<Vec<SourceId>> {
+    pub async fn clean_dirty_creating_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<SourceId>> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        let filter_condition = streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
+            streaming_job::Column::JobStatus
+                .eq(JobStatus::Creating)
+                .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
+        );
+
+        let filter_condition = if let Some(database_id) = database_id {
+            filter_condition.and(object::Column::DatabaseId.eq(database_id))
+        } else {
+            filter_condition
+        };
 
         let dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
@@ -834,13 +859,7 @@ impl CatalogController {
                 object::Column::DatabaseId,
             ])
             .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
-            .filter(
-                streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
-                    streaming_job::Column::JobStatus
-                        .eq(JobStatus::Creating)
-                        .and(streaming_job::Column::CreateType.eq(CreateType::Foreground)),
-                ),
-            )
+            .filter(filter_condition)
             .into_partial_model()
             .all(&txn)
             .await?;
@@ -989,7 +1008,7 @@ impl CatalogController {
                     id: table_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1013,7 +1032,7 @@ impl CatalogController {
                     id: source_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1037,7 +1056,7 @@ impl CatalogController {
                     id: sink_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1237,6 +1256,7 @@ impl CatalogController {
 
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
+        let connection_ids = get_referred_connection_ids_from_source(&pb_source);
 
         let source_obj = Self::create_object(
             &txn,
@@ -1252,8 +1272,9 @@ impl CatalogController {
         Source::insert(source).exec(&txn).await?;
 
         // add secret dependency
-        if !secret_ids.is_empty() {
-            ObjectDependency::insert_many(secret_ids.iter().map(|id| {
+        let dep_relation_ids = secret_ids.iter().chain(connection_ids.iter());
+        if !secret_ids.is_empty() || !connection_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(*id as _),
                     used_by: Set(source_id as _),
@@ -1397,6 +1418,43 @@ impl CatalogController {
         Ok(version)
     }
 
+    pub async fn alter_secret(
+        &self,
+        pb_secret: PbSecret,
+        secret_plain_payload: Vec<u8>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_secret.owner as _;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+
+        ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
+        let secret: secret::ActiveModel = pb_secret.clone().into();
+        Secret::update(secret).exec(&txn).await?;
+
+        txn.commit().await?;
+
+        // Notify the compute and frontend node plain secret
+        let mut secret_plain = pb_secret;
+        secret_plain.value.clone_from(&secret_plain_payload);
+
+        LocalSecretManager::global().update_secret(secret_plain.id, secret_plain_payload);
+        self.env
+            .notification_manager()
+            .notify_compute_without_version(Operation::Update, Info::Secret(secret_plain.clone()));
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::Secret(secret_plain),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn get_secret_by_id(&self, secret_id: SecretId) -> MetaResult<PbSecret> {
         let inner = self.inner.read().await;
         let (secret, obj) = Secret::find_by_id(secret_id)
@@ -1417,7 +1475,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
         ensure_object_not_refer(ObjectType::Secret, secret_id, &txn).await?;
 
-        // Find affect users with privileges on the connection.
+        // Find affect users with privileges on the secret.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
@@ -1464,6 +1522,16 @@ impl CatalogController {
         ensure_object_id(ObjectType::Schema, pb_connection.schema_id as _, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
+        let mut dep_secrets = HashSet::new();
+        if let Some(ConnectionInfo::ConnectionParams(params)) = &pb_connection.info {
+            dep_secrets.extend(
+                params
+                    .secret_refs
+                    .values()
+                    .map(|secret_ref| secret_ref.secret_id),
+            );
+        }
+
         let conn_obj = Self::create_object(
             &txn,
             ObjectType::Connection,
@@ -1476,7 +1544,36 @@ impl CatalogController {
         let connection: connection::ActiveModel = pb_connection.clone().into();
         Connection::insert(connection).exec(&txn).await?;
 
+        for secret_id in dep_secrets {
+            ObjectDependency::insert(object_dependency::ActiveModel {
+                oid: Set(secret_id as _),
+                used_by: Set(conn_obj.oid),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
+
         txn.commit().await?;
+
+        {
+            // call meta telemetry here to report the connection creation
+            report_event(
+                PbTelemetryEventStage::Unspecified,
+                "connection_create",
+                pb_connection.get_id() as _,
+                {
+                    pb_connection.info.as_ref().and_then(|info| match info {
+                        ConnectionInfo::ConnectionParams(params) => {
+                            Some(params.connection_type().as_str_name().to_owned())
+                        }
+                        _ => None,
+                    })
+                },
+                None,
+                None,
+            );
+        }
 
         let version = self
             .notify_frontend(
@@ -2424,7 +2521,7 @@ impl CatalogController {
 
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
-            name: Set(name.to_string()),
+            name: Set(name.to_owned()),
         };
         let database = active_model.update(&txn).await?;
 
@@ -2460,7 +2557,7 @@ impl CatalogController {
 
         let active_model = schema::ActiveModel {
             schema_id: Set(schema_id),
-            name: Set(name.to_string()),
+            name: Set(name.to_owned()),
         };
         let schema = active_model.update(&txn).await?;
 
@@ -2653,7 +2750,10 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn alter_source(&self, pb_source: PbSource) -> MetaResult<NotificationVersion> {
+    pub async fn alter_non_shared_source(
+        &self,
+        pb_source: PbSource,
+    ) -> MetaResult<NotificationVersion> {
         let source_id = pb_source.id as SourceId;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -2667,7 +2767,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
         if original_version + 1 != pb_source.version as i64 {
             return Err(MetaError::permission_denied(
-                "source version is stale".to_string(),
+                "source version is stale".to_owned(),
             ));
         }
 
@@ -2697,11 +2797,6 @@ impl CatalogController {
     pub async fn list_all_state_tables(&self) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
         inner.list_all_state_tables().await
-    }
-
-    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        let inner = self.inner.read().await;
-        inner.list_all_state_table_ids().await
     }
 
     pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
@@ -2890,19 +2985,23 @@ impl CatalogController {
 
     pub async fn get_mv_depended_subscriptions(
         &self,
+        database_id: Option<DatabaseId>,
     ) -> MetaResult<HashMap<DatabaseId, HashMap<TableId, HashMap<SubscriptionId, u64>>>> {
         let inner = self.inner.read().await;
+        let select = Subscription::find()
+            .select_only()
+            .select_column(subscription::Column::SubscriptionId)
+            .select_column(subscription::Column::DependentTableId)
+            .select_column(subscription::Column::RetentionSeconds)
+            .select_column(object::Column::DatabaseId)
+            .join(JoinType::InnerJoin, subscription::Relation::Object.def());
+        let select = if let Some(database_id) = database_id {
+            select.filter(object::Column::DatabaseId.eq(database_id))
+        } else {
+            select
+        };
         let subscription_objs: Vec<(SubscriptionId, ObjectId, i64, DatabaseId)> =
-            Subscription::find()
-                .select_only()
-                .select_column(subscription::Column::SubscriptionId)
-                .select_column(subscription::Column::DependentTableId)
-                .select_column(subscription::Column::RetentionSeconds)
-                .select_column(object::Column::DatabaseId)
-                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-                .into_tuple()
-                .all(&inner.db)
-                .await?;
+            select.into_tuple().all(&inner.db).await?;
         let mut map: HashMap<_, HashMap<_, HashMap<_, _>>> = HashMap::new();
         // Write object at the same time we write subscription, so we must be able to get obj
         for (subscription_id, dependent_table_id, retention_seconds, database_id) in
@@ -3054,10 +3153,7 @@ impl CatalogController {
             .map(|(id, name, table_type)| {
                 (
                     id,
-                    (
-                        name,
-                        PbTableType::from(table_type).as_str_name().to_string(),
-                    ),
+                    (name, PbTableType::from(table_type).as_str_name().to_owned()),
                 )
             })
             .collect())
@@ -3126,6 +3222,10 @@ impl CatalogController {
             })
             .collect();
         Ok(res)
+    }
+
+    pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        self.inner.read().await.list_time_travel_table_ids().await
     }
 }
 
@@ -3257,17 +3357,6 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
-    }
-
-    /// `list_all_tables` return all ids of state tables.
-    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        let table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .into_tuple()
-            .all(&self.db)
-            .await?;
-        Ok(table_ids)
     }
 
     /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
@@ -3488,6 +3577,21 @@ impl CatalogControllerInner {
             let _ = tx.send(Err(err.clone()));
         }
     }
+
+    pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .filter(table::Column::TableType.is_in(vec![
+                TableType::Table,
+                TableType::MaterializedView,
+                TableType::Index,
+            ]))
+            .column(table::Column::TableId)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        Ok(table_ids)
+    }
 }
 
 async fn update_internal_tables(
@@ -3535,7 +3639,7 @@ mod tests {
     async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
-            name: "db1".to_string(),
+            name: "db1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
@@ -3568,7 +3672,7 @@ mod tests {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
-            name: "schema1".to_string(),
+            name: "schema1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
@@ -3602,9 +3706,9 @@ mod tests {
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "view".to_string(),
+            name: "view".to_owned(),
             owner: TEST_OWNER_ID as _,
-            sql: "CREATE VIEW view AS SELECT 1".to_string(),
+            sql: "CREATE VIEW view AS SELECT 1".to_owned(),
             ..Default::default()
         };
         mgr.create_view(pb_view.clone()).await?;
@@ -3632,11 +3736,11 @@ mod tests {
         let pb_function = PbFunction {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "test_function".to_string(),
+            name: "test_function".to_owned(),
             owner: TEST_OWNER_ID as _,
             arg_types,
             return_type: Some(test_data_type.clone()),
-            language: "python".to_string(),
+            language: "python".to_owned(),
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
             )),
@@ -3675,7 +3779,7 @@ mod tests {
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "s1".to_string(),
+            name: "s1".to_owned(),
             owner: TEST_OWNER_ID as _,
             definition: r#"CREATE SOURCE s1 (v1 int) with (
   connector = 'kafka',
@@ -3683,7 +3787,7 @@ mod tests {
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
-                .to_string(),
+                .to_owned(),
             info: Some(StreamSourceInfo {
                 ..Default::default()
             }),
@@ -3702,9 +3806,9 @@ mod tests {
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "view_1".to_string(),
+            name: "view_1".to_owned(),
             owner: TEST_OWNER_ID as _,
-            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_string(),
+            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
             dependent_relations: vec![source_id as _],
             ..Default::default()
         };

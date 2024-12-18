@@ -53,7 +53,6 @@
         <module>connector-node/risingwave-source-cdc-test</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
-        <module>connector-node/risingwave-sink-mock-flink</module>
         <module>connector-node/tracing</module>
     </modules>
 
@@ -67,14 +66,15 @@
         <!-- dependency versions -->
         <protobuf.version>3.25.5</protobuf.version> <!-- https://github.com/grpc/grpc-java/issues/11015 -->
         <grpc.version>1.68.1</grpc.version>
-        <log4j.version>2.24.1</log4j.version>
+        <log4j.version>2.24.2</log4j.version>
         <slf4j.version>2.0.16</slf4j.version>
         <debezium.version>2.6.2.Final</debezium.version>
         <jackson.version>2.18.1</jackson.version>
         <hadoop.version>3.4.1</hadoop.version>
-        <testcontainers.version>1.20.3</testcontainers.version>
-        <aws.version>2.29.2</aws.version>
-        <jetty.version>12.0.14</jetty.version>
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <aws.version>2.29.20</aws.version>
+        <jetty.version>12.0.15</jetty.version>
+        <parquet.version>1.14.4</parquet.version>
     </properties>
 
     <dependencyManagement>
@@ -112,7 +112,7 @@
             <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
-                <version>2.17.0</version>
+                <version>2.18.0</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
@@ -173,11 +173,6 @@
                 <version>9.1.0</version>
             </dependency>
             <dependency>
-                <groupId>org.mongodb</groupId>
-                <artifactId>mongodb-driver-sync</artifactId>
-                <version>4.11.5</version>
-            </dependency>
-            <dependency>
                 <groupId>org.elasticsearch.client</groupId>
                 <artifactId>elasticsearch-rest-high-level-client</artifactId>
                 <version>7.17.25</version>
@@ -185,7 +180,7 @@
             <dependency>
                 <groupId>org.opensearch.client</groupId>
                 <artifactId>opensearch-rest-high-level-client</artifactId>
-                <version>2.17.1</version>
+                <version>2.18.0</version>
                 <exclusions>
                     <exclusion>
                         <groupId>org.apache.httpcomponents</groupId>
@@ -285,21 +280,6 @@
             <dependency>
                 <groupId>com.risingwave</groupId>
                 <artifactId>risingwave-sink-cassandra</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.risingwave</groupId>
-                <artifactId>risingwave-sink-mock-flink-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
@@ -418,7 +398,7 @@
                         <groupId>com.puppycrawl.tools</groupId>
                         <artifactId>checkstyle</artifactId>
                         <!-- TODO: Document it for devs. -->
-                        <version>8.29</version>
+                        <version>10.20.1</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -471,7 +451,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.0.0-M7</version>
+                <version>3.5.2</version>
                 <configuration>
                     <enableAssertions>true</enableAssertions>
                     <argLine>
@@ -497,7 +477,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-source-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>3.3.1</version>
                 <executions>
                     <execution>
                         <id>attach-sources</id>
@@ -511,7 +491,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-javadoc-plugin</artifactId>
-                <version>3.5.0</version>
+                <version>3.11.1</version>
                 <executions>
                     <execution>
                         <id>attach-javadocs</id>
@@ -546,7 +526,7 @@
             <plugin>
                 <groupId>org.sonatype.plugins</groupId>
                 <artifactId>nexus-staging-maven-plugin</artifactId>
-                <version>1.6.13</version>
+                <version>1.7.0</version>
                 <extensions>true</extensions>
                 <configuration>
                     <serverId>ossrh</serverId>

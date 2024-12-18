@@ -42,3 +42,9 @@
     from t1;
   expected_outputs:
     - explain_output
+- name: test dot output format (distsql, stream)
+  sql: |
+    CREATE TABLE t (v1 int);
+    explain (distsql, format dot) create materialized view m1 as SELECT approx_percentile(0.5) WITHIN GROUP (order by v1) from t;
+  expected_outputs:
+    - explain_output

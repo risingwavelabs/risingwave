@@ -166,8 +166,8 @@ mod tests {
         let mut binder = mock_binder();
 
         // Test i32 -> decimal.
-        let expr1 = Expr::Value(Value::Number("1".to_string()));
-        let expr2 = Expr::Value(Value::Number("1.1".to_string()));
+        let expr1 = Expr::Value(Value::Number("1".to_owned()));
+        let expr2 = Expr::Value(Value::Number("1.1".to_owned()));
         let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values, None).unwrap();
 

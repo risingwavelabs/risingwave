@@ -16,12 +16,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use thiserror::Error;
-use thiserror_ext::AsReport;
 
-use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::error::{ErrorCode, Result as RwResult};
-use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
+use super::type_inference::cast;
+use super::{infer_some_all, infer_type, CastContext, CastError, Expr, ExprImpl, Literal};
+use crate::error::Result as RwResult;
+use crate::expr::{bail_cast_error, ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -144,22 +143,23 @@ impl FunctionCall {
             // else when eager parsing fails, just proceed as normal.
             // Some callers are not ready to handle `'a'::int` error here.
         }
+
         let source = child.return_type();
         if source == target {
-            Ok(())
-        // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
-        // in frontend.
-        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
-            // Always Ok below. Safe to mutate `child`.
-            let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
-            *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
-            Ok(())
-        } else {
-            Err(CastError(format!(
-                "cannot cast type \"{}\" to \"{}\" in {:?} context",
-                source, target, allows
-            )))
+            return Ok(());
         }
+
+        if child.is_untyped() {
+            // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
+            // in frontend.
+        } else {
+            cast(&source, &target, allows)?;
+        }
+
+        // Always Ok below. Safe to mutate `child`.
+        let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
+        *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
+        Ok(())
     }
 
     /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
@@ -170,13 +170,13 @@ impl FunctionCall {
         target_type: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
+        // Can only cast to a struct type.
         let DataType::Struct(t) = &target_type else {
-            return Err(CastError(format!(
-                "cannot cast type \"{}\" to \"{}\" in {:?} context",
-                func.return_type(),
+            bail_cast_error!(
+                "cannot cast type \"{}\" to \"{}\"",
+                func.return_type(), // typically "record"
                 target_type,
-                allows
-            )));
+            );
         };
         match t.len().cmp(&func.inputs.len()) {
             std::cmp::Ordering::Equal => {
@@ -189,10 +189,8 @@ impl FunctionCall {
                 func.return_type = target_type;
                 Ok(())
             }
-            std::cmp::Ordering::Less => Err(CastError("Input has too few columns.".to_string())),
-            std::cmp::Ordering::Greater => {
-                Err(CastError("Input has too many columns.".to_string()))
-            }
+            std::cmp::Ordering::Less => bail_cast_error!("input has too few columns"),
+            std::cmp::Ordering::Greater => bail_cast_error!("input has too many columns"),
         }
     }
 
@@ -421,14 +419,4 @@ pub fn is_row_function(expr: &ExprImpl) -> bool {
         }
     }
     false
-}
-
-#[derive(Debug, Error)]
-#[error("{0}")]
-pub struct CastError(pub(super) String);
-
-impl From<CastError> for ErrorCode {
-    fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_report_string())
-    }
 }

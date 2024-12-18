@@ -197,6 +197,22 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// - Inner: neither side.
     ///
     /// Should be set to `None` if `need_degree_table` was set to `false`.
+    ///
+    /// The degree of each row will tell us if we need to emit `NULL` for the row.
+    /// For instance, given `lhs LEFT JOIN rhs`,
+    /// If the degree of a row in `lhs` is 0, it means the row does not have a match in `rhs`.
+    /// If the degree of a row in `lhs` is 2, it means the row has two matches in `rhs`.
+    /// Now, when emitting the result of the join, we need to emit `NULL` for the row in `lhs` if
+    /// the degree is 0.
+    ///
+    /// Why don't just use a boolean value instead of a degree count?
+    /// Consider the case where we delete a matched record from `rhs`.
+    /// Since we can delete a record,
+    /// there must have been a record in `rhs` that matched the record in `lhs`.
+    /// So this value is `true`.
+    /// But we don't know how many records are matched after removing this record,
+    /// since we only stored a boolean value rather than the count.
+    /// Hence we need to store the count of matched records.
     degree_state: Option<TableInner<S>>,
     /// If degree table is need
     need_degree_table: bool,
@@ -382,15 +398,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if self.need_degree_table {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
                 &(Bound::Unbounded, Bound::Unbounded);
-            let table_iter_fut =
-                self.state
-                    .table
-                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
+            let table_iter_fut = self.state.table.iter_keyed_row_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::default(),
+            );
             let degree_state = self.degree_state.as_ref().unwrap();
-            let degree_table_iter_fut =
-                degree_state
-                    .table
-                    .iter_with_prefix(&key, sub_range, PrefetchOptions::default());
+            let degree_table_iter_fut = degree_state.table.iter_keyed_row_with_prefix(
+                &key,
+                sub_range,
+                PrefetchOptions::default(),
+            );
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -522,7 +540,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_with_prefix(&key, sub_range, PrefetchOptions::default())
+                .iter_keyed_row_with_prefix(&key, sub_range, PrefetchOptions::default())
                 .await?;
 
             #[for_await]

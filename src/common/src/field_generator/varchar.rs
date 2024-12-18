@@ -94,7 +94,7 @@ impl VarcharConstant {
     pub fn generate_datum() -> Datum {
         Some(
             Self::CONSTANT_STRING
-                .to_string()
+                .to_owned()
                 .into_boxed_str()
                 .to_scalar_value(),
         )

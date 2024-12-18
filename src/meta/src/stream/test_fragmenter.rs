@@ -20,7 +20,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode};
+use risingwave_pb::common::worker_node::Property;
+use risingwave_pb::common::{
+    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::ddl_service::TableJobType;
@@ -240,7 +243,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![],
         stream_key: vec![2],
         operator_id: 1,
-        identity: "ExchangeExecutor".to_string(),
+        identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -263,7 +266,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node],
         stream_key: vec![0, 1],
         operator_id: 2,
-        identity: "FilterExecutor".to_string(),
+        identity: "FilterExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -281,7 +284,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
         operator_id: 3,
-        identity: "SimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -306,7 +309,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![],
         stream_key: vec![0, 1],
         operator_id: 4,
-        identity: "ExchangeExecutor".to_string(),
+        identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -324,7 +327,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
         operator_id: 5,
-        identity: "SimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -352,7 +355,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![simple_agg_node_1],
         stream_key: vec![1, 2],
         operator_id: 6,
-        identity: "ProjectExecutor".to_string(),
+        identity: "ProjectExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -367,7 +370,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
-        identity: "MaterializeExecutor".to_string(),
+        identity: "MaterializeExecutor".to_owned(),
         ..Default::default()
     };
 
@@ -426,7 +429,11 @@ fn make_cluster_info() -> StreamingClusterInfo {
         0,
         WorkerNode {
             id: 0,
-            parallelism: 8,
+            property: Some(Property {
+                parallelism: 8,
+                ..Default::default()
+            }),
+            r#type: WorkerType::ComputeNode.into(),
             ..Default::default()
         },
     ))
@@ -446,6 +453,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let graph = make_stream_graph();
     let expr_context = ExprContext {
         time_zone: graph.ctx.as_ref().unwrap().timezone.clone(),
+        strict_mode: false,
     };
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();

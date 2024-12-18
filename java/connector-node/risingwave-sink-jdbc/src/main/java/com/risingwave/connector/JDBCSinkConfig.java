@@ -23,6 +23,10 @@ import com.risingwave.connector.api.sink.CommonSinkConfig;
 public class JDBCSinkConfig extends CommonSinkConfig {
     private String jdbcUrl;
 
+    @JsonProperty private String user;
+
+    @JsonProperty private String password;
+
     private String tableName;
 
     private String sinkType;
@@ -52,6 +56,14 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public String getJdbcUrl() {
         return jdbcUrl;
+    }
+
+    public String getUser() {
+        return user;
+    }
+
+    public String getPassword() {
+        return password;
     }
 
     public String getTableName() {

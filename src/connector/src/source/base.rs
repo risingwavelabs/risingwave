@@ -32,6 +32,7 @@ use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
@@ -40,6 +41,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
+use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
 use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
 use crate::error::ConnectorResult as Result;
@@ -50,13 +52,16 @@ use crate::source::monitor::EnumeratorMetrics;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str, WithOptionsSecResolved,
+    dispatch_source_prop, dispatch_split_impl, for_all_connections, for_all_sources,
+    impl_connection, impl_connector_properties, impl_split, match_source_name_str,
+    WithOptionsSecResolved,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
+
+pub const WEBHOOK_CONNECTOR: &str = "webhook";
 
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
@@ -217,7 +222,7 @@ impl SourceContext {
             0,
             TableId::new(0),
             0,
-            "dummy".to_string(),
+            "dummy".to_owned(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
@@ -452,9 +457,17 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
+    }
+
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -476,6 +489,7 @@ impl ConnectorProperties {
 }
 
 for_all_sources!(impl_split);
+for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {
@@ -555,7 +569,7 @@ impl SplitMetaData for SplitImpl {
             .unwrap()
             .as_str()
             .unwrap()
-            .to_string();
+            .to_owned();
         let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
@@ -573,7 +587,7 @@ impl SplitMetaData for SplitImpl {
 impl SplitImpl {
     pub fn get_type(&self) -> String {
         dispatch_split_impl!(self, _ignored, PropType, {
-            PropType::SOURCE_NAME.to_string()
+            PropType::SOURCE_NAME.to_owned()
         })
     }
 
@@ -619,10 +633,15 @@ impl SourceMessage {
         Self {
             key: None,
             payload: None,
-            offset: "".to_string(),
+            offset: "".to_owned(),
             split_id: "".into(),
             meta: SourceMeta::Empty,
         }
+    }
+
+    /// Check whether the source message is a CDC heartbeat message.
+    pub fn is_cdc_heartbeat(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
     }
 }
 
@@ -634,6 +653,7 @@ pub enum SourceMeta {
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
@@ -695,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_owned());
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
@@ -708,7 +728,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
@@ -769,8 +789,8 @@ mod tests {
                 .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
-                "b-1:9092".to_string() => "dns-1".to_string(),
-                "b-2:9092".to_string() => "dns-2".to_string(),
+                "b-1:9092".to_owned() => "dns-1".to_owned(),
+                "b-2:9092".to_owned() => "dns-2".to_owned(),
             };
             assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {

@@ -28,7 +28,6 @@ use risingwave_common_service::{MetricsManager, TracingExtractLayer};
 use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::controller::IN_MEMORY_STORE;
 use risingwave_meta::manager::{MetadataManager, META_NODE_ID};
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
@@ -128,47 +127,19 @@ pub async fn rpc_serve(
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    match meta_store_backend {
+    let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
+
+    let election_client = match meta_store_backend {
         MetaStoreBackend::Mem => {
-            let dummy_election_client = Arc::new(DummyElectionClient::new(
+            // Use a dummy election client.
+            Arc::new(DummyElectionClient::new(
                 address_info.advertise_addr.clone(),
-            ));
-            let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await?;
-            rpc_serve_with_store(
-                SqlMetaStore::new(conn),
-                dummy_election_client,
-                address_info,
-                max_cluster_heartbeat_interval,
-                lease_interval_secs,
-                opts,
-                init_system_params,
-                init_session_config,
-                shutdown,
-            )
-            .await
+            ))
         }
-        MetaStoreBackend::Sql { endpoint, config } => {
-            let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-            let mut options = sea_orm::ConnectOptions::new(endpoint);
-            options
-                .max_connections(config.max_connections)
-                .min_connections(config.min_connections)
-                .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
-                .idle_timeout(Duration::from_secs(config.idle_timeout_sec))
-                .acquire_timeout(Duration::from_secs(config.acquire_timeout_sec));
-
-            if is_sqlite {
-                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                options.max_connections(1);
-            }
-
-            let conn = sea_orm::Database::connect(options).await?;
-            let meta_store_sql = SqlMetaStore::new(conn);
-
+        MetaStoreBackend::Sql { .. } => {
             // Init election client.
             let id = address_info.advertise_addr.clone();
-            let conn = meta_store_sql.conn.clone();
+            let conn = meta_store_impl.conn.clone();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
                 DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
@@ -180,20 +151,22 @@ pub async fn rpc_serve(
             };
             election_client.init().await?;
 
-            rpc_serve_with_store(
-                meta_store_sql,
-                election_client,
-                address_info,
-                max_cluster_heartbeat_interval,
-                lease_interval_secs,
-                opts,
-                init_system_params,
-                init_session_config,
-                shutdown,
-            )
-            .await
+            election_client
         }
-    }
+    };
+
+    rpc_serve_with_store(
+        meta_store_impl,
+        election_client,
+        address_info,
+        max_cluster_heartbeat_interval,
+        lease_interval_secs,
+        opts,
+        init_system_params,
+        init_session_config,
+        shutdown,
+    )
+    .await
 }
 
 /// Bootstraps the follower or leader service based on the election status.
@@ -547,6 +520,7 @@ pub async fn start_service_as_election_leader(
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
+        barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
     );

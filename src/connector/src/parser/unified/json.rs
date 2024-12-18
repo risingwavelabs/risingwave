@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use base64::Engine;
 use itertools::Itertools;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppresser;
@@ -26,7 +26,8 @@ use risingwave_common::types::{
     ToOwnedDatum,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector_codec::decoder::utils::extract_decimal;
+use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
+use simd_json::base::ValueAsObject;
 use simd_json::prelude::{
     TypedValue, ValueAsArray, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
 };
@@ -34,7 +35,6 @@ use simd_json::{BorrowedValue, ValueType};
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult};
-use crate::parser::common::json_object_get_case_insensitive;
 use crate::parser::DatumCow;
 use crate::schema::{bail_invalid_option_error, InvalidOptionError};
 
@@ -410,11 +410,8 @@ impl JsonParseOptions {
                     .as_str()
                     .unwrap()
                     .as_bytes();
-                let decimal = BigInt::from_signed_bytes_be(value);
-                let negative = decimal.sign() == Sign::Minus;
-                let (lo, mid, hi) = extract_decimal(decimal.to_bytes_be().1)?;
-                let decimal =
-                    rust_decimal::Decimal::from_parts(lo, mid, hi, negative, scale as u32);
+                let unscaled = BigInt::from_signed_bytes_be(value);
+                let decimal = scaled_bigint_to_rust_decimal(unscaled, scale as _)?;
                 ScalarImpl::Decimal(Decimal::Normalized(decimal))
             }
             // ---- Date -----
@@ -656,7 +653,7 @@ impl Access for JsonAccess<'_> {
                 value = sub_value;
             } else {
                 Err(AccessError::Undefined {
-                    name: key.to_string(),
+                    name: key.to_owned(),
                     path: path.iter().take(idx).join("."),
                 })?;
             }
@@ -664,4 +661,24 @@ impl Access for JsonAccess<'_> {
 
         self.options.parse(value, type_expected)
     }
+}
+
+/// Get a value from a json object by key, case insensitive.
+///
+/// Returns `None` if the given json value is not an object, or the key is not found.
+fn json_object_get_case_insensitive<'b>(
+    v: &'b simd_json::BorrowedValue<'b>,
+    key: &str,
+) -> Option<&'b simd_json::BorrowedValue<'b>> {
+    let obj = v.as_object()?;
+    let value = obj.get(key);
+    if value.is_some() {
+        return value; // fast path
+    }
+    for (k, v) in obj {
+        if k.eq_ignore_ascii_case(key) {
+            return Some(v);
+        }
+    }
+    None
 }

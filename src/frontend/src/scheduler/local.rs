@@ -100,7 +100,7 @@ impl LocalQueryExecution {
     pub async fn run_inner(self) {
         debug!(%self.query.query_id, self.sql, "Starting to run query");
 
-        let context = FrontendBatchTaskContext::new(self.session.clone());
+        let context = FrontendBatchTaskContext::create(self.session.clone());
 
         let task_id = TaskId {
             query_id: self.query.query_id.id.clone(),
@@ -118,6 +118,7 @@ impl LocalQueryExecution {
             self.batch_query_epoch,
             self.shutdown_rx().clone(),
         );
+
         let executor = executor.build().await?;
 
         #[for_await]
@@ -143,9 +144,10 @@ impl LocalQueryExecution {
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
         let auth_context = self.session.auth_context().clone();
-        let db_name = self.session.database().to_string();
+        let db_name = self.session.database().to_owned();
         let search_path = self.session.config().search_path();
         let time_zone = self.session.config().timezone();
+        let strict_mode = self.session.config().batch_expr_strict_mode();
         let timeout = self.timeout;
         let meta_client = self.front_env.meta_client_ref();
 
@@ -156,7 +158,7 @@ impl LocalQueryExecution {
                 // append a query cancelled error if the query is cancelled.
                 if r.is_err() && shutdown_rx.is_cancelled() {
                     r = Err(Box::new(SchedulerError::QueryCancelled(
-                        "Cancelled by user".to_string(),
+                        "Cancelled by user".to_owned(),
                     )) as BoxedError);
                 }
                 if sender1.send(r).await.is_err() {
@@ -166,7 +168,7 @@ impl LocalQueryExecution {
             }
         };
 
-        use risingwave_expr::expr_context::TIME_ZONE;
+        use risingwave_expr::expr_context::*;
 
         use crate::expr::function_impl::context::{
             AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
@@ -179,6 +181,7 @@ impl LocalQueryExecution {
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
+        let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
 
         if let Some(timeout) = timeout {
