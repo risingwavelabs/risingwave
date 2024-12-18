@@ -404,6 +404,7 @@ impl LogicalOverWindow {
             kind,
             return_type: window_function.return_type,
             args,
+            ignore_nulls: window_function.ignore_nulls,
             partition_by,
             order_by,
             frame,
