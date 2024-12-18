@@ -28,6 +28,7 @@ mod stream_graph_formatter;
 pub use stream_graph_formatter::*;
 mod with_options;
 use tokio::runtime::Runtime;
+pub use with_options::options::RETENTION_SECONDS;
 pub use with_options::*;
 mod rewrite_index;
 pub use rewrite_index::*;

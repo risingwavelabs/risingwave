@@ -117,7 +117,7 @@ pub async fn get_new_table_definition_for_cdc_table(
     Ok((definition, original_catalog))
 }
 
-fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
+pub fn to_ast_data_type(ty: &DataType) -> Result<AstDataType> {
     match ty {
         DataType::Boolean => Ok(AstDataType::Boolean),
         DataType::Int16 => Ok(AstDataType::SmallInt),

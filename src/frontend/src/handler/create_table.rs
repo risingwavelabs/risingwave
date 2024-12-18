@@ -35,6 +35,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::jvm_runtime::JVM;
+use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     ExternalTableConfig, ExternalTableImpl, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
@@ -1621,7 +1622,7 @@ pub async fn create_iceberg_engine_table(
     with.insert("table.name".to_owned(), iceberg_table_name.clone());
     let commit_checkpoint_interval = handler_args
         .with_options
-        .get("commit_checkpoint_interval")
+        .get(COMMIT_CHECKPOINT_INTERVAL)
         .map(|v| v.to_owned())
         .unwrap_or_else(|| "60".to_owned());
     let commit_checkpoint_interval = commit_checkpoint_interval.parse::<u32>().map_err(|_| {
