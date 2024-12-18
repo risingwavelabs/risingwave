@@ -557,6 +557,11 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                 break;
             }
         }
+        tracing::trace!(
+            "rate limited log store reader truncate offset {:?}, downstream offset {:?}",
+            truncate_offset,
+            offset
+        );
         if let Some(offset) = truncate_offset {
             self.core.inner.truncate(offset)
         } else {
