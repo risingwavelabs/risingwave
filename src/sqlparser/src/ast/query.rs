@@ -655,7 +655,7 @@ impl fmt::Display for OrderByExpr {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Fetch {
     pub with_ties: bool,
-    pub quantity: Option<Expr>,
+    pub quantity: Option<String>,
 }
 
 impl fmt::Display for Fetch {
