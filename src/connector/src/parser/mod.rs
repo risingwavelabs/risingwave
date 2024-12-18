@@ -202,11 +202,11 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a stream of vectors of [`SourceMessage`] into a stream of [`StreamChunk`].
+    /// Parse a stream of vectors of `SourceMessage` into a stream of [`StreamChunk`].
     ///
     /// # Arguments
     ///
-    /// - `msg_stream`: A stream of vectors of [`SourceMessage`].
+    /// - `msg_stream`: A stream of vectors of `SourceMessage`.
     ///
     /// # Returns
     ///
@@ -413,7 +413,7 @@ pub enum EncodingType {
     Value,
 }
 
-/// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
+/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
@@ -427,7 +427,7 @@ pub enum ByteStreamSourceParserImpl {
 }
 
 impl ByteStreamSourceParserImpl {
-    /// Converts [`SourceMessage`] vec stream into [`StreamChunk`] stream.
+    /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
