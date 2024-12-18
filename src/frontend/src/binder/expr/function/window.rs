@@ -75,14 +75,12 @@ impl Binder {
         // }
         if ignore_nulls {
             match &kind {
-                WindowFuncKind::Lag | WindowFuncKind::Lead => {
-                    // pass
-                }
                 WindowFuncKind::Aggregate(AggType::Builtin(
                     PbAggKind::FirstValue | PbAggKind::LastValue,
                 )) => {
                     // pass
                 }
+                // TODO(rc): support `LAG`/`LEAD` with `IGNORE NULLS`
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "`IGNORE NULLS` is not allowed for `{}`",

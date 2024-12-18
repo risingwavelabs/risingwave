@@ -333,6 +333,7 @@ impl LogicalOverWindow {
                 //     == `first_value(x) over (rows between N preceding and N preceding)`
                 // `lead(x, const offset N) over ()`
                 //     == `first_value(x) over (rows between N following and N following)`
+                assert!(!window_function.ignore_nulls); // the conversion is not applicable to `LAG`/`LEAD` with `IGNORE NULLS`
 
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
