@@ -17,8 +17,9 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitMetaData;
+use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
-use risingwave_meta::manager::{LocalNotification, MetadataManager};
+use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
@@ -45,6 +46,7 @@ pub type TonicResponse<T> = Result<Response<T>, Status>;
 pub struct StreamServiceImpl {
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
+    barrier_manager: BarrierManagerRef,
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
 }
@@ -53,12 +55,14 @@ impl StreamServiceImpl {
     pub fn new(
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
+        barrier_manager: BarrierManagerRef,
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
     ) -> Self {
         StreamServiceImpl {
             env,
             barrier_scheduler,
+            barrier_manager,
             stream_manager,
             metadata_manager,
         }
@@ -349,10 +353,7 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         _request: Request<RecoverRequest>,
     ) -> Result<Response<RecoverResponse>, Status> {
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::AdhocRecovery)
-            .await;
+        self.barrier_manager.adhoc_recovery().await?;
         Ok(Response::new(RecoverResponse {}))
     }
 

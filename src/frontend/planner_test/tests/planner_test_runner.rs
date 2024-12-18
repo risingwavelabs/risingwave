@@ -42,7 +42,7 @@ fn main() {
             || path.extension() == Some(OsStr::new("yaml"))
         {
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-            let test_case_name = file_name.split('.').next().unwrap().to_string();
+            let test_case_name = file_name.split('.').next().unwrap().to_owned();
 
             tests.push(Trial::test(test_case_name, move || {
                 let path = test_data_dir().join("input").join(file_name);

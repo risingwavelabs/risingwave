@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_pb::ddl_service::{ReplaceTablePlan, TableJobType};
+use risingwave_pb::ddl_service::{replace_job_plan, ReplaceJobPlan, TableJobType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -94,12 +94,16 @@ pub async fn handle_drop_sink(
             )?;
         }
 
-        affected_table_change = Some(ReplaceTablePlan {
-            source,
-            table: Some(table),
+        affected_table_change = Some(ReplaceJobPlan {
+            replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
+                replace_job_plan::ReplaceTable {
+                    table: Some(table),
+                    source,
+                    job_type: TableJobType::General as _,
+                },
+            )),
             fragment_graph: Some(graph),
             table_col_index_mapping: None,
-            job_type: TableJobType::General as _,
         });
     }
 

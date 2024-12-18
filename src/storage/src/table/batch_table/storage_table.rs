@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use foyer::CacheHint;
 use futures::future::try_join_all;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::bitmap::Bitmap;
@@ -37,7 +37,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_hummock_sdk::key::{
-    end_bound_of_prefix, next_key, prefixed_range_with_vnode, TableKeyRange,
+    end_bound_of_prefix, next_key, prefixed_range_with_vnode, CopyFromSlice, TableKeyRange,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -52,8 +52,8 @@ use crate::store::{
     PrefetchOptions, ReadLogOptions, ReadOptions, StateStoreIter, StateStoreIterExt,
     TryWaitEpochOptions,
 };
-use crate::table::merge_sort::merge_sort;
-use crate::table::{ChangeLogRow, KeyedChangeLogRow, KeyedRow, TableDistribution, TableIter};
+use crate::table::merge_sort::NodePeek;
+use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -487,61 +487,178 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     }
 }
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send;
-
 /// The row iterator of the storage table.
-/// The wrapper of stream item `StorageResult<KeyedRow<Bytes>>` if pk is not persisted.
-
-#[async_trait::async_trait]
-impl<S: PkAndRowStream + Unpin> TableIter for S {
+/// The wrapper of stream item `StorageResult<OwnedRow>` if pk is not persisted.
+impl<S: Stream<Item = StorageResult<OwnedRow>> + Send + Unpin> TableIter for S {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>> {
-        self.next()
-            .await
-            .transpose()
-            .map(|r| r.map(|keyed_row| keyed_row.into_owned_row()))
+        self.next().await.transpose()
     }
+}
+
+mod merge_vnode_stream {
+
+    use bytes::Bytes;
+    use futures::{Stream, StreamExt, TryStreamExt};
+    use risingwave_hummock_sdk::key::TableKey;
+
+    use crate::error::StorageResult;
+    use crate::table::merge_sort::{merge_sort, NodePeek};
+    use crate::table::KeyedRow;
+
+    pub(super) enum VnodeStreamType<RowSt, KeyedRowSt> {
+        Single(RowSt),
+        Unordered(Vec<RowSt>),
+        Ordered(Vec<KeyedRowSt>),
+    }
+
+    pub(super) type MergedVnodeStream<
+        R: Send,
+        RowSt: Stream<Item = StorageResult<((), R)>> + Send,
+        KeyedRowSt: Stream<Item = StorageResult<(SortKeyType, R)>> + Send,
+    >
+    where
+        KeyedRow<SortKeyType, R>: NodePeek + Send + Sync,
+    = impl Stream<Item = StorageResult<R>> + Send;
+
+    pub(super) type SortKeyType = Bytes; // TODO: may use Vec
+
+    pub(super) fn merge_stream<
+        R: Send,
+        RowSt: Stream<Item = StorageResult<((), R)>> + Send,
+        KeyedRowSt: Stream<Item = StorageResult<(SortKeyType, R)>> + Send,
+    >(
+        stream: VnodeStreamType<RowSt, KeyedRowSt>,
+    ) -> MergedVnodeStream<R, RowSt, KeyedRowSt>
+    where
+        KeyedRow<SortKeyType, R>: NodePeek + Send + Sync,
+    {
+        #[auto_enums::auto_enum(futures03::Stream)]
+        match stream {
+            VnodeStreamType::Single(stream) => stream.map_ok(|(_, row)| row),
+            VnodeStreamType::Unordered(streams) => futures::stream::iter(
+                streams
+                    .into_iter()
+                    .map(|stream| Box::pin(stream.map_ok(|(_, row)| row))),
+            )
+            .flatten_unordered(1024),
+            VnodeStreamType::Ordered(streams) => merge_sort(streams.into_iter().map(|stream| {
+                Box::pin(stream.map_ok(|(key, row)| KeyedRow {
+                    vnode_prefixed_key: TableKey(key),
+                    row,
+                }))
+            }))
+            .map_ok(|keyed_row| keyed_row.row),
+        }
+    }
+}
+
+use merge_vnode_stream::*;
+
+async fn build_vnode_stream<
+    R: Send,
+    RowSt: Stream<Item = StorageResult<((), R)>> + Send,
+    KeyedRowSt: Stream<Item = StorageResult<(SortKeyType, R)>> + Send,
+    RowStFut: Future<Output = StorageResult<RowSt>>,
+    KeyedRowStFut: Future<Output = StorageResult<KeyedRowSt>>,
+>(
+    row_stream_fn: impl Fn(VirtualNode) -> RowStFut,
+    keyed_row_stream_fn: impl Fn(VirtualNode) -> KeyedRowStFut,
+    vnodes: &[VirtualNode],
+    ordered: bool,
+) -> StorageResult<MergedVnodeStream<R, RowSt, KeyedRowSt>>
+where
+    KeyedRow<SortKeyType, R>: NodePeek + Send + Sync,
+{
+    let stream = match vnodes {
+        [] => unreachable!(),
+        [vnode] => VnodeStreamType::Single(row_stream_fn(*vnode).await?),
+        // Concat all iterators if not to preserve order.
+        vnodes if !ordered => VnodeStreamType::Unordered(
+            try_join_all(vnodes.iter().map(|vnode| row_stream_fn(*vnode))).await?,
+        ),
+        // Merge all iterators if to preserve order.
+        vnodes => VnodeStreamType::Ordered(
+            try_join_all(vnodes.iter().map(|vnode| keyed_row_stream_fn(*vnode))).await?,
+        ),
+    };
+    Ok(merge_stream(stream))
 }
 
 /// Iterators
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
-    /// Get multiple stream item `StorageResult<KeyedRow<Bytes>>` based on the specified vnodes of this table with
+    /// Get multiple stream item `StorageResult<OwnedRow>` based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range(
         &self,
         prefix_hint: Option<Bytes>,
-        encoded_key_range: (Bound<Bytes>, Bound<Bytes>),
+        (start_bound, end_bound): (Bound<Bytes>, Bound<Bytes>),
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
-        let cache_policy = match (
-            encoded_key_range.start_bound(),
-            encoded_key_range.end_bound(),
-        ) {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static> {
+        let vnodes = match vnode_hint {
+            // If `vnode_hint` is set, we can only access this single vnode.
+            Some(vnode) => {
+                assert!(
+                    self.distribution.vnodes().is_set(vnode.to_index()),
+                    "vnode unset: {:?}, distribution: {:?}",
+                    vnode,
+                    self.distribution
+                );
+                vec![vnode]
+            }
+            // Otherwise, we need to access all vnodes of this table.
+            None => self.distribution.vnodes().iter_vnodes().collect_vec(),
+        };
+
+        build_vnode_stream(
+            |vnode| {
+                self.iter_vnode_with_encoded_key_range(
+                    prefix_hint.clone(),
+                    (start_bound.as_ref(), end_bound.as_ref()),
+                    wait_epoch,
+                    vnode,
+                    prefetch_options,
+                )
+            },
+            |vnode| {
+                self.iter_vnode_with_encoded_key_range(
+                    prefix_hint.clone(),
+                    (start_bound.as_ref(), end_bound.as_ref()),
+                    wait_epoch,
+                    vnode,
+                    prefetch_options,
+                )
+            },
+            &vnodes,
+            ordered,
+        )
+        .await
+    }
+
+    async fn iter_vnode_with_encoded_key_range<K: CopyFromSlice>(
+        &self,
+        prefix_hint: Option<Bytes>,
+        encoded_key_range: (Bound<&Bytes>, Bound<&Bytes>),
+        wait_epoch: HummockReadEpoch,
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> StorageResult<impl Stream<Item = StorageResult<(K, OwnedRow)>> + Send> {
+        let cache_policy = match &encoded_key_range {
             // To prevent unbounded range scan queries from polluting the block cache, use the
             // low priority fill policy.
             (Unbounded, _) | (_, Unbounded) => CachePolicy::Fill(CacheHint::Low),
             _ => CachePolicy::Fill(CacheHint::Normal),
         };
 
-        let table_key_ranges = {
-            // Vnodes that are set and should be accessed.
-            let vnodes = match vnode_hint {
-                // If `vnode_hint` is set, we can only access this single vnode.
-                Some(vnode) => Either::Left(std::iter::once(vnode)),
-                // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.distribution.vnodes().iter_vnodes()),
-            };
-            vnodes.map(|vnode| prefixed_range_with_vnode(encoded_key_range.clone(), vnode))
-        };
+        let table_key_range = prefixed_range_with_vnode::<&Bytes>(encoded_key_range, vnode);
 
-        // For each key range, construct an iterator.
-        let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| {
+        {
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             let read_committed = wait_epoch.is_read_committed();
-            async move {
+            {
                 let read_options = ReadOptions {
                     prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
@@ -570,27 +687,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     wait_epoch,
                 )
                 .await?
-                .into_stream();
-
-                Ok::<_, StorageError>(iter)
+                .into_stream::<K>();
+                Ok(iter)
             }
-        }))
-        .await?;
-
-        #[auto_enum(futures03::Stream)]
-        let iter = match iterators.len() {
-            0 => unreachable!(),
-            1 => iterators.into_iter().next().unwrap(),
-            // Concat all iterators if not to preserve order.
-            _ if !ordered => {
-                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
-                    .flatten_unordered(1024)
-            }
-            // Merge all iterators if to preserve order.
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
-        };
-
-        Ok(iter)
+        }
     }
 
     // TODO: directly use `prefixed_range`.
@@ -651,10 +751,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
         let start_key = self.serialize_pk_bound(&pk_prefix, range_bounds.start_bound(), true);
         let end_key = self.serialize_pk_bound(&pk_prefix, range_bounds.end_bound(), false);
-
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
             .map(|index| self.pk_indices[index])
@@ -706,7 +805,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     // Construct a stream of (columns, row_count) from a row stream
     #[try_stream(ok = (Vec<ArrayRef>, usize), error = StorageError)]
     async fn convert_row_stream_to_array_vec_stream(
-        iter: impl Stream<Item = StorageResult<KeyedRow<Bytes>>>,
+        iter: impl Stream<Item = StorageResult<OwnedRow>>,
         schema: Schema,
         chunk_size: usize,
     ) {
@@ -772,7 +871,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ))
     }
 
-    /// Construct a stream item `StorageResult<KeyedRow<Bytes>>` for batch executors.
+    /// Construct a stream item `StorageResult<OwnedRow>` for batch executors.
     /// Differs from the streaming one, this iterator will wait for the epoch before iteration
     pub async fn batch_iter_with_pk_bounds(
         &self,
@@ -781,7 +880,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
         self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await
     }
@@ -792,9 +891,84 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         epoch: HummockReadEpoch,
         ordered: bool,
         prefetch_options: PrefetchOptions,
-    ) -> StorageResult<impl Stream<Item = StorageResult<KeyedRow<Bytes>>> + Send> {
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send> {
         self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered, prefetch_options)
             .await
+    }
+
+    pub async fn batch_iter_vnode(
+        &self,
+        epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static> {
+        let start_bound = if let Some(start_pk) = start_pk {
+            let mut bytes = BytesMut::new();
+            self.pk_serializer.serialize(start_pk, &mut bytes);
+            let bytes = bytes.freeze();
+            Included(bytes)
+        } else {
+            Unbounded
+        };
+        Ok(self
+            .iter_vnode_with_encoded_key_range::<()>(
+                None,
+                (start_bound.as_ref(), Unbounded),
+                epoch,
+                vnode,
+                prefetch_options,
+            )
+            .await?
+            .map_ok(|(_, row)| row))
+    }
+
+    async fn batch_iter_log_inner<K: CopyFromSlice>(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        vnode: VirtualNode,
+    ) -> StorageResult<impl Stream<Item = StorageResult<(K, ChangeLogRow)>>> {
+        let start_bound = if let Some(start_pk) = start_pk {
+            let mut bytes = BytesMut::new();
+            self.pk_serializer.serialize(start_pk, &mut bytes);
+            let bytes = bytes.freeze();
+            Included(bytes)
+        } else {
+            Unbounded
+        };
+        let table_key_range =
+            prefixed_range_with_vnode::<&Bytes>((start_bound.as_ref(), Unbounded), vnode);
+        let read_options = ReadLogOptions {
+            table_id: self.table_id,
+        };
+        let iter = StorageTableInnerIterLogInner::<S, SD>::new(
+            &self.store,
+            self.mapping.clone(),
+            self.row_serde.clone(),
+            table_key_range,
+            read_options,
+            start_epoch,
+            end_epoch,
+        )
+        .await?
+        .into_stream::<K>();
+
+        Ok(iter)
+    }
+
+    pub async fn batch_iter_vnode_log(
+        &self,
+        start_epoch: u64,
+        end_epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        vnode: VirtualNode,
+    ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>>> {
+        let stream = self
+            .batch_iter_log_inner::<()>(start_epoch, end_epoch, start_pk, vnode)
+            .await?;
+        Ok(stream.map_ok(|(_, row)| row))
     }
 
     pub async fn batch_iter_log_with_pk_bounds(
@@ -803,57 +977,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         end_epoch: HummockReadEpoch,
         ordered: bool,
     ) -> StorageResult<impl Stream<Item = StorageResult<ChangeLogRow>> + Send + 'static> {
-        let pk_prefix = OwnedRow::default();
-        let start_key = self.serialize_pk_bound(&pk_prefix, Unbounded, true);
-        let end_key = self.serialize_pk_bound(&pk_prefix, Unbounded, false);
-
-        assert!(pk_prefix.len() <= self.pk_indices.len());
-        let table_key_ranges = {
-            // Vnodes that are set and should be accessed.
-            let vnodes = match self.distribution.try_compute_vnode_by_pk_prefix(pk_prefix) {
-                // If `vnode_hint` is set, we can only access this single vnode.
-                Some(vnode) => Either::Left(std::iter::once(vnode)),
-                // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.distribution.vnodes().iter_vnodes()),
-            };
-            vnodes
-                .map(|vnode| prefixed_range_with_vnode((start_key.clone(), end_key.clone()), vnode))
-        };
-
-        let iterators: Vec<_> = try_join_all(table_key_ranges.map(|table_key_range| async move {
-            let read_options = ReadLogOptions {
-                table_id: self.table_id,
-            };
-            let iter = StorageTableInnerIterLogInner::<S, SD>::new(
-                &self.store,
-                self.mapping.clone(),
-                self.row_serde.clone(),
-                table_key_range,
-                read_options,
-                start_epoch,
-                end_epoch,
-            )
-            .await?
-            .into_stream();
-            Ok::<_, StorageError>(iter)
-        }))
-        .await?;
-
-        #[auto_enum(futures03::Stream)]
-        let iter = match iterators.len() {
-            0 => unreachable!(),
-            1 => iterators.into_iter().next().unwrap(),
-            // Concat all iterators if not to preserve order.
-            _ if !ordered => {
-                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
-                    .flatten_unordered(1024)
-            }
-            // Merge all iterators if to preserve order.
-            _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
-        }
-        .map(|row| row.map(|key_row| key_row.into_owned_row()));
-
-        Ok(iter)
+        let vnodes = self.distribution.vnodes().iter_vnodes().collect_vec();
+        build_vnode_stream(
+            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
+            |vnode| self.batch_iter_log_inner(start_epoch, end_epoch, None, vnode),
+            &vnodes,
+            ordered,
+        )
+        .await
     }
 
     /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds.
@@ -954,8 +1085,8 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = KeyedRow<Bytes>, error = StorageError)]
-    async fn into_stream(mut self) {
+    #[try_stream(ok = (K, OwnedRow), error = StorageError)]
+    async fn into_stream<K: CopyFromSlice>(mut self) {
         while let Some((k, v)) = self
             .iter
             .try_next()
@@ -965,7 +1096,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             let (table_key, value, epoch_with_gap) = (k.user_key.table_key, v, k.epoch_with_gap);
             let row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(OwnedRow::new(row));
-            match &self.key_output_indices {
+            let row = match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
                         Some(pk_serializer) => {
@@ -1005,13 +1136,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                             );
                         }
                     }
-                    let row = OwnedRow::new(result_row_vec);
-
-                    // TODO: may optimize the key clone
-                    yield KeyedRow {
-                        vnode_prefixed_key: table_key.copy_into(),
-                        row,
-                    }
+                    OwnedRow::new(result_row_vec)
                 }
                 None => match &self.epoch_idx {
                     Some(epoch_idx) => {
@@ -1034,20 +1159,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
                                 );
                             }
                         }
-                        let row = OwnedRow::new(result_row_vec);
-                        yield KeyedRow {
-                            vnode_prefixed_key: table_key.copy_into(),
-                            row,
-                        }
+                        OwnedRow::new(result_row_vec)
                     }
-                    None => {
-                        yield KeyedRow {
-                            vnode_prefixed_key: table_key.copy_into(),
-                            row: result_row_in_value.into_owned_row(),
-                        }
-                    }
+                    None => result_row_in_value.into_owned_row(),
                 },
-            }
+            };
+            yield (K::copy_from_slice(table_key.as_ref()), row);
         }
     }
 }
@@ -1098,7 +1215,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
     }
 
     /// Yield a row with its primary key.
-    fn into_stream(self) -> impl Stream<Item = StorageResult<KeyedChangeLogRow<Bytes>>> {
+    fn into_stream<K: CopyFromSlice>(self) -> impl Stream<Item = StorageResult<(K, ChangeLogRow)>> {
         self.iter.into_stream(move |(table_key, value)| {
             value
                 .try_map(|value| {
@@ -1109,10 +1226,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterLogInner<S, SD> {
                         .into_owned_row();
                     Ok(row)
                 })
-                .map(|row| KeyedChangeLogRow {
-                    vnode_prefixed_key: table_key.copy_into(),
-                    row,
-                })
+                .map(|row| (K::copy_from_slice(table_key.as_ref()), row))
         })
     }
 }

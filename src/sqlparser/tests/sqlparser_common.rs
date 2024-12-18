@@ -52,7 +52,7 @@ fn parse_insert_values() {
     check_one(
         sql,
         "public.customer",
-        &["id".to_string(), "name".to_string(), "active".to_string()],
+        &["id".to_owned(), "name".to_owned(), "active".to_owned()],
         &rows1,
     );
 
@@ -99,7 +99,7 @@ fn parse_update() {
             selection,
             ..
         } => {
-            assert_eq!(table_name.to_string(), "t".to_string());
+            assert_eq!(table_name.to_string(), "t".to_owned());
             assert_eq!(
                 assignments,
                 vec![
@@ -206,17 +206,17 @@ fn parse_simple_select() {
     assert_eq!(select.distinct, Distinct::All);
     assert_eq!(3, select.projection.len());
     let select = verified_query(sql);
-    assert_eq!(Some("5".to_string()), select.limit);
+    assert_eq!(Some("5".to_owned()), select.limit);
 }
 
 #[test]
 fn parse_limit_is_not_an_alias() {
     // In dialects supporting LIMIT it shouldn't be parsed as a table alias
     let ast = verified_query("SELECT id FROM customer LIMIT 1");
-    assert_eq!(Some("1".to_string()), ast.limit);
+    assert_eq!(Some("1".to_owned()), ast.limit);
 
     let ast = verified_query("SELECT 1 LIMIT 5");
-    assert_eq!(Some("5".to_string()), ast.limit);
+    assert_eq!(Some("5".to_owned()), ast.limit);
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn parse_escaped_single_quote_string_predicate() {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("salary"))),
             op: NotEq,
             right: Box::new(Expr::Value(Value::SingleQuotedString(
-                "Jim's salary".to_string()
+                "Jim's salary".to_owned()
             )))
         }),
         ast.selection,
@@ -653,7 +653,7 @@ fn parse_like() {
             Expr::Like {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: None,
             },
             select.selection.unwrap()
@@ -669,7 +669,7 @@ fn parse_like() {
             Expr::Like {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: Some(EscapeChar::escape('\\')),
             },
             select.selection.unwrap()
@@ -686,7 +686,7 @@ fn parse_like() {
             Expr::IsNull(Box::new(Expr::Like {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: None,
             })),
             select.selection.unwrap()
@@ -708,7 +708,7 @@ fn parse_ilike() {
             Expr::ILike {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: None,
             },
             select.selection.unwrap()
@@ -724,7 +724,7 @@ fn parse_ilike() {
             Expr::ILike {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: Some(EscapeChar::escape('^')),
             },
             select.selection.unwrap()
@@ -741,7 +741,7 @@ fn parse_ilike() {
             Expr::IsNull(Box::new(Expr::ILike {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: None,
             })),
             select.selection.unwrap()
@@ -763,7 +763,7 @@ fn parse_similar_to() {
             Expr::SimilarTo {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: None,
             },
             select.selection.unwrap()
@@ -779,7 +779,7 @@ fn parse_similar_to() {
             Expr::SimilarTo {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: Some(EscapeChar::escape('\\')),
             },
             select.selection.unwrap()
@@ -795,7 +795,7 @@ fn parse_similar_to() {
             Expr::IsNull(Box::new(Expr::SimilarTo {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 negated,
-                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_string()))),
+                pattern: Box::new(Expr::Value(Value::SingleQuotedString("%a".to_owned()))),
                 escape_char: Some(EscapeChar::escape('\\')),
             })),
             select.selection.unwrap()
@@ -817,8 +817,8 @@ fn parse_in_list() {
             Expr::InList {
                 expr: Box::new(Expr::Identifier(Ident::new_unchecked("segment"))),
                 list: vec![
-                    Expr::Value(Value::SingleQuotedString("HIGH".to_string())),
-                    Expr::Value(Value::SingleQuotedString("MED".to_string())),
+                    Expr::Value(Value::SingleQuotedString("HIGH".to_owned())),
+                    Expr::Value(Value::SingleQuotedString("MED".to_owned())),
                 ],
                 negated,
             },
@@ -1068,7 +1068,7 @@ fn parse_select_order_by_limit() {
         ],
         select.order_by
     );
-    assert_eq!(Some("2".to_string()), select.limit);
+    assert_eq!(Some("2".to_owned()), select.limit);
 }
 
 #[test]
@@ -1091,7 +1091,7 @@ fn parse_select_order_by_nulls_order() {
         ],
         select.order_by
     );
-    assert_eq!(Some("2".to_string()), select.limit);
+    assert_eq!(Some("2".to_owned()), select.limit);
 }
 
 #[test]
@@ -1257,7 +1257,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: "YEAR".to_string(),
+            field: "YEAR".to_owned(),
             expr: Box::new(Expr::Identifier(Ident::new_unchecked("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1496,7 +1496,7 @@ fn parse_create_table_as() {
 
     match verified_stmt(sql) {
         Statement::CreateTable { name, query, .. } => {
-            assert_eq!(name.to_string(), "t".to_string());
+            assert_eq!(name.to_string(), "t".to_owned());
             assert_eq!(query, Some(Box::new(verified_query("SELECT * FROM a"))));
         }
         _ => unreachable!(),
@@ -1509,8 +1509,8 @@ fn parse_create_table_as() {
     match verified_stmt(sql) {
         Statement::CreateTable { columns, query, .. } => {
             assert_eq!(columns.len(), 2);
-            assert_eq!(columns[0].to_string(), "a INT".to_string());
-            assert_eq!(columns[1].to_string(), "b INT".to_string());
+            assert_eq!(columns[0].to_string(), "a INT".to_owned());
+            assert_eq!(columns[1].to_string(), "b INT".to_owned());
             assert_eq!(
                 query,
                 Some(Box::new(verified_query("SELECT 1 AS b, 2 AS a")))
@@ -1771,7 +1771,7 @@ fn parse_alter_table_alter_column_type() {
                 op,
                 AlterColumnOperation::SetDataType {
                     data_type: DataType::Text,
-                    using: Some(Expr::Value(Value::SingleQuotedString("text".to_string()))),
+                    using: Some(Expr::Value(Value::SingleQuotedString("text".to_owned()))),
                 }
             );
         }
@@ -2035,7 +2035,7 @@ fn parse_window_functions() {
             filter: Some(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new_unchecked("bar"))),
                 op: BinaryOperator::Gt,
-                right: Box::new(Expr::Value(Value::Number("0".to_string()))),
+                right: Box::new(Expr::Value(Value::Number("0".to_owned()))),
             })),
             over: Some(WindowSpec {
                 partition_by: vec![],
@@ -2113,7 +2113,7 @@ fn parse_aggregate_with_filter() {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
                     op: BinaryOperator::Gt,
-                    right: Box::new(Expr::Value(Value::Number("0".to_string())))
+                    right: Box::new(Expr::Value(Value::Number("0".to_owned())))
                 }))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
@@ -2136,7 +2136,7 @@ fn parse_aggregate_with_within_group() {
             scalar_as_agg: false,
             name: ObjectName(vec![Ident::new_unchecked("percentile_cont")]),
             arg_list: FunctionArgList::args_only(vec![FunctionArg::Unnamed(
-                FunctionArgExpr::Expr(Expr::Value(Value::Number("0.5".to_string())))
+                FunctionArgExpr::Expr(Expr::Value(Value::Number("0.5".to_owned())))
             )]),
             within_group: Some(Box::new(OrderByExpr {
                 expr: Expr::Identifier(Ident::new_unchecked("a")),
@@ -2146,7 +2146,7 @@ fn parse_aggregate_with_within_group() {
             filter: Some(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
                 op: BinaryOperator::Gt,
-                right: Box::new(Expr::Value(Value::Number("0".to_string())))
+                right: Box::new(Expr::Value(Value::Number("0".to_owned())))
             })),
             over: None,
         }),
@@ -2177,21 +2177,21 @@ fn parse_literal_string() {
     let select = verified_only_select(sql);
     assert_eq!(4, select.projection.len());
     assert_eq!(
-        &Expr::Value(Value::SingleQuotedString("one".to_string())),
+        &Expr::Value(Value::SingleQuotedString("one".to_owned())),
         expr_from_projection(&select.projection[0])
     );
     assert_eq!(
-        &Expr::Value(Value::NationalStringLiteral("national string".to_string())),
+        &Expr::Value(Value::NationalStringLiteral("national string".to_owned())),
         expr_from_projection(&select.projection[1])
     );
     assert_eq!(
-        &Expr::Value(Value::HexStringLiteral("deadBEEF".to_string())),
+        &Expr::Value(Value::HexStringLiteral("deadBEEF".to_owned())),
         expr_from_projection(&select.projection[2])
     );
     assert_eq!(
         &Expr::Value(Value::CstyleEscapedString(CstyleEscapedString {
-            value: "c style escape string \x3f".to_string(),
-            raw: r"c style escape string \x3f".to_string(),
+            value: "c style escape string \x3f".to_owned(),
+            raw: r"c style escape string \x3f".to_owned(),
         })),
         expr_from_projection(&select.projection[3])
     );
@@ -2457,12 +2457,12 @@ fn parse_searched_case_expr() {
                 }
             ],
             results: vec![
-                Expr::Value(Value::SingleQuotedString("null".to_string())),
-                Expr::Value(Value::SingleQuotedString("=0".to_string())),
-                Expr::Value(Value::SingleQuotedString(">=0".to_string()))
+                Expr::Value(Value::SingleQuotedString("null".to_owned())),
+                Expr::Value(Value::SingleQuotedString("=0".to_owned())),
+                Expr::Value(Value::SingleQuotedString(">=0".to_owned()))
             ],
             else_result: Some(Box::new(Expr::Value(Value::SingleQuotedString(
-                "<0".to_string()
+                "<0".to_owned()
             ))))
         },
         expr_from_projection(only(&select.projection)),
@@ -2479,9 +2479,9 @@ fn parse_simple_case_expr() {
         &Case {
             operand: Some(Box::new(Identifier(Ident::new_unchecked("foo")))),
             conditions: vec![Expr::Value(number("1"))],
-            results: vec![Expr::Value(Value::SingleQuotedString("Y".to_string())),],
+            results: vec![Expr::Value(Value::SingleQuotedString("Y".to_owned())),],
             else_result: Some(Box::new(Expr::Value(Value::SingleQuotedString(
-                "N".to_string()
+                "N".to_owned()
             ))))
         },
         expr_from_projection(only(&select.projection)),
@@ -3361,7 +3361,7 @@ fn parse_create_table_on_conflict_with_version_column() {
         } => {
             assert_eq!("t", name.to_string());
             assert_eq!(on_conflict, Some(OnConflict::UpdateFull));
-            assert_eq!(with_version_column, Some("v2".to_string()));
+            assert_eq!(with_version_column, Some("v2".to_owned()));
         }
         _ => unreachable!(),
     }
@@ -3509,7 +3509,7 @@ fn parse_invalid_subquery_without_parens() {
 
 #[test]
 fn parse_offset() {
-    let expect = Some("2".to_string());
+    let expect = Some("2".to_owned());
     let ast = verified_query("SELECT foo FROM bar OFFSET 2");
     assert_eq!(ast.offset, expect);
     let ast = verified_query("SELECT foo FROM bar WHERE foo = 4 OFFSET 2");
@@ -3530,11 +3530,11 @@ fn parse_offset() {
         _ => panic!("Test broke"),
     }
     let ast = query("SELECT 'foo' OFFSET 0 ROWS", "SELECT 'foo' OFFSET 0");
-    assert_eq!(ast.offset, Some("0".to_string()));
+    assert_eq!(ast.offset, Some("0".to_owned()));
     let ast = query("SELECT 'foo' OFFSET 1 ROW", "SELECT 'foo' OFFSET 1");
-    assert_eq!(ast.offset, Some("1".to_string()));
+    assert_eq!(ast.offset, Some("1".to_owned()));
     let ast = verified_query("SELECT 'foo' OFFSET 1");
-    assert_eq!(ast.offset, Some("1".to_string()));
+    assert_eq!(ast.offset, Some("1".to_owned()));
 }
 
 #[test]
@@ -3542,7 +3542,7 @@ fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
 
-        quantity: Some("2".to_string()),
+        quantity: Some("2".to_owned()),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3567,13 +3567,13 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            quantity: Some("2".to_string()),
+            quantity: Some("2".to_owned()),
         })
     );
     let ast = verified_query(
         "SELECT foo FROM bar WHERE foo = 4 ORDER BY baz OFFSET 2 FETCH FIRST 2 ROWS ONLY",
     );
-    assert_eq!(ast.offset, Some("2".to_string()));
+    assert_eq!(ast.offset, Some("2".to_owned()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     let ast = verified_query(
         "SELECT foo FROM (SELECT * FROM bar FETCH FIRST 2 ROWS ONLY) FETCH FIRST 2 ROWS ONLY",
@@ -3589,12 +3589,12 @@ fn parse_fetch() {
         _ => panic!("Test broke"),
     }
     let ast = verified_query("SELECT foo FROM (SELECT * FROM bar OFFSET 2 FETCH FIRST 2 ROWS ONLY) OFFSET 2 FETCH FIRST 2 ROWS ONLY");
-    assert_eq!(ast.offset, Some("2".to_string()));
+    assert_eq!(ast.offset, Some("2".to_owned()));
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
     match ast.body {
         SetExpr::Select(s) => match only(s.from).relation {
             TableFactor::Derived { subquery, .. } => {
-                assert_eq!(subquery.offset, Some("2".to_string()));
+                assert_eq!(subquery.offset, Some("2".to_owned()));
                 assert_eq!(subquery.fetch, fetch_first_two_rows_only);
             }
             _ => panic!("Test broke"),

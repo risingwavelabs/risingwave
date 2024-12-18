@@ -452,7 +452,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
-            rw_version: RW_VERSION.to_string(),
+            rw_version: RW_VERSION.to_owned(),
             total_memory_bytes: system_memory_available_bytes() as _,
             total_cpu_cores: total_cpu_available() as _,
         }),
@@ -677,7 +677,7 @@ impl ClusterControllerInner {
                         "node_label is not set for worker {}, fallback to `default`",
                         worker.worker_id
                     );
-                    DEFAULT_COMPUTE_NODE_LABEL.to_string()
+                    DEFAULT_COMPUTE_NODE_LABEL.to_owned()
                 })));
 
                 WorkerProperty::update(property).exec(&txn).await?;
@@ -955,7 +955,7 @@ mod tests {
     fn mock_worker_hosts_for_test(count: usize) -> Vec<HostAddress> {
         (0..count)
             .map(|i| HostAddress {
-                host: "localhost".to_string(),
+                host: "localhost".to_owned(),
                 port: 5000 + i as i32,
             })
             .collect_vec()
@@ -1056,7 +1056,7 @@ mod tests {
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {
-            host: "localhost".to_string(),
+            host: "localhost".to_owned(),
             port: 5001,
         };
         let mut property = AddNodeProperty {

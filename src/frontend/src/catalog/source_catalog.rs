@@ -105,7 +105,7 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let options_with_secrets =
+        let connector_props_with_secrets =
             WithOptionsSecResolved::new(prost.with_properties.clone(), prost.secret_refs.clone());
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
@@ -131,7 +131,7 @@ impl From<&PbSource> for SourceCatalog {
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,
-            with_properties: options_with_secrets,
+            with_properties: connector_props_with_secrets,
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),

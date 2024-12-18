@@ -52,6 +52,7 @@ pub mod error;
 
 use error::Result;
 
+mod channel;
 mod compactor_client;
 mod compute_client;
 mod connector_client;
@@ -60,7 +61,6 @@ mod hummock_meta_client;
 mod meta_client;
 mod sink_coordinate_client;
 mod stream_client;
-mod tracing;
 
 pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};

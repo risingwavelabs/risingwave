@@ -25,7 +25,7 @@ use tiberius::xml::XmlData;
 use tiberius::Row;
 use uuid::Uuid;
 
-use crate::parser::util::log_error;
+use crate::parser::utils::log_error;
 
 static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
 

@@ -307,12 +307,12 @@ impl ToStream for LogicalTopN {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit_attr().limit() == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "OFFSET without LIMIT in streaming mode".to_string(),
+                "OFFSET without LIMIT in streaming mode".to_owned(),
             )));
         }
         if self.limit_attr().limit() == 0 {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "LIMIT 0 in streaming mode".to_string(),
+                "LIMIT 0 in streaming mode".to_owned(),
             )));
         }
         Ok(if !self.group_key().is_empty() {

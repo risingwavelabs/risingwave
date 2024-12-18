@@ -499,7 +499,7 @@ impl CatalogController {
             ensure_schema_empty(schema_id, &txn).await?;
         } else {
             return Err(MetaError::permission_denied(
-                "drop schema cascade is not supported yet".to_string(),
+                "drop schema cascade is not supported yet".to_owned(),
             ));
         }
 
@@ -1008,7 +1008,7 @@ impl CatalogController {
                     id: table_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1032,7 +1032,7 @@ impl CatalogController {
                     id: source_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1056,7 +1056,7 @@ impl CatalogController {
                     id: sink_id as _,
                     name,
                     definition,
-                    error: "clear during recovery".to_string(),
+                    error: "clear during recovery".to_owned(),
                 };
                 event_logs.push(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
                     event,
@@ -1565,7 +1565,7 @@ impl CatalogController {
                 {
                     pb_connection.info.as_ref().and_then(|info| match info {
                         ConnectionInfo::ConnectionParams(params) => {
-                            Some(params.connection_type().as_str_name().to_string())
+                            Some(params.connection_type().as_str_name().to_owned())
                         }
                         _ => None,
                     })
@@ -2521,7 +2521,7 @@ impl CatalogController {
 
         let active_model = database::ActiveModel {
             database_id: Set(database_id),
-            name: Set(name.to_string()),
+            name: Set(name.to_owned()),
         };
         let database = active_model.update(&txn).await?;
 
@@ -2557,7 +2557,7 @@ impl CatalogController {
 
         let active_model = schema::ActiveModel {
             schema_id: Set(schema_id),
-            name: Set(name.to_string()),
+            name: Set(name.to_owned()),
         };
         let schema = active_model.update(&txn).await?;
 
@@ -2767,7 +2767,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
         if original_version + 1 != pb_source.version as i64 {
             return Err(MetaError::permission_denied(
-                "source version is stale".to_string(),
+                "source version is stale".to_owned(),
             ));
         }
 
@@ -3153,10 +3153,7 @@ impl CatalogController {
             .map(|(id, name, table_type)| {
                 (
                     id,
-                    (
-                        name,
-                        PbTableType::from(table_type).as_str_name().to_string(),
-                    ),
+                    (name, PbTableType::from(table_type).as_str_name().to_owned()),
                 )
             })
             .collect())
@@ -3642,7 +3639,7 @@ mod tests {
     async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
-            name: "db1".to_string(),
+            name: "db1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
@@ -3675,7 +3672,7 @@ mod tests {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
             database_id: TEST_DATABASE_ID as _,
-            name: "schema1".to_string(),
+            name: "schema1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         };
@@ -3709,9 +3706,9 @@ mod tests {
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "view".to_string(),
+            name: "view".to_owned(),
             owner: TEST_OWNER_ID as _,
-            sql: "CREATE VIEW view AS SELECT 1".to_string(),
+            sql: "CREATE VIEW view AS SELECT 1".to_owned(),
             ..Default::default()
         };
         mgr.create_view(pb_view.clone()).await?;
@@ -3739,11 +3736,11 @@ mod tests {
         let pb_function = PbFunction {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "test_function".to_string(),
+            name: "test_function".to_owned(),
             owner: TEST_OWNER_ID as _,
             arg_types,
             return_type: Some(test_data_type.clone()),
-            language: "python".to_string(),
+            language: "python".to_owned(),
             kind: Some(risingwave_pb::catalog::function::Kind::Scalar(
                 Default::default(),
             )),
@@ -3782,7 +3779,7 @@ mod tests {
         let pb_source = PbSource {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "s1".to_string(),
+            name: "s1".to_owned(),
             owner: TEST_OWNER_ID as _,
             definition: r#"CREATE SOURCE s1 (v1 int) with (
   connector = 'kafka',
@@ -3790,7 +3787,7 @@ mod tests {
   properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON"#
-                .to_string(),
+                .to_owned(),
             info: Some(StreamSourceInfo {
                 ..Default::default()
             }),
@@ -3809,9 +3806,9 @@ mod tests {
         let pb_view = PbView {
             schema_id: TEST_SCHEMA_ID as _,
             database_id: TEST_DATABASE_ID as _,
-            name: "view_1".to_string(),
+            name: "view_1".to_owned(),
             owner: TEST_OWNER_ID as _,
-            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_string(),
+            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
             dependent_relations: vec![source_id as _],
             ..Default::default()
         };

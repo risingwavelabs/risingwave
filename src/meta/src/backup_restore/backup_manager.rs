@@ -87,7 +87,7 @@ impl BackupManager {
         store_url: &str,
         store_dir: &str,
     ) -> MetaResult<Arc<Self>> {
-        let store_config = (store_url.to_string(), store_dir.to_string());
+        let store_config = (store_url.to_owned(), store_dir.to_owned());
         let store = create_snapshot_store(
             &store_config,
             metrics.object_store_metric.clone(),
@@ -117,8 +117,8 @@ impl BackupManager {
                     Some(notification) => {
                         if let LocalNotification::SystemParamsChange(p) = notification {
                             let new_config = (
-                                p.backup_storage_url().to_string(),
-                                p.backup_storage_directory().to_string(),
+                                p.backup_storage_url().to_owned(),
+                                p.backup_storage_directory().to_owned(),
                             );
                             this.handle_new_config(new_config).await;
                         }
