@@ -275,17 +275,17 @@ mod tests {
     #[tokio::test]
     async fn test_postgres_schema() {
         let config = ExternalTableConfig {
-            connector: "postgres-cdc".to_string(),
-            host: "localhost".to_string(),
-            port: "8432".to_string(),
-            username: "myuser".to_string(),
-            password: "123456".to_string(),
-            database: "mydb".to_string(),
-            schema: "public".to_string(),
-            table: "mytest".to_string(),
+            connector: "postgres-cdc".to_owned(),
+            host: "localhost".to_owned(),
+            port: "8432".to_owned(),
+            username: "myuser".to_owned(),
+            password: "123456".to_owned(),
+            database: "mydb".to_owned(),
+            schema: "public".to_owned(),
+            table: "mytest".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
-            encrypt: "false".to_string(),
+            encrypt: "false".to_owned(),
         };
 
         let table = PostgresExternalTable::connect(
@@ -320,15 +320,15 @@ mod tests {
 
     #[test]
     fn test_filter_expression() {
-        let cols = vec!["v1".to_string()];
+        let cols = vec!["v1".to_owned()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"v1\") > ($1)");
 
-        let cols = vec!["v1".to_string(), "v2".to_string()];
+        let cols = vec!["v1".to_owned(), "v2".to_owned()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"v1\", \"v2\") > ($1, $2)");
 
-        let cols = vec!["v1".to_string(), "v2".to_string(), "v3".to_string()];
+        let cols = vec!["v1".to_owned(), "v2".to_owned(), "v3".to_owned()];
         let expr = PostgresExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"v1\", \"v2\", \"v3\") > ($1, $2, $3)");
     }
@@ -369,11 +369,11 @@ mod tests {
         let start_pk = OwnedRow::new(vec![Some(ScalarImpl::from(3)), Some(ScalarImpl::from("c"))]);
         let stream = reader.snapshot_read(
             SchemaTableName {
-                schema_name: "public".to_string(),
-                table_name: "t1".to_string(),
+                schema_name: "public".to_owned(),
+                table_name: "t1".to_owned(),
             },
             Some(start_pk),
-            vec!["v1".to_string(), "v2".to_string()],
+            vec!["v1".to_owned(), "v2".to_owned()],
             1000,
         );
 

@@ -26,7 +26,7 @@ use thiserror_ext::AsReport;
 use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extract_timestamp_from_meta,
+    extract_subject_from_meta, extract_timestamp_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceMeta};
 
@@ -216,7 +216,7 @@ impl SourceStreamChunkRowWriter<'_> {
                                 )?))
                             } else {
                                 Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_string(),
+                                    message: "CDC metadata not found in the message".to_owned(),
                                 })
                             }
                         }
@@ -231,6 +231,12 @@ impl SourceStreamChunkRowWriter<'_> {
                     // collection name for `mongodb-cdc` should be parsed from the message payload
                     parse_field(desc)
                 }
+                (_, &Some(AdditionalColumnType::Subject(_))) => Ok(A::output_for(
+                    self.row_meta
+                        .as_ref()
+                        .and_then(|ele| extract_subject_from_meta(ele.meta))
+                        .unwrap_or(None),
+                )),
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
                     // the meta info does not involve spec connector
                     Ok(A::output_for(

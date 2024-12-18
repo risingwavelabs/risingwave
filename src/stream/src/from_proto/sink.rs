@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
@@ -28,6 +29,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
+use url::Url;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -59,7 +61,7 @@ fn telemetry_sink_build(
         PbTelemetryEventStage::CreateStreamJob,
         "sink",
         sink_id.sink_id() as i64,
-        Some(connector_name.to_string()),
+        Some(connector_name.to_owned()),
         Some(PbTelemetryDatabaseObject::Sink),
         attr,
     )
@@ -158,13 +160,40 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(ColumnCatalog::from)
             .collect_vec();
 
+        let mut properties_with_secret =
+            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
+
+        if params.env.config().developer.switch_jdbc_pg_to_native
+            && let Some(connector_type) = properties_with_secret.get(CONNECTOR_TYPE_KEY)
+            && connector_type == "jdbc"
+            && let Some(url) = properties_with_secret.get("jdbc.url")
+            && url.starts_with("jdbc:postgresql:")
+        {
+            let jdbc_url = parse_jdbc_url(url)
+                .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id.sink_id)))?;
+            properties_with_secret.insert("host".to_owned(), jdbc_url.host);
+            properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
+            properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
+            properties_with_secret.insert("user".to_owned(), jdbc_url.username);
+            properties_with_secret.insert("password".to_owned(), jdbc_url.password);
+            if let Some(table_name) = properties_with_secret.get("table.name") {
+                properties_with_secret.insert("table".to_owned(), table_name.clone());
+            }
+            if let Some(schema_name) = properties_with_secret.get("schema.name") {
+                properties_with_secret.insert("schema".to_owned(), schema_name.clone());
+            }
+            // TODO(kwannoel): Do we need to handle jdbc.query.timeout?
+        }
+
         let connector = {
-            let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
-                StreamExecutorError::from((
-                    SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
-                    sink_id.sink_id,
-                ))
-            })?;
+            let sink_type = properties_with_secret
+                .get(CONNECTOR_TYPE_KEY)
+                .ok_or_else(|| {
+                    StreamExecutorError::from((
+                        SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
+                        sink_id.sink_id,
+                    ))
+                })?;
 
             match_sink_name_str!(
                 sink_type.to_lowercase().as_str(),
@@ -185,7 +214,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     .try_into()
                     .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
             ),
-            None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
+            None => match properties_with_secret.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
                 Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
                     .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
@@ -193,9 +222,6 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 None => None,
             },
         };
-
-        let properties_with_secret =
-            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
         let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
             .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
@@ -225,7 +251,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             actor_id: params.actor_context.id,
             sink_id,
             sink_name,
-            connector: connector.to_string(),
+            connector: connector.to_owned(),
         };
 
         let log_store_identity = format!(
@@ -294,5 +320,71 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         };
 
         Ok((params.info, exec).into())
+    }
+}
+
+struct JdbcUrl {
+    host: String,
+    port: u16,
+    db_name: String,
+    username: String,
+    password: String,
+}
+
+fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
+    if !url.starts_with("jdbc:postgresql") {
+        bail!("invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://...")
+    }
+
+    // trim the "jdbc:" prefix to make it a valid url
+    let url = url.replace("jdbc:", "");
+
+    // parse the url
+    let url = Url::parse(&url).map_err(|e| anyhow!(e).context("failed to parse jdbc url"))?;
+
+    let scheme = url.scheme();
+    assert_eq!("postgresql", scheme, "jdbc scheme should be postgresql");
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("missing host in jdbc url"))?;
+    let port = url
+        .port()
+        .ok_or_else(|| anyhow!("missing port in jdbc url"))?;
+    let db_name = url.path();
+    let mut username = None;
+    let mut password = None;
+    for (key, value) in url.query_pairs() {
+        if key == "user" {
+            username = Some(value.to_string());
+        }
+        if key == "password" {
+            password = Some(value.to_string());
+        }
+    }
+    let username = username.ok_or_else(|| anyhow!("missing username in jdbc url"))?;
+    let password = password.ok_or_else(|| anyhow!("missing password in jdbc url"))?;
+
+    Ok(JdbcUrl {
+        host: host.to_owned(),
+        port,
+        db_name: db_name.to_owned(),
+        username: username.to_owned(),
+        password: password.to_owned(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_jdbc_url() {
+        let url = "jdbc:postgresql://localhost:5432/test?user=postgres&password=postgres";
+        let jdbc_url = parse_jdbc_url(url).unwrap();
+        assert_eq!(jdbc_url.host, "localhost");
+        assert_eq!(jdbc_url.port, 5432);
+        assert_eq!(jdbc_url.db_name, "/test");
+        assert_eq!(jdbc_url.username, "postgres");
+        assert_eq!(jdbc_url.password, "postgres");
     }
 }

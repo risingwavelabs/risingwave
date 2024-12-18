@@ -17,6 +17,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::parser::debezium_cdc_source_schema;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
@@ -25,7 +26,6 @@ use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
-use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -188,7 +188,7 @@ impl StreamCdcTableScan {
             ],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "StreamCdcFilter".to_string(),
+            identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
@@ -203,7 +203,7 @@ impl StreamCdcTableScan {
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "Exchange".to_string(),
+            identity: "Exchange".to_owned(),
             fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(ExchangeNode {
                 strategy: Some(DispatchStrategy {

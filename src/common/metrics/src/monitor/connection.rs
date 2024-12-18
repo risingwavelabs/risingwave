@@ -276,7 +276,7 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let ret = self.inner.poll_ready(cx);
         if let Poll::Ready(Err(_)) = &ret {
-            self.monitor.on_err("<poll_ready>".to_string());
+            self.monitor.on_err("<poll_ready>".to_owned());
         }
         ret
     }
@@ -316,7 +316,7 @@ where
                     let remote_addr = conn.connect_info().remote_addr();
                     let endpoint = remote_addr
                         .map(|remote_addr| format!("{}", remote_addr.ip()))
-                        .unwrap_or("unknown".to_string());
+                        .unwrap_or("unknown".to_owned());
                     MonitoredConnection::new(conn, monitor.new_connection_monitor(endpoint))
                 })
             })
@@ -350,7 +350,7 @@ mod compat {
         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             let ret = self.inner.poll_ready(cx);
             if let Poll::Ready(Err(_)) = &ret {
-                self.monitor.on_err("<poll_ready>".to_string());
+                self.monitor.on_err("<poll_ready>".to_owned());
             }
             ret
         }

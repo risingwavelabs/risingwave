@@ -62,7 +62,7 @@ pub struct ObjectStoreMetaSnapshotStorage {
 impl ObjectStoreMetaSnapshotStorage {
     pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
         let instance = Self {
-            path: path.to_string(),
+            path: path.to_owned(),
             store,
             manifest: Default::default(),
         };

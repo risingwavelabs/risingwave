@@ -1091,7 +1091,7 @@ mod tests {
             for k in keys {
                 lru = (*lru).next;
                 assert!(
-                    (*lru).is_same_key(&k.to_string()),
+                    (*lru).is_same_key(&k.to_owned()),
                     "compare failed: {} vs {}, get value: {:?}",
                     (*lru).get_key(),
                     k,
@@ -1107,10 +1107,10 @@ mod tests {
 
     fn lookup(cache: &mut LruCacheShard<String, String>, key: &str) -> bool {
         unsafe {
-            let h = cache.lookup(0, &key.to_string());
+            let h = cache.lookup(0, &key.to_owned());
             let exist = !h.is_null();
             if exist {
-                assert!((*h).is_same_key(&key.to_string()));
+                assert!((*h).is_same_key(&key.to_owned()));
                 cache.release(h);
             }
             exist
@@ -1126,10 +1126,10 @@ mod tests {
         let mut free_list = vec![];
         unsafe {
             let handle = cache.insert(
-                key.to_string(),
+                key.to_owned(),
                 0,
                 value.len(),
-                value.to_string(),
+                value.to_owned(),
                 priority,
                 &mut free_list,
             );
@@ -1160,7 +1160,7 @@ mod tests {
         assert!(lookup(&mut cache, "z"));
         validate_lru_list(&mut cache, vec!["d", "x", "y", "e", "z"]);
         unsafe {
-            let h = cache.erase(0, &"x".to_string());
+            let h = cache.erase(0, &"x".to_owned());
             assert!(h.is_some());
             validate_lru_list(&mut cache, vec!["d", "y", "e", "z"]);
         }
@@ -1198,22 +1198,22 @@ mod tests {
         let mut free_list = vec![];
         validate_lru_list(&mut cache, vec!["k1", "k2"]);
         unsafe {
-            let h1 = cache.lookup(0, &"k1".to_string());
+            let h1 = cache.lookup(0, &"k1".to_owned());
             assert!(!h1.is_null());
-            let h2 = cache.lookup(0, &"k2".to_string());
+            let h2 = cache.lookup(0, &"k2".to_owned());
             assert!(!h2.is_null());
 
             let h3 = cache.insert(
-                "k3".to_string(),
+                "k3".to_owned(),
                 0,
                 2,
-                "bb".to_string(),
+                "bb".to_owned(),
                 CachePriority::High,
                 &mut free_list,
             );
             assert_eq!(cache.usage.load(Ordering::Relaxed), 6);
             assert!(!h3.is_null());
-            let h4 = cache.lookup(0, &"k1".to_string());
+            let h4 = cache.lookup(0, &"k1".to_owned());
             assert!(!h4.is_null());
 
             cache.release(h1);
@@ -1234,37 +1234,37 @@ mod tests {
             let mut to_delete = vec![];
             let mut cache = create_cache(5);
             let insert_handle = cache.insert(
-                "key".to_string(),
+                "key".to_owned(),
                 0,
                 1,
-                "old_value".to_string(),
+                "old_value".to_owned(),
                 CachePriority::High,
                 &mut to_delete,
             );
-            let old_entry = cache.lookup(0, &"key".to_string());
+            let old_entry = cache.lookup(0, &"key".to_owned());
             assert!(!old_entry.is_null());
-            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_owned());
             assert_eq!((*old_entry).refs, 2);
             cache.release(insert_handle);
             assert_eq!((*old_entry).refs, 1);
             let insert_handle = cache.insert(
-                "key".to_string(),
+                "key".to_owned(),
                 0,
                 1,
-                "new_value".to_string(),
+                "new_value".to_owned(),
                 CachePriority::Low,
                 &mut to_delete,
             );
             assert!(!(*old_entry).is_in_cache());
-            let new_entry = cache.lookup(0, &"key".to_string());
+            let new_entry = cache.lookup(0, &"key".to_owned());
             assert!(!new_entry.is_null());
-            assert_eq!((*new_entry).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry).get_value(), &"new_value".to_owned());
             assert_eq!((*new_entry).refs, 2);
             cache.release(insert_handle);
             assert_eq!((*new_entry).refs, 1);
 
             assert!(!old_entry.is_null());
-            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_owned());
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(new_entry);
@@ -1274,7 +1274,7 @@ mod tests {
 
             // assert old value unchanged.
             assert!(!old_entry.is_null());
-            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_owned());
             assert_eq!((*old_entry).refs, 1);
 
             cache.release(old_entry);
@@ -1295,31 +1295,31 @@ mod tests {
             // The cache can only hold one handle
             let mut cache = create_cache(1);
             let insert_handle = cache.insert(
-                "key".to_string(),
+                "key".to_owned(),
                 0,
                 1,
-                "old_value".to_string(),
+                "old_value".to_owned(),
                 CachePriority::High,
                 &mut to_delete,
             );
             cache.release(insert_handle);
-            let old_entry = cache.lookup(0, &"key".to_string());
+            let old_entry = cache.lookup(0, &"key".to_owned());
             assert!(!old_entry.is_null());
-            assert_eq!((*old_entry).get_value(), &"old_value".to_string());
+            assert_eq!((*old_entry).get_value(), &"old_value".to_owned());
             assert_eq!((*old_entry).refs, 1);
 
             let insert_handle = cache.insert(
-                "key".to_string(),
+                "key".to_owned(),
                 0,
                 1,
-                "new_value".to_string(),
+                "new_value".to_owned(),
                 CachePriority::High,
                 &mut to_delete,
             );
             assert!(!(*old_entry).is_in_cache());
-            let new_entry = cache.lookup(0, &"key".to_string());
+            let new_entry = cache.lookup(0, &"key".to_owned());
             assert!(!new_entry.is_null());
-            assert_eq!((*new_entry).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry).get_value(), &"new_value".to_owned());
             assert_eq!((*new_entry).refs, 2);
             cache.release(insert_handle);
             assert_eq!((*new_entry).refs, 1);
@@ -1333,9 +1333,9 @@ mod tests {
             assert_eq!(1, cache.usage.load(Relaxed));
             assert_eq!(0, cache.lru_usage.load(Relaxed));
 
-            let new_entry_again = cache.lookup(0, &"key".to_string());
+            let new_entry_again = cache.lookup(0, &"key".to_owned());
             assert!(!new_entry_again.is_null());
-            assert_eq!((*new_entry_again).get_value(), &"new_value".to_string());
+            assert_eq!((*new_entry_again).get_value(), &"new_value".to_owned());
             assert_eq!((*new_entry_again).refs, 2);
 
             cache.release(new_entry);
@@ -1355,21 +1355,21 @@ mod tests {
             assert!(lookup(&mut shard, "a"));
         }
         assert!(matches!(
-            cache.lookup_for_request(0, "a".to_string()),
+            cache.lookup_for_request(0, "a".to_owned()),
             LookupResult::Cached(_)
         ));
         assert!(matches!(
-            cache.lookup_for_request(0, "b".to_string()),
+            cache.lookup_for_request(0, "b".to_owned()),
             LookupResult::Miss
         ));
-        let ret2 = cache.lookup_for_request(0, "b".to_string());
+        let ret2 = cache.lookup_for_request(0, "b".to_owned());
         match ret2 {
             LookupResult::WaitPendingRequest(mut recv) => {
                 assert!(matches!(recv.try_recv(), Err(TryRecvError::Empty)));
-                cache.insert("b".to_string(), 0, 1, "v2".to_string(), CachePriority::Low);
+                cache.insert("b".to_owned(), 0, 1, "v2".to_owned(), CachePriority::Low);
                 recv.try_recv().unwrap();
                 assert!(
-                    matches!(cache.lookup_for_request(0, "b".to_string()), LookupResult::Cached(v) if v.eq("v2"))
+                    matches!(cache.lookup_for_request(0, "b".to_owned()), LookupResult::Cached(v) if v.eq("v2"))
                 );
             }
             _ => panic!(),
@@ -1396,59 +1396,41 @@ mod tests {
         let cache = Arc::new(LruCache::with_event_listener(1, 2, 0, listener.clone()));
 
         // full-fill cache
-        let h = cache.insert(
-            "k1".to_string(),
-            0,
-            1,
-            "v1".to_string(),
-            CachePriority::High,
-        );
+        let h = cache.insert("k1".to_owned(), 0, 1, "v1".to_owned(), CachePriority::High);
         drop(h);
-        let h = cache.insert(
-            "k2".to_string(),
-            0,
-            1,
-            "v2".to_string(),
-            CachePriority::High,
-        );
+        let h = cache.insert("k2".to_owned(), 0, 1, "v2".to_owned(), CachePriority::High);
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().is_empty());
 
         // test evict
-        let h = cache.insert(
-            "k3".to_string(),
-            0,
-            1,
-            "v3".to_string(),
-            CachePriority::High,
-        );
+        let h = cache.insert("k3".to_owned(), 0, 1, "v3".to_owned(), CachePriority::High);
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k1").is_some());
 
         // test erase
-        cache.erase(0, &"k2".to_string());
+        cache.erase(0, &"k2".to_owned());
         assert_eq!(cache.get_memory_usage(), 1);
         assert!(listener.released.lock().remove("k2").is_some());
 
         // test refill
-        let h = cache.insert("k4".to_string(), 0, 1, "v4".to_string(), CachePriority::Low);
+        let h = cache.insert("k4".to_owned(), 0, 1, "v4".to_owned(), CachePriority::Low);
         drop(h);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().is_empty());
 
         // test release after full
         // 1. full-fill cache but not release
-        let h1 = cache.insert("k5".to_string(), 0, 1, "v5".to_string(), CachePriority::Low);
+        let h1 = cache.insert("k5".to_owned(), 0, 1, "v5".to_owned(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k3").is_some());
-        let h2 = cache.insert("k6".to_string(), 0, 1, "v6".to_string(), CachePriority::Low);
+        let h2 = cache.insert("k6".to_owned(), 0, 1, "v6".to_owned(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 2);
         assert!(listener.released.lock().remove("k4").is_some());
 
         // 2. insert one more entry after cache is full, cache will be oversized
-        let h3 = cache.insert("k7".to_string(), 0, 1, "v7".to_string(), CachePriority::Low);
+        let h3 = cache.insert("k7".to_owned(), 0, 1, "v7".to_owned(), CachePriority::Low);
         assert_eq!(cache.get_memory_usage(), 3);
         assert!(listener.released.lock().is_empty());
 

@@ -44,7 +44,7 @@ pub fn check_schema_create_privilege(
         )
     {
         return Err(PermissionDenied(
-            "Require new owner to have create privilege on the object.".to_string(),
+            "Require new owner to have create privilege on the object.".to_owned(),
         )
         .into());
     }

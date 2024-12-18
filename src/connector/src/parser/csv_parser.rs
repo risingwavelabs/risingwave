@@ -69,7 +69,7 @@ impl CsvParser {
             .next()
             .transpose()?;
         Ok(record
-            .map(|record| record.iter().map(|field| field.to_string()).collect())
+            .map(|record| record.iter().map(|field| field.to_owned()).collect())
             .unwrap_or_default())
     }
 
@@ -390,59 +390,59 @@ mod tests {
     #[test]
     fn test_parse_boolean() {
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "1".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "1".to_owned()).unwrap(),
             Some(true.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "t".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "t".to_owned()).unwrap(),
             Some(true.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "T".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "T".to_owned()).unwrap(),
             Some(true.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "true".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "true".to_owned()).unwrap(),
             Some(true.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "TRUE".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "TRUE".to_owned()).unwrap(),
             Some(true.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "True".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "True".to_owned()).unwrap(),
             Some(true.into())
         );
 
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "0".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "0".to_owned()).unwrap(),
             Some(false.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "f".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "f".to_owned()).unwrap(),
             Some(false.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "F".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "F".to_owned()).unwrap(),
             Some(false.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "false".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "false".to_owned()).unwrap(),
             Some(false.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "FALSE".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "FALSE".to_owned()).unwrap(),
             Some(false.into())
         );
         assert_eq!(
-            CsvParser::parse_string(&DataType::Boolean, "False".to_string()).unwrap(),
+            CsvParser::parse_string(&DataType::Boolean, "False".to_owned()).unwrap(),
             Some(false.into())
         );
 
-        assert!(CsvParser::parse_string(&DataType::Boolean, "2".to_string()).is_err());
-        assert!(CsvParser::parse_string(&DataType::Boolean, "t1".to_string()).is_err());
-        assert!(CsvParser::parse_string(&DataType::Boolean, "f1".to_string()).is_err());
-        assert!(CsvParser::parse_string(&DataType::Boolean, "false1".to_string()).is_err());
-        assert!(CsvParser::parse_string(&DataType::Boolean, "TRUE1".to_string()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "2".to_owned()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "t1".to_owned()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "f1".to_owned()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "false1".to_owned()).is_err());
+        assert!(CsvParser::parse_string(&DataType::Boolean, "TRUE1".to_owned()).is_err());
     }
 }

@@ -14,6 +14,12 @@ mosquitto = "mosquitto" # This is a MQTT broker.
 abd = "abd"
 iy = "iy"
 Pn = "Pn"
+barreir = "barrier"
+perhapts = "perhaps"
+psrser = "parser"
+extreact = "extract"
+buidler = "builder"
+epoches = "epochs"
 
 [default.extend-identifiers]
 TABLE_SCHEM = "TABLE_SCHEM"
@@ -40,5 +46,5 @@ extend-exclude = [
     # We don't want to fix "Divy" here, but may want in other places.
     "integration_tests/deltalake-sink/spark-script/run-sql-file.sh",
     # These files are copied from debezium connector, we don't want to fix their typos
-    "java/connector-node/risingwave-source-cdc/src/main/java/io/debezium/connector/postgresql/*.java"
+    "java/connector-node/risingwave-source-cdc/src/main/java/io/debezium/connector/postgresql/*.java",
 ]

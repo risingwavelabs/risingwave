@@ -120,7 +120,7 @@ impl Binder {
                 match join_type {
                     JoinType::Inner | JoinType::LeftOuter => {}
                     _ => {
-                        return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_string())
+                        return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_owned())
                             .into());
                     }
                 }

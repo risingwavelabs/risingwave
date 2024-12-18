@@ -1,5 +1,9 @@
 version: 2
 updates:
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: "weekly"
 - package-ecosystem: cargo
   directory: /
   schedule:
@@ -69,7 +73,7 @@ updates:
       update-types:
         ["version-update:semver-major"]
   groups:
-    # Group all dependenies together because Java libraries are quite stable
+    # Group all dependencies together because Java libraries are quite stable
     all:
       patterns:
         - "*"

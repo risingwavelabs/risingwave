@@ -71,7 +71,7 @@ pub async fn handle_create_schema(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.to_string()))?
+            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
     } else {
         session.user_id()
     };
