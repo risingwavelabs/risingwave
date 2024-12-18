@@ -78,7 +78,6 @@ use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
 use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::current::notice_to_user;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::OverwriteOptions;
@@ -138,7 +137,9 @@ impl ColumnIdGenerator {
     }
 
     /// Generates a new [`ColumnId`] for a column with the given field.
-    pub fn generate(&mut self, field: impl FieldLike) -> ColumnId {
+    ///
+    /// Returns an error if the data type of the column has been changed.
+    pub fn generate(&mut self, field: impl FieldLike) -> Result<ColumnId> {
         if let Some((id, original_type)) = self.existing.get(field.name()) {
             // Intentionally not using `datatype_equals` here because we want nested types to be
             // exactly the same, **NOT** ignoring field names as they may be referenced in expressions
@@ -146,22 +147,21 @@ impl ColumnIdGenerator {
             // TODO: support compatible changes on types, typically for `STRUCT` types.
             //       https://github.com/risingwavelabs/risingwave/issues/19755
             if original_type == field.data_type() {
-                return *id;
+                Ok(*id)
             } else {
-                notice_to_user(format!(
-                    "The data type of column \"{}\" has been changed from {} to {}. \
-                     This is currently not supported, even if it could be a compatible change in external systems. \
-                     The original column will be dropped and a new column will be created.",
+                bail_not_implemented!(
+                    "The data type of column \"{}\" has been changed from \"{}\" to \"{}\". \
+                     This is currently not supported, even if it could be a compatible change in external systems.",
                     field.name(),
                     original_type,
                     field.data_type()
-                ));
+                );
             }
+        } else {
+            let id = self.next_column_id;
+            self.next_column_id = self.next_column_id.next();
+            Ok(id)
         }
-
-        let id = self.next_column_id;
-        self.next_column_id = self.next_column_id.next();
-        id
     }
 
     /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
@@ -587,7 +587,7 @@ pub(crate) fn gen_create_table_plan(
     let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)
+        c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
     let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
@@ -840,7 +840,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     )?;
 
     for c in &mut columns {
-        c.column_desc.column_id = col_id_gen.generate(&*c)
+        c.column_desc.column_id = col_id_gen.generate(&*c)?;
     }
 
     let (mut columns, pk_column_ids, _row_id_index) =
@@ -2003,8 +2003,8 @@ mod tests {
     #[test]
     fn test_col_id_gen_initial() {
         let mut gen = ColumnIdGenerator::new_initial();
-        assert_eq!(gen.generate(B("v1")), ColumnId::new(1));
-        assert_eq!(gen.generate(B("v2")), ColumnId::new(2));
+        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(1));
+        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(2));
     }
 
     #[test]
@@ -2040,27 +2040,26 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(gen.generate(B("v1")), ColumnId::new(4));
-        assert_eq!(gen.generate(B("v2")), ColumnId::new(5));
+        assert_eq!(gen.generate(B("v1")).unwrap(), ColumnId::new(4));
+        assert_eq!(gen.generate(B("v2")).unwrap(), ColumnId::new(5));
         assert_eq!(
-            gen.generate(Field::new("f32", DataType::Float32)),
+            gen.generate(Field::new("f32", DataType::Float32)).unwrap(),
             ColumnId::new(1)
         );
-        assert_eq!(
-            // mismatched data type, will generate a new column id
-            gen.generate(Field::new("f64", DataType::Float32)),
-            ColumnId::new(6)
-        );
-        assert_eq!(
-            // mismatched data type, will generate a new column id
-            // we require the nested data type to be exactly the same
-            gen.generate(Field::new(
-                "nested",
-                StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into()
-            )),
-            ColumnId::new(7)
-        );
-        assert_eq!(gen.generate(B("v3")), ColumnId::new(8));
+
+        // mismatched data type
+        gen.generate(Field::new("f64", DataType::Float32))
+            .unwrap_err();
+
+        // mismatched data type
+        // we require the nested data type to be exactly the same
+        gen.generate(Field::new(
+            "nested",
+            StructType::new([("f1", DataType::Int32), ("f2", DataType::Int64)]).into(),
+        ))
+        .unwrap_err();
+
+        assert_eq!(gen.generate(B("v3")).unwrap(), ColumnId::new(6));
     }
 
     #[tokio::test]
@@ -2152,7 +2151,7 @@ mod tests {
                 let mut columns = bind_sql_columns(&column_defs)?;
                 let mut col_id_gen = ColumnIdGenerator::new_initial();
                 for c in &mut columns {
-                    c.column_desc.column_id = col_id_gen.generate(&*c)
+                    c.column_desc.column_id = col_id_gen.generate(&*c).unwrap();
                 }
 
                 let pk_names =
