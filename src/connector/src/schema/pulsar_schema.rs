@@ -49,7 +49,7 @@ impl Client {
         Self { inner, base, token }
     }
 
-    pub async fn get_schema(&self, topic: &str) -> SchemaInfo {
+    pub async fn get_schema(&self, topic: &str) -> Result<SchemaInfo, reqwest::Error> {
         #[derive(serde::Deserialize)]
         struct GetSchemaResponse {
             version: usize,
@@ -76,7 +76,7 @@ impl Client {
         if let Some(token) = &self.token {
             q = q.bearer_auth(token);
         }
-        let res = q.send().await.unwrap();
+        let res = q.send().await?;
         let res: GetSchemaResponse = res.json().await.unwrap();
         let schema = match res.r#type.as_str() {
             "PROTOBUF_NATIVE" => {
@@ -100,13 +100,13 @@ impl Client {
             }
             _ => unimplemented!(),
         };
-        SchemaInfo {
+        Ok(SchemaInfo {
             topic: topic.to_owned(),
             version: res.version,
             timestamp_ms: res.timestamp,
             schema,
             properties: res.properties,
-        }
+        })
     }
 }
 

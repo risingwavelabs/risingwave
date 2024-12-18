@@ -27,6 +27,7 @@ def_anyhow_newtype! {
 
     // Common errors
     std::io::Error => transparent,
+    reqwest::Error => transparent,
 
     // Fine-grained connector errors
     AccessError => transparent,
