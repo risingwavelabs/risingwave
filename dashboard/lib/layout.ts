@@ -19,6 +19,7 @@ import { max } from "lodash"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 import { Relation } from "./api/streaming"
+import { boxHeight, boxWidth } from "../components/RelationGraph"
 
 export type Enter<Type> = Type extends d3.Selection<
   any,
@@ -409,32 +410,12 @@ export function layoutItem<I extends LayoutItemBase>(
   return rtn
 }
 
-function layoutRelation(
-  relations: Array<RelationPoint>,
-  layerMargin: number,
-  rowMargin: number,
-  nodeRadius: number
-): RelationPointPosition[] {
-  const result = layoutItem(relations, layerMargin, rowMargin)
-  return result.map(({ x, y, ...data }) => ({
-    x: x + nodeRadius,
-    y: y + nodeRadius,
-    ...data,
-  }))
-}
-
 export function flipLayoutRelation(
   relations: Array<RelationPoint>,
   layerMargin: number,
   rowMargin: number,
-  nodeRadius: number
 ): RelationPointPosition[] {
-  const fragmentPosition = layoutRelation(
-    relations,
-    rowMargin,
-    layerMargin,
-    nodeRadius
-  )
+  const fragmentPosition = layoutItem(relations, layerMargin, rowMargin)
   return fragmentPosition.map(({ x, y, ...data }) => ({
     x: y,
     y: x,
@@ -455,8 +436,8 @@ export function generateRelationEdges(
       const parentRelation = relationMap.get(parentId)!
       links.push({
         points: [
-          { x: relation.x, y: relation.y },
-          { x: parentRelation.x, y: parentRelation.y },
+          { x: relation.x + boxWidth/2, y: relation.y },
+          { x: parentRelation.x + boxWidth/2, y: parentRelation.y + boxHeight },
         ],
         source: relation.id,
         target: parentId,

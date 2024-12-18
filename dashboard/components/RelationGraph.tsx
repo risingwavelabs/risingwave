@@ -37,9 +37,16 @@ import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { RelationStats } from "../proto/gen/monitor_service"
 
+export const boxWidth = 150
+export const boxHeight = 45
+const iconRadius = 12
+
+const layerMargin = 30
+const rowMargin = 40
+const layoutMargin = 30
+
 function boundBox(
   relationPosition: RelationPointPosition[],
-  nodeRadius: number
 ): {
   width: number
   height: number
@@ -47,16 +54,11 @@ function boundBox(
   let width = 0
   let height = 0
   for (const { x, y } of relationPosition) {
-    width = Math.max(width, x + nodeRadius)
-    height = Math.max(height, y + nodeRadius)
+    width = Math.max(width, x + boxWidth)
+    height = Math.max(height, y + boxHeight)
   }
   return { width, height }
 }
-
-const layerMargin = 50
-const rowMargin = 50
-export const nodeRadius = 12
-const layoutMargin = 50
 
 export default function RelationGraph({
   nodes,
@@ -80,7 +82,6 @@ export default function RelationGraph({
       nodes,
       layerMargin,
       rowMargin,
-      nodeRadius
     ).map(
       ({ x, y, ...data }) =>
         ({
@@ -90,7 +91,7 @@ export default function RelationGraph({
         } as RelationPointPosition)
     )
     const links = generateRelationEdges(layoutMap)
-    const { width, height } = boundBox(layoutMap, nodeRadius)
+    const { width, height } = boundBox(layoutMap)
     return {
       layoutMap,
       links,
@@ -141,7 +142,6 @@ export default function RelationGraph({
             return backPressureWidth(value, 15)
           }
         }
-
         return 2
       }
 
@@ -200,29 +200,86 @@ export default function RelationGraph({
     const applyNode = (g: NodeSelection) => {
       g.attr("transform", ({ x, y }) => `translate(${x},${y})`)
 
-      // Circle
+      // Rectangle box of relation
+      let rect = g.select<SVGRectElement>("rect")
+      if (rect.empty()) {
+        rect = g.append("rect")
+      }
+      rect
+        .attr("width", boxWidth)
+        .attr("height", boxHeight)
+        .attr("rx", 6) // rounded corners
+        .attr("ry", 6)
+        .attr("fill", "white")
+        .attr("stroke", ({ id }) => isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["200"])
+        .attr("stroke-width", 2)
+
+      // Icon circle of relation type
       let circle = g.select<SVGCircleElement>("circle")
       if (circle.empty()) {
         circle = g.append("circle")
       }
-
-      circle.attr("r", nodeRadius).attr("fill", ({ id, relation }) => {
-        const weight = relationIsStreamingJob(relation) ? "500" : "400"
-        const baseColor = isSelected(id)
-          ? theme.colors.blue[weight]
-          : theme.colors.gray[weight]
-        if (relationStats) {
-          const relationId = parseInt(id)
-          if (!isNaN(relationId) && relationStats[relationId]) {
-            const currentMs = epochToUnixMillis(relationStats[relationId].currentEpoch)
-            return latencyToColor(now_ms - currentMs, baseColor)
+      circle
+        .attr("cx", iconRadius + 10) // position circle in left part of box
+        .attr("cy", boxHeight/2)
+        .attr("r", iconRadius)
+        .attr("fill", ({ id, relation }) => {
+          const weight = relationIsStreamingJob(relation) ? "500" : "400"
+          const baseColor = isSelected(id)
+            ? theme.colors.blue[weight]
+            : theme.colors.gray[weight]
+          if (relationStats) {
+            const relationId = parseInt(id)
+            if (!isNaN(relationId) && relationStats[relationId]) {
+              const currentMs = epochToUnixMillis(relationStats[relationId].currentEpoch)
+              return latencyToColor(now_ms - currentMs, baseColor)
+            }
           }
+          return baseColor
+        })
+
+      // Type letter in circle
+      let typeText = g.select<SVGTextElement>(".type")
+      if (typeText.empty()) {
+        typeText = g.append("text").attr("class", "type")
+      }
+
+      function relationTypeAbbr(relation: Relation) {
+        const type = relationType(relation)
+        if (type === "SINK") {
+          return "K"
+        } else {
+          return type.charAt(0)
         }
-        return baseColor
-      })
+      }
+      
+      // Add a clipPath to contain the text within the box
+      let clipPath = g.select<SVGClipPathElement>(".clip-path")
+      if (clipPath.empty()) {
+        clipPath = g.append("clipPath")
+          .attr("class", "clip-path")
+          .attr("id", d => `clip-${d.id}`)
+        clipPath.append("rect")
+      }
+      clipPath.select("rect")
+        .attr("width", boxWidth - (iconRadius * 2 + 20)) // Leave space for icon
+        .attr("height", boxHeight)
+        .attr("x", iconRadius * 2 + 15)
+        .attr("y", 0)
+
+      typeText
+        .attr("fill", "white")
+        .text(({ relation }) => `${relationTypeAbbr(relation)}`)
+        .attr("font-family", "inherit")
+        .attr("text-anchor", "middle")
+        .attr("x", iconRadius + 10)
+        .attr("y", boxHeight/2)
+        .attr("dy", "0.35em") // vertical alignment
+        .attr("font-size", 16)
+        .attr("font-weight", "bold")
 
       // Relation name
-      let text = g.select<SVGTextElement>(".text")
+      let text = g.select<SVGTextElement>(".text") 
       if (text.empty()) {
         text = g.append("text").attr("class", "text")
       }
@@ -231,36 +288,13 @@ export default function RelationGraph({
         .attr("fill", "black")
         .text(({ name }) => name)
         .attr("font-family", "inherit")
-        .attr("text-anchor", "middle")
-        .attr("dy", nodeRadius * 2)
-        .attr("font-size", 12)
-        .attr("transform", "rotate(-8)")
+        .attr("x", iconRadius * 2 + 15) // position text right of circle
+        .attr("y", boxHeight/2)
+        .attr("dy", "0.35em")
+        .attr("font-size", 14)
+        .attr("clip-path", d => `url(#clip-${d.id})`) // Apply clipPath
 
-      // Relation type
-      let typeText = g.select<SVGTextElement>(".type")
-      if (typeText.empty()) {
-        typeText = g.append("text").attr("class", "type")
-      }
-
-      const relationTypeAbbr = (relation: Relation) => {
-        const type = relationType(relation)
-        if (type === "SINK") {
-          return "K"
-        } else {
-          return type.charAt(0)
-        }
-      }
-
-      typeText
-        .attr("fill", "white")
-        .text(({ relation }) => `${relationTypeAbbr(relation)}`)
-        .attr("font-family", "inherit")
-        .attr("text-anchor", "middle")
-        .attr("dy", nodeRadius * 0.5)
-        .attr("font-size", 16)
-        .attr("font-weight", "bold")
-
-      // Tooltip
+      // Tooltip for relation
       const getTooltipContent = (relation: Relation, id: string) => {
         const relationId = parseInt(id)
         const stats = relationStats?.[relationId]
