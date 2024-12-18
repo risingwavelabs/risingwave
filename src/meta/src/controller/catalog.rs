@@ -2799,11 +2799,6 @@ impl CatalogController {
         inner.list_all_state_tables().await
     }
 
-    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        let inner = self.inner.read().await;
-        inner.list_all_state_table_ids().await
-    }
-
     pub async fn list_readonly_table_ids(&self, schema_id: SchemaId) -> MetaResult<Vec<TableId>> {
         let inner = self.inner.read().await;
         let table_ids: Vec<TableId> = Table::find()
@@ -3228,6 +3223,10 @@ impl CatalogController {
             .collect();
         Ok(res)
     }
+
+    pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        self.inner.read().await.list_time_travel_table_ids().await
+    }
 }
 
 /// `CatalogStats` is a struct to store the statistics of all catalogs.
@@ -3358,17 +3357,6 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .collect())
-    }
-
-    /// `list_all_tables` return all ids of state tables.
-    pub async fn list_all_state_table_ids(&self) -> MetaResult<Vec<TableId>> {
-        let table_ids: Vec<TableId> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .into_tuple()
-            .all(&self.db)
-            .await?;
-        Ok(table_ids)
     }
 
     /// `list_tables` return all `CREATED` tables, `CREATING` materialized views and internal tables that belong to them.
@@ -3588,6 +3576,21 @@ impl CatalogControllerInner {
         {
             let _ = tx.send(Err(err.clone()));
         }
+    }
+
+    pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
+        let table_ids: Vec<TableId> = Table::find()
+            .select_only()
+            .filter(table::Column::TableType.is_in(vec![
+                TableType::Table,
+                TableType::MaterializedView,
+                TableType::Index,
+            ]))
+            .column(table::Column::TableId)
+            .into_tuple()
+            .all(&self.db)
+            .await?;
+        Ok(table_ids)
     }
 }
 
