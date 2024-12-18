@@ -355,12 +355,16 @@ impl Condition {
 
             Ok(Some((non_overlap_scan_ranges, false)))
         } else {
-            let scan_ranges = disjunctions_result
-                .into_iter()
-                .flat_map(|(scan_ranges, _)| scan_ranges)
-                // sort, small one first
-                .sorted_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()))
-                .collect_vec();
+            let mut scan_ranges = vec![];
+            for (scan_ranges_chunk, _) in disjunctions_result {
+                if scan_ranges_chunk.is_empty() {
+                    // full scan range
+                    return Ok(None);
+                }
+
+                scan_ranges.extend(scan_ranges_chunk);
+            }
+            scan_ranges.sort_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()));
 
             if scan_ranges.is_empty() {
                 return Ok(None);
@@ -425,6 +429,7 @@ impl Condition {
                             }
                         };
 
+                        // Included Bound just for convenience, the correctness will be guaranteed by the upper level filter.
                         Bound::Included(bound)
                     }
 
