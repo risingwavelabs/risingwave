@@ -45,7 +45,7 @@ futures-util = "0.3"
 ginepro = "0.8"
 hex = "0.4"
 hmac = "0.12"
-icelake = { workspace = true }
+iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
