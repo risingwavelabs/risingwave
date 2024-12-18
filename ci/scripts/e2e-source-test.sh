@@ -32,7 +32,7 @@ mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Install dependencies"
-python3 -m pip install --break-system-packages requests protobuf fastavro confluent_kafka jsonschema
+python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 apt-get -y install jq
 
 echo "--- e2e, inline test"
