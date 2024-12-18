@@ -63,26 +63,27 @@ impl Planner {
                 )
                 .into());
             }
-            let limit_original = limit.clone();
-            let limit_err = ErrorCode::ExprError(
-                format!(
-                    "expects an integer or expression after LIMIT, but found:{:?}",
-                    limit_original
-                )
-                .into(),
-            );
             let limit_cast_to_bigint = limit.cast_explicit(DataType::Int64).map_err(|_| {
                 RwError::from(ErrorCode::ExprError(
-                    format!(
-                        "expects an integer or expression after LIMIT, but found:{:?}",
-                        limit_original
-                    )
+                        "expects an integer or expression that can be evaluated to an integer after LIMIT"
                     .into(),
                 ))
             })?;
             let limit = match limit_cast_to_bigint.fold_const() {
-                Ok(Some(datum)) => datum.as_integral() as u64,
-                _ => return Err(limit_err.into()),
+                Ok(Some(datum)) => {
+                    let value = datum.as_integral();
+                    if value < 0 {
+                        return Err(ErrorCode::ExprError(
+                            format!("LIMIT must not be negative, but found: {}", value).into(),
+                        )
+                        .into());
+                    }
+                    value as u64
+                }
+                _ => return Err(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                        .into(),
+                ).into()),
             };
 
             let offset = offset.unwrap_or_default();
