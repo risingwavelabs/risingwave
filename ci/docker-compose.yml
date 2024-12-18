@@ -112,7 +112,7 @@ services:
 
   # Standard environment for CI, including MySQL and Postgres for metadata.
   ci-standard-env:
-    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20240911
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:v20241213
     depends_on:
       - mysql
       - db

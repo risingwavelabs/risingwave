@@ -20,7 +20,7 @@ Caused by these errors (recent errors listed first):
   1: gRPC request to batch service failed: Internal error
   2: Storage error
   3: Hummock error
-  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+  4: Meta error: gRPC request to hummock service (call `/hummock.HummockManagerService/GetVersionByEpoch`) failed: Internal error: time travel: version not found for epoch 0
 
 
 query error
@@ -32,7 +32,7 @@ Caused by these errors (recent errors listed first):
   1: gRPC request to batch service failed: Internal error
   2: Storage error
   3: Hummock error
-  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+  4: Meta error: gRPC request to hummock service (call `/hummock.HummockManagerService/GetVersionByEpoch`) failed: Internal error: time travel: version not found for epoch 0
 
 
 query error
@@ -44,7 +44,7 @@ Caused by these errors (recent errors listed first):
   1: gRPC request to batch service failed: Internal error
   2: Storage error
   3: Hummock error
-  4: Meta error: gRPC request to hummock service failed: Internal error: time travel: version not found for epoch 0
+  4: Meta error: gRPC request to hummock service (call `/hummock.HummockManagerService/GetVersionByEpoch`) failed: Internal error: time travel: version not found for epoch 0
 
 
 query I
