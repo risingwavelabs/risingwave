@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 pub trait ZipEqFast<B: IntoIterator>: ExactSizeIterator + Sized
 where
     B::IntoIter: ExactSizeIterator,
@@ -53,4 +55,43 @@ where
     B::IntoIter: ExactSizeIterator,
 {
     a.into_iter().zip_eq_fast(b)
+}
+
+pub trait RwTupleItertools<A, B>: IntoIterator<Item = (A, B)> + Sized {
+    // type Iter: Iterator<Item= Self::Item>;
+
+    /// Gets the first element of the iterator.
+    fn first<C: FromIterator<A>>(self) -> C {
+        self.into_iter().map(|(a, _)| a).collect()
+    }
+
+    fn map_first<F, C, FA>(self, f: F) -> C
+    where
+        F: Fn(A) -> FA,
+        C: FromIterator<(FA, B)>,
+    {
+        self.into_iter().map(|(a, b)| (f(a), b)).collect()
+    }
+
+    fn map_second<F, C, FB>(self, f: F) -> C
+    where
+        F: Fn(B) -> FB,
+        C: FromIterator<(A, FB)>,
+    {
+        self.into_iter().map(|(a, b)| (a, f(b))).collect()
+    }
+}
+
+impl<A, B, T> RwTupleItertools<A, B> for T where T: IntoIterator<Item = (A, B)> {}
+
+// type IterFirst<I: IntoIterator> {}
+
+#[test]
+fn test() {
+    let m: HashMap<i32, i32> = HashMap::from_iter([(1, 2), (3, 4)]);
+    let m1: Vec<_> = (&m).first();
+    println!("{:?}", m1);
+
+    let m2: Vec<_> = (&m).map_first(|a| a * 2);
+    println!("{:?}", m2);
 }
