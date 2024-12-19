@@ -354,7 +354,8 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 }
 
 /// Stream of [`SourceMessage`].
-pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+pub type BoxSourceMessageStream =
+    BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 
 // Manually expand the trait alias to improve IDE experience.
 pub trait ChunkSourceStream:

@@ -30,7 +30,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxChunkSourceStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -72,7 +72,7 @@ fn make_batch(use_struct: bool) -> Vec<SourceMessage> {
         .collect_vec()
 }
 
-fn make_data_stream(use_struct: bool) -> BoxSourceStream {
+fn make_data_stream(use_struct: bool) -> BoxSourceMessageStream {
     futures::future::ready(Ok(if use_struct {
         STRUCT_BATCH.clone()
     } else {

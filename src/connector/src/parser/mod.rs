@@ -48,7 +48,7 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    BoxSourceMessageStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
 
@@ -213,7 +213,7 @@ impl<P: ByteStreamSourceParser> P {
     /// A [`ChunkSourceStream`] which is a stream of parsed chunks. Each of the parsed chunks
     /// are guaranteed to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless
     /// there's a large transaction and `source_ctrl_opts.split_txn` is false.
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream {
+    pub fn into_stream(self, msg_stream: BoxSourceMessageStream) -> impl ChunkSourceStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
 
@@ -230,7 +230,7 @@ impl<P: ByteStreamSourceParser> P {
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
 async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
-    msg_stream: BoxSourceStream,
+    msg_stream: BoxSourceMessageStream,
     source_ctrl_opts: SourceCtrlOpts,
 ) {
     let mut chunk_builder =
@@ -428,7 +428,7 @@ pub enum ByteStreamSourceParserImpl {
 
 impl ByteStreamSourceParserImpl {
     /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
+    pub fn into_stream(self, msg_stream: BoxSourceMessageStream) -> impl ChunkSourceStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
