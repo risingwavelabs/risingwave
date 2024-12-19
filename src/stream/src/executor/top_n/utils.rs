@@ -115,6 +115,7 @@ where
 
                     yield Message::Barrier(barrier)
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             };
         }
     }

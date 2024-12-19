@@ -51,6 +51,7 @@ impl LocalApproxPercentileExecutor {
         #[for_await]
         for message in self.input.execute() {
             match message? {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Chunk(chunk) => {
                     let mut builder = DataChunkBuilder::new(
                         vec![DataType::Int16, DataType::Int32, DataType::Int32],

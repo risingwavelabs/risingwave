@@ -278,6 +278,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;

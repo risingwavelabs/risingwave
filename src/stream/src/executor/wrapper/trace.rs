@@ -58,6 +58,9 @@ pub async fn trace(
     while let Some(message) = input.next().instrument(span.clone()).await.transpose()? {
         // Emit a debug event and record the message type.
         match &message {
+            Message::BarrierBatch(_) => {
+                span.record("message", "barrier_batch");
+            }
             Message::Chunk(chunk) => {
                 if let Some(count) = &executor_row_count {
                     count.inc_by(chunk.cardinality() as u64);

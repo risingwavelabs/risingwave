@@ -411,6 +411,7 @@ impl<'a, S> UpstreamBuffer<'a, S> {
                 .await?
                 .ok_or_else(|| anyhow!("end of upstream"))?;
             match msg {
+                DispatcherMessage::BarrierBatch(_) => unreachable!(""),
                 DispatcherMessage::Chunk(chunk) => {
                     self.is_polling_epoch_data = true;
                     self.consume_upstream_row_count
