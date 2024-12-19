@@ -25,6 +25,18 @@ impl CatalogController {
         Ok(ObjectModel(secret, obj.unwrap()).into())
     }
 
+    pub async fn get_object_database_id(&self, object_id: ObjectId) -> MetaResult<DatabaseId> {
+        let inner = self.inner.read().await;
+        let (database_id,): (Option<DatabaseId>,) = Object::find_by_id(object_id)
+            .select_only()
+            .select_column(object::Column::DatabaseId)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+        Ok(database_id.ok_or_else(|| anyhow!("object has no database id: {object_id}"))?)
+    }
+
     pub async fn get_connection_by_id(
         &self,
         connection_id: ConnectionId,
