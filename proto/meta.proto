@@ -310,6 +310,7 @@ enum ThrottleTarget {
   TABLE_WITH_SOURCE = 3;
   CDC_TABLE = 4;
   TABLE_DML = 5;
+  SINK = 6;
 }
 
 message ApplyThrottleRequest {
