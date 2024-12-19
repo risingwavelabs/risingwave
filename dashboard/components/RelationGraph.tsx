@@ -30,8 +30,8 @@ import {
   Position,
   RelationPoint,
   RelationPointPosition,
-  flipLayoutRelation,
   generateRelationEdges,
+  layoutItem,
 } from "../lib/layout"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
@@ -41,8 +41,8 @@ export const boxWidth = 150
 export const boxHeight = 45
 const iconRadius = 12
 
-const layerMargin = 30
-const rowMargin = 40
+const layerMargin = 80
+const rowMargin = 30
 const layoutMargin = 30
 
 function boundBox(
@@ -78,11 +78,7 @@ export default function RelationGraph({
   const svgRef = useRef<SVGSVGElement>(null)
 
   const layoutMapCallback = useCallback(() => {
-    const layoutMap = flipLayoutRelation(
-      nodes,
-      layerMargin,
-      rowMargin,
-    ).map(
+    const layoutMap = layoutItem(nodes, layerMargin, rowMargin).map(
       ({ x, y, ...data }) =>
         ({
           x: x + layoutMargin,

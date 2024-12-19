@@ -410,18 +410,6 @@ export function layoutItem<I extends LayoutItemBase>(
   return rtn
 }
 
-export function flipLayoutRelation(
-  relations: Array<RelationPoint>,
-  layerMargin: number,
-  rowMargin: number,
-): RelationPointPosition[] {
-  const fragmentPosition = layoutItem(relations, layerMargin, rowMargin)
-  return fragmentPosition.map(({ x, y, ...data }) => ({
-    x: y,
-    y: x,
-    ...data,
-  }))
-}
 
 export function generateRelationEdges(
   layoutMap: RelationPointPosition[]
@@ -436,8 +424,9 @@ export function generateRelationEdges(
       const parentRelation = relationMap.get(parentId)!
       links.push({
         points: [
-          { x: relation.x + boxWidth/2, y: relation.y },
-          { x: parentRelation.x + boxWidth/2, y: parentRelation.y + boxHeight },
+          // center of right edge -> center of left edge
+          { x: relation.x, y: relation.y + boxHeight/2 },
+          { x: parentRelation.x + boxWidth, y: parentRelation.y + boxHeight/2 },
         ],
         source: relation.id,
         target: parentId,

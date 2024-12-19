@@ -82,8 +82,8 @@ function buildDependencyAsEdges(
           : []
         : [],
       order: r.id,
-      width: boxHeight, // will be flipped later
-      height: boxWidth, // will be flipped later
+      width: boxWidth,
+      height: boxHeight,
       relation: r,
     })
   }
