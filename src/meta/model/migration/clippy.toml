@@ -1,0 +1,4 @@
+disallowed-methods = [
+    { path = "sea_query::table::column::ColumnDef::binary", reason = "Please use `.rw_binary(..)` instead." },
+    { path = "sea_query::table::column::ColumnDef::blob", reason = "Please use `.rw_binary(..)` instead." },
+]
