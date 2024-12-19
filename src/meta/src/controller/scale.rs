@@ -452,7 +452,14 @@ impl CatalogController {
     pub async fn integrity_check(&self) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
+        Self::graph_check(&txn).await
+    }
 
+    // Perform integrity checks on the Actor, ActorDispatcher and Fragment tables.
+    pub async fn graph_check<C>(txn: &C) -> MetaResult<()>
+    where
+        C: ConnectionTrait,
+    {
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "ActorDispatcher")]
         pub struct PartialActorDispatcher {
@@ -487,14 +494,14 @@ impl CatalogController {
         let mut flag = false;
 
         let fragments: Vec<PartialFragment> =
-            Fragment::find().into_partial_model().all(&txn).await?;
+            Fragment::find().into_partial_model().all(txn).await?;
 
         let fragment_map: HashMap<_, _> = fragments
             .into_iter()
             .map(|fragment| (fragment.fragment_id, fragment))
             .collect();
 
-        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(&txn).await?;
+        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
 
         let mut fragment_actors = HashMap::new();
         for actor in &actors {
@@ -511,7 +518,7 @@ impl CatalogController {
 
         let actor_dispatchers: Vec<PartialActorDispatcher> = ActorDispatcher::find()
             .into_partial_model()
-            .all(&txn)
+            .all(txn)
             .await?;
 
         let mut discovered_upstream_fragments = HashMap::new();
@@ -640,10 +647,7 @@ impl CatalogController {
             crit_check_in_loop!(
                 flag,
                 actor_map.contains_key(actor_id),
-                format!(
-                    "ActorDispatcher {} has actor_id {} which does not exist",
-                    id, actor_id
-                )
+                format!("ActorDispatcher {id} has actor_id {actor_id} which does not exist",)
             );
 
             let actor = &actor_map[actor_id];
@@ -652,8 +656,7 @@ impl CatalogController {
                 flag,
                 fragment_map.contains_key(dispatcher_id),
                 format!(
-                    "ActorDispatcher {} has dispatcher_id {} which does not exist",
-                    id, dispatcher_id
+                    "ActorDispatcher {id} has dispatcher_id {dispatcher_id} which does not exist",
                 )
             );
 
@@ -677,8 +680,8 @@ impl CatalogController {
                 flag,
                 fragment_actors.contains_key(dispatcher_id),
                 format!(
-                    "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
-                )
+                "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
+            )
             );
 
             let dispatcher_downstream_actor_ids: HashSet<_> =
@@ -718,7 +721,7 @@ impl CatalogController {
                         flag,
                         &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {dispatcher_downstream_actor_ids:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher downstream actor ids: {dispatcher_downstream_actor_ids:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
                         )
                     );
                 }
@@ -771,7 +774,7 @@ impl CatalogController {
                         flag,
                         &mapping_actors == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {mapping_actors:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher mapping actor ids {mapping_actors:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
                         )
                     );
 
@@ -797,7 +800,7 @@ impl CatalogController {
                                 flag,
                                 mapping.to_bitmaps() == downstream_bitmaps,
                                 format!(
-                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
+                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id}, but dispatcher mapping {mapping:?} != discovered downstream actor bitmaps: {downstream_bitmaps:?}"
                                 )
                             );
                         }
@@ -868,7 +871,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_fragment_ids == upstream_fragment_ids,
                 format!(
-                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != {upstream_fragment_ids:?}",
+                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != fragment upstream fragment ids: {upstream_fragment_ids:?}",
                 )
             );
         }
@@ -901,7 +904,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_actor_ids == upstream_actor_ids,
                 format!(
-                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != {upstream_actor_ids:?}",
+                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != actor upstream actor ids: {upstream_actor_ids:?}",
                 )
             )
         }
