@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::reader::desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -91,7 +91,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         source_desc: &FsSourceDesc,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxChunkSourceStream> {
+    ) -> StreamExecutorResult<BoxSourceChunkStream> {
         let column_ids = source_desc
             .columns
             .iter()

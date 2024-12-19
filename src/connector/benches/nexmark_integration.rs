@@ -30,7 +30,7 @@ use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -118,7 +118,7 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
 }
 
 fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxChunkSourceStream = make_parser(use_struct)
+    let mut stream: BoxSourceChunkStream = make_parser(use_struct)
         .into_stream(make_data_stream(use_struct))
         .boxed();
 

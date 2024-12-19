@@ -367,7 +367,7 @@ impl<T> ChunkSourceStream for T where
 {
 }
 
-pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -386,7 +386,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxChunkSourceStream;
+    fn into_stream(self) -> BoxSourceChunkStream;
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
