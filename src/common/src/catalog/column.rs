@@ -413,6 +413,10 @@ impl ColumnCatalog {
         !self.is_generated() && !self.is_rw_timestamp_column()
     }
 
+    pub fn can_drop(&self) -> bool {
+        !(self.is_hidden() || self.is_rw_sys_column())
+    }
+
     /// If the column is a generated column
     pub fn generated_expr(&self) -> Option<&ExprNode> {
         if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =

@@ -728,7 +728,7 @@ pub struct CreateTableProps {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_table_plan_inner(
+pub fn gen_table_plan_inner(
     context: OptimizerContextRef,
     schema_name: Option<String>,
     table_name: String,
