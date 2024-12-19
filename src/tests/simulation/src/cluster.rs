@@ -33,6 +33,7 @@ use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 #[cfg(madsim)]
 use risingwave_object_store::object::sim::SimServer as ObjectStoreSimServer;
 use risingwave_pb::common::WorkerNode;
@@ -89,6 +90,9 @@ pub struct Configuration {
 
     /// Queries to run per session.
     pub per_session_queries: Arc<Vec<String>>,
+
+    /// Resource groups for compute nodes.
+    pub compute_resource_groups: HashMap<usize, String>,
 }
 
 impl Default for Configuration {
@@ -116,6 +120,7 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
+            compute_resource_groups: Default::default(),
         }
     }
 }
@@ -203,6 +208,7 @@ metrics_level = "Disabled"
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
                 .into(),
+            ..Default::default()
         }
     }
 
@@ -249,6 +255,7 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
                 .into(),
+            ..Default::default()
         }
     }
 
@@ -295,6 +302,7 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
+            ..Default::default()
         }
     }
 }
@@ -478,6 +486,12 @@ impl Cluster {
                 &conf.compute_node_cores.to_string(),
                 "--temp-secret-file-dir",
                 &format!("./secrets/compute-{i}"),
+                "--resource-group",
+                &conf
+                    .compute_resource_groups
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or(DEFAULT_RESOURCE_GROUP.to_string()),
             ]);
             handle
                 .create_node()

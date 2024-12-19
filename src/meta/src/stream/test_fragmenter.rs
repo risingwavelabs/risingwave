@@ -432,7 +432,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
             id: 0,
             property: Some(Property {
                 parallelism: 8,
-                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_string()),
+                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
                 ..Default::default()
             }),
             r#type: WorkerType::ComputeNode.into(),
@@ -466,7 +466,7 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
-        DEFAULT_RESOURCE_GROUP.to_string(),
+        DEFAULT_RESOURCE_GROUP.to_owned(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),

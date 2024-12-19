@@ -1327,7 +1327,7 @@ where
         .await?
         .ok_or_else(|| MetaError::catalog_id_not_found("database", database_id))?;
 
-    Ok(database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_string()))
+    Ok(database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned()))
 }
 
 pub async fn get_existing_job_resource_group<C>(
@@ -1350,14 +1350,14 @@ where
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
 
     Ok(job_specific_resource_group.unwrap_or_else(|| {
-        database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_string())
+        database_resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned())
     }))
 }
 
 pub fn filter_workers_by_resource_group(
     workers: &HashMap<u32, WorkerNode>,
     resource_group: &str,
-) -> HashSet<u32> {
+) -> BTreeSet<WorkerId> {
     workers
         .iter()
         .filter(|&(_, worker)| {
@@ -1366,7 +1366,7 @@ pub fn filter_workers_by_resource_group(
                 .map(|node_label| node_label.as_str() == resource_group)
                 .unwrap_or(false)
         })
-        .map(|(id, _)| *id)
+        .map(|(id, _)| (*id as WorkerId))
         .collect()
 }
 

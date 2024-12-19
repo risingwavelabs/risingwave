@@ -256,7 +256,7 @@ impl CatalogWriter for MockCatalogWriter {
             name: db_name.to_owned(),
             id: database_id,
             owner,
-            resource_group: resource_group.to_string(),
+            resource_group: resource_group.to_owned(),
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
@@ -684,6 +684,15 @@ impl CatalogWriter for MockCatalogWriter {
     ) -> Result<()> {
         unreachable!()
     }
+
+    async fn alter_resource_group(
+        &self,
+        _table_id: u32,
+        _resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {
@@ -695,7 +704,7 @@ impl MockCatalogWriter {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_owned(),
             owner: DEFAULT_SUPER_USER_ID,
-            resource_group: DEFAULT_RESOURCE_GROUP.to_string(),
+            resource_group: DEFAULT_RESOURCE_GROUP.to_owned(),
         });
         catalog.write().create_schema(&PbSchema {
             id: 1,

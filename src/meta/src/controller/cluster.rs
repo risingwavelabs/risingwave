@@ -407,7 +407,7 @@ impl StreamingClusterInfo {
 
         self.worker_nodes
             .values()
-            .filter(|worker| available_worker_ids.contains(&worker.id))
+            .filter(|worker| available_worker_ids.contains(&(worker.id as WorkerId)))
             .map(|worker| worker.parallelism())
             .sum()
     }
@@ -419,7 +419,7 @@ impl StreamingClusterInfo {
         let worker_ids = filter_workers_by_resource_group(&self.worker_nodes, resource_group);
         self.worker_nodes
             .iter()
-            .filter(|(id, _)| worker_ids.contains(id))
+            .filter(|(id, _)| worker_ids.contains(&(**id as WorkerId)))
             .map(|(id, worker)| (*id, worker.clone()))
             .collect()
     }
