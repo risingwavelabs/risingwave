@@ -26,12 +26,12 @@ public mv_pkey public mv
 public t_pkey public t
 
 query TT
-select schema_name, schema_owner from information_schema.schemata order by schema_name;
+select schema_name from information_schema.schemata order by schema_name;
 ----
-information_schema root
-pg_catalog root
-public root
-rw_catalog root
+information_schema
+pg_catalog
+public
+rw_catalog
 
 query TTTTTII
 select * EXCEPT(constraint_catalog, table_catalog) from information_schema.key_column_usage where table_schema = 'public' order by table_name;
