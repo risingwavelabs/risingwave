@@ -209,6 +209,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .await?
             {
                 match msg {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     Message::Barrier(barrier) => {
                         // commit state to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
@@ -295,6 +296,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             #[for_await]
             for msg in upstream.by_ref() {
                 match msg? {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     Message::Barrier(barrier) => {
                         match barrier.mutation.as_deref() {
                             Some(crate::executor::Mutation::Pause) => {
@@ -380,6 +382,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         // Upstream
                         Either::Left(msg) => {
                             match msg? {
+                                Message::BarrierBatch(_) => unreachable!(""),
                                 Message::Barrier(barrier) => {
                                     // increase the barrier count and check whether need to start a new snapshot
                                     barrier_count += 1;

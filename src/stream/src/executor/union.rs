@@ -116,6 +116,7 @@ async fn merge(
         match active.next().await {
             Some((Some(Ok(message)), remaining)) => {
                 match message {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     Message::Chunk(chunk) => {
                         // Continue polling this upstream by pushing it back to `active`.
                         active.push(remaining.into_future());

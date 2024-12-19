@@ -181,6 +181,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             self.materialize_cache.evict();
 
             yield match msg {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     self.metrics

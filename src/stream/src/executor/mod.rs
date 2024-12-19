@@ -40,10 +40,10 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation, PauseMutation,
-    PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessage, PbUpdateMutation,
-    PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation,
+    BarrierBatch, BarrierMutation, CombinedMutation, Dispatchers, DropSubscriptionsMutation,
+    PauseMutation, PbAddMutation, PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessage,
+    PbUpdateMutation, PbWatermark, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation,
 };
 use smallvec::SmallVec;
 
@@ -331,6 +331,7 @@ pub struct BarrierInner<M> {
 pub type BarrierMutationType = Option<Arc<Mutation>>;
 pub type Barrier = BarrierInner<BarrierMutationType>;
 pub type DispatcherBarrier = BarrierInner<()>;
+pub type DispatcherBarriers = Vec<DispatcherBarrier>;
 
 impl<M: Default> BarrierInner<M> {
     /// Create a plain barrier.
@@ -1032,6 +1033,7 @@ pub enum MessageInner<M> {
     Chunk(StreamChunk),
     Barrier(BarrierInner<M>),
     Watermark(Watermark),
+    BarrierBatch(Vec<BarrierInner<M>>),
 }
 
 impl<M> MessageInner<M> {
@@ -1040,6 +1042,17 @@ impl<M> MessageInner<M> {
             MessageInner::Chunk(chunk) => MessageInner::Chunk(chunk),
             MessageInner::Barrier(barrier) => MessageInner::Barrier(barrier.map_mutation(f)),
             MessageInner::Watermark(watermark) => MessageInner::Watermark(watermark),
+            MessageInner::BarrierBatch(_) => unreachable!(""),
+        }
+    }
+
+    pub fn expand_barrier_batch(self) -> Vec<Self> {
+        match self {
+            MessageInner::BarrierBatch(barriers) => barriers
+                .into_iter()
+                .map(|b| crate::executor::MessageInner::Barrier(b))
+                .collect(),
+            msg @ _ => vec![msg],
         }
     }
 }
@@ -1058,6 +1071,7 @@ impl<'a> TryFrom<&'a Message> for &'a Barrier {
 
     fn try_from(m: &'a Message) -> std::result::Result<Self, Self::Error> {
         match m {
+            Message::BarrierBatch(_) => Err(()),
             Message::Chunk(_) => Err(()),
             Message::Barrier(b) => Ok(b),
             Message::Watermark(_) => Err(()),
@@ -1085,11 +1099,14 @@ impl Message {
 impl DispatcherMessage {
     pub fn to_protobuf(&self) -> PbStreamMessage {
         let prost = match self {
+            Self::BarrierBatch(barriers) => StreamMessage::BarrierBatch(BarrierBatch {
+                barriers: barriers.iter().map(|b| b.to_protobuf()).collect(),
+            }),
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
-            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
+            Self::Barrier(barrier) => StreamMessage::Barrier(barrier.to_protobuf()),
             Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
         };
         PbStreamMessage {
@@ -1099,6 +1116,13 @@ impl DispatcherMessage {
 
     pub fn from_protobuf(prost: &PbStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
+            StreamMessage::BarrierBatch(barriers) => {
+                let mut barrier_batch = Vec::with_capacity(barriers.barriers.len());
+                for b in &barriers.barriers {
+                    barrier_batch.push(DispatcherBarrier::from_protobuf_inner(b, |_| Ok(()))?);
+                }
+                Self::BarrierBatch(barrier_batch)
+            }
             StreamMessage::StreamChunk(chunk) => Self::Chunk(StreamChunk::from_protobuf(chunk)?),
             StreamMessage::Barrier(barrier) => Self::Barrier(
                 DispatcherBarrier::from_protobuf_inner(barrier, |mutation| {

@@ -252,8 +252,9 @@ impl MergeExecutor {
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: DispatcherMessage = msg?;
             let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
-
+            let msgs = msg.expand_barrier_batch();
             match &mut msg {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(_) => {
                     // Do nothing.
                 }
@@ -424,6 +425,7 @@ impl Stream for SelectReceivers {
                 Some((Some(Ok(message)), remaining)) => {
                     let actor_id = remaining.actor_id();
                     match message {
+                        DispatcherMessage::BarrierBatch(_) => todo!("WIP"),
                         DispatcherMessage::Chunk(chunk) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());

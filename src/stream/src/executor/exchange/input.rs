@@ -86,6 +86,7 @@ pub(crate) async fn process_dispatcher_msg(
     barrier_rx: &mut mpsc::UnboundedReceiver<Barrier>,
 ) -> StreamExecutorResult<Message> {
     let msg = match dispatcher_msg {
+        DispatcherMessage::BarrierBatch(_) => unreachable!(""),
         DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
         DispatcherMessage::Barrier(barrier) => {
             let mut recv_barrier = barrier_rx

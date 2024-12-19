@@ -120,78 +120,84 @@ impl Execute for ReceiverExecutor {
                     .actor_input_buffer_blocking_duration_ns
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let msg: DispatcherMessage = msg?;
-                let mut msg = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
+                let msgs = msg.expand_barrier_batch();
+                for msg in msgs {
+                    let mut msg = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
 
-                match &mut msg {
-                    Message::Watermark(_) => {
-                        // Do nothing.
-                    }
-                    Message::Chunk(chunk) => {
-                        metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
-                    }
-                    Message::Barrier(barrier) => {
-                        tracing::debug!(
-                            target: "events::stream::barrier::path",
-                            actor_id = actor_id,
-                            "receiver receives barrier from path: {:?}",
-                            barrier.passed_actors
-                        );
-                        barrier.passed_actors.push(actor_id);
-
-                        if let Some(update) = barrier
-                            .as_update_merge(self.actor_context.id, self.upstream_fragment_id)
-                        {
-                            let new_upstream_fragment_id = update
-                                .new_upstream_fragment_id
-                                .unwrap_or(self.upstream_fragment_id);
-                            let added_upstream_actor_id = update.added_upstream_actor_id.clone();
-                            let removed_upstream_actor_id: Vec<_> =
-                                if update.new_upstream_fragment_id.is_some() {
-                                    vec![self.input.actor_id()]
-                                } else {
-                                    update.removed_upstream_actor_id.clone()
-                                };
-
-                            assert_eq!(
-                                removed_upstream_actor_id,
-                                vec![self.input.actor_id()],
-                                "the removed upstream actor should be the same as the current input"
-                            );
-                            let upstream_actor_id = *added_upstream_actor_id
-                                .iter()
-                                .exactly_one()
-                                .expect("receiver should have exactly one upstream");
-
-                            // Create new upstream receiver.
-                            let mut new_upstream = new_input(
-                                &self.context,
-                                self.metrics.clone(),
-                                self.actor_context.id,
-                                self.fragment_id,
-                                upstream_actor_id,
-                                new_upstream_fragment_id,
-                            )
-                            .context("failed to create upstream input")?;
-
-                            // Poll the first barrier from the new upstream. It must be the same as
-                            // the one we polled from original upstream.
-                            let new_barrier = expect_first_barrier(&mut new_upstream).await?;
-                            assert_equal_dispatcher_barrier(barrier, &new_barrier);
-
-                            // Replace the input.
-                            self.input = new_upstream;
-
-                            self.upstream_fragment_id = new_upstream_fragment_id;
-                            metrics = self.metrics.new_actor_input_metrics(
-                                actor_id,
-                                self.fragment_id,
-                                self.upstream_fragment_id,
-                            );
+                    match &mut msg {
+                        Message::BarrierBatch(_) => unreachable!(""),
+                        Message::Watermark(_) => {
+                            // Do nothing.
                         }
-                    }
-                };
+                        Message::Chunk(chunk) => {
+                            metrics.actor_in_record_cnt.inc_by(chunk.cardinality() as _);
+                        }
+                        Message::Barrier(barrier) => {
+                            tracing::debug!(
+                                target: "events::stream::barrier::path",
+                                actor_id = actor_id,
+                                "receiver receives barrier from path: {:?}",
+                                barrier.passed_actors
+                            );
+                            barrier.passed_actors.push(actor_id);
 
-                yield msg;
+                            if let Some(update) = barrier
+                                .as_update_merge(self.actor_context.id, self.upstream_fragment_id)
+                            {
+                                let new_upstream_fragment_id = update
+                                    .new_upstream_fragment_id
+                                    .unwrap_or(self.upstream_fragment_id);
+                                let added_upstream_actor_id =
+                                    update.added_upstream_actor_id.clone();
+                                let removed_upstream_actor_id: Vec<_> =
+                                    if update.new_upstream_fragment_id.is_some() {
+                                        vec![self.input.actor_id()]
+                                    } else {
+                                        update.removed_upstream_actor_id.clone()
+                                    };
+
+                                assert_eq!(
+                                    removed_upstream_actor_id,
+                                    vec![self.input.actor_id()],
+                                    "the removed upstream actor should be the same as the current input"
+                                );
+                                let upstream_actor_id = *added_upstream_actor_id
+                                    .iter()
+                                    .exactly_one()
+                                    .expect("receiver should have exactly one upstream");
+
+                                // Create new upstream receiver.
+                                let mut new_upstream = new_input(
+                                    &self.context,
+                                    self.metrics.clone(),
+                                    self.actor_context.id,
+                                    self.fragment_id,
+                                    upstream_actor_id,
+                                    new_upstream_fragment_id,
+                                )
+                                .context("failed to create upstream input")?;
+
+                                // Poll the first barrier from the new upstream. It must be the same as
+                                // the one we polled from original upstream.
+                                let new_barrier = expect_first_barrier(&mut new_upstream).await?;
+                                assert_equal_dispatcher_barrier(barrier, &new_barrier);
+
+                                // Replace the input.
+                                self.input = new_upstream;
+
+                                self.upstream_fragment_id = new_upstream_fragment_id;
+                                metrics = self.metrics.new_actor_input_metrics(
+                                    actor_id,
+                                    self.fragment_id,
+                                    self.upstream_fragment_id,
+                                );
+                            }
+                        }
+                    };
+
+                    yield msg;
+                }
+
                 start_time = Instant::now();
             }
         };

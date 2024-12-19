@@ -28,6 +28,7 @@ pub async fn schema_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
         let message = message?;
 
         match &message {
+            Message::BarrierBatch(_) => Ok(()),
             Message::Chunk(chunk) => risingwave_common::util::schema_check::schema_check(
                 info.schema.fields().iter().map(|f| &f.data_type),
                 chunk.columns(),

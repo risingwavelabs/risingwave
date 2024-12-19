@@ -58,6 +58,7 @@ impl RearrangedMessage {
 impl RearrangedMessage {
     fn rearranged_from(msg: Message) -> Self {
         match msg {
+            Message::BarrierBatch(_) => unreachable!(""),
             Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::RearrangedBarrier(barrier),
@@ -66,6 +67,7 @@ impl RearrangedMessage {
 
     fn phantom_from(msg: Message) -> Self {
         match msg {
+            Message::BarrierBatch(_) => unreachable!(""),
             Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::PhantomBarrier(barrier),

@@ -101,6 +101,7 @@ pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Ba
     #[for_await]
     for item in stream {
         match item? {
+            Message::BarrierBatch(_) => unreachable!(""),
             Message::Watermark(_) => {
                 // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
             }
@@ -138,6 +139,7 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
                     // left stream end, passthrough right chunks
                     while let Some(msg) = right.next().await {
                         match msg? {
+                            Message::BarrierBatch(_) => unreachable!(""),
                             w @ Message::Watermark(_) => yield Either::Left(w),
                             c @ Message::Chunk(_) => yield Either::Left(c),
                             Message::Barrier(_) => {
@@ -151,6 +153,7 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
                     // right stream end, passthrough left chunks
                     while let Some(msg) = left.next().await {
                         match msg? {
+                            Message::BarrierBatch(_) => unreachable!(""),
                             w @ Message::Watermark(_) => yield Either::Right(w),
                             c @ Message::Chunk(_) => yield Either::Right(c),
                             Message::Barrier(_) => {
@@ -161,6 +164,7 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
                     break 'outer;
                 }
                 future::Either::Left((Some(msg), _)) => match msg? {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     w @ Message::Watermark(_) => yield Either::Left(w),
                     c @ Message::Chunk(_) => yield Either::Left(c),
                     Message::Barrier(b) => {
@@ -169,6 +173,7 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
                     }
                 },
                 future::Either::Right((Some(msg), _)) => match msg? {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     w @ Message::Watermark(_) => yield Either::Right(w),
                     c @ Message::Chunk(_) => yield Either::Right(c),
                     Message::Barrier(b) => {
@@ -221,6 +226,8 @@ pub async fn stream_lookup_arrange_prev_epoch(stream: Executor, arrangement: Exe
 
         while let Some(item) = input.next().await {
             match item? {
+                Either::Left(Message::BarrierBatch(_)) => unreachable!(""),
+                Either::Right(Message::BarrierBatch(_)) => unreachable!(""),
                 Either::Left(Message::Chunk(msg)) => {
                     // As prev epoch is already available, we can directly forward messages from the
                     // stream side.
@@ -261,6 +268,7 @@ pub async fn stream_lookup_arrange_prev_epoch(stream: Executor, arrangement: Exe
                 .await
                 .context("unexpected close of barrier aligner")??
             {
+                Either::Left(Message::BarrierBatch(_)) => unreachable!(""),
                 Either::Left(Message::Watermark(_)) => {
                     // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                 }
@@ -309,6 +317,8 @@ pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Exe
                 .await
                 .context("unexpected close of barrier aligner")??
             {
+                Either::Left(Message::BarrierBatch(_)) => unreachable!(""),
+                Either::Right(Message::BarrierBatch(_)) => unreachable!(""),
                 Either::Left(Message::Chunk(msg)) => {
                     // Should wait until arrangement from this epoch is available.
                     stream_buf.push(msg);
@@ -344,6 +354,7 @@ pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Exe
                     .await
                     .context("unexpected close of barrier aligner")??
                 {
+                    Either::Left(Message::BarrierBatch(_)) => unreachable!(""),
                     Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
                     Either::Left(Message::Barrier(b)) => {
                         yield ArrangeMessage::Barrier(b);
@@ -367,6 +378,7 @@ pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Exe
                     .context("unexpected close of barrier aligner")??
                 {
                     Either::Left(_) => unreachable!(),
+                    Either::Right(Message::BarrierBatch(_)) => unreachable!(""),
                     Either::Right(Message::Chunk(chunk)) => {
                         arrange_buf.push(chunk);
                     }
