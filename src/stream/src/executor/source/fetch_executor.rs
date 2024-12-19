@@ -182,7 +182,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             source_desc.metrics.clone(),
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
-                rate_limit: self.rate_limit_rps,
+                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,

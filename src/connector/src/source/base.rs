@@ -142,17 +142,27 @@ pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
-    /// Rate limit of source
-    pub rate_limit: Option<u32>,
+    /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
+    pub split_txn: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
+
+impl SourceCtrlOpts {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        SourceCtrlOpts {
+            chunk_size: 256,
+            split_txn: false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SourceEnumeratorContext {
@@ -226,7 +236,7 @@ impl SourceContext {
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
-                rate_limit: None,
+                split_txn: false,
             },
             ConnectorProperties::default(),
             None,

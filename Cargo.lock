@@ -11148,6 +11148,7 @@ dependencies = [
  "serde_with 3.8.1",
  "serde_yaml",
  "simd-json",
+ "smallvec",
  "sqlx",
  "strum 0.26.3",
  "strum_macros 0.26.4",
