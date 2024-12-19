@@ -56,7 +56,9 @@ public class JDBCSinkFactory implements SinkFactory {
         Set<String> jdbcPks = new HashSet<>();
         Set<String> jdbcTableNames = new HashSet<>();
 
-        try (Connection conn = DriverManager.getConnection(jdbcUrl);
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                jdbcUrl, config.getUser(), config.getPassword());
                 ResultSet tableNamesResultSet =
                         conn.getMetaData().getTables(null, schemaName, "%", null);
                 ResultSet columnResultSet =
