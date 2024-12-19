@@ -291,6 +291,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         #[for_await]
         for msg in input {
             match msg? {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     assert!(
@@ -349,6 +350,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             #[for_await]
             for msg in input {
                 match msg? {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     Message::Watermark(w) => watermark = Some(w),
                     Message::Chunk(c) => {
                         chunk_buffer.push(c);
@@ -422,6 +424,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             #[for_await]
             for msg in input {
                 match msg? {
+                    Message::BarrierBatch(_) => unreachable!(""),
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any useless intermediate result (e.g. UPDATE

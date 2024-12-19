@@ -379,6 +379,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

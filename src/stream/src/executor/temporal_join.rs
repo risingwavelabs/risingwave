@@ -219,6 +219,7 @@ async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: Barr
                 return Err(StreamExecutorError::align_barrier(expected_barrier, b));
             }
             Message::Barrier(_) => return Ok(()),
+            Message::BarrierBatch(_) => unreachable!(""),
         }
     }
 }
@@ -236,6 +237,7 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
                 return Err(StreamExecutorError::align_barrier(expected_barrier, b));
             }
             Message::Barrier(_) => return Ok(()),
+            Message::BarrierBatch(_) => unreachable!(""),
         }
     }
 }
@@ -292,6 +294,8 @@ pub(super) async fn align_input<const YIELD_RIGHT_CHUNKS: bool>(left: Executor, 
                 Some(Either::Right(Ok(Message::Watermark(_)))) => {
                     // ignore right side watermark
                 }
+                Some(Either::Left(Ok(Message::BarrierBatch(_)))) => unreachable!(""),
+                Some(Either::Right(Ok(Message::BarrierBatch(_)))) => unreachable!(""),
                 None => return Ok(()),
             }
         }

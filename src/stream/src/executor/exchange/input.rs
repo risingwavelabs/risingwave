@@ -86,6 +86,7 @@ pub(crate) async fn process_dispatcher_msg(
     barrier_rx: &mut mpsc::UnboundedReceiver<Barrier>,
 ) -> StreamExecutorResult<Message> {
     let msg = match dispatcher_msg {
+        DispatcherMessage::BarrierBatch(_) => unreachable!(""),
         DispatcherMessage::Chunk(chunk) => Message::Chunk(chunk),
         DispatcherMessage::Barrier(barrier) => {
             let mut recv_barrier = barrier_rx
@@ -357,4 +358,66 @@ pub(crate) fn new_input(
     };
 
     Ok(input)
+}
+
+mod expanded_input {
+    use crate::executor::exchange::input::BoxedInput;
+    use crate::executor::prelude::{try_stream, StreamExt};
+    use crate::executor::{DispatcherMessage, StreamExecutorError};
+
+    pub(super) type ExpandedInputStreamInner = impl crate::executor::DispatcherMessageStream;
+
+    pub(super) fn run(input: BoxedInput) -> ExpandedInputStreamInner {
+        run_inner(input)
+    }
+
+    #[try_stream(ok = DispatcherMessage, error = StreamExecutorError)]
+    async fn run_inner(mut input: BoxedInput) {
+        while let Some(msg) = input.next().await {
+            let msg: DispatcherMessage = msg?;
+            match msg {
+                m @ DispatcherMessage::Chunk(_)
+                | m @ DispatcherMessage::Barrier(_)
+                | m @ DispatcherMessage::Watermark(_) => yield m,
+                DispatcherMessage::BarrierBatch(barriers) => {
+                    // tracing::info!(barrier_batch_size = barriers.len(), "!!!");
+                    for barrier in barriers {
+                        yield DispatcherMessage::Barrier(barrier);
+                    }
+                }
+            }
+        }
+    }
+}
+
+use expanded_input::ExpandedInputStreamInner;
+impl ExpandedInput {
+    pub fn new(input: BoxedInput) -> Self {
+        Self {
+            actor_id: input.actor_id(),
+            inner: expanded_input::run(input),
+        }
+    }
+}
+
+#[pin_project]
+pub struct ExpandedInput {
+    #[pin]
+    inner: ExpandedInputStreamInner,
+
+    actor_id: ActorId,
+}
+
+impl Input for ExpandedInput {
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
+    }
+}
+
+impl Stream for ExpandedInput {
+    type Item = DispatcherMessageStreamItem;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
+    }
 }

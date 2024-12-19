@@ -260,6 +260,7 @@ impl Inner {
                         yield Message::Chunk(chunk);
                     }
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

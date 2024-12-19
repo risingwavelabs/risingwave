@@ -696,6 +696,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

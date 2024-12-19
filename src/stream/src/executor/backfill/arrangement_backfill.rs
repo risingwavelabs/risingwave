@@ -266,6 +266,7 @@ where
                                     Message::Watermark(_) => {
                                         // Ignore watermark during backfill.
                                     }
+                                    Message::BarrierBatch(_) => unreachable!(""),
                                 }
                             }
                             // Snapshot read

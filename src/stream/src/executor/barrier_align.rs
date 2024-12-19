@@ -84,6 +84,7 @@ pub async fn barrier_align(
                         Message::Barrier(_) => {
                             bail!("right barrier received while left stream end");
                         }
+                        Message::BarrierBatch(_) => unreachable!(""),
                     }
                 }
                 break;
@@ -99,6 +100,7 @@ pub async fn barrier_align(
                         Message::Barrier(_) => {
                             bail!("left barrier received while right stream end");
                         }
+                        Message::BarrierBatch(_) => unreachable!(""),
                     }
                 }
                 break;
@@ -124,10 +126,13 @@ pub async fn barrier_align(
                                 .inc_by(start_time.elapsed().as_nanos() as u64);
                             break;
                         }
+                        Message::BarrierBatch(_) => unreachable!(""),
                     }
                 },
+                Message::BarrierBatch(_) => unreachable!(""),
             },
             Either::Right((Some(msg), _)) => match msg? {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(watermark) => yield AlignedMessage::WatermarkRight(watermark),
                 Message::Chunk(chunk) => yield AlignedMessage::Right(chunk),
                 Message::Barrier(_) => loop {
@@ -138,6 +143,7 @@ pub async fn barrier_align(
                         .await
                         .context("failed to poll left message, stream closed unexpectedly")??
                     {
+                        Message::BarrierBatch(_) => unreachable!(""),
                         Message::Watermark(watermark) => {
                             yield AlignedMessage::WatermarkLeft(watermark)
                         }

@@ -69,6 +69,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
             self.cache.evict();
 
             match msg? {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Chunk(chunk) => {
                     // Append-only dedup executor only receives INSERT messages.
                     debug_assert!(chunk.ops().iter().all(|&op| op == Op::Insert));

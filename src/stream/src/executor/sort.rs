@@ -136,6 +136,7 @@ impl<S: StateStore> SortExecutor<S> {
 
                     yield Message::Barrier(barrier);
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

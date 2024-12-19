@@ -680,6 +680,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Message::Watermark(_) => {
                                 // Ignore watermark during backfill.
                             }
+                            Message::BarrierBatch(_) => unreachable!(""),
                         }
                     }
                     // backfill
@@ -784,6 +785,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 Message::Watermark(watermark) => {
                     yield Message::Watermark(watermark);
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

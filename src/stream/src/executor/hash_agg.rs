@@ -678,6 +678,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     yield Message::Barrier(barrier);
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

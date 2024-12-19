@@ -210,6 +210,7 @@ impl MergeExecutor {
         metrics: &StreamingMetrics,
         actor_context: &ActorContext,
     ) -> SelectReceivers {
+        use crate::executor::exchange::input::{ExpandedInput, Input};
         let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
             Some(
                 metrics
@@ -223,6 +224,10 @@ impl MergeExecutor {
             None
         };
 
+        let upstreams = upstreams
+            .into_iter()
+            .map(|input| ExpandedInput::new(input).boxed_input())
+            .collect();
         // Futures of all active upstreams.
         SelectReceivers::new(
             actor_context.id,
@@ -252,8 +257,8 @@ impl MergeExecutor {
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             let msg: DispatcherMessage = msg?;
             let mut msg: Message = process_dispatcher_msg(msg, &mut self.barrier_rx).await?;
-
             match &mut msg {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(_) => {
                     // Do nothing.
                 }
@@ -424,6 +429,7 @@ impl Stream for SelectReceivers {
                 Some((Some(Ok(message)), remaining)) => {
                     let actor_id = remaining.actor_id();
                     match message {
+                        DispatcherMessage::BarrierBatch(_) => unreachable!(""),
                         DispatcherMessage::Chunk(chunk) => {
                             // Continue polling this upstream by pushing it back to `active`.
                             self.active.push(remaining.into_future());

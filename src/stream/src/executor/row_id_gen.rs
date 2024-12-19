@@ -110,6 +110,7 @@ impl RowIdGenExecutor {
                     yield Message::Barrier(barrier);
                 }
                 Message::Watermark(watermark) => yield Message::Watermark(watermark),
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

@@ -105,6 +105,7 @@ impl LookupUnionExecutor {
                             }
                             break; // move to the next input
                         }
+                        Message::BarrierBatch(_) => unreachable!(""),
                     }
                 }
             }

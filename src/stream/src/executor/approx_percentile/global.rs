@@ -61,6 +61,7 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         #[for_await]
         for message in input_stream {
             match message? {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Chunk(chunk) => {
                     state.apply_chunk(chunk)?;
                 }

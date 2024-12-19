@@ -338,7 +338,8 @@ profile:
       - use: compute-node
       - use: frontend
 
-  meta-1cn-1fe-pg-backend:
+  kkk:
+    config-path: src/config/example.toml
     steps:
       - use: minio
       - use: postgres
@@ -352,7 +353,24 @@ profile:
         meta-backend: postgres
       - use: compactor
       - use: compute-node
+        port: 5686
+        exporter-port: 1221
+        parallelism: 48
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        parallelism: 48
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        parallelism: 48
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        parallelism: 48
       - use: frontend
+      - use: prometheus
+      - use: grafana
 
   meta-1cn-1fe-pg-backend-with-recovery:
     config-path: src/config/ci-recovery.toml

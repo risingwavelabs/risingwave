@@ -68,6 +68,7 @@ impl StatelessSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::BarrierBatch(_) => unreachable!(""),
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&agg_calls, &aggs, &mut states, &chunk).await?;

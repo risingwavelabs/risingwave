@@ -134,6 +134,7 @@ impl Sender {
             }
             Message::Barrier(_) => Some(permits::Value::Barrier(1)),
             Message::Watermark(_) => None,
+            Message::BarrierBatch(_) => Some(permits::Value::Barrier(1)), // todo!("WIP")
         };
 
         if let Some(permits) = &permits {

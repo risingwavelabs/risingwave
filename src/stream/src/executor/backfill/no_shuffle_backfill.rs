@@ -247,6 +247,7 @@ where
                             // Upstream
                             Either::Left(msg) => {
                                 match msg? {
+                                    Message::BarrierBatch(_) => unreachable!(""),
                                     Message::Barrier(barrier) => {
                                         // We have to process barrier outside of the loop.
                                         // This is because the backfill stream holds a mutable

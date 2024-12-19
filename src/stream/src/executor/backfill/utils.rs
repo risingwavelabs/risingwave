@@ -462,6 +462,7 @@ fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option
 
 pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Option<Message> {
     match msg {
+        Message::BarrierBatch(_) => Some(msg),
         Message::Barrier(_) => Some(msg),
         Message::Watermark(watermark) => {
             mapping_watermark(watermark, upstream_indices).map(Message::Watermark)

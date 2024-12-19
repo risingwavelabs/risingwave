@@ -219,6 +219,7 @@ impl HopWindowExecutor {
                         yield Message::Watermark(w.with_idx(out_idx));
                     }
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             };
         }
     }

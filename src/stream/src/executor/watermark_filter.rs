@@ -312,6 +312,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                     }
                 }
+                Message::BarrierBatch(_) => unreachable!(""),
             }
         }
     }

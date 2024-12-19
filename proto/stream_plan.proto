@@ -167,11 +167,16 @@ message Watermark {
   data.Datum val = 3;
 }
 
+message BarrierBatch {
+  repeated Barrier barriers = 1;
+}
+
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
     Watermark watermark = 3;
+    BarrierBatch barrier_batch = 4;
   }
 }
 
