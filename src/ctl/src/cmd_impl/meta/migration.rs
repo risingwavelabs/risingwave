@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use chrono::DateTime;
 use etcd_client::ConnectOptions;
 use itertools::Itertools;
@@ -108,9 +108,8 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     let meta_store_sql = SqlMetaStore::new(conn);
 
     if force_clean {
-        Migrator::down(&meta_store_sql.conn, None)
-            .await
-            .expect("failed to clean sql backend");
+        reset_target_database(&meta_store_sql).await?;
+        tracing::info!("target database reset");
     }
     Migrator::up(&meta_store_sql.conn, None)
         .await
@@ -998,6 +997,58 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .await?;
         }
         DbBackend::Sqlite => {}
+    }
+
+    Ok(())
+}
+
+async fn reset_target_database(store: &SqlMetaStore) -> anyhow::Result<()> {
+    match store.conn.get_database_backend() {
+        DbBackend::Postgres => {
+            store
+                .conn
+                .execute_unprepared(
+                    "DROP SCHEMA IF EXISTS \"public\" CASCADE; CREATE SCHEMA \"public\";",
+                )
+                .await?;
+        }
+        DbBackend::MySql => {
+            let res = store
+                .conn
+                .query_one(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    "SELECT DATABASE()",
+                ))
+                .await?
+                .expect("current database should exist");
+            let db_name: String = res.try_get_by(0)?;
+
+            store
+                .conn
+                .execute_unprepared(&format!(
+                    "DROP DATABASE IF EXISTS {}; CREATE DATABASE {}; USE {};",
+                    db_name, db_name, db_name
+                ))
+                .await?;
+        }
+        DbBackend::Sqlite => {
+            let res = store
+                .conn
+                .query_one(Statement::from_string(
+                    DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table';",
+                ))
+                .await?
+                .expect("count should exist");
+            let count: i64 = res.try_get_by(0)?;
+            if count != 0 {
+                // there's no such command to reset the sqlite database,
+                // notify the user to change another file.
+                return Err(anyhow!(
+                    "sqlite file is not empty, please change another file or remove it."
+                ));
+            }
+        }
     }
 
     Ok(())
