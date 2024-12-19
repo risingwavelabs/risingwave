@@ -41,12 +41,20 @@ import {
   latencyToColor,
 } from "./utils/backPressure"
 
+// Size of each relation box in pixels
 export const boxWidth = 150
 export const boxHeight = 45
+
+// Radius of the icon circle in pixels
 const iconRadius = 12
 
+// Horizontal spacing between layers in the graph in pixels
 const layerMargin = 80
+
+// Vertical spacing between rows in the graph in pixels
 const rowMargin = 30
+
+// Margin around the entire graph layout in pixels
 const layoutMargin = 30
 
 function boundBox(relationPosition: RelationPointPosition[]): {
@@ -199,25 +207,21 @@ export default function RelationGraph({
           // Remove existing tooltip if any
           d3.selectAll(".tooltip").remove()
 
-          if (backPressures) {
-            const value = backPressures.get(`${d.target}_${d.source}`)
-            if (value) {
-              // Create new tooltip
-              d3.select("body")
-                .append("div")
-                .attr("class", "tooltip")
-                .style("position", "absolute")
-                .style("background", "white")
-                .style("padding", "10px")
-                .style("border", "1px solid #ddd")
-                .style("border-radius", "4px")
-                .style("pointer-events", "none")
-                .style("left", event.pageX + 10 + "px")
-                .style("top", event.pageY + 10 + "px")
-                .style("font-size", "12px")
-                .html(`BP: ${value.toFixed(2)}%`)
-            }
-          }
+          // Create new tooltip
+          const tooltipText = `<b>Relation ${d.source} → ${d.target}</b><br>Backpressure: ${backPressures?.get(`${d.target}_${d.source}`) ?? "N/A"}`
+          d3.select("body")
+            .append("div")
+            .attr("class", "tooltip")
+            .style("position", "absolute")
+            .style("background", "white")
+            .style("padding", "10px")
+            .style("border", "1px solid #ddd")
+            .style("border-radius", "4px")
+            .style("pointer-events", "none")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+            .style("font-size", "12px")
+            .html(tooltipText)
         })
         .on("mousemove", (event) => {
           d3.select(".tooltip")

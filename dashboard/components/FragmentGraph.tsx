@@ -120,7 +120,7 @@ export default function FragmentGraph({
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
 
     // Layer 1: Keep existing d3-hierarchy layout for actors within fragments
-    const layoutFragmentResult = new Map<string, any>()
+    const layoutFragmentResult = new Map<string, FragmentLayout>()
     const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
@@ -140,7 +140,7 @@ export default function FragmentGraph({
         width,
         height,
         actorIds: fragmentRoot.data.actorIds ?? [],
-      })
+      } as FragmentLayout)
       includedFragmentIds.add(fragmentId)
     }
 
@@ -162,11 +162,7 @@ export default function FragmentGraph({
     // Add fragment nodes
     fragmentDependencyDag.forEach(({ id, parentIds }) => {
       const fragmentLayout = layoutFragmentResult.get(id)!
-      g.setNode(id, {
-        width: fragmentLayout.width,
-        height: fragmentLayout.height,
-        ...fragmentLayout,
-      })
+      g.setNode(id, fragmentLayout)
     })
 
     // Add fragment edges
@@ -181,7 +177,7 @@ export default function FragmentGraph({
 
     // Convert to final format
     const layoutResult = g.nodes().map((id) => {
-      const node = g.node(id)
+      const node = g.node(id) as FragmentLayout
       return {
         id,
         x: node.x - node.width / 2,
@@ -190,7 +186,7 @@ export default function FragmentGraph({
         height: node.height,
         layoutRoot: node.layoutRoot,
         actorIds: node.actorIds,
-      }
+      } as FragmentLayout
     })
 
     // Get edges with points
@@ -513,25 +509,21 @@ export default function FragmentGraph({
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
 
-            if (backPressures) {
-              const value = backPressures.get(`${d.target}_${d.source}`)
-              if (value) {
-                // Create new tooltip
-                d3.select("body")
-                  .append("div")
-                  .attr("class", "tooltip")
-                  .style("position", "absolute")
-                  .style("background", "white")
-                  .style("padding", "10px")
-                  .style("border", "1px solid #ddd")
-                  .style("border-radius", "4px")
-                  .style("pointer-events", "none")
-                  .style("left", event.pageX + 10 + "px")
-                  .style("top", event.pageY + 10 + "px")
-                  .style("font-size", "12px")
-                  .html(`BP: ${value.toFixed(2)}%`)
-              }
-            }
+            // Create new tooltip
+            const tooltipText = `<b>Fragment ${d.source} → ${d.target}</b><br>Backpressure: ${backPressures?.get(`${d.target}_${d.source}`) ?? "N/A"}`
+            d3.select("body")
+              .append("div")
+              .attr("class", "tooltip")
+              .style("position", "absolute")
+              .style("background", "white")
+              .style("padding", "10px")
+              .style("border", "1px solid #ddd")
+              .style("border-radius", "4px")
+              .style("pointer-events", "none")
+              .style("left", event.pageX + 10 + "px")
+              .style("top", event.pageY + 10 + "px")
+              .style("font-size", "12px")
+              .html(tooltipText)
           })
           .on("mousemove", (event) => {
             d3.select(".tooltip")
