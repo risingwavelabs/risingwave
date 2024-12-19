@@ -25,3 +25,4 @@ mod singleton_migration;
 mod sink;
 mod streaming_parallelism;
 mod table;
+mod resource_group;
