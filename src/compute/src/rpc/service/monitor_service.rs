@@ -361,7 +361,6 @@ impl MonitorService for MonitorServiceImpl {
             .next()
             .unwrap()
             .take_metric();
-        dbg!(&mview_current_epoch);
         for m in &mview_current_epoch {
             let table_id = get_label(m, "table_id").unwrap();
             let epoch = m.get_gauge().get_value() as u64;
