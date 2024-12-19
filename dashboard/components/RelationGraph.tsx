@@ -17,6 +17,7 @@
 
 import { theme } from "@chakra-ui/react"
 import * as d3 from "d3"
+import * as dagre from "dagre"
 import { useCallback, useEffect, useRef } from "react"
 import {
   Relation,
@@ -67,7 +68,7 @@ export default function RelationGraph({
   backPressures,
   relationStats,
 }: {
-  nodes: RelationPoint[]
+  nodes: RelationPoint[] // rename to RelationNode
   selectedId: string | undefined
   setSelectedId: (id: string) => void
   backPressures?: Map<string, number> // relationId-relationId->back_pressure_rate})
@@ -78,32 +79,74 @@ export default function RelationGraph({
   const svgRef = useRef<SVGSVGElement>(null)
 
   const layoutMapCallback = useCallback(() => {
-    const layoutMap = layoutItem(nodes, layerMargin, rowMargin).map(
-      ({ x, y, ...data }) =>
-        ({
-          x: x + layoutMargin,
-          y: y + layoutMargin,
-          ...data,
-        } as RelationPointPosition)
-    )
-    const links = generateRelationEdges(layoutMap)
+    // Create a new directed graph
+    const g = new dagre.graphlib.Graph()
+
+    // Set graph direction and spacing
+    g.setGraph({
+      rankdir: 'LR',
+      nodesep: rowMargin,
+      ranksep: layerMargin,
+      marginx: layoutMargin,
+      marginy: layoutMargin
+    })
+
+    // Default to assigning empty object as edge label
+    g.setDefaultEdgeLabel(() => ({}))
+
+    // Add nodes
+    nodes.forEach(node => {
+      g.setNode(node.id, node)
+    })
+
+    // Add edges
+    nodes.forEach(node => {
+      node.parentIds?.forEach(parentId => {
+        g.setEdge(parentId, node.id) // Here the "parent" means the upstream relation
+      })
+    })
+
+    // Perform layout
+    dagre.layout(g)
+
+    // Convert to expected format
+    const layoutMap = g.nodes().map(id => {
+      const node = g.node(id)
+      return {
+        ...node,
+        x: node.x - boxWidth/2, // Adjust for center-based coordinates
+        y: node.y - boxHeight/2,
+      } as RelationPointPosition
+    })
+
+    const links = g.edges().map(e => {
+      const edge = g.edge(e)
+      return {
+        source: e.v,
+        target: e.w,
+        points: edge.points || []
+      }
+    })
+
+    // Calculate bounds
     const { width, height } = boundBox(layoutMap)
+
     return {
       layoutMap,
       links,
-      width: width + rowMargin + layoutMargin * 2,
-      height: height + layerMargin + layoutMargin * 2,
+      width,
+      height
     }
   }, [nodes])
 
-  const { layoutMap, width, height, links } = layoutMapCallback()
+  const { layoutMap, links, width, height } = layoutMapCallback()
 
   useEffect(() => {
     const now_ms = Date.now()
     const svgNode = svgRef.current
     const svgSelection = d3.select(svgNode)
 
-    const curveStyle = d3.curveMonotoneY
+    const curveStyle = d3.curveBasis
 
     const line = d3
       .line<Position>()
