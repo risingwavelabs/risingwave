@@ -353,7 +353,7 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-/// Stream of [`SourceMessage`].
+/// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
 pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.

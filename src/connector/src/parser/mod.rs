@@ -202,17 +202,17 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a stream of vectors of `SourceMessage` into a stream of [`StreamChunk`].
+    /// Parse a `SourceMessage` stream into a [`StreamChunk`] stream.
     ///
     /// # Arguments
     ///
-    /// - `msg_stream`: A stream of vectors of `SourceMessage`.
+    /// - `msg_stream`: A stream of batches of `SourceMessage`.
     ///
     /// # Returns
     ///
-    /// A [`ChunkSourceStream`] which is a stream of parsed chunks. Each of the parsed chunks
-    /// are guaranteed to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless
-    /// there's a large transaction and `source_ctrl_opts.split_txn` is false.
+    /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
+    /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
+    /// large transaction and `source_ctrl_opts.split_txn` is false.
     pub fn into_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
