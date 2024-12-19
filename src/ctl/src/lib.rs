@@ -514,6 +514,14 @@ enum MetaCommands {
         #[clap(short = 'f', long, default_value_t = false)]
         force_clean: bool,
     },
+
+    /// Performing graph check for scaling.
+    #[clap(verbatim_doc_comment)]
+    GraphCheck {
+        /// SQL endpoint
+        #[clap(long, required = true)]
+        endpoint: String,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -850,6 +858,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
+        Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
+            cmd_impl::meta::graph_check(endpoint).await?
+        }
         Commands::Meta(MetaCommands::Migration {
             etcd_endpoints,
             etcd_user_password,
@@ -881,6 +892,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Heap { dir }) => {
             cmd_impl::profile::heap_profile(context, dir).await?
         }
+
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
                 .await?
