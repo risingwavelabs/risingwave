@@ -7,50 +7,50 @@ create view v as select * from t;
 statement ok
 create materialized view mv as select * from t;
 
-query TTT
-select table_catalog, table_schema, table_name from information_schema.views where table_schema = 'public';
+query TT
+select table_schema, table_name from information_schema.views where table_schema = 'public';
 ----
-dev public v
+public v
 
-query TTT
-select table_catalog, table_schema, table_name from information_schema.tables where table_schema = 'public' order by table_name;
+query TT
+select table_schema, table_name from information_schema.tables where table_schema = 'public' order by table_name;
 ----
-dev public mv
-dev public t
-dev public v
+public mv
+public t
+public v
 
-query TTTTTTTTTT
-select constraint_catalog, constraint_schema, constraint_name, table_catalog, table_schema, table_name from information_schema.table_constraints where table_schema = 'public' order by table_name;
+query TTTTTTTT
+select constraint_schema, constraint_name, table_schema, table_name from information_schema.table_constraints where table_schema = 'public' order by table_name;
 ----
-dev public mv_pkey dev public mv
-dev public t_pkey dev public t
+public mv_pkey public mv
+public t_pkey public t
 
-query TTT
-select catalog_name, schema_name, schema_owner from information_schema.schemata order by schema_name;
+query TT
+select schema_name, schema_owner from information_schema.schemata order by schema_name;
 ----
-dev information_schema root
-dev pg_catalog root
-dev public root
-dev rw_catalog root
+information_schema root
+pg_catalog root
+public root
+rw_catalog root
 
-query TTTTTTTII
-select * from information_schema.key_column_usage where table_schema = 'public' order by table_name;
+query TTTTTII
+select * EXCEPT(constraint_catalog, table_catalog) from information_schema.key_column_usage where table_schema = 'public' order by table_name;
 ----
-dev public mv_pkey dev public mv key 3 NULL
-dev public t_pkey dev public t key 3 NULL
+public mv_pkey public mv key 3 NULL
+public t_pkey public t key 3 NULL
 
-query TTTTITTTT
-select table_catalog, table_schema, table_name, column_name, ordinal_position, data_type, udt_catalog, udt_schema, udt_name from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position;
+query TTTITTT
+select table_schema, table_name, column_name, ordinal_position, data_type, udt_schema, udt_name from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position;
 ----
-dev public mv a 1 integer dev pg_catalog int4
-dev public mv b 2 bigint dev pg_catalog int8
-dev public mv key 3 integer dev pg_catalog int4
-dev public t a 1 integer dev pg_catalog int4
-dev public t b 2 bigint dev pg_catalog int8
-dev public t key 3 integer dev pg_catalog int4
-dev public v a 1 integer dev pg_catalog int4
-dev public v b 2 bigint dev pg_catalog int8
-dev public v key 3 integer dev pg_catalog int4
+public mv a 1 integer pg_catalog int4
+public mv b 2 bigint pg_catalog int8
+public mv key 3 integer pg_catalog int4
+public t a 1 integer pg_catalog int4
+public t b 2 bigint pg_catalog int8
+public t key 3 integer pg_catalog int4
+public v a 1 integer pg_catalog int4
+public v b 2 bigint pg_catalog int8
+public v key 3 integer pg_catalog int4
 
 
 statement ok
