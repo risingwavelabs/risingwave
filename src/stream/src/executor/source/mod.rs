@@ -148,24 +148,25 @@ pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Opti
         }
 
         let limiter = limiter.as_ref().unwrap();
-        let limit = rate_limit_rps.unwrap() as usize;
+        let burst = rate_limit_rps.unwrap() as usize;
 
-        let required_permits = compute_rate_limit_chunk_permits(&chunk, limit);
-        if required_permits <= limit {
-            let n = NonZeroU32::new(required_permits as u32).unwrap();
-            // `InsufficientCapacity` should never happen because we have check the cardinality
-            limiter.until_n_ready(n).await.unwrap();
-            yield chunk;
-        } else {
-            // Cut the chunk into smaller chunks
-            for chunk in chunk.split(limit) {
-                let n = NonZeroU32::new(compute_rate_limit_chunk_permits(&chunk, limit) as u32)
-                    .unwrap();
-                // chunks split should have effective chunk size <= limit
-                limiter.until_n_ready(n).await.unwrap();
-                yield chunk;
-            }
+        let mut required_permits = compute_rate_limit_chunk_permits(&chunk, burst);
+        if required_permits > burst {
+            // This should not happen after https://github.com/risingwavelabs/risingwave/pull/19698.
+            // But if it does happen, let's don't panic and just log an error.
+            tracing::error!(
+                chunk_size,
+                required_permits,
+                burst,
+                "unexpected large chunk size"
+            );
+            required_permits = burst;
         }
+
+        let n = NonZeroU32::new(required_permits as u32).unwrap();
+        // `InsufficientCapacity` should never happen because we have check the cardinality
+        limiter.until_n_ready(n).await.unwrap();
+        yield chunk;
     }
 }
 
