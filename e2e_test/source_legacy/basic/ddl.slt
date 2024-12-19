@@ -27,7 +27,7 @@ create source s(x int) WITH(unknown_field='1', connector='kafka') FORMAT PLAIN E
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSource`) failed: Internal error
   2: failed to create source worker
   3: failed to parse json
   4: missing field `topic`
@@ -39,7 +39,7 @@ create source s(x int) WITH(unknown_field='1', connector='kafka', properties.boo
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSource`) failed: Internal error
   2: failed to create source worker
   3: Unknown fields in the WITH clause: {"unknown_field": "1"}
 
