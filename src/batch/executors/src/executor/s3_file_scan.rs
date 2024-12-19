@@ -16,7 +16,9 @@ use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_connector::source::iceberg::{new_s3_operator, read_parquet_file};
+use risingwave_connector::source::iceberg::{
+    extract_bucket_and_file_name, new_s3_operator, read_parquet_file,
+};
 use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::file_scan_node::StorageType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -82,13 +84,15 @@ impl S3FileScanExecutor {
     async fn do_execute(self: Box<Self>) {
         assert_eq!(self.file_format, FileFormat::Parquet);
         for file in self.file_location {
+            let (bucket, file_name) = extract_bucket_and_file_name(&file)?;
             let op = new_s3_operator(
                 self.s3_region.clone(),
                 self.s3_access_key.clone(),
                 self.s3_secret_key.clone(),
-                file.clone(),
+                bucket.clone(),
             )?;
-            let chunk_stream = read_parquet_file(op, file, None, None, self.batch_size, 0).await?;
+            let chunk_stream =
+                read_parquet_file(op, file_name, None, None, self.batch_size, 0).await?;
             #[for_await]
             for stream_chunk in chunk_stream {
                 let stream_chunk = stream_chunk?;
