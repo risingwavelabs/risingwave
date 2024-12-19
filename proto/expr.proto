@@ -590,6 +590,7 @@ message WindowFunction {
   repeated InputRef args = 3;
   data.DataType return_type = 4;
   WindowFrame frame = 5;
+  bool ignore_nulls = 6;
 }
 
 // Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,

@@ -1345,3 +1345,97 @@
     Caused by these errors (recent errors listed first):
       1: Expr error
       2: for session order column of type `timestamptz`, gap should not have non-zero `month` and `day`
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      first_value(val ignore nulls) over (partition by 1::int order by ts)
+    from t;
+  logical_plan: |-
+    LogicalProject { exprs: [first_value] }
+    └─LogicalOverWindow { window_functions: [first_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─LogicalProject { exprs: [t.ts, t.val, t._row_id, t._rw_timestamp, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.ts, t.val, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [first_value] }
+      └─BatchOverWindow { window_functions: [first_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [1:Int32 ASC, t.ts ASC], dist: HashShard(1:Int32) }
+          └─BatchSort { order: [1:Int32 ASC, t.ts ASC] }
+            └─BatchProject { exprs: [t.ts, t.val, 1:Int32] }
+              └─BatchScan { table: t, columns: [t.ts, t.val], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [first_value, t._row_id(hidden), 1:Int32(hidden)], stream_key: [t._row_id, 1:Int32], pk_columns: [t._row_id, 1:Int32], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [first_value, t._row_id, 1:Int32] }
+      └─StreamOverWindow { window_functions: [first_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamExchange { dist: HashShard(1:Int32) }
+          └─StreamProject { exprs: [t.ts, t.val, 1:Int32, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      last_value(val ignore nulls) over (partition by 1::int order by ts rows between 1 preceding and 1 following)
+    from t;
+  logical_plan: |-
+    LogicalProject { exprs: [last_value] }
+    └─LogicalOverWindow { window_functions: [last_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)] }
+      └─LogicalProject { exprs: [t.ts, t.val, t._row_id, t._rw_timestamp, 1:Int32] }
+        └─LogicalScan { table: t, columns: [t.ts, t.val, t._row_id, t._rw_timestamp] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [last_value] }
+      └─BatchOverWindow { window_functions: [last_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)] }
+        └─BatchExchange { order: [1:Int32 ASC, t.ts ASC], dist: HashShard(1:Int32) }
+          └─BatchSort { order: [1:Int32 ASC, t.ts ASC] }
+            └─BatchProject { exprs: [t.ts, t.val, 1:Int32] }
+              └─BatchScan { table: t, columns: [t.ts, t.val], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [last_value, t._row_id(hidden), 1:Int32(hidden)], stream_key: [t._row_id, 1:Int32], pk_columns: [t._row_id, 1:Int32], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [last_value, t._row_id, 1:Int32] }
+      └─StreamOverWindow { window_functions: [last_value(t.val IGNORE NULLS) OVER(PARTITION BY 1:Int32 ORDER BY t.ts ASC ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING)] }
+        └─StreamExchange { dist: HashShard(1:Int32) }
+          └─StreamProject { exprs: [t.ts, t.val, 1:Int32, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.ts, t.val, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      first_value(val) filter (where val is not null) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: first_value(val) FILTER (WHERE val IS NOT NULL) OVER (PARTITION BY CAST(1 AS INT) ORDER BY ts)
+
+    Caused by:
+      Feature is not yet implemented: `FILTER` is not supported yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      last_value(val) filter (where val is not null) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: last_value(val) FILTER (WHERE val IS NOT NULL) OVER (PARTITION BY CAST(1 AS INT) ORDER BY ts)
+
+    Caused by:
+      Feature is not yet implemented: `FILTER` is not supported yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      lag(val ignore nulls) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: lag(val IGNORE NULLS) OVER (PARTITION BY CAST(1 AS INT) ORDER BY ts)
+
+    Caused by:
+      Feature is not yet implemented: `IGNORE NULLS` is not supported for `lag` yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      lead(val ignore nulls) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  binder_error: |
+    Failed to bind expression: lead(val IGNORE NULLS) OVER (PARTITION BY CAST(1 AS INT) ORDER BY ts)
+
+    Caused by:
+      Feature is not yet implemented: `IGNORE NULLS` is not supported for `lead` yet
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

@@ -43,6 +43,7 @@ where
 {
     agg_impl: AggImpl,
     arg_data_types: Vec<DataType>,
+    ignore_nulls: bool,
     buffer: WindowBuffer<W>,
     buffer_heap_size: KvSize,
 }
@@ -97,6 +98,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         FrameBounds::Rows(frame_bounds) => Box::new(AggregateState {
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<RowsWindow<StateKey, StateValue>>::new(
                 RowsWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -107,6 +109,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         FrameBounds::Range(frame_bounds) => Box::new(AggregateState {
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<RangeWindow<StateValue>>::new(
                 RangeWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -117,6 +120,7 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         FrameBounds::Session(frame_bounds) => Box::new(AggregateState {
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<SessionWindow<StateValue>>::new(
                 SessionWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -194,14 +198,31 @@ where
                 wrapper.update(state, self.buffer.consume_curr_window_values_delta())
             }
             AggImpl::Shortcut(shortcut) => match shortcut {
-                Shortcut::FirstValue => Ok(self
-                    .buffer
-                    .curr_window_first_value()
-                    .and_then(|args| args[0].clone())),
-                Shortcut::LastValue => Ok(self
-                    .buffer
-                    .curr_window_last_value()
-                    .and_then(|args| args[0].clone())),
+                Shortcut::FirstValue => Ok(if !self.ignore_nulls {
+                    // no `IGNORE NULLS`
+                    self.buffer
+                        .curr_window_values()
+                        .next()
+                        .and_then(|args| args[0].clone())
+                } else {
+                    // filter out NULLs
+                    self.buffer
+                        .curr_window_values()
+                        .find(|args| args[0].is_some())
+                        .and_then(|args| args[0].clone())
+                }),
+                Shortcut::LastValue => Ok(if !self.ignore_nulls {
+                    self.buffer
+                        .curr_window_values()
+                        .next_back()
+                        .and_then(|args| args[0].clone())
+                } else {
+                    self.buffer
+                        .curr_window_values()
+                        .rev()
+                        .find(|args| args[0].is_some())
+                        .and_then(|args| args[0].clone())
+                }),
             },
         }?;
         let evict_hint = self.slide_inner();
