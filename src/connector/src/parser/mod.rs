@@ -85,7 +85,7 @@ pub use unified::{AccessError, AccessResult};
 /// Extracted from the `SourceMessage`.
 #[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
-    meta: &'a SourceMeta,
+    source_meta: &'a SourceMeta,
     split_id: &'a str,
     offset: &'a str,
 }
@@ -102,7 +102,7 @@ impl<'a> MessageMeta<'a> {
             // Extract the offset from the meta data.
             SourceColumnType::Offset => Some(self.offset.into()),
             // Extract custom meta data per connector.
-            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -110,7 +110,7 @@ impl<'a> MessageMeta<'a> {
                 );
                 kafka_meta.extract_timestamp()
             }
-            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     TABLE_NAME_COLUMN_NAME,
@@ -266,7 +266,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 "handling a heartbeat message"
             );
             chunk_builder.heartbeat(MessageMeta {
-                meta: &heartbeat_msg.meta,
+                source_meta: &heartbeat_msg.meta,
                 split_id: &heartbeat_msg.split_id,
                 offset: &heartbeat_msg.offset,
             });
@@ -312,7 +312,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     msg.key,
                     msg.payload,
                     chunk_builder.row_writer().with_meta(MessageMeta {
-                        meta: &msg.meta,
+                        source_meta: &msg.meta,
                         split_id: &msg.split_id,
                         offset: &msg.offset,
                     }),
