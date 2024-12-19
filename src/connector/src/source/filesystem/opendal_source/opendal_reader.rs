@@ -109,7 +109,7 @@ impl<Src: OpendalSource> OpendalReader<Src> {
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
                         .await?;
-                chunk_stream = Box::pin(parser.into_stream(line_stream));
+                chunk_stream = Box::pin(parser.parse_stream(line_stream));
             }
 
             #[for_await]

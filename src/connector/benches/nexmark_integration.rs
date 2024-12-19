@@ -119,7 +119,7 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
 
 fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
     let mut stream: BoxSourceChunkStream = make_parser(use_struct)
-        .into_stream(make_data_stream(use_struct))
+        .parse_stream(make_data_stream(use_struct))
         .boxed();
 
     std::iter::from_fn(move || {

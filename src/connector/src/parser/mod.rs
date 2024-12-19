@@ -213,7 +213,7 @@ impl<P: ByteStreamSourceParser> P {
     /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
     /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
     /// large transaction and `source_ctrl_opts.split_txn` is false.
-    pub fn into_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
+    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
 
@@ -428,16 +428,19 @@ pub enum ByteStreamSourceParserImpl {
 
 impl ByteStreamSourceParserImpl {
     /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn into_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream + Unpin {
+    pub fn parse_stream(
+        self,
+        msg_stream: BoxSourceMessageStream,
+    ) -> impl SourceChunkStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
-            Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Debezium(parser) => parser.into_stream(msg_stream),
-            Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
-            Self::Maxwell(parser) => parser.into_stream(msg_stream),
-            Self::CanalJson(parser) => parser.into_stream(msg_stream),
-            Self::Plain(parser) => parser.into_stream(msg_stream),
-            Self::Upsert(parser) => parser.into_stream(msg_stream),
+            Self::Csv(parser) => parser.parse_stream(msg_stream),
+            Self::Debezium(parser) => parser.parse_stream(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.parse_stream(msg_stream),
+            Self::Maxwell(parser) => parser.parse_stream(msg_stream),
+            Self::CanalJson(parser) => parser.parse_stream(msg_stream),
+            Self::Plain(parser) => parser.parse_stream(msg_stream),
+            Self::Upsert(parser) => parser.parse_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -513,7 +516,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()
@@ -531,7 +534,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()
