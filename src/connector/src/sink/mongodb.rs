@@ -81,11 +81,17 @@ mod send_bulk_write_command_future {
             )))
         })?;
 
-        if result.get_array("writeErrors").is_ok() || result.get_array("writeConcernError").is_ok()
-        {
+        if let Ok(write_errors) = result.get_array("writeErrors") {
             return Err(SinkError::Mongodb(anyhow!(
                 "bulk write respond with write errors: {:?}",
-                result,
+                write_errors,
+            )));
+        }
+
+        if let Ok(write_concern_error) = result.get_array("writeConcernError") {
+            return Err(SinkError::Mongodb(anyhow!(
+                "bulk write respond with write errors: {:?}",
+                write_concern_error,
             )));
         }
 
