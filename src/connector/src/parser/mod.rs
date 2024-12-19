@@ -161,7 +161,7 @@ pub enum ParserFormat {
 /// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
 /// It consumes bytes of one individual message and produces parsed records.
 ///
-/// It's used by [`ByteStreamSourceParserImpl::into_stream`]. `pub` is for benchmark only.
+/// It's used by [`ByteStreamSourceParserImpl::parse_stream`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
