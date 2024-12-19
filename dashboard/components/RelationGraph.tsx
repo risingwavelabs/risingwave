@@ -33,9 +33,14 @@ import {
   flipLayoutRelation,
   generateRelationEdges,
 } from "../lib/layout"
-import { CatalogModal, useCatalogModal } from "./CatalogModal"
-import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { RelationStats } from "../proto/gen/monitor_service"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
+import {
+  backPressureColor,
+  backPressureWidth,
+  epochToUnixMillis,
+  latencyToColor,
+} from "./utils/backPressure"
 
 function boundBox(
   relationPosition: RelationPointPosition[],
@@ -158,7 +163,7 @@ export default function RelationGraph({
         .on("mouseover", (event, d) => {
           // Remove existing tooltip if any
           d3.selectAll(".tooltip").remove()
-          
+
           if (backPressures) {
             const value = backPressures.get(`${d.target}_${d.source}`)
             if (value) {
@@ -166,7 +171,7 @@ export default function RelationGraph({
               d3.select("body")
                 .append("div")
                 .attr("class", "tooltip")
-                .style("position", "absolute") 
+                .style("position", "absolute")
                 .style("background", "white")
                 .style("padding", "10px")
                 .style("border", "1px solid #ddd")
@@ -214,7 +219,9 @@ export default function RelationGraph({
         if (relationStats) {
           const relationId = parseInt(id)
           if (!isNaN(relationId) && relationStats[relationId]) {
-            const currentMs = epochToUnixMillis(relationStats[relationId].currentEpoch)
+            const currentMs = epochToUnixMillis(
+              relationStats[relationId].currentEpoch
+            )
             return latencyToColor(now_ms - currentMs, baseColor)
           }
         }
@@ -264,18 +271,23 @@ export default function RelationGraph({
       const getTooltipContent = (relation: Relation, id: string) => {
         const relationId = parseInt(id)
         const stats = relationStats?.[relationId]
-        const latencySeconds = stats 
-          ? ((Date.now() - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) 
+        const latencySeconds = stats
+          ? (
+              (Date.now() - epochToUnixMillis(stats.currentEpoch)) /
+              1000
+            ).toFixed(2)
           : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
-        
-        return `<b>${relation.name} (${relationTypeTitleCase(relation)})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+
+        return `<b>${relation.name} (${relationTypeTitleCase(
+          relation
+        )})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
       g.on("mouseover", (event, { relation, id }) => {
         // Remove existing tooltip if any
         d3.selectAll(".tooltip").remove()
-        
+
         // Create new tooltip
         d3.select("body")
           .append("div")
@@ -291,14 +303,14 @@ export default function RelationGraph({
           .style("font-size", "12px")
           .html(getTooltipContent(relation, id))
       })
-      .on("mousemove", (event) => {
-        d3.select(".tooltip")
-          .style("left", event.pageX + 10 + "px")
-          .style("top", event.pageY + 10 + "px")
-      })
-      .on("mouseout", () => {
-        d3.selectAll(".tooltip").remove()
-      })
+        .on("mousemove", (event) => {
+          d3.select(".tooltip")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+        })
+        .on("mouseout", () => {
+          d3.selectAll(".tooltip").remove()
+        })
 
       // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
@@ -321,7 +333,15 @@ export default function RelationGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures, relationStats])
+  }, [
+    layoutMap,
+    links,
+    selectedId,
+    setModalId,
+    setSelectedId,
+    backPressures,
+    relationStats,
+  ])
 
   return (
     <>

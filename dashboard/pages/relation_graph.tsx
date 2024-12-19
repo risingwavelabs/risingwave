@@ -133,7 +133,9 @@ export default function StreamingGraph() {
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
-  const [relationStats, setRelationStats] = useState<{ [key: number]: RelationStats }>();
+  const [relationStats, setRelationStats] = useState<{
+    [key: number]: RelationStats
+  }>()
 
   useEffect(() => {
     if (resetEmbeddedBackPressures) {
@@ -165,7 +167,7 @@ export default function StreamingGraph() {
                     totalDurationNs: 0,
                   }
             )
-            setRelationStats(response.relationStats);
+            setRelationStats(response.relationStats)
           },
           (e) => {
             console.error(e)

@@ -24,9 +24,14 @@ import {
   layoutItem,
 } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
-import { StreamNode } from "../proto/gen/stream_plan"
-import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { FragmentStats } from "../proto/gen/monitor_service"
+import { StreamNode } from "../proto/gen/stream_plan"
+import {
+  backPressureColor,
+  backPressureWidth,
+  epochToUnixMillis,
+  latencyToColor,
+} from "./utils/backPressure"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -250,14 +255,21 @@ export default function FragmentGraph({
           .attr("height", ({ height }) => height - fragmentMarginY * 2)
           .attr("x", fragmentMarginX)
           .attr("y", fragmentMarginY)
-          .attr("fill", fragmentStats ? ({ id }) => {
-            const fragmentId = parseInt(id)
-            if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
-              return "white";
-            }
-            let currentMs = epochToUnixMillis(fragmentStats[fragmentId].currentEpoch)
-            return latencyToColor(now_ms - currentMs, "white");
-          } : "white")
+          .attr(
+            "fill",
+            fragmentStats
+              ? ({ id }) => {
+                  const fragmentId = parseInt(id)
+                  if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
+                    return "white"
+                  }
+                  let currentMs = epochToUnixMillis(
+                    fragmentStats[fragmentId].currentEpoch
+                  )
+                  return latencyToColor(now_ms - currentMs, "white")
+                }
+              : "white"
+          )
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
@@ -267,9 +279,13 @@ export default function FragmentGraph({
         const getTooltipContent = (id: string) => {
           const fragmentId = parseInt(id)
           const stats = fragmentStats?.[fragmentId]
-          const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+          const latencySeconds = stats
+            ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(
+                2
+              )
+            : "N/A"
           const epoch = stats?.currentEpoch ?? "N/A"
-          
+
           return `<b>Fragment ${fragmentId}</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
         }
 
@@ -277,7 +293,7 @@ export default function FragmentGraph({
           .on("mouseover", (event, { id }) => {
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
-            
+
             // Create new tooltip
             d3.select("body")
               .append("div")
@@ -462,14 +478,14 @@ export default function FragmentGraph({
           .on("mouseover", (event, d) => {
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
-            
+
             if (backPressures) {
               const value = backPressures.get(`${d.target}_${d.source}`)
               if (value) {
                 // Create new tooltip
                 d3.select("body")
                   .append("div")
-                  .attr("class", "tooltip") 
+                  .attr("class", "tooltip")
                   .style("position", "absolute")
                   .style("background", "white")
                   .style("padding", "10px")
