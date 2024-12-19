@@ -48,7 +48,7 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
 
@@ -85,7 +85,7 @@ pub use unified::{AccessError, AccessResult};
 /// Extracted from the `SourceMessage`.
 #[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
-    meta: &'a SourceMeta,
+    source_meta: &'a SourceMeta,
     split_id: &'a str,
     offset: &'a str,
 }
@@ -102,7 +102,7 @@ impl<'a> MessageMeta<'a> {
             // Extract the offset from the meta data.
             SourceColumnType::Offset => Some(self.offset.into()),
             // Extract custom meta data per connector.
-            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -110,7 +110,7 @@ impl<'a> MessageMeta<'a> {
                 );
                 kafka_meta.extract_timestamp()
             }
-            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     TABLE_NAME_COLUMN_NAME,
@@ -161,7 +161,7 @@ pub enum ParserFormat {
 /// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
 /// It consumes bytes of one individual message and produces parsed records.
 ///
-/// It's used by [`ByteStreamSourceParserImpl::into_stream`]. `pub` is for benchmark only.
+/// It's used by [`ByteStreamSourceParserImpl::parse_stream`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
@@ -202,25 +202,25 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a stream of vectors of `SourceMessage` into a stream of [`StreamChunk`].
+    /// Parse a `SourceMessage` stream into a [`StreamChunk`] stream.
     ///
     /// # Arguments
     ///
-    /// - `msg_stream`: A stream of vectors of `SourceMessage`.
+    /// - `msg_stream`: A stream of batches of `SourceMessage`.
     ///
     /// # Returns
     ///
-    /// A [`ChunkSourceStream`] which is a stream of parsed chunks. Each of the parsed chunks
-    /// are guaranteed to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless
-    /// there's a large transaction and `source_ctrl_opts.split_txn` is false.
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream {
+    /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
+    /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
+    /// large transaction and `source_ctrl_opts.split_txn` is false.
+    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
 
         // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
         let source_ctrl_opts = self.source_ctx().source_ctrl_opts;
-        into_chunk_stream_inner(self, msg_stream, source_ctrl_opts)
+        parse_message_stream(self, msg_stream, source_ctrl_opts)
             .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
@@ -228,9 +228,9 @@ impl<P: ByteStreamSourceParser> P {
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
-async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
+async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
-    msg_stream: BoxSourceStream,
+    msg_stream: BoxSourceMessageStream,
     source_ctrl_opts: SourceCtrlOpts,
 ) {
     let mut chunk_builder =
@@ -266,7 +266,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 "handling a heartbeat message"
             );
             chunk_builder.heartbeat(MessageMeta {
-                meta: &heartbeat_msg.meta,
+                source_meta: &heartbeat_msg.meta,
                 split_id: &heartbeat_msg.split_id,
                 offset: &heartbeat_msg.offset,
             });
@@ -312,7 +312,7 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                     msg.key,
                     msg.payload,
                     chunk_builder.row_writer().with_meta(MessageMeta {
-                        meta: &msg.meta,
+                        source_meta: &msg.meta,
                         split_id: &msg.split_id,
                         offset: &msg.offset,
                     }),
@@ -428,16 +428,19 @@ pub enum ByteStreamSourceParserImpl {
 
 impl ByteStreamSourceParserImpl {
     /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
+    pub fn parse_stream(
+        self,
+        msg_stream: BoxSourceMessageStream,
+    ) -> impl SourceChunkStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
-            Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Debezium(parser) => parser.into_stream(msg_stream),
-            Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
-            Self::Maxwell(parser) => parser.into_stream(msg_stream),
-            Self::CanalJson(parser) => parser.into_stream(msg_stream),
-            Self::Plain(parser) => parser.into_stream(msg_stream),
-            Self::Upsert(parser) => parser.into_stream(msg_stream),
+            Self::Csv(parser) => parser.parse_stream(msg_stream),
+            Self::Debezium(parser) => parser.parse_stream(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.parse_stream(msg_stream),
+            Self::Maxwell(parser) => parser.parse_stream(msg_stream),
+            Self::CanalJson(parser) => parser.parse_stream(msg_stream),
+            Self::Plain(parser) => parser.parse_stream(msg_stream),
+            Self::Upsert(parser) => parser.parse_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -513,7 +516,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()
@@ -531,7 +534,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()

@@ -29,7 +29,7 @@ use risingwave_connector::source::filesystem::opendal_source::{
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
+    BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
@@ -159,7 +159,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         source_desc: &SourceDesc,
         batch: SplitBatch,
         rate_limit_rps: Option<u32>,
-    ) -> StreamExecutorResult<BoxChunkSourceStream> {
+    ) -> StreamExecutorResult<BoxSourceChunkStream> {
         let (stream, _) = source_desc
             .source
             .build_stream(batch, column_ids, Arc::new(source_ctx), false)

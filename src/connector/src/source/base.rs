@@ -353,20 +353,22 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-/// Stream of [`SourceMessage`].
-pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
+pub type BoxSourceMessageStream =
+    BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`StreamChunk`]s parsed from the messages from the external source.
+pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 
 // Manually expand the trait alias to improve IDE experience.
-pub trait ChunkSourceStream:
+pub trait SourceChunkStream:
     Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
-impl<T> ChunkSourceStream for T where
+impl<T> SourceChunkStream for T where
     T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
 
-pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -385,7 +387,7 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxChunkSourceStream;
+    fn into_stream(self) -> BoxSourceChunkStream;
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()

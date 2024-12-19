@@ -95,7 +95,7 @@ impl PlainParser {
         // plain parser also used in the shared cdc source,
         // we need to handle transaction metadata and schema change messages here
         if let Some(msg_meta) = writer.row_meta()
-            && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.meta
+            && let SourceMeta::DebeziumCdc(cdc_meta) = msg_meta.source_meta
             && let Some(data) = payload
         {
             match cdc_meta.msg_type {
@@ -252,7 +252,7 @@ mod tests {
         let mut transactional = false;
         // for untransactional source, we expect emit a chunk for each message batch
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream_inner(
+        let chunk_stream = crate::parser::parse_message_stream(
             parser,
             message_stream.boxed(),
             SourceCtrlOpts::for_test(),
@@ -293,7 +293,7 @@ mod tests {
         // for transactional source, we expect emit a single chunk for the transaction
         transactional = true;
         let message_stream = source_message_stream(transactional);
-        let chunk_stream = crate::parser::into_chunk_stream_inner(
+        let chunk_stream = crate::parser::parse_message_stream(
             parser,
             message_stream.boxed(),
             SourceCtrlOpts::for_test(),
@@ -426,7 +426,7 @@ mod tests {
             cdc_message::CdcMessageType::TransactionMeta,
         ));
         let msg_meta = MessageMeta {
-            meta: &cdc_meta,
+            source_meta: &cdc_meta,
             split_id: "1001",
             offset: "",
         };
@@ -500,7 +500,7 @@ mod tests {
             cdc_message::CdcMessageType::SchemaChange,
         ));
         let msg_meta = MessageMeta {
-            meta: &cdc_meta,
+            source_meta: &cdc_meta,
             split_id: "1001",
             offset: "",
         };

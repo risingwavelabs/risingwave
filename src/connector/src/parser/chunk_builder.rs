@@ -43,6 +43,12 @@ struct Transaction {
 }
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
+///
+/// Output chunk size is controlled by `source_ctrl_opts.chunk_size` and `source_ctrl_opts.split_txn`.
+/// During building process, it's possible that multiple chunks are built even without any explicit
+/// call to `finish_current_chunk`. This mainly happens when we find more than one records in one
+/// `SourceMessage` when parsing it. User of this builder should call `consume_ready_chunks` to consume
+/// the built chunks from time to time, to avoid the buffer from growing too large.
 pub struct SourceStreamChunkBuilder {
     column_descs: Vec<SourceColumnDesc>,
     source_ctrl_opts: SourceCtrlOpts,
@@ -299,7 +305,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 }
                 (&SourceColumnType::Meta, _)
                     if matches!(
-                        &self.row_meta.map(|ele| ele.meta),
+                        &self.row_meta.map(|ele| ele.source_meta),
                         &Some(SourceMeta::Kafka(_) | SourceMeta::DebeziumCdc(_))
                     ) =>
                 {
@@ -318,7 +324,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 ) => {
                     match self.row_meta {
                         Some(row_meta) => {
-                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.meta {
+                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.source_meta {
                                 Ok(A::output_for(extract_cdc_meta_column(
                                     cdc_meta,
                                     col,
@@ -334,7 +340,9 @@ impl SourceStreamChunkRowWriter<'_> {
                     }
                 }
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {
-                    Some(row_meta) => Ok(A::output_for(extract_timestamp_from_meta(row_meta.meta))),
+                    Some(row_meta) => Ok(A::output_for(extract_timestamp_from_meta(
+                        row_meta.source_meta,
+                    ))),
                     None => parse_field(desc), // parse from payload
                 },
                 (_, &Some(AdditionalColumnType::CollectionName(_))) => {
@@ -344,7 +352,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 (_, &Some(AdditionalColumnType::Subject(_))) => Ok(A::output_for(
                     self.row_meta
                         .as_ref()
-                        .and_then(|ele| extract_subject_from_meta(ele.meta))
+                        .and_then(|ele| extract_subject_from_meta(ele.source_meta))
                         .unwrap_or(None),
                 )),
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
@@ -369,7 +377,7 @@ impl SourceStreamChunkRowWriter<'_> {
                             .as_ref()
                             .and_then(|ele| {
                                 extract_header_inner_from_meta(
-                                    ele.meta,
+                                    ele.source_meta,
                                     header_inner.inner_field.as_ref(),
                                     header_inner.data_type.as_ref(),
                                 )
@@ -380,7 +388,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 (_, &Some(AdditionalColumnType::Headers(_))) => Ok(A::output_for(
                     self.row_meta
                         .as_ref()
-                        .and_then(|ele| extract_headers_from_meta(ele.meta))
+                        .and_then(|ele| extract_headers_from_meta(ele.source_meta))
                         .unwrap_or(None),
                 )),
                 (_, &Some(AdditionalColumnType::Filename(_))) => {
