@@ -23,7 +23,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, With,
+    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, Value, With,
 };
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
@@ -160,10 +160,12 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-    fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
+    fn gen_limit(&mut self, has_order_by: bool) -> Option<Expr> {
         if (!self.is_mview || has_order_by) && self.flip_coin() {
             let start = if self.is_mview { 1 } else { 0 };
-            Some(self.rng.gen_range(start..=100).to_string())
+            Some(Expr::Value(Value::Number(
+                self.rng.gen_range(start..=100).to_string(),
+            )))
         } else {
             None
         }
