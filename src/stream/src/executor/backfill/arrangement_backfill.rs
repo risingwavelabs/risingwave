@@ -25,15 +25,18 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
+use super::rate_limiter::AdaptiveRateLimiterConfig;
 use crate::common::table::state_table::ReplicatedStateTable;
+use crate::executor::backfill::rate_limiter::TickInfo;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
-    compute_bounds, create_builder, create_limiter, get_progress_per_vnode, mapping_chunk,
-    mapping_message, mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode,
-    BackfillProgressPerVnode, BackfillRateLimiter, BackfillState,
+    compute_bounds, create_builder, get_progress_per_vnode, mapping_chunk, mapping_message,
+    mark_chunk_ref_by_vnode, persist_state_per_vnode, update_pos_by_vnode, update_rate_limiter,
+    BackfillProgressPerVnode, BackfillState,
 };
 use crate::executor::prelude::*;
+use crate::executor::MonitoredBackfillRateLimiter;
 use crate::task::CreateMviewProgressReporter;
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
@@ -65,6 +68,8 @@ pub struct ArrangementBackfillExecutor<S: StateStore, SD: ValueRowSerde> {
     chunk_size: usize,
 
     rate_limit: Option<usize>,
+
+    adaptive_rate_limit_config: AdaptiveRateLimiterConfig,
 }
 
 impl<S, SD> ArrangementBackfillExecutor<S, SD>
@@ -83,6 +88,7 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         rate_limit: Option<usize>,
+        adaptive_rate_limit_config: AdaptiveRateLimiterConfig,
     ) -> Self {
         Self {
             upstream_table,
@@ -94,6 +100,7 @@ where
             metrics,
             chunk_size,
             rate_limit,
+            adaptive_rate_limit_config,
         }
     }
 
@@ -207,7 +214,12 @@ where
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
 
-            let mut rate_limiter = rate_limit.and_then(create_limiter);
+            let mut rate_limiter = MonitoredBackfillRateLimiter::new(upstream_table_id.into());
+            update_rate_limiter(
+                &mut rate_limiter,
+                rate_limit,
+                self.adaptive_rate_limit_config.clone(),
+            );
 
             let metrics = self
                 .metrics
@@ -339,10 +351,8 @@ where
                     //
                     // If rate limit is set, respect the rate limit, check if we can read,
                     // If we can't, skip it. If no rate limit set, we can read.
-                    let rate_limit_ready = rate_limiter
-                        .as_ref()
-                        .map(|r| r.check().is_ok())
-                        .unwrap_or(true);
+                    let rate_limit_ready = rate_limiter.check();
+
                     if !has_snapshot_read && !paused && rate_limit_ready {
                         debug_assert!(builders.values().all(|b| b.is_empty()));
                         let (_, snapshot) = backfill_stream.into_inner();
@@ -460,6 +470,12 @@ where
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
 
+                // tick rate limiter for every barrier
+                rate_limiter.tick(TickInfo {
+                    processed_snapshot_rows: cur_barrier_snapshot_processed_rows as _,
+                    processed_upstream_rows: cur_barrier_upstream_processed_rows as _,
+                });
+
                 // TODO(kwannoel): Not sure if this holds for arrangement backfill.
                 // May need to revisit it.
                 // Need to check it after scale-in / scale-out.
@@ -524,7 +540,11 @@ where
                                             (vnode, builder)
                                         })
                                         .collect();
-                                    rate_limiter = new_rate_limit.and_then(create_limiter);
+                                    update_rate_limiter(
+                                        &mut rate_limiter,
+                                        new_rate_limit,
+                                        self.adaptive_rate_limit_config.clone(),
+                                    );
                                 }
                             }
                         }
@@ -612,7 +632,7 @@ where
         upstream_table: &'a ReplicatedStateTable<S, SD>,
         backfill_state: BackfillState,
         paused: bool,
-        rate_limiter: &'a Option<BackfillRateLimiter>,
+        rate_limiter: &'a MonitoredBackfillRateLimiter,
     ) {
         if paused {
             #[for_await]
@@ -622,11 +642,9 @@ where
         } else {
             // Checked the rate limit is not zero.
             #[for_await]
-            for r in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
-                let r = r?;
-                if let Some(rate_limit) = rate_limiter {
-                    rate_limit.until_ready().await;
-                }
+            for res in Self::snapshot_read_per_vnode(upstream_table, backfill_state) {
+                let r = res?;
+                rate_limiter.wait().await;
                 yield r;
             }
         }

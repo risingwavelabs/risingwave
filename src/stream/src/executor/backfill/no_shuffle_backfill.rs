@@ -26,7 +26,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, create_builder, create_limiter, get_new_pos,
-    mapping_chunk, mapping_message, mark_chunk, BackfillRateLimiter, METADATA_STATE_LEN,
+    mapping_chunk, mapping_message, mark_chunk, BackfillRateLimiterV1, METADATA_STATE_LEN,
 };
 use crate::executor::prelude::*;
 use crate::task::CreateMviewProgressReporter;
@@ -642,7 +642,7 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
         paused: bool,
-        rate_limiter: &'a Option<BackfillRateLimiter>,
+        rate_limiter: &'a Option<BackfillRateLimiterV1>,
     ) {
         if paused {
             #[for_await]

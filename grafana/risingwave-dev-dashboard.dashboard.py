@@ -917,6 +917,17 @@ def section_streaming(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "Backfill Snapshot Read Adaptive Rate Limit",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('backfill_rate_limit_bytes')}",
+                            "table_id={{table_id}} @ {{%s}}"
+                            % NODE_LABEL,
+                        )
+                    ],
+                ),
+                panels.timeseries_count(
                     "Source Upstream Status",
                     "Monitor each source upstream, 0 means the upstream is not normal, 1 means the source is ready.",
                     [
