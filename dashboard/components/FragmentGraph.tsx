@@ -12,22 +12,19 @@ import {
 } from "@chakra-ui/react"
 import loadable from "@loadable/component"
 import * as d3 from "d3"
+import * as dagre from "dagre"
 import { cloneDeep } from "lodash"
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-import {
-  Edge,
-  Enter,
-  FragmentBox,
-  FragmentBoxPosition,
-  Position,
-  generateFragmentEdges,
-  layoutItem,
-} from "../lib/layout"
+import { Edge, Enter, FragmentBox, Position } from "../lib/layout"
 import { PlanNodeDatum } from "../pages/fragment_graph"
-import { StreamNode } from "../proto/gen/stream_plan"
-import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { FragmentStats } from "../proto/gen/monitor_service"
-import * as dagre from "dagre"
+import { StreamNode } from "../proto/gen/stream_plan"
+import {
+  backPressureColor,
+  backPressureWidth,
+  epochToUnixMillis,
+  latencyToColor,
+} from "./utils/backPressure"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -152,11 +149,11 @@ export default function FragmentGraph({
 
     // Configure the graph
     g.setGraph({
-      rankdir: 'LR',
+      rankdir: "LR",
       nodesep: fragmentDistanceY,
       ranksep: fragmentDistanceX,
       marginx: fragmentMarginX,
-      marginy: fragmentMarginY
+      marginy: fragmentMarginY,
     })
 
     // Default edge labels
@@ -168,13 +165,13 @@ export default function FragmentGraph({
       g.setNode(id, {
         width: fragmentLayout.width,
         height: fragmentLayout.height,
-        ...fragmentLayout
+        ...fragmentLayout,
       })
     })
 
     // Add fragment edges
     fragmentDependencyDag.forEach(({ id, parentIds }) => {
-      parentIds?.forEach(parentId => {
+      parentIds?.forEach((parentId) => {
         g.setEdge(parentId, id)
       })
     })
@@ -183,26 +180,26 @@ export default function FragmentGraph({
     dagre.layout(g)
 
     // Convert to final format
-    const layoutResult = g.nodes().map(id => {
+    const layoutResult = g.nodes().map((id) => {
       const node = g.node(id)
       return {
         id,
-        x: node.x - node.width/2,
-        y: node.y - node.height/2,
+        x: node.x - node.width / 2,
+        y: node.y - node.height / 2,
         width: node.width,
         height: node.height,
         layoutRoot: node.layoutRoot,
-        actorIds: node.actorIds
+        actorIds: node.actorIds,
       }
     })
 
     // Get edges with points
-    const edges = g.edges().map(e => {
+    const edges = g.edges().map((e) => {
       const edge = g.edge(e)
       return {
         source: e.v,
         target: e.w,
-        points: edge.points || []
+        points: edge.points || [],
       }
     })
 
@@ -292,14 +289,21 @@ export default function FragmentGraph({
           .attr("height", ({ height }) => height)
           .attr("x", 0)
           .attr("y", 0)
-          .attr("fill", fragmentStats ? ({ id }) => {
-            const fragmentId = parseInt(id)
-            if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
-              return "white";
-            }
-            let currentMs = epochToUnixMillis(fragmentStats[fragmentId].currentEpoch)
-            return latencyToColor(now_ms - currentMs, "white");
-          } : "white")
+          .attr(
+            "fill",
+            fragmentStats
+              ? ({ id }) => {
+                  const fragmentId = parseInt(id)
+                  if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
+                    return "white"
+                  }
+                  let currentMs = epochToUnixMillis(
+                    fragmentStats[fragmentId].currentEpoch
+                  )
+                  return latencyToColor(now_ms - currentMs, "white")
+                }
+              : "white"
+          )
           .attr("stroke-width", ({ id }) => (isSelected(id) ? 3 : 1))
           .attr("rx", 5)
           .attr("stroke", ({ id }) =>
@@ -309,9 +313,13 @@ export default function FragmentGraph({
         const getTooltipContent = (id: string) => {
           const fragmentId = parseInt(id)
           const stats = fragmentStats?.[fragmentId]
-          const latencySeconds = stats ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) : "N/A"
+          const latencySeconds = stats
+            ? ((now_ms - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(
+                2
+              )
+            : "N/A"
           const epoch = stats?.currentEpoch ?? "N/A"
-          
+
           return `<b>Fragment ${fragmentId}</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
         }
 
@@ -319,7 +327,7 @@ export default function FragmentGraph({
           .on("mouseover", (event, { id }) => {
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
-            
+
             // Create new tooltip
             d3.select("body")
               .append("div")
@@ -504,14 +512,14 @@ export default function FragmentGraph({
           .on("mouseover", (event, d) => {
             // Remove existing tooltip if any
             d3.selectAll(".tooltip").remove()
-            
+
             if (backPressures) {
               const value = backPressures.get(`${d.target}_${d.source}`)
               if (value) {
                 // Create new tooltip
                 d3.select("body")
                   .append("div")
-                  .attr("class", "tooltip") 
+                  .attr("class", "tooltip")
                   .style("position", "absolute")
                   .style("background", "white")
                   .style("padding", "10px")

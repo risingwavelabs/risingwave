@@ -31,12 +31,15 @@ import {
   Position,
   RelationPoint,
   RelationPointPosition,
-  generateRelationEdges,
-  layoutItem,
 } from "../lib/layout"
-import { CatalogModal, useCatalogModal } from "./CatalogModal"
-import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { RelationStats } from "../proto/gen/monitor_service"
+import { CatalogModal, useCatalogModal } from "./CatalogModal"
+import {
+  backPressureColor,
+  backPressureWidth,
+  epochToUnixMillis,
+  latencyToColor,
+} from "./utils/backPressure"
 
 export const boxWidth = 150
 export const boxHeight = 45
@@ -46,9 +49,7 @@ const layerMargin = 80
 const rowMargin = 30
 const layoutMargin = 30
 
-function boundBox(
-  relationPosition: RelationPointPosition[],
-): {
+function boundBox(relationPosition: RelationPointPosition[]): {
   width: number
   height: number
 } {
@@ -84,24 +85,24 @@ export default function RelationGraph({
 
     // Set graph direction and spacing
     g.setGraph({
-      rankdir: 'LR',
+      rankdir: "LR",
       nodesep: rowMargin,
       ranksep: layerMargin,
       marginx: layoutMargin,
-      marginy: layoutMargin
+      marginy: layoutMargin,
     })
 
     // Default to assigning empty object as edge label
     g.setDefaultEdgeLabel(() => ({}))
 
     // Add nodes
-    nodes.forEach(node => {
+    nodes.forEach((node) => {
       g.setNode(node.id, node)
     })
 
     // Add edges
-    nodes.forEach(node => {
-      node.parentIds?.forEach(parentId => {
+    nodes.forEach((node) => {
+      node.parentIds?.forEach((parentId) => {
         g.setEdge(parentId, node.id) // Here the "parent" means the upstream relation
       })
     })
@@ -110,21 +111,21 @@ export default function RelationGraph({
     dagre.layout(g)
 
     // Convert to expected format
-    const layoutMap = g.nodes().map(id => {
+    const layoutMap = g.nodes().map((id) => {
       const node = g.node(id)
       return {
         ...node,
-        x: node.x - boxWidth/2, // Adjust for center-based coordinates
-        y: node.y - boxHeight/2,
+        x: node.x - boxWidth / 2, // Adjust for center-based coordinates
+        y: node.y - boxHeight / 2,
       } as RelationPointPosition
     })
 
-    const links = g.edges().map(e => {
+    const links = g.edges().map((e) => {
       const edge = g.edge(e)
       return {
         source: e.v,
         target: e.w,
-        points: edge.points || []
+        points: edge.points || [],
       }
     })
 
@@ -135,7 +136,7 @@ export default function RelationGraph({
       layoutMap,
       links,
       width,
-      height
+      height,
     }
   }, [nodes])
 
@@ -197,7 +198,7 @@ export default function RelationGraph({
         .on("mouseover", (event, d) => {
           // Remove existing tooltip if any
           d3.selectAll(".tooltip").remove()
-          
+
           if (backPressures) {
             const value = backPressures.get(`${d.target}_${d.source}`)
             if (value) {
@@ -205,7 +206,7 @@ export default function RelationGraph({
               d3.select("body")
                 .append("div")
                 .attr("class", "tooltip")
-                .style("position", "absolute") 
+                .style("position", "absolute")
                 .style("background", "white")
                 .style("padding", "10px")
                 .style("border", "1px solid #ddd")
@@ -250,7 +251,9 @@ export default function RelationGraph({
         .attr("rx", 6) // rounded corners
         .attr("ry", 6)
         .attr("fill", "white")
-        .attr("stroke", ({ id }) => isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["200"])
+        .attr("stroke", ({ id }) =>
+          isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["200"]
+        )
         .attr("stroke-width", 2)
 
       // Icon circle of relation type
@@ -260,7 +263,7 @@ export default function RelationGraph({
       }
       circle
         .attr("cx", iconRadius + 10) // position circle in left part of box
-        .attr("cy", boxHeight/2)
+        .attr("cy", boxHeight / 2)
         .attr("r", iconRadius)
         .attr("fill", ({ id, relation }) => {
           const weight = relationIsStreamingJob(relation) ? "500" : "400"
@@ -270,7 +273,9 @@ export default function RelationGraph({
           if (relationStats) {
             const relationId = parseInt(id)
             if (!isNaN(relationId) && relationStats[relationId]) {
-              const currentMs = epochToUnixMillis(relationStats[relationId].currentEpoch)
+              const currentMs = epochToUnixMillis(
+                relationStats[relationId].currentEpoch
+              )
               return latencyToColor(now_ms - currentMs, baseColor)
             }
           }
@@ -291,16 +296,18 @@ export default function RelationGraph({
           return type.charAt(0)
         }
       }
-      
+
       // Add a clipPath to contain the text within the box
       let clipPath = g.select<SVGClipPathElement>(".clip-path")
       if (clipPath.empty()) {
-        clipPath = g.append("clipPath")
+        clipPath = g
+          .append("clipPath")
           .attr("class", "clip-path")
-          .attr("id", d => `clip-${d.id}`)
+          .attr("id", (d) => `clip-${d.id}`)
         clipPath.append("rect")
       }
-      clipPath.select("rect")
+      clipPath
+        .select("rect")
         .attr("width", boxWidth - (iconRadius * 2 + 20)) // Leave space for icon
         .attr("height", boxHeight)
         .attr("x", iconRadius * 2 + 15)
@@ -312,13 +319,13 @@ export default function RelationGraph({
         .attr("font-family", "inherit")
         .attr("text-anchor", "middle")
         .attr("x", iconRadius + 10)
-        .attr("y", boxHeight/2)
+        .attr("y", boxHeight / 2)
         .attr("dy", "0.35em") // vertical alignment
         .attr("font-size", 16)
         .attr("font-weight", "bold")
 
       // Relation name
-      let text = g.select<SVGTextElement>(".text") 
+      let text = g.select<SVGTextElement>(".text")
       if (text.empty()) {
         text = g.append("text").attr("class", "text")
       }
@@ -328,27 +335,32 @@ export default function RelationGraph({
         .text(({ name }) => name)
         .attr("font-family", "inherit")
         .attr("x", iconRadius * 2 + 15) // position text right of circle
-        .attr("y", boxHeight/2)
+        .attr("y", boxHeight / 2)
         .attr("dy", "0.35em")
         .attr("font-size", 14)
-        .attr("clip-path", d => `url(#clip-${d.id})`) // Apply clipPath
+        .attr("clip-path", (d) => `url(#clip-${d.id})`) // Apply clipPath
 
       // Tooltip for relation
       const getTooltipContent = (relation: Relation, id: string) => {
         const relationId = parseInt(id)
         const stats = relationStats?.[relationId]
-        const latencySeconds = stats 
-          ? ((Date.now() - epochToUnixMillis(stats.currentEpoch)) / 1000).toFixed(2) 
+        const latencySeconds = stats
+          ? (
+              (Date.now() - epochToUnixMillis(stats.currentEpoch)) /
+              1000
+            ).toFixed(2)
           : "N/A"
         const epoch = stats?.currentEpoch ?? "N/A"
-        
-        return `<b>${relation.name} (${relationTypeTitleCase(relation)})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
+
+        return `<b>${relation.name} (${relationTypeTitleCase(
+          relation
+        )})</b><br>Epoch: ${epoch}<br>Latency: ${latencySeconds} seconds`
       }
 
       g.on("mouseover", (event, { relation, id }) => {
         // Remove existing tooltip if any
         d3.selectAll(".tooltip").remove()
-        
+
         // Create new tooltip
         d3.select("body")
           .append("div")
@@ -364,14 +376,14 @@ export default function RelationGraph({
           .style("font-size", "12px")
           .html(getTooltipContent(relation, id))
       })
-      .on("mousemove", (event) => {
-        d3.select(".tooltip")
-          .style("left", event.pageX + 10 + "px")
-          .style("top", event.pageY + 10 + "px")
-      })
-      .on("mouseout", () => {
-        d3.selectAll(".tooltip").remove()
-      })
+        .on("mousemove", (event) => {
+          d3.select(".tooltip")
+            .style("left", event.pageX + 10 + "px")
+            .style("top", event.pageY + 10 + "px")
+        })
+        .on("mouseout", () => {
+          d3.selectAll(".tooltip").remove()
+        })
 
       // Relation modal
       g.style("cursor", "pointer").on("click", (_, { relation, id }) => {
@@ -394,7 +406,15 @@ export default function RelationGraph({
     nodeSelection.enter().call(createNode)
     nodeSelection.call(applyNode)
     nodeSelection.exit().remove()
-  }, [layoutMap, links, selectedId, setModalId, setSelectedId, backPressures, relationStats])
+  }, [
+    layoutMap,
+    links,
+    selectedId,
+    setModalId,
+    setSelectedId,
+    backPressures,
+    relationStats,
+  ])
 
   return (
     <>

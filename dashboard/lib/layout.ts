@@ -16,10 +16,10 @@
  */
 
 import { max } from "lodash"
+import { boxHeight, boxWidth } from "../components/RelationGraph"
 import { TableFragments_Fragment } from "../proto/gen/meta"
 import { GraphNode } from "./algo"
 import { Relation } from "./api/streaming"
-import { boxHeight, boxWidth } from "../components/RelationGraph"
 
 export type Enter<Type> = Type extends d3.Selection<
   any,
@@ -410,7 +410,6 @@ export function layoutItem<I extends LayoutItemBase>(
   return rtn
 }
 
-
 export function generateRelationEdges(
   layoutMap: RelationPointPosition[]
 ): Edge[] {
@@ -425,8 +424,11 @@ export function generateRelationEdges(
       links.push({
         points: [
           // center of right edge -> center of left edge
-          { x: relation.x, y: relation.y + boxHeight/2 },
-          { x: parentRelation.x + boxWidth, y: parentRelation.y + boxHeight/2 },
+          { x: relation.x, y: relation.y + boxHeight / 2 },
+          {
+            x: parentRelation.x + boxWidth,
+            y: parentRelation.y + boxHeight / 2,
+          },
         ],
         source: relation.id,
         target: parentId,

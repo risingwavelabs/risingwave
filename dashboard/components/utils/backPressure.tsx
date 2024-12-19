@@ -50,7 +50,7 @@ export function epochToUnixMillis(epoch: number) {
 export function latencyToColor(latency_ms: number, baseColor: string) {
   const LOWER = 10000 // 10s
   const UPPER = 300000 // 5min
-  
+
   const colorRange = [
     baseColor,
     theme.colors.yellow["200"],

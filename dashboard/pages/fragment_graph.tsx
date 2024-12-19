@@ -329,8 +329,9 @@ export default function Streaming() {
   // Didn't call `useFetch()` because the `setState` way is special.
   const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
     useState<EmbeddedBackPressureInfo>()
-  const [fragmentStats, setFragmentStats] = 
-    useState< { [key: number]: FragmentStats }>()
+  const [fragmentStats, setFragmentStats] = useState<{
+    [key: number]: FragmentStats
+  }>()
 
   useEffect(() => {
     if (backPressureDataSource === "Embedded") {
@@ -338,7 +339,8 @@ export default function Streaming() {
         fetchEmbeddedBackPressure().then(
           (response) => {
             console.log(response)
-            let newBP = response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? [];
+            let newBP =
+              response.backPressureInfos?.map(BackPressureInfo.fromJSON) ?? []
             setEmbeddedBackPressureInfo((prev) =>
               prev
                 ? {
@@ -359,7 +361,7 @@ export default function Streaming() {
                     totalDurationNs: 0,
                   }
             )
-            setFragmentStats(response.fragmentStats);
+            setFragmentStats(response.fragmentStats)
           },
           (e) => {
             console.error(e)
