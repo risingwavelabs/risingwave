@@ -168,29 +168,18 @@ impl FromStr for Timestamp {
     type Err = InvalidParamsError;
 
     fn from_str(s: &str) -> Result<Self> {
-        if let Ok(res) = speedate::DateTime::parse_str_rfc3339(s) {
-            if res.time.tz_offset.is_some() {
-                return Err(ErrorKind::ParseTimestamp.into());
-            }
-            Ok(Date::from_ymd_uncheck(
-                res.date.year as i32,
-                res.date.month as u32,
-                res.date.day as u32,
-            )
-            .and_hms_micro_uncheck(
-                res.time.hour as u32,
-                res.time.minute as u32,
-                res.time.second as u32,
-                res.time.microsecond,
-            ))
-        } else {
-            let res =
-                speedate::Date::parse_str_rfc3339(s).map_err(|_| ErrorKind::ParseTimestamp)?;
-            Ok(
-                Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
-                    .and_hms_micro_uncheck(0, 0, 0, 0),
-            )
-        }
+        let dt = s
+            .parse::<jiff::civil::DateTime>()
+            .map_err(|_| ErrorKind::ParseTimestamp)?;
+        Ok(
+            Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
+                .and_hms_nano_uncheck(
+                    dt.hour() as u32,
+                    dt.minute() as u32,
+                    dt.second() as u32,
+                    dt.subsec_nanosecond() as u32,
+                ),
+        )
     }
 }
 
@@ -422,6 +411,13 @@ impl Date {
                 .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
         )
     }
+
+    pub fn and_hms_nano_uncheck(self, hour: u32, min: u32, sec: u32, nano: u32) -> Timestamp {
+        Timestamp::new(
+            self.0
+                .and_time(Time::from_hms_nano_uncheck(hour, min, sec, nano).0),
+        )
+    }
 }
 
 impl Time {
@@ -495,18 +491,47 @@ impl Timestamp {
     }
 
     pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-        let micros = cur
+        let secs = cur
             .read_i64::<BigEndian>()
-            .context("failed to read i64 from Timestamp buffer")?;
-
-        Ok(Timestamp::with_micros(micros)?)
+            .context("failed to read i64 from Time buffer")?;
+        if Self::has_timestamp_namo_format_state(secs) {
+            let secs = Self::remove_timestamp_namo_format_state(secs);
+            let nsecs = cur
+                .read_u32::<BigEndian>()
+                .context("failed to read u32 from Time buffer")?;
+            Ok(Timestamp::with_secs_nsecs(secs, nsecs)?)
+        } else {
+            Ok(Timestamp::with_micros(secs)?)
+        }
     }
 
-    /// Although `Timestamp` takes 12 bytes, we drop 4 bytes in protobuf encoding.
+    // Since timestamp secs is much smaller than i64, we use the highest 2 bit to store the format information, which is compatible with the old format.
+    // New format: secs(i64) + nsecs(u32)
+    // Old format: micros(i64)
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output
-            .write(&(self.0.and_utc().timestamp_micros()).to_be_bytes())
-            .map_err(Into::into)
+        let timestamp_size = output
+            .write(
+                &(Self::add_timestamp_namo_format_state(self.0.and_utc().timestamp()))
+                    .to_be_bytes(),
+            )
+            .map_err(Into::<ArrayError>::into)?;
+        let timestamp_subsec_nanos_size = output
+            .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
+            .map_err(Into::<ArrayError>::into)?;
+        Ok(timestamp_subsec_nanos_size + timestamp_size)
+    }
+
+    fn add_timestamp_namo_format_state(value: i64) -> i64 {
+        value ^ (0b01 << 62)
+    }
+
+    fn has_timestamp_namo_format_state(value: i64) -> bool {
+        let state = (value >> 62) & 0b11;
+        state == 0b10 || state == 0b01
+    }
+
+    fn remove_timestamp_namo_format_state(value: i64) -> i64 {
+        value ^ (0b01 << 62)
     }
 
     pub fn get_timestamp_nanos(&self) -> i64 {
