@@ -27,6 +27,7 @@ import { PlanNodeDatum } from "../pages/fragment_graph"
 import { StreamNode } from "../proto/gen/stream_plan"
 import { backPressureColor, backPressureWidth, epochToUnixMillis, latencyToColor } from "./utils/backPressure"
 import { FragmentStats } from "../proto/gen/monitor_service"
+import * as dagre from "dagre"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -88,8 +89,8 @@ const nodeMarginX = nodeRadius * 6
 const nodeMarginY = nodeRadius * 4
 const fragmentMarginX = nodeRadius * 2
 const fragmentMarginY = nodeRadius * 2
-const fragmentDistanceX = nodeRadius * 2
-const fragmentDistanceY = nodeRadius * 2
+const fragmentDistanceX = nodeRadius * 5
+const fragmentDistanceY = nodeRadius * 4
 
 export default function FragmentGraph({
   planNodeDependencies,
@@ -121,6 +122,7 @@ export default function FragmentGraph({
     const deps = cloneDeep(planNodeDependencies)
     const fragmentDependencyDag = cloneDeep(fragmentDependency)
 
+    // Layer 1: Keep existing d3-hierarchy layout for actors within fragments
     const layoutFragmentResult = new Map<string, any>()
     const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
@@ -130,10 +132,10 @@ export default function FragmentGraph({
       })
       let { width, height } = boundBox(layoutRoot, {
         margin: {
-          left: nodeRadius * 4 + fragmentMarginX,
-          right: nodeRadius * 4 + fragmentMarginX,
-          top: nodeRadius * 3 + fragmentMarginY,
-          bottom: nodeRadius * 4 + fragmentMarginY,
+          left: nodeRadius * 4,
+          right: nodeRadius * 4,
+          top: nodeRadius * 3,
+          bottom: nodeRadius * 4,
         },
       })
       layoutFragmentResult.set(fragmentId, {
@@ -145,32 +147,72 @@ export default function FragmentGraph({
       includedFragmentIds.add(fragmentId)
     }
 
-    const fragmentLayout = layoutItem(
-      fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
-        const { width, height } = layoutFragmentResult.get(id)!
-        return { width, height, id, ...data }
-      }),
-      fragmentDistanceX,
-      fragmentDistanceY
-    )
-    const fragmentLayoutPosition = new Map<string, Position>()
-    fragmentLayout.forEach(({ id, x, y }: FragmentBoxPosition) => {
-      fragmentLayoutPosition.set(id, { x, y })
+    // Layer 2: Use dagre for fragment-level layout
+    const g = new dagre.graphlib.Graph()
+
+    // Configure the graph
+    g.setGraph({
+      rankdir: 'LR',
+      nodesep: fragmentDistanceY,
+      ranksep: fragmentDistanceX,
+      marginx: fragmentMarginX,
+      marginy: fragmentMarginY
     })
 
-    const layoutResult: FragmentLayout[] = []
-    for (const [fragmentId, result] of layoutFragmentResult) {
-      const { x, y } = fragmentLayoutPosition.get(fragmentId)!
-      layoutResult.push({ id: fragmentId, x, y, ...result })
-    }
+    // Default edge labels
+    g.setDefaultEdgeLabel(() => ({}))
 
+    // Add fragment nodes
+    fragmentDependencyDag.forEach(({ id, parentIds }) => {
+      const fragmentLayout = layoutFragmentResult.get(id)!
+      g.setNode(id, {
+        width: fragmentLayout.width,
+        height: fragmentLayout.height,
+        ...fragmentLayout
+      })
+    })
+
+    // Add fragment edges
+    fragmentDependencyDag.forEach(({ id, parentIds }) => {
+      parentIds?.forEach(parentId => {
+        g.setEdge(parentId, id)
+      })
+    })
+
+    // Perform layout
+    dagre.layout(g)
+
+    // Convert to final format
+    const layoutResult = g.nodes().map(id => {
+      const node = g.node(id)
+      return {
+        id,
+        x: node.x - node.width/2,
+        y: node.y - node.height/2,
+        width: node.width,
+        height: node.height,
+        layoutRoot: node.layoutRoot,
+        actorIds: node.actorIds
+      }
+    })
+
+    // Get edges with points
+    const edges = g.edges().map(e => {
+      const edge = g.edge(e)
+      return {
+        source: e.v,
+        target: e.w,
+        points: edge.points || []
+      }
+    })
+
+    // Calculate overall SVG dimensions
     let svgWidth = 0
     let svgHeight = 0
     layoutResult.forEach(({ x, y, width, height }) => {
+      svgWidth = Math.max(svgWidth, x + width + 50)
       svgHeight = Math.max(svgHeight, y + height + 50)
-      svgWidth = Math.max(svgWidth, x + width)
     })
-    const edges = generateFragmentEdges(fragmentLayout)
 
     return {
       layoutResult,
@@ -218,8 +260,8 @@ export default function FragmentGraph({
           .text(({ id }) => `Fragment ${id}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - fragmentMarginY + 12)
-          .attr("dx", ({ width }) => width - fragmentMarginX)
+          .attr("dy", ({ height }) => height + 12)
+          .attr("dx", ({ width }) => width)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -234,8 +276,8 @@ export default function FragmentGraph({
           .text(({ actorIds }) => `Actor ${actorIds.join(", ")}`)
           .attr("font-family", "inherit")
           .attr("text-anchor", "end")
-          .attr("dy", ({ height }) => height - fragmentMarginY + 24)
-          .attr("dx", ({ width }) => width - fragmentMarginX)
+          .attr("dy", ({ height }) => height + 24)
+          .attr("dx", ({ width }) => width)
           .attr("fill", "black")
           .attr("font-size", 12)
 
@@ -246,10 +288,10 @@ export default function FragmentGraph({
         }
 
         boundingBox
-          .attr("width", ({ width }) => width - fragmentMarginX * 2)
-          .attr("height", ({ height }) => height - fragmentMarginY * 2)
-          .attr("x", fragmentMarginX)
-          .attr("y", fragmentMarginY)
+          .attr("width", ({ width }) => width)
+          .attr("height", ({ height }) => height)
+          .attr("x", 0)
+          .attr("y", 0)
           .attr("fill", fragmentStats ? ({ id }) => {
             const fragmentId = parseInt(id)
             if (isNaN(fragmentId) || !fragmentStats[fragmentId]) {
@@ -410,7 +452,7 @@ export default function FragmentGraph({
         .data(fragmentEdgeLayout)
       type EdgeSelection = typeof edgeSelection
 
-      const curveStyle = d3.curveMonotoneX
+      const curveStyle = d3.curveBasis
 
       const line = d3
         .line<Position>()

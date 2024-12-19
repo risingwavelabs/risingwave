@@ -107,7 +107,7 @@ function buildPlanNodeDependency(
         dispatcherName = "multipleDispatchers"
       }
     } else {
-      dispatcherName = `${firstDispatcherName}Dispatcher`
+      dispatcherName = `${firstDispatcherName}\nDispatcher`
     }
   } else {
     dispatcherName = "noDispatcher"
