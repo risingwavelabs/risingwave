@@ -81,22 +81,11 @@ mod send_bulk_write_command_future {
             )))
         })?;
 
-        if let Ok(write_errors) = result.get_array("writeErrors") {
+        if result.get_array("writeErrors").is_ok() || result.get_array("writeConcernError").is_ok()
+        {
             return Err(SinkError::Mongodb(anyhow!(
                 "bulk write respond with write errors: {:?}",
-                write_errors,
-            )));
-        }
-
-        let n = result.get_i32("n").map_err(|err| {
-            SinkError::Mongodb(
-                anyhow!(err).context("can't extract field n from bulk write response"),
-            )
-        })?;
-        if n < 1 {
-            return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with an abnormal state, n = {}",
-                n
+                result,
             )));
         }
 
