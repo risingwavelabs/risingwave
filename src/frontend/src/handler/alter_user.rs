@@ -171,7 +171,7 @@ pub async fn handle_alter_user(
             .to_prost();
 
         let session_user = user_reader
-            .get_user_by_name(session.user_name())
+            .get_user_by_name(&session.user_name())
             .ok_or_else(|| CatalogError::NotFound("user", session.user_name().to_owned()))?;
 
         match stmt.mode {

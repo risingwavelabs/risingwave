@@ -203,7 +203,7 @@ impl LocalFrontend {
     ) -> Arc<SessionImpl> {
         Arc::new(SessionImpl::new(
             self.env.clone(),
-            Arc::new(AuthContext::new(database, user_name, user_id)),
+            AuthContext::new(database, user_name, user_id),
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),

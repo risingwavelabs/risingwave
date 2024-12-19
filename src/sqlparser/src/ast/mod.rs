@@ -1621,6 +1621,12 @@ pub enum Statement {
     Wait,
     /// Trigger stream job recover
     Recover,
+    /// `USE <db_name>`
+    ///
+    /// Note: this is a RisingWave specific statement and used to switch the current database.
+    Use {
+        db_name: ObjectName,
+    },
 }
 
 impl fmt::Display for Statement {
@@ -2228,6 +2234,10 @@ impl fmt::Display for Statement {
             }
             Statement::Recover => {
                 write!(f, "RECOVER")?;
+                Ok(())
+            }
+            Statement::Use { db_name } => {
+                write!(f, "USE {}", db_name)?;
                 Ok(())
             }
         }

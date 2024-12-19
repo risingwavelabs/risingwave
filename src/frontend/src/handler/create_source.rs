@@ -628,7 +628,7 @@ pub async fn bind_create_source_or_table_with_connector(
     source_rate_limit: Option<u32>,
 ) -> Result<(SourceCatalog, DatabaseId, SchemaId)> {
     let session = &handler_args.session;
-    let db_name: &str = session.database();
+    let db_name: &str = &session.database();
     let (schema_name, source_name) = Binder::resolve_schema_qualified_name(db_name, full_name)?;
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
