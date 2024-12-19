@@ -43,6 +43,12 @@ struct Transaction {
 }
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
+///
+/// Output chunk size is controlled by `source_ctrl_opts.chunk_size` and `source_ctrl_opts.split_txn`.
+/// During building process, it's possible that multiple chunks are built even without any explicit
+/// call to `finish_current_chunk`. This mainly happens when we find more than one records in one
+/// `SourceMessage` when parsing it. User of this builder should call `consume_ready_chunks` to consume
+/// the built chunks from time to time, to avoid the buffer from growing too large.
 pub struct SourceStreamChunkBuilder {
     column_descs: Vec<SourceColumnDesc>,
     source_ctrl_opts: SourceCtrlOpts,
