@@ -220,7 +220,7 @@ impl<P: ByteStreamSourceParser> P {
         // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
         let source_ctrl_opts = self.source_ctx().source_ctrl_opts;
-        into_chunk_stream_inner(self, msg_stream, source_ctrl_opts)
+        parse_message_stream(self, msg_stream, source_ctrl_opts)
             .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
@@ -228,7 +228,7 @@ impl<P: ByteStreamSourceParser> P {
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
-async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
+async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
     msg_stream: BoxSourceStream,
     source_ctrl_opts: SourceCtrlOpts,
