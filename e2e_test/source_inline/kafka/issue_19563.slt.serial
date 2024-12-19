@@ -70,4 +70,4 @@ statement ok
 DROP SOURCE kafkasource CASCADE;
 
 system ok
-rpk topic delete test-topic-18308
+rpk topic delete test-topic-19563

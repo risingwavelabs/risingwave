@@ -97,11 +97,9 @@ impl Op {
             Op::UpdateInsert => "UpdateInsert",
             Op::UpdateDelete => "UpdateDelete",
         }
-        .to_string()
+        .to_owned()
     }
 }
-
-pub type Ops<'a> = &'a [Op];
 
 /// `StreamChunk` is used to pass data over the streaming pathway.
 #[derive(Clone, PartialEq)]

@@ -49,7 +49,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
         recovery_reason: RecoveryReason,
     ) {
-        self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
+        }
 
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -58,7 +60,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     fn mark_ready(&self, database_id: Option<DatabaseId>) {
         self.scheduled_barriers.mark_ready(database_id);
-        self.set_status(BarrierManagerStatus::Running);
+        if database_id.is_none() {
+            self.set_status(BarrierManagerStatus::Running);
+        }
     }
 
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
@@ -161,7 +165,7 @@ impl CommandContext {
                     .await?;
                 barrier_manager_context
                     .source_manager
-                    .apply_source_change(None, None, Some(split_assignment.clone()), None)
+                    .apply_source_change(None, None, Some(split_assignment.clone()), None, None)
                     .await;
             }
 
@@ -193,12 +197,16 @@ impl CommandContext {
                     )
                     .await?;
 
-                if let CreateStreamingJobType::SinkIntoTable(ReplaceStreamJobPlan {
-                    new_fragments,
-                    dispatchers,
-                    init_split_assignment,
-                    ..
-                }) = job_type
+                let mut fragment_replacements = None;
+                let mut dropped_actors = None;
+                if let CreateStreamingJobType::SinkIntoTable(
+                    replace_plan @ ReplaceStreamJobPlan {
+                        new_fragments,
+                        dispatchers,
+                        init_split_assignment,
+                        ..
+                    },
+                ) = job_type
                 {
                     barrier_manager_context
                         .metadata_manager
@@ -210,6 +218,8 @@ impl CommandContext {
                             init_split_assignment,
                         )
                         .await?;
+                    fragment_replacements = Some(replace_plan.fragment_replacements());
+                    dropped_actors = Some(replace_plan.dropped_actors());
                 }
 
                 // Extract the fragments that include source operators.
@@ -221,7 +231,8 @@ impl CommandContext {
                         Some(source_fragments),
                         Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
-                        None,
+                        dropped_actors,
+                        fragment_replacements,
                     )
                     .await;
             }
@@ -236,13 +247,15 @@ impl CommandContext {
                     .await?;
             }
 
-            Command::ReplaceStreamJob(ReplaceStreamJobPlan {
-                old_fragments,
-                new_fragments,
-                dispatchers,
-                init_split_assignment,
-                ..
-            }) => {
+            Command::ReplaceStreamJob(
+                replace_plan @ ReplaceStreamJobPlan {
+                    old_fragments,
+                    new_fragments,
+                    dispatchers,
+                    init_split_assignment,
+                    ..
+                },
+            ) => {
                 // Update actors and actor_dispatchers for new table fragments.
                 barrier_manager_context
                     .metadata_manager
@@ -269,7 +282,8 @@ impl CommandContext {
                         Some(source_fragments),
                         Some(backfill_fragments),
                         Some(init_split_assignment.clone()),
-                        None,
+                        Some(replace_plan.dropped_actors()),
+                        Some(replace_plan.fragment_replacements()),
                     )
                     .await;
             }

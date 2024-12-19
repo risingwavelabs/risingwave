@@ -72,7 +72,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     for (op, left_row) in chunk.rows() {
         let mut matched = false;
         #[for_await]
-        for keyed_row in right_table
+        for right_row in right_table
             .source
             .batch_iter(
                 HummockReadEpoch::NoWait(epoch),
@@ -81,8 +81,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
             )
             .await?
         {
-            let keyed_row = keyed_row?;
-            let right_row = keyed_row.row();
+            let right_row = right_row?;
             matched = true;
             if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
                 yield chunk;

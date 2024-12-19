@@ -89,21 +89,21 @@ async fn test_storage_table_value_indices() {
         None,
         Some(11_i32.into()),
         Some(111_i32.into()),
-        Some("1111".to_string().into()),
+        Some("1111".to_owned().into()),
     ]));
     state.insert(OwnedRow::new(vec![
         Some(2_i32.into()),
         None,
         Some(22_i32.into()),
         Some(222_i32.into()),
-        Some("2222".to_string().into()),
+        Some("2222".to_owned().into()),
     ]));
     state.insert(OwnedRow::new(vec![
         Some(3_i32.into()),
         None,
         Some(33_i32.into()),
         Some(333_i32.into()),
-        Some("3333".to_string().into()),
+        Some("3333".to_owned().into()),
     ]));
 
     state.delete(OwnedRow::new(vec![
@@ -111,7 +111,7 @@ async fn test_storage_table_value_indices() {
         None,
         Some(22_i32.into()),
         Some(222_i32.into()),
-        Some("2222".to_string().into()),
+        Some("2222".to_owned().into()),
     ]));
 
     epoch.inc_for_test();
@@ -135,7 +135,7 @@ async fn test_storage_table_value_indices() {
             None,
             Some(11_i32.into()),
             Some(111_i32.into()),
-            Some("1111".to_string().into())
+            Some("1111".to_owned().into())
         ]))
     );
 
@@ -162,7 +162,7 @@ async fn test_storage_table_value_indices() {
             None,
             Some(33_i32.into()),
             Some(333_i32.into()),
-            Some("3333".to_string().into())
+            Some("3333".to_owned().into())
         ]))
     );
 
