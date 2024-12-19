@@ -187,7 +187,7 @@ public class SinkWriterStreamObserver
 
     @Override
     public void onCompleted() {
-        LOG.info("sink writer completed");
+        LOG.debug("sink writer completed");
         cleanup();
         responseObserver.onCompleted();
     }

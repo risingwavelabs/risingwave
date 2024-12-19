@@ -782,7 +782,7 @@ impl EmbeddedConnectorClient {
 
                 match result {
                     Ok(_) => {
-                        tracing::info!("end of jni call {}::{}", class_name, method_name);
+                        tracing::debug!("end of jni call {}::{}", class_name, method_name);
                     }
                     Err(e) => {
                         tracing::error!(error = %e.as_report(), "jni call error");
