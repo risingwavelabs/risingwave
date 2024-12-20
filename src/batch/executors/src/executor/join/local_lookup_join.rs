@@ -404,7 +404,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let worker_slot_mapping: HashMap<WorkerSlotId, WorkerNode> = worker_nodes
             .iter()
             .flat_map(|worker| {
-                (0..(worker.parallelism()))
+                (0..(worker.compute_node_parallelism()))
                     .map(|i| (WorkerSlotId::new(worker.id, i), worker.clone()))
             })
             .collect();
