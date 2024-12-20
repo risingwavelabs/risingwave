@@ -684,7 +684,7 @@ fn gen_table_plan_with_source(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_table_plan_inner(
+pub fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: String,
     columns: Vec<ColumnCatalog>,
