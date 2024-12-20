@@ -62,7 +62,7 @@ ${EXTRA_ARGS:-} \
 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl"
-seq "$TEST_NUM" | parallel --tmpdor .risingwave 'MADSIM_TEST_SEED={} ./risingwave_simulation \
+seq "$TEST_NUM" | parallel --tmpdir .risingwave 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
 --kill-rate=${KILL_RATE} \
 --background-ddl-rate=${BACKGROUND_DDL_RATE} \
