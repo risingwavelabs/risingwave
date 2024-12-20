@@ -426,6 +426,14 @@ enum MetaCommands {
         #[clap(long)]
         props: String,
     },
+
+    /// Performing graph check for scaling.
+    #[clap(verbatim_doc_comment)]
+    GraphCheck {
+        /// SQL endpoint
+        #[clap(long, required = true)]
+        endpoint: String,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -775,6 +783,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
+        }
+        Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
+            cmd_impl::meta::graph_check(endpoint).await?
         }
         Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
         Commands::Profile(ProfileCommands::Cpu { sleep }) => {
