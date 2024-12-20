@@ -61,6 +61,12 @@ ${EXTRA_ARGS:-} \
 ./e2e_test/background_ddl/sim/basic.slt \
 2> $LOGDIR/recovery-background-ddl-{}.log && rm $LOGDIR/recovery-background-ddl-{}.log'
 
+df -h
+echo `df -h`
+
+ls -lsh /risingwave
+echo `ls -lsh /risingwave`
+
 echo "--- deterministic simulation e2e, ci-3cn-2fe-1meta, recovery, ddl"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation \
 --kill \
