@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::fmt::Formatter;
-use std::cell::{RefCell, RefMut};
+use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -59,11 +59,11 @@ pub struct OptimizerContext {
     rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
 
     /// Last assigned plan node ID.
-    last_plan_node_id: RefCell<i32>,
+    last_plan_node_id: Cell<i32>,
     /// Last assigned correlated ID.
-    last_correlated_id: RefCell<u32>,
+    last_correlated_id: Cell<u32>,
     /// Last assigned expr display ID.
-    last_expr_display_id: RefCell<usize>,
+    last_expr_display_id: Cell<usize>,
 
     _phantom: PhantomUnsend,
 }
@@ -96,9 +96,9 @@ impl OptimizerContext {
             overwrite_options,
             rcte_cache: RefCell::new(HashMap::new()),
 
-            last_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
-            last_correlated_id: RefCell::new(0),
-            last_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+            last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
+            last_correlated_id: Cell::new(0),
+            last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
 
             _phantom: Default::default(),
         }
@@ -121,9 +121,9 @@ impl OptimizerContext {
             overwrite_options: OverwriteOptions::default(),
             rcte_cache: RefCell::new(HashMap::new()),
 
-            last_plan_node_id: RefCell::new(0),
-            last_correlated_id: RefCell::new(0),
-            last_expr_display_id: RefCell::new(0),
+            last_plan_node_id: Cell::new(0),
+            last_correlated_id: Cell::new(0),
+            last_expr_display_id: Cell::new(0),
 
             _phantom: Default::default(),
         }
@@ -131,34 +131,31 @@ impl OptimizerContext {
     }
 
     pub fn next_plan_node_id(&self) -> PlanNodeId {
-        *self.last_plan_node_id.borrow_mut() += 1;
-        PlanNodeId(*self.last_plan_node_id.borrow())
+        PlanNodeId(self.last_plan_node_id.update(|id| id + 1))
     }
 
     pub fn get_plan_node_id(&self) -> i32 {
-        *self.last_plan_node_id.borrow()
+        self.last_plan_node_id.get()
     }
 
-    pub fn set_plan_node_id(&self, next_plan_node_id: i32) {
-        *self.last_plan_node_id.borrow_mut() = next_plan_node_id;
+    pub fn set_plan_node_id(&self, plan_node_id: i32) {
+        self.last_plan_node_id.set(plan_node_id);
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {
-        *self.last_correlated_id.borrow_mut() += 1;
-        *self.last_correlated_id.borrow()
+        self.last_correlated_id.update(|id| id + 1)
     }
 
     pub fn next_expr_display_id(&self) -> usize {
-        *self.last_expr_display_id.borrow_mut() += 1;
-        *self.last_expr_display_id.borrow()
+        self.last_expr_display_id.update(|id| id + 1)
     }
 
     pub fn get_expr_display_id(&self) -> usize {
-        *self.last_expr_display_id.borrow()
+        self.last_expr_display_id.get()
     }
 
     pub fn set_expr_display_id(&self, expr_display_id: usize) {
-        *self.last_expr_display_id.borrow_mut() = expr_display_id;
+        self.last_expr_display_id.set(expr_display_id);
     }
 
     pub fn add_rule_applied(&self, num: usize) {
@@ -264,8 +261,8 @@ impl std::fmt::Debug for OptimizerContext {
             self.sql,
             self.explain_options,
             self.with_options,
-            self.last_plan_node_id.borrow(),
-            self.last_correlated_id.borrow(),
+            self.last_plan_node_id.get(),
+            self.last_correlated_id.get(),
         )
     }
 }
