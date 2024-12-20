@@ -68,6 +68,12 @@ pub struct OptimizerContext {
     _phantom: PhantomUnsend,
 }
 
+pub(in crate::optimizer) struct LastAssignedIds {
+    last_plan_node_id: i32,
+    last_correlated_id: u32,
+    last_expr_display_id: usize,
+}
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -134,14 +140,6 @@ impl OptimizerContext {
         PlanNodeId(self.last_plan_node_id.update(|id| id + 1))
     }
 
-    pub fn get_plan_node_id(&self) -> i32 {
-        self.last_plan_node_id.get()
-    }
-
-    pub fn set_plan_node_id(&self, plan_node_id: i32) {
-        self.last_plan_node_id.set(plan_node_id);
-    }
-
     pub fn next_correlated_id(&self) -> CorrelatedId {
         self.last_correlated_id.update(|id| id + 1)
     }
@@ -150,12 +148,25 @@ impl OptimizerContext {
         self.last_expr_display_id.update(|id| id + 1)
     }
 
-    pub fn get_expr_display_id(&self) -> usize {
-        self.last_expr_display_id.get()
+    pub(in crate::optimizer) fn backup_elem_ids(&self) -> LastAssignedIds {
+        LastAssignedIds {
+            last_plan_node_id: self.last_plan_node_id.get(),
+            last_correlated_id: self.last_correlated_id.get(),
+            last_expr_display_id: self.last_expr_display_id.get(),
+        }
     }
 
-    pub fn set_expr_display_id(&self, expr_display_id: usize) {
-        self.last_expr_display_id.set(expr_display_id);
+    /// This should only be called in [`crate::optimizer::plan_node::reorganize_elements_id`].
+    pub(in crate::optimizer) fn reset_elem_ids(&self) {
+        self.last_plan_node_id.set(0);
+        self.last_correlated_id.set(0);
+        self.last_expr_display_id.set(0);
+    }
+
+    pub(in crate::optimizer) fn restore_elem_ids(&self, backup: LastAssignedIds) {
+        self.last_plan_node_id.set(backup.last_plan_node_id);
+        self.last_correlated_id.set(backup.last_correlated_id);
+        self.last_expr_display_id.set(backup.last_expr_display_id);
     }
 
     pub fn add_rule_applied(&self, num: usize) {
