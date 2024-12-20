@@ -3157,6 +3157,8 @@ impl Parser<'_> {
                 let column_def = self.parse_column_def()?;
                 AlterTableOperation::AddColumn { column_def }
             }
+        } else if self.parse_keywords(&[Keyword::DROP, Keyword::CONNECTOR]) {
+            AlterTableOperation::DropConnector
         } else if self.parse_keyword(Keyword::RENAME) {
             if self.parse_keyword(Keyword::CONSTRAINT) {
                 let old_name = self.parse_identifier_non_reserved()?;
@@ -3256,8 +3258,6 @@ impl Parser<'_> {
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_table = self.parse_object_name()?;
             AlterTableOperation::SwapRenameTable { target_table }
-        } else if self.parse_keywords(&[Keyword::DROP, Keyword::CONNECTOR]) {
-            AlterTableOperation::DropConnector
         } else {
             return self
                 .expected("ADD or RENAME or OWNER TO or SET or DROP or SWAP after ALTER TABLE");

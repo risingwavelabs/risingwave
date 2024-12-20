@@ -169,6 +169,7 @@ pub async fn get_replace_table_plan(
 )> {
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
+    tracing::info!("new sql: {:?}", handler_args.normalized_sql);
     let col_id_gen = ColumnIdGenerator::new_alter(old_catalog);
     let Statement::CreateTable {
         columns,
