@@ -25,7 +25,7 @@ use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
 use crate::source::mqtt::MqttProperties;
-use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitReader};
+use crate::source::{BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitReader};
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
@@ -77,7 +77,7 @@ impl SplitReader for MqttSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

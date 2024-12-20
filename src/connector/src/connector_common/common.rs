@@ -64,18 +64,27 @@ use risingwave_common::util::env_var::env_var_is_true;
 /// A flatten config map for aws auth.
 #[derive(Deserialize, Debug, Clone, WithOptions, PartialEq)]
 pub struct AwsAuthProps {
-    #[serde(rename = "aws.region", alias = "region")]
+    #[serde(rename = "aws.region", alias = "region", alias = "s3.region")]
     pub region: Option<String>,
 
     #[serde(
         rename = "aws.endpoint_url",
         alias = "endpoint_url",
-        alias = "endpoint"
+        alias = "endpoint",
+        alias = "s3.endpoint"
     )]
     pub endpoint: Option<String>,
-    #[serde(rename = "aws.credentials.access_key_id", alias = "access_key")]
+    #[serde(
+        rename = "aws.credentials.access_key_id",
+        alias = "access_key",
+        alias = "s3.access.key"
+    )]
     pub access_key: Option<String>,
-    #[serde(rename = "aws.credentials.secret_access_key", alias = "secret_key")]
+    #[serde(
+        rename = "aws.credentials.secret_access_key",
+        alias = "secret_key",
+        alias = "s3.secret.key"
+    )]
     pub secret_key: Option<String>,
     #[serde(rename = "aws.credentials.session_token", alias = "session_token")]
     pub session_token: Option<String>,
