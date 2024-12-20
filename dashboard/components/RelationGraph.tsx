@@ -174,7 +174,7 @@ export default function RelationGraph({
     const applyEdge = (sel: EdgeSelection) => {
       const color = (d: Edge) => {
         if (backPressures) {
-          let value = backPressures.get(`${d.target}_${d.source}`)
+          let value = backPressures.get(`${d.source}_${d.target}`)
           if (value) {
             return backPressureColor(value)
           }
@@ -185,7 +185,7 @@ export default function RelationGraph({
 
       const width = (d: Edge) => {
         if (backPressures) {
-          let value = backPressures.get(`${d.target}_${d.source}`)
+          let value = backPressures.get(`${d.source}_${d.target}`)
           if (value) {
             return backPressureWidth(value, 15)
           }
@@ -208,7 +208,11 @@ export default function RelationGraph({
           d3.selectAll(".tooltip").remove()
 
           // Create new tooltip
-          const tooltipText = `<b>Relation ${d.source} → ${d.target}</b><br>Backpressure: ${backPressures?.get(`${d.target}_${d.source}`) ?? "N/A"}`
+          const tooltipText = `<b>Relation ${d.source} → ${
+            d.target
+          }</b><br>Backpressure: ${
+            backPressures?.get(`${d.source}_${d.target}`) ?? "N/A"
+          }`
           d3.select("body")
             .append("div")
             .attr("class", "tooltip")
