@@ -905,6 +905,12 @@ impl From<icelake::Error> for SinkError {
     }
 }
 
+impl From<sea_orm::DbErr> for SinkError {
+    fn from(err: sea_orm::DbErr) -> Self {
+        SinkError::Iceberg(anyhow!(err))
+    }
+}
+
 impl From<OpendalError> for SinkError {
     fn from(error: OpendalError) -> Self {
         SinkError::File(error.to_report_string())

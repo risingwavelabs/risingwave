@@ -104,6 +104,7 @@ pub struct IcebergConfig {
 
     /// Whether it is exactly_once, the default is not.
     #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
     pub is_exactly_once: Option<bool>,
 }
 
@@ -839,8 +840,7 @@ impl WriteResult {
             data_files = values
                 .into_iter()
                 .map(|value| data_file_from_json(value, partition_type.clone()))
-                .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()
-                .unwrap();
+                .collect::<std::result::Result<Vec<DataFile>, icelake::Error>>()?;
         } else {
             bail!("iceberg sink metadata should have data_files object");
         }
@@ -960,8 +960,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             tracing::info!("Re commit");
             let metadata_map = self
                 .get_metadata_by_sink_id(&self.db, self.param.sink_id.sink_id())
-                .await
-                .unwrap();
+                .await?;
             let partition_type = self.table.current_partition_type()?;
             let mut last_recommit_epoch = 0;
             for (end_epoch, sealized_bytes) in metadata_map {
@@ -978,20 +977,17 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
                     .await?
                 {
                     // skip
+                    tracing::debug!("All pre-commit files have been successfully committed into iceberg and do not need to be committed again.");
                 } else {
                     // recommit
-
+                    tracing::debug!("There are files that were not successfully committed; re-commit these files.");
                     self.re_commit(end_epoch, write_results).await?;
-
-                    // Think twice, need delete meta store?
                 }
                 last_recommit_epoch = end_epoch;
             }
             tracing::info!("Iceberg commit coordinator inited.");
             return Ok(Some(last_recommit_epoch));
         }
-
-        // todo: rewind log store to last_recommit_epoch
 
         tracing::info!("Iceberg commit coordinator inited.");
         return Ok(None);
@@ -1014,7 +1010,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
         if self.is_exactly_once {
             let mut pre_commit_metadata_bytes = Vec::new();
-
+            println!("执行precommit");
             for each_parallelism_write_result in write_results.clone() {
                 let each_parallelism_write_result_bytes: Vec<u8> =
                     each_parallelism_write_result.try_into()?;
@@ -1022,7 +1018,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             }
 
             let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(pre_commit_metadata_bytes);
-            // todo: write into meta store
+
             self.persist_pre_commit_metadata(
                 self.db.clone(),
                 self.last_commit_epoch,
@@ -1037,24 +1033,23 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
     }
 }
 
+/// Methods Required to Achieve Exactly Once Semantics
 impl IcebergSinkCommitter {
-    // do not pre_commit
     async fn re_commit(&mut self, epoch: u64, write_results: Vec<WriteResult>) -> Result<()> {
-        tracing::info!("Starting iceberg re commit in epoch {epoch}.");
+        tracing::info!("Starting iceberg re_commit in epoch {epoch}.");
 
         if write_results.is_empty()
             || write_results
                 .iter()
                 .all(|r| r.data_files.is_empty() && r.delete_files.is_empty())
         {
-            tracing::debug!(?epoch, "no data to commit");
+            tracing::debug!(?epoch, "no data to re_commit");
             return Ok(());
         }
         self.commit_iceberg_inner(epoch, write_results).await?;
         Ok(())
     }
 
-    // do not pre_commit
     async fn commit_iceberg_inner(
         &mut self,
         epoch: u64,
@@ -1093,7 +1088,8 @@ impl IcebergSinkCommitter {
         start_epoch: u64,
         end_epoch: u64,
         pre_commit_metadata: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
+        println!("写meta store");
         let m = exactly_once_iceberg_sink::ActiveModel {
             sink_id: Set(self.sink_id),
             end_epoch: Set(end_epoch),
@@ -1111,7 +1107,8 @@ impl IcebergSinkCommitter {
         db: &DatabaseConnection,
         sink_id: u32,
         end_epoch: u64,
-    ) -> anyhow::Result<()> {
+    ) -> Result<()> {
+        println!("删meta store");
         let deleted_count = Entity::delete_many()
             .filter(Column::SinkId.eq(sink_id))
             .filter(Column::EndEpoch.eq(end_epoch))
@@ -1133,11 +1130,12 @@ impl IcebergSinkCommitter {
         db: &DatabaseConnection,
         sink_id: u32,
     ) -> anyhow::Result<bool> {
+        println!("检查meta store iceberg_sink_has_pre_commit_metadata");
         let count = exactly_once_iceberg_sink::Entity::find()
             .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
             .count(db)
             .await?;
-
+        println!("count = {:?}", count);
         Ok(count > 0)
     }
 
@@ -1145,7 +1143,7 @@ impl IcebergSinkCommitter {
         &self,
         db: &DatabaseConnection,
         sink_id: u32,
-    ) -> anyhow::Result<BTreeMap<u64, Vec<u8>>, Box<dyn std::error::Error>> {
+    ) -> Result<BTreeMap<u64, Vec<u8>>> {
         let models: Vec<Model> = Entity::find()
             .filter(Column::SinkId.eq(sink_id))
             .all(db)
@@ -1160,17 +1158,17 @@ impl IcebergSinkCommitter {
         Ok(result)
     }
 
+    /// This is used to check whether all files in the current batch of pre-commits have been successfully submitted.
+    ///  It returns true if all filenames are present in the current snapshot, indicating successful committing.
     async fn all_files_in_snapshot(
         &self,
         iceberg_config: &IcebergConfig,
         write_results: &[WriteResult],
     ) -> anyhow::Result<bool> {
         let iceberg_common = iceberg_config.common.clone();
-        // todo: handle unwrap
         let table = iceberg_common
             .load_table_v2(&iceberg_config.java_catalog_props)
-            .await
-            .unwrap();
+            .await?;
 
         if let Some(snapshot) = table.metadata().current_snapshot() {
             let manifest_list: ManifestList = snapshot
@@ -1212,10 +1210,7 @@ impl IcebergSinkCommitter {
 }
 
 /// Try to match our schema with iceberg schema.
-pub fn try_matches_arrow_schema(
-    rw_schema: &Schema,
-    arrow_schema: &ArrowSchema,
-) -> anyhow::Result<()> {
+pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
     if rw_schema.fields.len() != arrow_schema.fields().len() {
         bail!(
             "Schema length mismatch, risingwave is {}, and iceberg is {}",
