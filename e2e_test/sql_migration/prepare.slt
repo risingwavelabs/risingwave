@@ -27,7 +27,16 @@ statement ok
 create materialized view mv1 as select * from t1;
 
 statement ok
-create materialized view mv2 as select * from src;
+create schema tmp;
+
+statement ok
+create materialized view tmp.mv2 as select * from src;
+
+statement ok
+alter materialized view tmp.mv2 set schema public;
+
+statement ok
+drop schema tmp;
 
 statement ok
 create view v1 as select * from mv1;
