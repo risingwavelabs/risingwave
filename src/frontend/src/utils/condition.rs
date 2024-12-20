@@ -437,6 +437,7 @@ impl Condition {
                     }
                 }
 
+                // Here it is necessary to determine whether all of row is included in the `ScanRanges`, if so, the data for eq is not needed
                 if !pk_struct.is_empty() {
                     if !all_added {
                         let scan_range = ScanRange {
