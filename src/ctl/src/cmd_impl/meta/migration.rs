@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use chrono::DateTime;
 use etcd_client::ConnectOptions;
 use itertools::Itertools;
@@ -59,7 +59,7 @@ use risingwave_meta_model_v2::{
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
-    PbSubscription, PbTable, PbView,
+    PbStreamSourceInfo, PbSubscription, PbTable, PbView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{
@@ -67,6 +67,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::PbSystemParams;
+use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::user::grant_privilege::PbObject as GrantObject;
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::ActiveValue::Set;
@@ -98,16 +101,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     // 2. init sql meta store.
     let mut options = sea_orm::ConnectOptions::new(target);
     options
-        .max_connections(10)
+        .max_connections(1)
         .connect_timeout(Duration::from_secs(10))
         .idle_timeout(Duration::from_secs(30));
     let conn = sea_orm::Database::connect(options).await?;
     let meta_store_sql = SqlMetaStore::new(conn);
 
     if force_clean {
-        Migrator::down(&meta_store_sql.conn, None)
-            .await
-            .expect("failed to clean sql backend");
+        reset_target_database(&meta_store_sql).await?;
+        tracing::info!("target database reset");
     }
     Migrator::up(&meta_store_sql.conn, None)
         .await
@@ -132,7 +134,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .filter(cluster::Column::ClusterId.eq(generated_cluster_id))
         .exec(&meta_store_sql.conn)
         .await?;
-    println!("cluster id updated to {}", cluster_id);
+    tracing::info!("cluster id updated to {}", cluster_id);
 
     // system parameters.
     let system_parameters = PbSystemParams::get(&meta_store)
@@ -141,7 +143,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     SystemParameter::insert_many(system_params_to_model(&system_parameters)?)
         .exec(&meta_store_sql.conn)
         .await?;
-    println!("system parameters migrated");
+    tracing::info!("system parameters migrated");
 
     // workers.
     let workers = model::Worker::list(&meta_store).await?;
@@ -171,7 +173,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .await?;
         }
     }
-    println!("worker nodes migrated");
+    tracing::info!("worker nodes migrated");
 
     // catalogs.
     let databases = PbDatabase::list(&meta_store).await?;
@@ -198,15 +200,15 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .chain(subscriptions.iter().map(|s| s.id))
         .collect::<BTreeSet<_>>();
 
-    // Helper function to get next available id.
-    let mut next_available_id = || -> u32 {
-        let id = inuse_obj_ids
+    // Helper function to get the next available id.
+    let next_available_id = |objs: &mut BTreeSet<u32>| -> u32 {
+        let id = objs
             .iter()
             .enumerate()
             .find(|(i, id)| i + 1 != **id as usize)
             .map(|(i, _)| i + 1)
-            .unwrap_or(inuse_obj_ids.len() + 1) as u32;
-        inuse_obj_ids.insert(id);
+            .unwrap_or(objs.len() + 1) as u32;
+        objs.insert(id);
         id
     };
 
@@ -228,12 +230,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     User::insert_many(user_models)
         .exec(&meta_store_sql.conn)
         .await?;
-    println!("users migrated");
+    tracing::info!("users migrated");
 
     // database
     let mut db_rewrite = HashMap::new();
     for mut db in databases {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
+        tracing::info!("add database rewrite plan: {} -> {}", db.id, id);
         db_rewrite.insert(db.id, id);
         db.id = id as _;
 
@@ -248,12 +251,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("databases migrated");
+    tracing::info!("databases migrated");
 
     // schema
     let mut schema_rewrite = HashMap::new();
     for mut schema in schemas {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
+        tracing::info!("add schema rewrite plan: {} -> {}", schema.id, id);
         schema_rewrite.insert(schema.id, id);
         schema.id = id as _;
 
@@ -269,12 +273,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("schemas migrated");
+    tracing::info!("schemas migrated");
 
     // function
     let mut function_rewrite = HashMap::new();
     for mut function in functions {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
+        tracing::info!("add function rewrite plan: {} -> {}", function.id, id);
         function_rewrite.insert(function.id, id);
         function.id = id as _;
 
@@ -291,12 +296,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("functions migrated");
+    tracing::info!("functions migrated");
 
     // connection mapping
     let mut connection_rewrite = HashMap::new();
     for mut connection in connections {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
+        tracing::info!("add connection rewrite plan: {} -> {}", connection.id, id);
         connection_rewrite.insert(connection.id, id);
         connection.id = id as _;
 
@@ -315,12 +321,13 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("connections migrated");
+    tracing::info!("connections migrated");
 
     // secret mapping
     let mut secret_rewrite = HashMap::new();
     for mut secret in secrets {
-        let id = next_available_id();
+        let id = next_available_id(&mut inuse_obj_ids);
+        tracing::info!("add secret rewrite plan: {} -> {}", secret.id, id);
         secret_rewrite.insert(secret.id, id);
         secret.id = id as _;
 
@@ -337,7 +344,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("secrets migrated");
+    tracing::info!("secrets migrated");
 
     // add object: table, source, sink, index, view, subscription.
     macro_rules! insert_objects {
@@ -466,8 +473,22 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         let mut stream_node = fragment.stream_node.to_protobuf();
         visit_stream_node_tables(&mut stream_node, |table, _| {
             table.database_id = *db_rewrite.get(&table.database_id).unwrap();
-            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap();
+            // Note: The schema could be altered and not updated here.
+            // It's safe to leave it as 0 if not found.
+            let new_schema_id = *schema_rewrite.get(&table.schema_id).unwrap_or(&0);
+            if new_schema_id == 0 {
+                tracing::warn!(
+                    "schema id {} not found for table: id={}, name={}",
+                    table.schema_id,
+                    table.id,
+                    table.name,
+                );
+            }
+            table.schema_id = *schema_rewrite.get(&table.schema_id).unwrap_or(&0);
         });
+        // rewrite secret ids.
+        visit_secret_ref_mut(&mut stream_node, &secret_rewrite);
+
         let mut fragment = fragment.into_active_model();
         fragment.stream_node = Set((&stream_node).into());
         Fragment::insert(fragment)
@@ -488,7 +509,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 .await?;
         }
     }
-    println!("table fragments migrated");
+    tracing::info!("table fragments migrated");
 
     let mut object_dependencies = vec![];
 
@@ -561,7 +582,12 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 if let Some(info) = &mut src.info {
                     for secret_ref in info.format_encode_secret_refs.values_mut() {
                         secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
-                        dependent_secret_ids.insert(secret_ref.secret_id);
+                    }
+                    if let Some(table) = &mut info.external_table {
+                        for secret_ref in table.secret_refs.values_mut() {
+                            secret_ref.secret_id =
+                                *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+                        }
                     }
                 }
                 object_dependencies.extend(dependent_secret_ids.into_iter().map(|secret_id| {
@@ -578,7 +604,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("sources migrated");
+    tracing::info!("sources migrated");
 
     // table
     for table in tables {
@@ -598,7 +624,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         t.belongs_to_job_id = job_id;
         Table::insert(t).exec(&meta_store_sql.conn).await?;
     }
-    println!("tables migrated");
+    tracing::info!("tables migrated");
 
     // index
     if !indexes.is_empty() {
@@ -608,7 +634,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("indexes migrated");
+    tracing::info!("indexes migrated");
 
     // sink
     if !sinks.is_empty() {
@@ -650,7 +676,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("sinks migrated");
+    tracing::info!("sinks migrated");
 
     // view
     if !views.is_empty() {
@@ -671,7 +697,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("views migrated");
+    tracing::info!("views migrated");
 
     // subscriptions
     if !subscriptions.is_empty() {
@@ -690,7 +716,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("subscriptions migrated");
+    tracing::info!("subscriptions migrated");
 
     // object_dependency
     if !object_dependencies.is_empty() {
@@ -698,7 +724,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("object dependencies migrated");
+    tracing::info!("object dependencies migrated");
 
     // user privilege
     let mut privileges = vec![];
@@ -707,9 +733,9 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     for user in users {
         for gp in user.grant_privileges {
             let id = match gp.get_object()? {
-                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap(),
-                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap(),
-                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap(),
+                GrantObject::DatabaseId(id) => *db_rewrite.get(id).unwrap_or(&0),
+                GrantObject::SchemaId(id) => *schema_rewrite.get(id).unwrap_or(&0),
+                GrantObject::FunctionId(id) => *function_rewrite.get(id).unwrap_or(&0),
                 GrantObject::TableId(id)
                 | GrantObject::SourceId(id)
                 | GrantObject::SinkId(id)
@@ -717,6 +743,14 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                 | GrantObject::SubscriptionId(id) => *id,
                 ty => unreachable!("invalid object type: {:?}", ty),
             };
+            if id == 0 {
+                tracing::warn!("grant object not found");
+                continue;
+            } else if !inuse_obj_ids.contains(&id) {
+                tracing::warn!("grant object id {} not found", id);
+                continue;
+            }
+
             for action_with_opt in &gp.action_with_opts {
                 privileges.push(user_privilege::ActiveModel {
                     user_id: Set(user.id as _),
@@ -734,7 +768,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
             .exec(&meta_store_sql.conn)
             .await?;
     }
-    println!("user privileges migrated");
+    tracing::info!("user privileges migrated");
 
     // notification.
     let notification_version = NotificationVersion::new(&meta_store).await;
@@ -744,7 +778,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     })
     .exec(&meta_store_sql.conn)
     .await?;
-    println!("notification version migrated");
+    tracing::info!("notification version migrated");
 
     // table revision.
     let table_revision = TableRevision::get(&meta_store).await?;
@@ -754,7 +788,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     })
     .exec(&meta_store_sql.conn)
     .await?;
-    println!("table revision migrated");
+    tracing::info!("table revision migrated");
 
     // hummock.
     // hummock pinned snapshots
@@ -772,7 +806,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("hummock pinned snapshots migrated");
+    tracing::info!("hummock pinned snapshots migrated");
 
     // hummock pinned version
     let pinned_version = HummockPinnedVersion::list(&meta_store).await?;
@@ -789,7 +823,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("hummock pinned version migrated");
+    tracing::info!("hummock pinned version migrated");
 
     // hummock version delta
     let version_delta = HummockVersionDelta::list(&meta_store).await?;
@@ -810,7 +844,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("hummock version delta migrated");
+    tracing::info!("hummock version delta migrated");
 
     // hummock version stat
     let version_stats = HummockVersionStats::list(&meta_store)
@@ -825,7 +859,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("hummock version stats migrated");
+    tracing::info!("hummock version stats migrated");
 
     // compaction
     // compaction config
@@ -843,7 +877,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("compaction config migrated");
+    tracing::info!("compaction config migrated");
 
     // compaction status
     let compaction_statuses = CompactStatus::list(&meta_store).await?;
@@ -862,7 +896,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("compaction status migrated");
+    tracing::info!("compaction status migrated");
 
     // compaction task
     let compaction_tasks = CompactTaskAssignment::list(&meta_store).await?;
@@ -879,7 +913,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
         .exec(&meta_store_sql.conn)
         .await?;
     }
-    println!("compaction task migrated");
+    tracing::info!("compaction task migrated");
 
     // hummock sequence
     let sst_obj_id = load_current_id(&meta_store, "hummock_ss_table_id", Some(1)).await;
@@ -911,7 +945,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     ])
     .exec(&meta_store_sql.conn)
     .await?;
-    println!("hummock sequence migrated");
+    tracing::info!("hummock sequence migrated");
 
     // Rest sequence for object and user.
     match meta_store_sql.conn.get_database_backend() {
@@ -923,7 +957,7 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
                     format!("ALTER TABLE worker AUTO_INCREMENT = {next_worker_id};"),
                 ))
                 .await?;
-            let next_object_id = next_available_id();
+            let next_object_id = next_available_id(&mut inuse_obj_ids);
             meta_store_sql
                 .conn
                 .execute(Statement::from_string(
@@ -966,6 +1000,113 @@ pub async fn migrate(from: EtcdBackend, target: String, force_clean: bool) -> an
     }
 
     Ok(())
+}
+
+async fn reset_target_database(store: &SqlMetaStore) -> anyhow::Result<()> {
+    match store.conn.get_database_backend() {
+        DbBackend::Postgres => {
+            store
+                .conn
+                .execute_unprepared(
+                    "DROP SCHEMA IF EXISTS \"public\" CASCADE; CREATE SCHEMA \"public\";",
+                )
+                .await?;
+        }
+        DbBackend::MySql => {
+            let res = store
+                .conn
+                .query_one(Statement::from_string(
+                    DatabaseBackend::MySql,
+                    "SELECT DATABASE()",
+                ))
+                .await?
+                .expect("current database should exist");
+            let db_name: String = res.try_get_by(0)?;
+
+            store
+                .conn
+                .execute_unprepared(&format!(
+                    "DROP DATABASE IF EXISTS {}; CREATE DATABASE {}; USE {};",
+                    db_name, db_name, db_name
+                ))
+                .await?;
+        }
+        DbBackend::Sqlite => {
+            let res = store
+                .conn
+                .query_one(Statement::from_string(
+                    DatabaseBackend::Sqlite,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table';",
+                ))
+                .await?
+                .expect("count should exist");
+            let count: i64 = res.try_get_by(0)?;
+            if count != 0 {
+                // there's no such command to reset the sqlite database,
+                // notify the user to change another file.
+                return Err(anyhow!(
+                    "sqlite file is not empty, please change another file or remove it."
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn visit_secret_ref_mut(stream_node: &mut PbStreamNode, secret_rewrite: &HashMap<u32, u32>) {
+    let visit_map_secret_refs = |refs: &mut BTreeMap<String, PbSecretRef>| {
+        for secret_ref in refs.values_mut() {
+            secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+        }
+    };
+    let visit_info = |info: &mut PbStreamSourceInfo| {
+        for secret_ref in info.format_encode_secret_refs.values_mut() {
+            secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+        }
+        if let Some(table) = &mut info.external_table {
+            for secret_ref in table.secret_refs.values_mut() {
+                secret_ref.secret_id = *secret_rewrite.get(&secret_ref.secret_id).unwrap();
+            }
+        }
+    };
+
+    let visit_body = |body: &mut PbNodeBody| match body {
+        PbNodeBody::Source(node) => {
+            if let Some(inner) = &mut node.source_inner {
+                visit_map_secret_refs(&mut inner.secret_refs);
+                inner.info.as_mut().map(visit_info);
+            }
+        }
+        PbNodeBody::Sink(node) => {
+            if let Some(desc) = &mut node.sink_desc {
+                visit_map_secret_refs(&mut desc.secret_refs);
+                if let Some(desc) = &mut desc.format_desc {
+                    visit_map_secret_refs(&mut desc.secret_refs)
+                }
+            }
+        }
+        PbNodeBody::StreamFsFetch(node) => {
+            if let Some(inner) = &mut node.node_inner {
+                visit_map_secret_refs(&mut inner.secret_refs);
+                inner.info.as_mut().map(visit_info);
+            }
+        }
+        PbNodeBody::StreamCdcScan(node) => {
+            if let Some(desc) = &mut node.cdc_table_desc {
+                visit_map_secret_refs(&mut desc.secret_refs)
+            }
+        }
+        PbNodeBody::SourceBackfill(node) => {
+            visit_map_secret_refs(&mut node.secret_refs);
+            node.info.as_mut().map(visit_info);
+        }
+        _ => {}
+    };
+    visit_body(stream_node.node_body.as_mut().unwrap());
+    for input in &mut stream_node.input {
+        visit_secret_ref_mut(input, secret_rewrite);
+    }
 }
 
 async fn load_current_id(meta_store: &MetaStoreRef, category: &str, start: Option<u64>) -> u64 {
