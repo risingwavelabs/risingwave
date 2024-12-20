@@ -223,7 +223,7 @@ impl Scheduler {
 
         let slots = workers
             .iter()
-            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_parallelism()))
+            .map(|(worker_id, worker)| (*worker_id as WorkerId, worker.compute_node_parallelism()))
             .collect();
 
         let parallelism = default_parallelism.get();

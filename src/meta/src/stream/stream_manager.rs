@@ -641,7 +641,7 @@ impl GlobalStreamManager {
         // Check if the provided parallelism is valid.
         let available_parallelism = worker_nodes
             .iter()
-            .map(|w| w.compute_parallelism())
+            .map(|w| w.compute_node_parallelism())
             .sum::<usize>();
         let max_parallelism = self
             .metadata_manager

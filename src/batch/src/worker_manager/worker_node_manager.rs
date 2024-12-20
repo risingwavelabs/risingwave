@@ -338,7 +338,7 @@ impl WorkerNodeSelector {
         };
         worker_nodes
             .iter()
-            .map(|node| node.compute_parallelism())
+            .map(|node| node.compute_node_parallelism())
             .sum()
     }
 

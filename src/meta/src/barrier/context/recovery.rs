@@ -411,7 +411,7 @@ impl GlobalBarrierWorkerContextImpl {
             .current()
             .values()
             .flat_map(|node| {
-                (0..node.compute_parallelism()).map(|idx| WorkerSlotId::new(node.id, idx))
+                (0..node.compute_node_parallelism()).map(|idx| WorkerSlotId::new(node.id, idx))
             })
             .collect();
 
@@ -441,7 +441,7 @@ impl GlobalBarrierWorkerContextImpl {
                 .current()
                 .values()
                 .flat_map(|worker| {
-                    (0..worker.compute_parallelism())
+                    (0..worker.compute_node_parallelism())
                         .map(move |i| WorkerSlotId::new(worker.id, i as _))
                 })
                 .collect_vec();
@@ -460,7 +460,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .current()
                         .values()
                         .flat_map(|worker| {
-                            (0..worker.compute_parallelism() * factor)
+                            (0..worker.compute_node_parallelism() * factor)
                                 .map(move |i| WorkerSlotId::new(worker.id, i as _))
                         })
                         .collect_vec();
@@ -516,7 +516,7 @@ impl GlobalBarrierWorkerContextImpl {
                         let current_nodes = active_nodes
                             .current()
                             .values()
-                            .map(|node| (node.id, &node.host, node.compute_parallelism()))
+                            .map(|node| (node.id, &node.host, node.compute_node_parallelism()))
                             .collect_vec();
                         warn!(
                             current_nodes = ?current_nodes,
@@ -557,7 +557,7 @@ impl GlobalBarrierWorkerContextImpl {
         let available_parallelism = active_nodes
             .current()
             .values()
-            .map(|worker_node| worker_node.compute_parallelism())
+            .map(|worker_node| worker_node.compute_node_parallelism())
             .sum();
 
         let table_parallelisms: HashMap<_, _> = {

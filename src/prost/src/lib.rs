@@ -221,7 +221,7 @@ impl stream_plan::MaterializeNode {
 
 // Encapsulating the use of parallelism.
 impl common::WorkerNode {
-    pub fn compute_parallelism(&self) -> usize {
+    pub fn compute_node_parallelism(&self) -> usize {
         assert_eq!(self.r#type(), WorkerType::ComputeNode);
         self.property
             .as_ref()
@@ -231,7 +231,7 @@ impl common::WorkerNode {
 
     pub fn parallelism(&self) -> Option<usize> {
         if WorkerType::ComputeNode == self.r#type() {
-            Some(self.compute_parallelism())
+            Some(self.compute_node_parallelism())
         } else {
             None
         }
