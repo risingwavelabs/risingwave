@@ -51,7 +51,7 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onCompleted() {
-        LOG.info("JniSinkWriterHandler onCompleted");
+        LOG.debug("JniSinkWriterHandler onCompleted");
     }
 
     public boolean isSuccess() {

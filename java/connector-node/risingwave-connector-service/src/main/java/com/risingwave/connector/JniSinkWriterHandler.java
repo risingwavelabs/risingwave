@@ -44,6 +44,6 @@ public class JniSinkWriterHandler {
         } catch (Throwable t) {
             sinkWriterStreamObserver.onError(t);
         }
-        LOG.info("end of runJniSinkWriterThread");
+        LOG.debug("end of runJniSinkWriterThread");
     }
 }
