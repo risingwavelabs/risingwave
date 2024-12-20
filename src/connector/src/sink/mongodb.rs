@@ -81,6 +81,12 @@ mod send_bulk_write_command_future {
             )))
         })?;
 
+        if let Ok(ok) = result.get_i32("ok")
+            && ok != 1
+        {
+            return Err(SinkError::Mongodb(anyhow!("bulk write write errors")));
+        }
+
         if let Ok(write_errors) = result.get_array("writeErrors") {
             return Err(SinkError::Mongodb(anyhow!(
                 "bulk write respond with write errors: {:?}",
