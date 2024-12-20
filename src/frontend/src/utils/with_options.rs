@@ -199,7 +199,7 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     object: TelemetryDatabaseObject,
 ) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
     let connector_name = with_options.get_connector();
-    let db_name: &str = session.database();
+    let db_name: &str = &session.database();
     let (mut options, secret_refs, connection_refs) = with_options.clone().into_parts();
 
     let mut connection_id = None;
@@ -339,7 +339,7 @@ pub(crate) fn resolve_secret_ref_in_with_options(
 ) -> RwResult<WithOptionsSecResolved> {
     let (options, secret_refs, _) = with_options.into_parts();
     let mut resolved_secret_refs = BTreeMap::new();
-    let db_name: &str = session.database();
+    let db_name: &str = &session.database();
     for (key, secret_ref) in secret_refs {
         let (schema_name, secret_name) =
             Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
