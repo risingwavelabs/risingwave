@@ -1150,6 +1150,23 @@ pub struct StreamingDeveloperConfig {
     /// When true, all jdbc sinks with connector='jdbc' and jdbc.url="jdbc:postgresql://..."
     /// will be switched from jdbc postgresql sinks to rust native (connector='postgres') sinks.
     pub switch_jdbc_pg_to_native: bool,
+
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_min")]
+    pub backfill_adaptive_rate_limit_min: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_max")]
+    pub backfill_adaptive_rate_limit_max: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_init")]
+    pub backfill_adaptive_rate_limit_init: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_min")]
+    pub backfill_adaptive_rate_limit_step_min: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_max")]
+    pub backfill_adaptive_rate_limit_step_max: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_ratio")]
+    pub backfill_adaptive_rate_limit_step_ratio: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_up_threshold")]
+    pub backfill_adaptive_rate_limit_step_up_threshold: f64,
+    #[serde(default = "default::developer::backfill_adaptive_rate_limit_step_down_threshold")]
+    pub backfill_adaptive_rate_limit_step_down_threshold: f64,
 }
 
 /// The subsections `[batch.developer]`.
@@ -2112,6 +2129,38 @@ pub mod default {
 
         pub fn switch_jdbc_pg_to_native() -> bool {
             false
+        }
+
+        pub fn backfill_adaptive_rate_limit_min() -> f64 {
+            10.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_max() -> f64 {
+            100_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_init() -> f64 {
+            1_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_min() -> f64 {
+            10.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_max() -> f64 {
+            10_000.0
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_ratio() -> f64 {
+            0.1
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_up_threshold() -> f64 {
+            0.99
+        }
+
+        pub fn backfill_adaptive_rate_limit_step_down_threshold() -> f64 {
+            0.9
         }
     }
 
