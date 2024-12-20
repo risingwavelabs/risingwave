@@ -23,7 +23,7 @@ use json_common::*;
 use old_json_parser::JsonParser;
 use risingwave_connector::parser::plain_parser::PlainParser;
 use risingwave_connector::parser::{SourceStreamChunkBuilder, SpecificParserConfig};
-use risingwave_connector::source::SourceContext;
+use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 
 // The original implementation used to parse JSON prior to #13707.
 mod old_json_parser {
@@ -130,7 +130,13 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                 (parser, records.clone())
             },
             |(mut parser, records)| async move {
-                let mut builder = SourceStreamChunkBuilder::with_capacity(get_descs(), NUM_RECORDS);
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
                 for record in records {
                     let writer = builder.row_writer();
                     parser
@@ -155,7 +161,13 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                 (parser, records.clone())
             },
             |(parser, records)| async move {
-                let mut builder = SourceStreamChunkBuilder::with_capacity(get_descs(), NUM_RECORDS);
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
                 for record in records {
                     let writer = builder.row_writer();
                     parser.parse_inner(record, writer).await.unwrap();

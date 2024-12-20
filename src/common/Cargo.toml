@@ -121,7 +121,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = "0.3.17"
-twox-hash = "1"
+twox-hash = "2"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 

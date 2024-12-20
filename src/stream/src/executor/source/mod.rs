@@ -24,7 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_connector::error::ConnectorError;
-use risingwave_connector::source::{BoxChunkSourceStream, SourceColumnDesc, SplitId};
+use risingwave_connector::source::{BoxSourceChunkStream, SourceColumnDesc, SplitId};
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use risingwave_pb::plan_common::AdditionalColumn;
 pub use state_table_handler::*;
@@ -120,7 +120,7 @@ pub fn prune_additional_cols(
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
-pub async fn apply_rate_limit(stream: BoxChunkSourceStream, rate_limit_rps: Option<u32>) {
+pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Option<u32>) {
     if rate_limit_rps == Some(0) {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
