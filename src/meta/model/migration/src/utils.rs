@@ -11,6 +11,7 @@ impl ColumnDef {
     pub fn rw_binary(&mut self, manager: &SchemaManager) -> &mut Self {
         match manager.get_database_backend() {
             DatabaseBackend::MySql => self.custom(extension::mysql::MySqlType::LongBlob),
+            #[expect(clippy::disallowed_methods)]
             DatabaseBackend::Postgres | DatabaseBackend::Sqlite => self.blob(),
         }
     }
