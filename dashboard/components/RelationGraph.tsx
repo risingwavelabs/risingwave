@@ -208,10 +208,11 @@ export default function RelationGraph({
           d3.selectAll(".tooltip").remove()
 
           // Create new tooltip
+          const bpValue = backPressures?.get(`${d.source}_${d.target}`)
           const tooltipText = `<b>Relation ${d.source} → ${
             d.target
           }</b><br>Backpressure: ${
-            backPressures?.get(`${d.source}_${d.target}`) ?? "N/A"
+            bpValue != null ? `${(bpValue * 100).toFixed(2)}%` : "N/A"
           }`
           d3.select("body")
             .append("div")
