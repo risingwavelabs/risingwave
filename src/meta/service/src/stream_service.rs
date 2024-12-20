@@ -23,7 +23,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::model;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
-use risingwave_meta_model::{ObjectId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{ObjectId, SinkId, SourceId, StreamingParallelism};
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_table_fragments_response::{
@@ -129,6 +129,11 @@ impl StreamManagerService for StreamServiceImpl {
             ThrottleTarget::TableDml => {
                 self.metadata_manager
                     .update_dml_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .await?
+            }
+            ThrottleTarget::Sink => {
+                self.metadata_manager
+                    .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
                     .await?
             }
             ThrottleTarget::Unspecified => {
