@@ -35,8 +35,6 @@ type PhantomUnsend = PhantomData<Rc<()>>;
 
 pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
-    /// Store plan node id
-    next_plan_node_id: RefCell<i32>,
     /// The original SQL string, used for debugging.
     sql: Arc<str>,
     /// Normalized SQL string. See [`HandlerArgs::normalize_sql`].
@@ -47,14 +45,10 @@ pub struct OptimizerContext {
     optimizer_trace: RefCell<Vec<String>>,
     /// Store the optimized logical plan of optimizer
     logical_explain: RefCell<Option<String>>,
-    /// Store correlated id
-    next_correlated_id: RefCell<u32>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
     session_timezone: RefCell<SessionTimezone>,
-    /// Store expr display id.
-    next_expr_display_id: RefCell<usize>,
     /// Total number of optimization rules have been applied.
     total_rule_applied: RefCell<usize>,
     /// Store the configs can be overwritten in with clause
@@ -63,6 +57,13 @@ pub struct OptimizerContext {
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
     rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
+
+    /// Last assigned plan node ID.
+    next_plan_node_id: RefCell<i32>,
+    /// Last assigned correlated ID.
+    next_correlated_id: RefCell<u32>,
+    /// Last assigned expr display ID.
+    next_expr_display_id: RefCell<usize>,
 
     _phantom: PhantomUnsend,
 }
@@ -84,19 +85,21 @@ impl OptimizerContext {
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {
             session_ctx: handler_args.session,
-            next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
             explain_options,
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
-            next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
             session_timezone,
-            next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
             total_rule_applied: RefCell::new(0),
             overwrite_options,
             rcte_cache: RefCell::new(HashMap::new()),
+
+            next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
+            next_correlated_id: RefCell::new(0),
+            next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+
             _phantom: Default::default(),
         }
     }
@@ -107,19 +110,21 @@ impl OptimizerContext {
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
-            next_plan_node_id: RefCell::new(0),
             sql: Arc::from(""),
             normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
-            next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
-            next_expr_display_id: RefCell::new(0),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
             rcte_cache: RefCell::new(HashMap::new()),
+
+            next_plan_node_id: RefCell::new(0),
+            next_correlated_id: RefCell::new(0),
+            next_expr_display_id: RefCell::new(0),
+
             _phantom: Default::default(),
         }
         .into()
@@ -138,6 +143,11 @@ impl OptimizerContext {
         *self.next_plan_node_id.borrow_mut() = next_plan_node_id;
     }
 
+    pub fn next_correlated_id(&self) -> CorrelatedId {
+        *self.next_correlated_id.borrow_mut() += 1;
+        *self.next_correlated_id.borrow()
+    }
+
     pub fn next_expr_display_id(&self) -> usize {
         *self.next_expr_display_id.borrow_mut() += 1;
         *self.next_expr_display_id.borrow()
@@ -149,11 +159,6 @@ impl OptimizerContext {
 
     pub fn set_expr_display_id(&self, expr_display_id: usize) {
         *self.next_expr_display_id.borrow_mut() = expr_display_id;
-    }
-
-    pub fn next_correlated_id(&self) -> CorrelatedId {
-        *self.next_correlated_id.borrow_mut() += 1;
-        *self.next_correlated_id.borrow()
     }
 
     pub fn add_rule_applied(&self, num: usize) {
