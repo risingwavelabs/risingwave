@@ -494,6 +494,15 @@ impl std::fmt::Debug for plan_common::ColumnDesc {
     }
 }
 
+impl batch_plan::iceberg_metadata_scan_node::IcebergMetadataTableType {
+    pub fn from_str_name_not_unspecified(s: &str) -> Option<Self> {
+        if s == "UNSPECIFIED" {
+            return None;
+        }
+        Self::from_str_name(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};

@@ -52,9 +52,9 @@ pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
-    ResolveQualifiedNameError, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundIcebergTableFunction, BoundJoin, BoundShare,
+    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
+    Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;

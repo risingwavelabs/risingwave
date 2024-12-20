@@ -81,6 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".batch_plan.IcebergMetadataScanNode",
     ];
 
     // Build protobuf structs.

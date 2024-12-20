@@ -77,6 +77,9 @@ pub(crate) fn resolve_relation_privileges(
         Relation::WindowTableFunction(table) => {
             resolve_relation_privileges(&table.input, mode, objects)
         }
+        Relation::IcebergTableFunction(table) => {
+            resolve_relation_privileges(&table.input, mode, objects)
+        }
         _ => {}
     };
 }

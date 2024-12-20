@@ -114,6 +114,16 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
     }
 
+    pub fn connector_name(&self) -> String {
+        match &self.catalog {
+            Some(catalog) => catalog
+                .with_properties
+                .get_connector()
+                .unwrap_or("no connector".to_owned()),
+            None => "no connector".to_owned(),
+        }
+    }
+
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()

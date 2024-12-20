@@ -17,6 +17,8 @@ use std::str::FromStr;
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
+use risingwave_connector::source::iceberg::iceberg_metadata_table_schema;
+use risingwave_pb::batch_plan::iceberg_metadata_scan_node::IcebergMetadataTableType;
 use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
 
 use super::{Binder, Relation, Result};
@@ -124,5 +126,60 @@ impl Binder {
             kind,
             args: exprs,
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BoundIcebergTableFunction {
+    pub(crate) input: Relation,
+    pub(crate) table_type: IcebergMetadataTableType,
+}
+
+impl RewriteExprsRecursive for BoundIcebergTableFunction {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.input.rewrite_exprs_recursive(rewriter);
+    }
+}
+
+const ICEBERG_ERROR_1ST_ARG: &str =
+    "The 1st arg of iceberg table function should be a table name of an iceberg source.";
+
+impl Binder {
+    pub(super) fn bind_iceberg_table_function(
+        &mut self,
+        alias: Option<TableAlias>,
+        table_type: IcebergMetadataTableType,
+        args: Vec<FunctionArg>,
+    ) -> Result<BoundIcebergTableFunction> {
+        let mut args = args.into_iter();
+
+        self.push_context();
+
+        let (base, _table_name) =
+            self.bind_relation_by_function_arg(args.next(), ICEBERG_ERROR_1ST_ARG)?;
+
+        self.pop_context()?;
+        let columns = iceberg_metadata_table_schema(table_type)
+            .fields()
+            .iter()
+            .map(|c| Ok((false, c.clone())))
+            .collect::<Result<Vec<_>>>()?;
+
+        let metadata_table_name = "?";
+        self.bind_table_to_context(columns, metadata_table_name.to_owned(), alias)?;
+
+        Ok(BoundIcebergTableFunction {
+            input: base,
+            table_type,
+        })
+    }
+}
+
+/// `iceberg_snapshots` etc.
+pub(super) fn parse_iceberg_metadata_table_type(s: &str) -> Option<IcebergMetadataTableType> {
+    if let Some(s) = s.strip_prefix("iceberg_") {
+        IcebergMetadataTableType::from_str_name_not_unspecified(&s.to_ascii_uppercase())
+    } else {
+        None
     }
 }

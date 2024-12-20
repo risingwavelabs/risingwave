@@ -26,15 +26,17 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_sqlparser::ast::AsOf;
 
 use crate::binder::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBackCteRef, BoundBaseTable, BoundIcebergTableFunction, BoundJoin, BoundShare,
+    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
+    Relation, WindowTableFunctionKind,
 };
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan,
-    LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalApply, LogicalCteRef, LogicalHopWindow, LogicalIcebergMetadataScan, LogicalJoin,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -53,6 +55,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
+            Relation::IcebergTableFunction(tf) => self.plan_iceberg_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::TableFunction {
                 expr: tf,
@@ -297,6 +300,44 @@ impl Planner {
                 table_function.time_col,
                 table_function.args,
             ),
+        }
+    }
+
+    pub(super) fn plan_iceberg_table_function(
+        &mut self,
+        table_function: BoundIcebergTableFunction,
+    ) -> Result<PlanRef> {
+        let base = self.plan_relation(table_function.input)?;
+        match base.as_logical_source() {
+            Some(source) =>  {
+                if source.core.is_iceberg_connector() {
+                let iceberg_scan = LogicalIcebergMetadataScan::new(
+                    source
+                        .core
+                        .catalog
+                        .as_ref()
+                        .unwrap()
+                        .with_properties
+                        .clone(),
+                    table_function.table_type,
+                    self.ctx(),
+                );
+                Ok(iceberg_scan.into())
+            } else {
+                Err(ErrorCode::BindError(format!(
+                    "The input of iceberg metadata table function `{}` should be an iceberg source, got {} source",
+                    table_function.table_type.as_str_name(),
+                   source.core.connector_name()
+                ))
+                .into())
+            }
+        }
+            _ => Err(ErrorCode::BindError(format!(
+                "The input of iceberg metadata table function `{}` should be an iceberg source, got {:?}",
+                table_function.table_type.as_str_name(),
+                base.node_type()
+            ))
+            .into()),
         }
     }
 

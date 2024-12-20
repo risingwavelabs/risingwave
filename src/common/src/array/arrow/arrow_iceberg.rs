@@ -24,6 +24,7 @@ pub use super::arrow_53::{
     arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
 };
 use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
+use crate::catalog::Schema;
 use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
@@ -42,6 +43,13 @@ impl IcebergArrowConvert {
         batch: &arrow_array::RecordBatch,
     ) -> Result<DataChunk, ArrayError> {
         FromArrow::from_record_batch(self, batch)
+    }
+
+    pub fn schema_from_arrow_schema(
+        &self,
+        schema: &arrow_schema::Schema,
+    ) -> Result<Schema, ArrayError> {
+        FromArrow::from_schema(self, schema)
     }
 
     pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {

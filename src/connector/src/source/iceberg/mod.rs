@@ -21,15 +21,18 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures_async_stream::for_await;
 use iceberg::expr::Predicate as IcebergPredicate;
+use iceberg::metadata_scan::MetadataTable;
 use iceberg::scan::FileScanTask;
 use iceberg::spec::TableMetadata;
 use iceberg::table::Table;
 use itertools::Itertools;
 pub use parquet_file_handler::*;
+use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Schema, ICEBERG_SEQUENCE_NUM_COLUMN_NAME};
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::batch_plan::iceberg_metadata_scan_node::IcebergMetadataTableType;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
 
@@ -493,4 +496,14 @@ impl SplitReader for IcebergFileReader {
     fn into_stream(self) -> BoxChunkSourceStream {
         unimplemented!()
     }
+}
+
+pub fn iceberg_metadata_table_schema(table_type: IcebergMetadataTableType) -> Schema {
+    let arrow_schema = match table_type {
+        IcebergMetadataTableType::Snapshots => iceberg::metadata_scan::SnapshotsTable::schema(),
+        _ => unreachable!(),
+    };
+    IcebergArrowConvert
+        .schema_from_arrow_schema(&arrow_schema)
+        .expect("should be a valid schema")
 }

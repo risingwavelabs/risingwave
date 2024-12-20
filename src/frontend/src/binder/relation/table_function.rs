@@ -21,6 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgList, ObjectName, TableAlias};
 
 use super::watermark::is_watermark_func;
+use super::window_table_function::parse_iceberg_metadata_table_type;
 use super::{Binder, Relation, Result, WindowTableFunctionKind};
 use crate::binder::bind_context::Clause;
 use crate::error::ErrorCode;
@@ -66,6 +67,14 @@ impl Binder {
                 self.bind_window_table_function(alias, kind, args)?,
             )));
         }
+
+        // iceberg metadata table
+        if let Some(table_type) = parse_iceberg_metadata_table_type(func_name) {
+            return Ok(Relation::IcebergTableFunction(Box::new(
+                self.bind_iceberg_table_function(alias, table_type, args)?,
+            )));
+        }
+
         // watermark
         if is_watermark_func(func_name) {
             if with_ordinality {

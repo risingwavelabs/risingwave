@@ -53,6 +53,7 @@ use itertools::Itertools;
 use super::{arrow_array, arrow_buffer, arrow_cast, arrow_schema, ArrowIntervalType};
 // Other import should always use the absolute path.
 use crate::array::*;
+use crate::catalog::{Field, Schema};
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
 
@@ -477,6 +478,15 @@ pub trait FromArrow {
             columns.push(column);
         }
         Ok(DataChunk::new(columns, batch.num_rows()))
+    }
+
+    fn from_schema(&self, schema: &arrow_schema::Schema) -> Result<Schema, ArrayError> {
+        let fields = schema
+            .fields()
+            .iter()
+            .map(|f| Ok(Field::new(f.name(), self.from_field(f)?)))
+            .try_collect::<_, Vec<_>, ArrayError>()?;
+        Ok(Schema::new(fields))
     }
 
     /// Converts Arrow `Fields` to RisingWave `StructType`.
