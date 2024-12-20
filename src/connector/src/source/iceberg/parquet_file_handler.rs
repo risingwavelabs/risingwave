@@ -110,6 +110,7 @@ pub fn new_s3_operator(
     s3_secret_key: String,
     bucket: String,
 ) -> ConnectorResult<Operator> {
+    println!("这里还在用s3");
     // Create s3 builder.
     let mut builder = S3::default().bucket(&bucket).region(&s3_region);
     builder = builder.secret_access_key(&s3_access_key);
@@ -124,6 +125,32 @@ pub fn new_s3_operator(
         .layer(RetryLayer::default())
         .finish();
 
+    Ok(op)
+}
+
+pub fn new_minio_operator(
+    minio_region: String,
+    minio_access_key: String,
+    minio_secret_key: String,
+    bucket: String,
+) -> ConnectorResult<Operator> {
+    // Create s3 builder.
+    println!("minio_region = {} minio_access_key = {} minio_secret_key = {} bucket  = {} ", minio_region, minio_access_key, minio_secret_key, bucket);
+    let mut builder = S3::default().bucket(&bucket).region(&minio_region);
+    builder = builder.secret_access_key(&minio_access_key);
+    builder = builder.secret_access_key(&minio_secret_key);
+    builder = builder.endpoint("http://127.0.0.1:9301");
+
+
+    builder = builder.disable_ec2_metadata();
+    builder = builder.disable_config_load();
+    builder = builder.allow_anonymous();
+    // builder = builder.enable_virtual_host_style();
+
+     let op: Operator = Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(RetryLayer::default())
+            .finish();
     Ok(op)
 }
 
@@ -149,6 +176,7 @@ pub async fn list_s3_directory(
     s3_secret_key: String,
     dir: String,
 ) -> Result<Vec<String>, anyhow::Error> {
+    println!("list");
     let (bucket, file_name) = extract_bucket_and_file_name(&dir)?;
     let prefix = format!("s3://{}/", bucket);
     if dir.starts_with(&prefix) {
@@ -244,6 +272,7 @@ pub async fn read_parquet_file(
 ) -> ConnectorResult<
     Pin<Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>>,
 > {
+    println!("这里 file name = {:?}", file_name);
     let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
         .reader_with(&file_name)
         .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
@@ -302,6 +331,7 @@ pub async fn get_parquet_fields(
     op: Operator,
     file_name: String,
 ) -> ConnectorResult<risingwave_common::array::arrow::arrow_schema_udf::Fields> {
+    println!("file_name = {:?}", file_name);
     let mut reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = op
         .reader_with(&file_name)
         .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.

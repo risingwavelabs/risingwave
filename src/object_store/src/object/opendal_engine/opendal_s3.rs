@@ -78,7 +78,8 @@ impl OpendalObjectStore {
             "http://"
         };
         let (address, bucket) = rest.split_once('/').unwrap();
-
+        let a = &format!("{}{}", endpoint_prefix, address);
+        println!("这里   {:?}", a);
         let builder = S3::default()
             .bucket(bucket)
             .region("custom")
