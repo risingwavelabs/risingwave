@@ -590,6 +590,9 @@ impl ScaleController {
                     vnode_bitmap,
                 } = actors.first().unwrap().clone();
 
+                let (related_job, job_definition) =
+                    related_jobs.get(&job_id).expect("job not found");
+
                 let fragment = CustomFragmentInfo {
                     fragment_id: fragment_id as _,
                     fragment_type_mask: fragment_type_mask as _,
@@ -603,8 +606,7 @@ impl ScaleController {
                         dispatcher,
                         upstream_actor_id,
                         vnode_bitmap: vnode_bitmap.map(|b| b.to_protobuf()),
-                        // todo, we need to fill this part
-                        mview_definition: "".to_string(),
+                        mview_definition: job_definition.to_owned(),
                         expr_context: expr_contexts
                             .get(&actor_id)
                             .cloned()
@@ -616,8 +618,6 @@ impl ScaleController {
                 fragment_map.insert(fragment_id as _, fragment);
 
                 fragment_to_table.insert(fragment_id as _, TableId::from(job_id as u32));
-
-                let related_job = related_jobs.get(&job_id).expect("job not found");
 
                 fragment_state.insert(
                     fragment_id,
