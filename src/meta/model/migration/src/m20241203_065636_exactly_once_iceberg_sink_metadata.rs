@@ -8,25 +8,25 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(IcebergSinkMetadata::Table)
+                    .table(ExactlyOnceIcebergSinkMetadata::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(IcebergSinkMetadata::SinkId)
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::SinkId)
                             .integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IcebergSinkMetadata::EndEpoch)
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::EndEpoch)
                             .big_integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IcebergSinkMetadata::StartEpoch)
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::StartEpoch)
                             .big_integer()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(IcebergSinkMetadata::Metadata)
+                        ColumnDef::new(ExactlyOnceIcebergSinkMetadata::Metadata)
                             .blob()
                             .not_null(),
                     )
@@ -38,13 +38,13 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        crate::drop_tables!(manager, IcebergSinkMetadata);
+        crate::drop_tables!(manager, ExactlyOnceIcebergSinkMetadata);
         Ok(())
     }
 }
 
 #[derive(DeriveIden)]
-enum IcebergSinkMetadata {
+enum ExactlyOnceIcebergSinkMetadata {
     Table,
     SinkId,
     EndEpoch,

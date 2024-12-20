@@ -1010,7 +1010,6 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
 
         if self.is_exactly_once {
             let mut pre_commit_metadata_bytes = Vec::new();
-            println!("执行precommit");
             for each_parallelism_write_result in write_results.clone() {
                 let each_parallelism_write_result_bytes: Vec<u8> =
                     each_parallelism_write_result.try_into()?;
@@ -1089,7 +1088,6 @@ impl IcebergSinkCommitter {
         end_epoch: u64,
         pre_commit_metadata: Vec<u8>,
     ) -> Result<()> {
-        println!("写meta store");
         let m = exactly_once_iceberg_sink::ActiveModel {
             sink_id: Set(self.sink_id),
             end_epoch: Set(end_epoch),
@@ -1108,7 +1106,6 @@ impl IcebergSinkCommitter {
         sink_id: u32,
         end_epoch: u64,
     ) -> Result<()> {
-        println!("删meta store");
         let deleted_count = Entity::delete_many()
             .filter(Column::SinkId.eq(sink_id))
             .filter(Column::EndEpoch.eq(end_epoch))
@@ -1130,12 +1127,10 @@ impl IcebergSinkCommitter {
         db: &DatabaseConnection,
         sink_id: u32,
     ) -> anyhow::Result<bool> {
-        println!("检查meta store iceberg_sink_has_pre_commit_metadata");
         let count = exactly_once_iceberg_sink::Entity::find()
             .filter(exactly_once_iceberg_sink::Column::SinkId.eq(sink_id))
             .count(db)
             .await?;
-        println!("count = {:?}", count);
         Ok(count > 0)
     }
 
