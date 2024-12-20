@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::types::{data_types, DataType, ScalarImpl};
 use risingwave_common::{bail_not_implemented, must_match};
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, RangeFrameBounds, RangeFrameOffset,
     RowsFrameBounds, SessionFrameBounds, SessionFrameGap, WindowFuncKind,
@@ -69,7 +70,23 @@ impl Binder {
         self.ensure_window_function_allowed()?;
 
         if ignore_nulls {
-            bail_not_implemented!("`IGNORE NULLS` is not supported yet");
+            match &kind {
+                WindowFuncKind::Aggregate(AggType::Builtin(
+                    PbAggKind::FirstValue | PbAggKind::LastValue,
+                )) => {
+                    // pass
+                }
+                WindowFuncKind::Lag | WindowFuncKind::Lead => {
+                    bail_not_implemented!("`IGNORE NULLS` is not supported for `{}` yet", kind);
+                }
+                _ => {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "`IGNORE NULLS` is not allowed for `{}`",
+                        kind
+                    ))
+                    .into());
+                }
+            }
         }
 
         if filter.is_some() {
@@ -192,7 +209,7 @@ impl Binder {
         } else {
             None
         };
-        Ok(WindowFunction::new(kind, partition_by, order_by, args, frame)?.into())
+        Ok(WindowFunction::new(kind, args, ignore_nulls, partition_by, order_by, frame)?.into())
     }
 
     fn bind_window_frame_usize_bounds(

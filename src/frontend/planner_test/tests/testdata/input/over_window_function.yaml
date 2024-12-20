@@ -641,3 +641,51 @@
     from t;
   expected_outputs:
     - binder_error
+
+# IGNORE NULLS
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      first_value(val ignore nulls) over (partition by 1::int order by ts)
+    from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      last_value(val ignore nulls) over (partition by 1::int order by ts rows between 1 preceding and 1 following)
+    from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      first_value(val) filter (where val is not null) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      last_value(val) filter (where val is not null) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      lag(val ignore nulls) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
+- sql: |
+    create table t (ts timestamptz, val int);
+    select
+      lead(val ignore nulls) over (partition by 1::int order by ts) -- not supported yet
+    from t;
+  expected_outputs:
+    - binder_error
