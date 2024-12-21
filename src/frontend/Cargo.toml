@@ -65,7 +65,6 @@ risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_frontend_macro = { path = "macro" }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
@@ -102,7 +101,6 @@ tower-http = { version = "0.6", features = [
 tracing = "0.1"
 url = "2.5.0"
 uuid = "1"
-zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

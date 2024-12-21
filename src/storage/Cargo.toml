@@ -8,7 +8,6 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-ahash = "0.8.7"
 anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"

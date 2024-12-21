@@ -10,19 +10,13 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-async-trait = "0.1"
 bytes = "1"
 clap = { workspace = true }
 foyer = { workspace = true }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-prometheus = { version = "0.13" }
-rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_meta = { workspace = true }
 risingwave_meta_node = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_rt = { workspace = true }

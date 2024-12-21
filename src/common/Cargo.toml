@@ -47,7 +47,6 @@ hashbrown = "0.14"
 hex = "0.4.3"
 http = "1"
 humantime = "2.1"
-hytra = { workspace = true }
 itertools = { workspace = true }
 itoa = "1.0"
 jsonbb = { workspace = true }

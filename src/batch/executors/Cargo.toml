@@ -20,7 +20,6 @@ futures-util = "0.3"
 hashbrown = { workspace = true }
 iceberg = { workspace = true }
 itertools = { workspace = true }
-linkme = { workspace = true }
 mysql_async = { workspace = true }
 opendal = { workspace = true }
 prometheus = { version = "0.13", features = ["process"] }

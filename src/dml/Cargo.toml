@@ -12,11 +12,8 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 itertools = { workspace = true }
 parking_lot = { workspace = true }
-rand = { workspace = true }
 risingwave_common = { workspace = true }
-risingwave_pb = { workspace = true }
 thiserror = "1"
-thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
