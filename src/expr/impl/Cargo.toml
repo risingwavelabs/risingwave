@@ -9,6 +9,9 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["chrono-tz", "futures-async-stream"]
+
 [features]
 external-udf = ["arrow-udf-flight", "arrow-flight", "tonic", "ginepro"]
 js-udf = ["arrow-udf-js"]
@@ -30,9 +33,11 @@ chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
+chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 constant_time_eq = "0.3"
 educe = "0.6"
 fancy-regex = "0.14"
+futures-async-stream = { workspace = true }
 futures-util = "0.3"
 ginepro = { version = "0.8", optional = true }
 hex = "0.4"
