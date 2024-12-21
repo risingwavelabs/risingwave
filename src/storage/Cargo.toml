@@ -21,7 +21,6 @@ async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
-crossbeam = "0.8.2"
 dashmap = { version = "6", default-features = false }
 dyn-clone = "1.0.14"
 either = "1"

@@ -1332,22 +1332,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-http"
-version = "0.60.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30e4199d5d62ab09be6a64650c06cc5c4aa45806fed4c74bc4a5c8eaf039a6fa"
-dependencies = [
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-types",
- "bytes",
- "http 0.2.9",
- "http-body 0.4.5",
- "pin-project-lite",
- "tracing",
-]
-
-[[package]]
 name = "aws-lc-rs"
 version = "1.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5345,21 +5329,6 @@ checksum = "76ee7a02da4d231650c7cea31349b889be2f45ddb3ef3032d2ec8185f6313fd2"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "function_name"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1ab577a896d09940b5fe12ec5ae71f9d8211fff62c919c03a3750a9901e98a7"
-dependencies = [
- "function_name-proc-macro",
-]
-
-[[package]]
-name = "function_name-proc-macro"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673464e1e314dd67a0fd9544abc99e8eb28d0c7e3b69b033bcff9b2d00b87333"
 
 [[package]]
 name = "funty"
@@ -10522,7 +10491,6 @@ dependencies = [
  "anyhow",
  "async-recursion",
  "async-trait",
- "criterion",
  "either",
  "futures",
  "futures-async-stream",
@@ -10552,7 +10520,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.63",
  "thiserror-ext",
- "tikv-jemallocator",
  "tokio-postgres",
  "tokio-stream 0.1.15",
  "tracing",
@@ -10829,7 +10796,6 @@ dependencies = [
  "ethnum",
  "fixedbitset 0.5.0",
  "jsonbb",
- "lru 0.7.6",
  "risingwave_common_proc_macro",
  "rust_decimal",
  "serde_json",
@@ -10956,7 +10922,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_hummock_sdk",
- "risingwave_hummock_test",
  "risingwave_meta",
  "risingwave_meta_node",
  "risingwave_object_store",
@@ -11132,7 +11097,6 @@ dependencies = [
  "risingwave_common_estimate_size",
  "risingwave_connector_codec",
  "risingwave_jni_core",
- "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rumqttc",
@@ -11254,7 +11218,6 @@ name = "risingwave_dml"
 version = "2.3.0-alpha"
 dependencies = [
  "assert_matches",
- "criterion",
  "futures",
  "futures-async-stream",
  "itertools 0.13.0",
@@ -11263,7 +11226,6 @@ dependencies = [
  "paste",
  "rand",
  "risingwave_common",
- "risingwave_connector",
  "risingwave_pb",
  "rw_futures_util",
  "tempfile",
@@ -11628,8 +11590,6 @@ dependencies = [
  "paste",
  "prost 0.13.1",
  "risingwave_common",
- "risingwave_expr",
- "risingwave_hummock_sdk",
  "risingwave_pb",
  "rw_futures_util",
  "serde",
@@ -11694,7 +11654,6 @@ dependencies = [
  "expect-test",
  "fail",
  "flate2",
- "function_name",
  "futures",
  "hex",
  "http 1.1.0",
@@ -11729,7 +11688,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_test_runner",
- "rw-aws-sdk-ec2",
  "rw_futures_util",
  "scopeguard",
  "sea-orm",
@@ -11778,7 +11736,6 @@ version = "2.3.0-alpha"
 dependencies = [
  "prost 0.13.1",
  "risingwave_common",
- "risingwave_hummock_sdk",
  "risingwave_pb",
  "sea-orm",
  "serde",
@@ -12157,7 +12114,6 @@ dependencies = [
  "bincode 1.3.3",
  "bytes",
  "criterion",
- "crossbeam",
  "darwin-libproc",
  "dashmap 6.1.0",
  "dyn-clone",
@@ -12299,7 +12255,6 @@ dependencies = [
  "thiserror 1.0.63",
  "thiserror-ext",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -12721,30 +12676,6 @@ dependencies = [
  "quick-error",
  "tempfile",
  "wait-timeout",
-]
-
-[[package]]
-name = "rw-aws-sdk-ec2"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80dba3602b267a7f9dcc546ccbf1d05752447773146253c7e344e2a320630b7f"
-dependencies = [
- "aws-credential-types",
- "aws-http",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-query",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-smithy-xml",
- "aws-types",
- "fastrand",
- "http 0.2.9",
- "regex",
- "tracing",
 ]
 
 [[package]]

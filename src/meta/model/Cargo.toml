@@ -16,7 +16,6 @@ normal = ["workspace-hack"]
 [dependencies]
 prost = { workspace = true }
 risingwave_common = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 sea-orm = { workspace = true }
 serde = { version = "1.0.196", features = ["derive"] }

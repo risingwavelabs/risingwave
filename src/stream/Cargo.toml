@@ -25,6 +25,7 @@ await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 delta_btree_map = { path = "../utils/delta_btree_map" }
+dhat = { version = "0.3", optional = true }
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
@@ -91,7 +92,6 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
-dhat =  "0.3"
 expect-test = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
@@ -102,7 +102,7 @@ serde_yaml = "0.9"
 tracing-test = "0.2"
 
 [features]
-dhat-heap = []
+dhat-heap = ["dhat"]
 
 [[bench]]
 name = "stream_hash_agg"
