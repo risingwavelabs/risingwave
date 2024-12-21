@@ -81,7 +81,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.metadata.cargo-machete]
-ignored = ["workspace-hack", "expect-test", "pretty_assertions"]
+ignored = ["workspace-hack", "expect-test", "pretty_assertions", "serde", "serde_json"]
 
 [workspace.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]

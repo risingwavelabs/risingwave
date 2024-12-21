@@ -19,10 +19,10 @@ js-udf = ["risingwave_expr_impl/js-udf"]
 python-udf = ["risingwave_expr_impl/python-udf"]
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [package.metadata.cargo-udeps.ignore]
-ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc", "tikv-jemallocator"]
 
 [dependencies]
 clap = { workspace = true }
@@ -42,6 +42,10 @@ risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
 strum = "0.26"
 strum_macros = "0.26"
+tempfile = "3"
+tikv-jemallocator = { workspace = true, features = [
+    "unprefixed_malloc_on_supported_platforms",
+] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

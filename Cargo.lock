@@ -10603,6 +10603,7 @@ name = "risingwave_cmd"
 version = "2.3.0-alpha"
 dependencies = [
  "clap",
+ "madsim-tokio",
  "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_compactor",
@@ -10612,6 +10613,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta_node",
  "risingwave_rt",
+ "tikv-jemallocator",
  "workspace-config",
  "workspace-hack",
 ]
@@ -10639,7 +10641,9 @@ dependencies = [
  "shell-words",
  "strum 0.26.3",
  "strum_macros 0.26.4",
+ "tempfile",
  "thiserror-ext",
+ "tikv-jemallocator",
  "tracing",
  "vergen",
  "workspace-config",
@@ -11931,6 +11935,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_sqlparser",
  "risingwave_sqlsmith",
+ "serde",
  "serde_derive",
  "serde_json",
  "sqllogictest",
