@@ -80,9 +80,15 @@ keywords = ["sql", "database", "streaming"]
 license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
+# some dependencies are not worth deleting.
 [workspace.metadata.cargo-machete]
-ignored = ["workspace-hack", "expect-test", "pretty_assertions", "serde", "serde_json"]
-
+ignored = [
+    "workspace-hack",
+    "expect-test",
+    "pretty_assertions",
+    "serde",
+    "serde_json",
+]
 [workspace.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 development = ["expect-test", "pretty_assertions"]
