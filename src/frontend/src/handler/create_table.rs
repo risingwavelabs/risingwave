@@ -1759,6 +1759,7 @@ pub async fn generate_stream_graph_for_replace_table(
         format_encode,
         include_column_options,
         engine,
+        with_options,
         ..
     } = statement
     else {
@@ -1772,6 +1773,16 @@ pub async fn generate_stream_graph_for_replace_table(
     let engine = match engine {
         risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
         risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
+    };
+
+    let is_drop_connector = {
+        original_catalog.associated_source_id().is_some()
+            && format_encode.is_none()
+            && source_watermarks.is_empty()
+            && include_column_options.is_empty()
+            && with_options
+                .iter()
+                .all(|opt| opt.name.real_value().to_lowercase() != "connector")
     };
 
     let ((plan, mut source, table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
@@ -1873,7 +1884,7 @@ pub async fn generate_stream_graph_for_replace_table(
         id: original_catalog.id().table_id(),
         ..table
     };
-    if let Some(source_id) = original_catalog.associated_source_id() {
+    if !is_drop_connector && let Some(source_id) = original_catalog.associated_source_id() {
         table.optional_associated_source_id = Some(OptionalAssociatedSourceId::AssociatedSourceId(
             source_id.table_id,
         ));
