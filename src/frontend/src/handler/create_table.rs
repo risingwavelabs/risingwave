@@ -1893,14 +1893,10 @@ fn bind_webhook_info(
     let db_name = session.database();
     let (schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
-    let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
+    // let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
     let pb_secret_ref = PbSecretRef {
-        secret_id: secret_catalog.id.secret_id(),
-        ref_as: match secret_ref.ref_as {
-            SecretRefAsType::Text => PbRefAsType::Text,
-            SecretRefAsType::File => PbRefAsType::File,
-        }
-        .into(),
+        secret_id: 0,
+        ref_as: PbRefAsType::Text.into(),
     };
 
     let secure_compare_context = SecureCompareContext {

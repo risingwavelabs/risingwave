@@ -107,9 +107,10 @@ pub(super) mod handlers {
                 .clone()
         };
 
-        let secret_string = LocalSecretManager::global()
-            .fill_secret(secret_ref.unwrap())
-            .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
+        // let secret_string = LocalSecretManager::global()
+        //     .fill_secret(secret_ref.unwrap())
+        //     .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
+        let secret_string = String::from("TEST_WEBHOOK");
 
         // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
         let headers_jsonb = header_map_to_json(&headers);
