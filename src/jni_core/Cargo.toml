@@ -3,12 +3,6 @@ name = "risingwave_jni_core"
 version = "0.1.0"
 edition = "2021"
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 bytes = "1"
@@ -23,7 +17,6 @@ paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
-rw_futures_util = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1"
