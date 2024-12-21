@@ -11669,6 +11669,7 @@ dependencies = [
  "risingwave_pb",
  "sea-orm",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
