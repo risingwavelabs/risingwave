@@ -29,7 +29,7 @@ use super::statement::RewriteExprsRecursive;
 use super::BoundValues;
 use crate::binder::bind_context::{BindingCte, RecursiveUnion};
 use crate::binder::{Binder, BoundSetExpr};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
@@ -38,7 +38,7 @@ use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<ColumnOrder>,
-    pub limit: Option<ExprImpl>,
+    pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub with_ties: bool,
     pub extra_order_exprs: Vec<ExprImpl>,
@@ -181,7 +181,39 @@ impl Binder {
             (Some(limit), None) => Some(limit),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
-        let limit = limit.map(|expr| self.bind_expr(expr)).transpose()?;
+        let limit_expr = limit.map(|expr| self.bind_expr(expr)).transpose()?;
+        let limit = if let Some(limit_expr) = limit_expr {
+            let limit_cast_to_bigint = limit_expr.cast_assign(DataType::Int64).map_err(|_| {
+                RwError::from(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                        .into(),
+                ))
+            })?;
+            let limit = match limit_cast_to_bigint.try_fold_const() {
+                Some(Ok(Some(datum))) => {
+                    let value = datum.as_integral();
+                    if value < 0 {
+                        return Err(ErrorCode::ExprError(
+                            format!("LIMIT must not be negative, but found: {}", value).into(),
+                        )
+                            .into());
+                    }
+                    value as u64
+                }
+                // If evaluated to NULL, we follow PG to treat NULL as no limit
+                Some(Ok(None)) => {
+                    u64::MAX
+                }
+                // wrong type, not const, eval error all belongs to this branch
+                _ => return Err(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                        .into(),
+                ).into()),
+            };
+            Some(limit)
+        } else {
+            None
+        };
 
         let offset = offset
             .map(|s| parse_non_negative_i64("OFFSET", &s))

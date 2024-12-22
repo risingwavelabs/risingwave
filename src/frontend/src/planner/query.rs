@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::DataType;
 
 use crate::binder::BoundQuery;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::ExprImpl;
+use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalLimit, LogicalTopN};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -52,36 +50,7 @@ impl Planner {
             let func_dep = plan.functional_dependency();
             order = func_dep.minimize_order_key(order, &[]);
 
-            let limit = limit.unwrap_or(ExprImpl::literal_bigint(LIMIT_ALL_COUNT as i64));
-            if !limit.is_const() {
-                return Err(ErrorCode::ExprError(
-                        "expects an integer or expression that can be evaluated to an integer after LIMIT"
-                    .into(),
-                )
-                .into());
-            }
-            let limit_cast_to_bigint = limit.cast_explicit(DataType::Int64).map_err(|_| {
-                RwError::from(ErrorCode::ExprError(
-                        "expects an integer or expression that can be evaluated to an integer after LIMIT"
-                    .into(),
-                ))
-            })?;
-            let limit = match limit_cast_to_bigint.fold_const() {
-                Ok(Some(datum)) => {
-                    let value = datum.as_integral();
-                    if value < 0 {
-                        return Err(ErrorCode::ExprError(
-                            format!("LIMIT must not be negative, but found: {}", value).into(),
-                        )
-                        .into());
-                    }
-                    value as u64
-                }
-                _ => return Err(ErrorCode::ExprError(
-                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
-                        .into(),
-                ).into()),
-            };
+            let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
 
             let offset = offset.unwrap_or_default();
             plan = if order.column_orders.is_empty() {

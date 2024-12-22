@@ -182,6 +182,45 @@ INSERT INTO integers VALUES (1), (2), (3), (4), (5);
 # 4
 # 5
 
+# expression in the limit clause
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1+2;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit -3+4;
+----
+0
+
+query I
+SELECT * FROM generate_series(0,10,1) as t(v) order by v limit 1.5*2 OFFSET 2;
+----
+2
+3
+4
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit NULL + 1;
+----
+0
+1
+2
+
+query I
+SELECT * FROM generate_series(0,3,1) as t(v) order by v limit 1.1::Decimal;
+----
+0
+
 
 # Subqueries that return negative values
 statement error
