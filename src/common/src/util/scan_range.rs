@@ -199,7 +199,7 @@ impl ScanRange {
         }
 
         if left_end_vec.is_empty() {
-            return true;
+            true
         } else {
             // cmp left_end and right_start
             assert!(!left_end_vec.is_empty());
