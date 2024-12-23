@@ -28,10 +28,10 @@ use std::task::{ready, Context, Poll};
 use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
-use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{HistogramTimer, IntGauge};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::UintGauge;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::table_watermark::{
     TableWatermarks, VnodeWatermark, WatermarkDirection,
@@ -112,14 +112,14 @@ mod uploader_imm {
     use std::fmt::Formatter;
     use std::ops::Deref;
 
-    use prometheus::core::{AtomicU64, GenericGauge};
+    use risingwave_common::metrics::UintGauge;
 
     use crate::hummock::event_handler::uploader::UploaderContext;
     use crate::mem_table::ImmutableMemtable;
 
     pub(super) struct UploaderImm {
         inner: ImmutableMemtable,
-        size_guard: GenericGauge<AtomicU64>,
+        size_guard: UintGauge,
     }
 
     impl UploaderImm {
@@ -137,7 +137,7 @@ mod uploader_imm {
         pub(super) fn for_test(imm: ImmutableMemtable) -> Self {
             Self {
                 inner: imm,
-                size_guard: GenericGauge::new("test", "test").unwrap(),
+                size_guard: UintGauge::new("test", "test").unwrap(),
             }
         }
     }
@@ -175,7 +175,7 @@ struct UploadingTask {
     join_handle: JoinHandle<HummockResult<UploadTaskOutput>>,
     task_info: UploadTaskInfo,
     spawn_upload_task: SpawnUploadTask,
-    task_size_guard: GenericGauge<AtomicU64>,
+    task_size_guard: UintGauge,
     task_count_guard: IntGauge,
 }
 
