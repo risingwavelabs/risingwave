@@ -192,12 +192,12 @@ impl WorkerNodeManager {
         fragment_id: FragmentId,
         vnode_mapping: WorkerSlotMapping,
     ) {
-        self.inner
+        let _ = self.inner
             .write()
             .unwrap()
             .streaming_fragment_vnode_mapping
-            .try_insert(fragment_id, vnode_mapping)
-            .unwrap();
+            .try_insert(fragment_id, vnode_mapping);
+            //.unwrap();
     }
 
     pub fn update_streaming_fragment_mapping(
@@ -208,8 +208,10 @@ impl WorkerNodeManager {
         let mut guard = self.inner.write().unwrap();
         guard
             .streaming_fragment_vnode_mapping
-            .insert(fragment_id, vnode_mapping)
-            .unwrap();
+            .insert(fragment_id, vnode_mapping);
+
+        // for background ddl, may not be created but updated
+     //       .unwrap();
     }
 
     pub fn remove_streaming_fragment_mapping(&self, fragment_id: &FragmentId) {

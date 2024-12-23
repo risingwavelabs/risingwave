@@ -216,6 +216,7 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
+        vnodes: Option<Bitmap>,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -624,6 +625,7 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_storage::StateStoreImpl;
 

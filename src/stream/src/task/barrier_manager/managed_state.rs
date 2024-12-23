@@ -31,7 +31,7 @@ use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
-
+use risingwave_common::bitmap::Bitmap;
 use super::progress::BackfillState;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::StreamingMetrics;
@@ -157,7 +157,7 @@ impl Display for &'_ PartialGraphManagedBarrierState {
             writeln!(f, "Create MView Progress:")?;
             for (epoch, progress) in &self.create_mview_progress {
                 write!(f, "> Epoch {}:", epoch)?;
-                for (actor_id, state) in progress {
+                for (actor_id, (state, _)) in progress {
                     write!(f, ">> Actor {}: {}, ", actor_id, state)?;
                 }
             }
@@ -296,7 +296,7 @@ pub(super) struct PartialGraphManagedBarrierState {
     ///
     /// This is updated by [`super::CreateMviewProgressReporter::update`] and will be reported to meta
     /// in [`crate::task::barrier_manager::BarrierCompleteResult`].
-    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
+    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, (BackfillState, Option<Bitmap>)>>,
 
     state_store: StateStoreImpl,
 
@@ -839,9 +839,9 @@ impl DatabaseManagedBarrierState {
                 LocalBarrierEvent::ReportCreateProgress {
                     epoch,
                     actor,
-                    state,
+                    state, vnodes
                 } => {
-                    self.update_create_mview_progress(epoch, actor, state);
+                    self.update_create_mview_progress(epoch, actor, state, vnodes);
                 }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,
@@ -940,7 +940,7 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| state.to_pb(actor))
+                .map(|(actor, (state, vnodes))| state.to_pb(actor, vnodes))
                 .collect();
 
             let prev_state = replace(

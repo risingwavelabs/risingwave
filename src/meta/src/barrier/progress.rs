@@ -15,11 +15,14 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::mem::take;
+use std::ops::{BitAndAssign, BitOrAssign};
 
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ObjectId;
 use risingwave_pb::catalog::CreateType;
+use risingwave_pb::common::Buffer;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -47,7 +50,8 @@ enum BackfillState {
 pub(super) struct Progress {
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
     states: HashMap<ActorId, BackfillState>,
-    done_count: usize,
+    // done_count: usize,
+    done_bitmap: Option<Bitmap>,
 
     /// Tells whether the backfill is from source or mv.
     backfill_upstream_types: HashMap<ActorId, BackfillUpstreamType>,
@@ -85,7 +89,7 @@ impl Progress {
         Self {
             states,
             backfill_upstream_types,
-            done_count: 0,
+            done_bitmap: Some(Bitmap::zeros(256)),
             upstream_mv_count,
             upstream_mvs_total_key_count: upstream_total_key_count,
             mv_backfill_consumed_rows: 0,
@@ -95,7 +99,13 @@ impl Progress {
     }
 
     /// Update the progress of `actor`.
-    fn update(&mut self, actor: ActorId, new_state: BackfillState, upstream_total_key_count: u64) {
+    fn update(
+        &mut self,
+        actor: ActorId,
+        new_state: BackfillState,
+        upstream_total_key_count: u64,
+        vnodes: Option<Bitmap>,
+    ) {
         self.upstream_mvs_total_key_count = upstream_total_key_count;
         let total_actors = self.states.len();
         let backfill_upstream_type = self.backfill_upstream_types.get(&actor).unwrap();
@@ -118,10 +128,14 @@ impl Progress {
             BackfillState::Done(new_consumed_rows) => {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
-                self.done_count += 1;
+                //                self.done_count += 1;
+                if let (Some(done), Some(v)) = (self.done_bitmap.as_mut(), vnodes) {
+                    done.bitor_assign(&v);
+                }
+
                 tracing::debug!(
                     "{} actors out of {} complete",
-                    self.done_count,
+                    self.done_bitmap.as_ref().unwrap().count_ones(),
                     total_actors,
                 );
             }
@@ -145,11 +159,18 @@ impl Progress {
     fn is_done(&self) -> bool {
         tracing::trace!(
             "Progress::is_done? {}, {}, {:?}",
-            self.done_count,
+            0,
+            //  self.done_count,
             self.states.len(),
             self.states
         );
-        self.done_count == self.states.len()
+        // self.done_count == self.states.len()
+
+        println!(
+            "count {:?}",
+            self.done_bitmap.as_ref().map(|x| x.count_ones())
+        );
+        self.done_bitmap.as_ref().map(|x| x.all()).unwrap_or(false)
     }
 
     /// Returns the ids of all actors containing the backfill executors for the mview tracked by this
@@ -352,8 +373,10 @@ impl CreateMviewProgressTracker {
             calculate_total_key_count(&upstream_mv_count, version_stats);
         Progress {
             states,
+            // todo
+            done_bitmap: None,
             backfill_upstream_types,
-            done_count: 0, // Fill only after first barrier pass
+            // done_count: 0, // Fill only after first barrier pass
             upstream_mv_count,
             upstream_mvs_total_key_count,
             mv_backfill_consumed_rows: 0, // Fill only after first barrier pass
@@ -401,6 +424,11 @@ impl CreateMviewProgressTracker {
                     }
                     // Update the progress of all commands.
                     for progress in create_mview_progress {
+                        println!(
+                            "11111 backfill actor {} progress {:?}",
+                            progress.backfill_actor_id, progress
+                        );
+
                         // Those with actors complete can be finished immediately.
                         if let Some(command) = self.update(progress, version_stats) {
                             tracing::trace!(?progress, "finish progress");
@@ -596,8 +624,10 @@ impl CreateMviewProgressTracker {
         progress: &CreateMviewProgress,
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
-        tracing::trace!(?progress, "update progress");
+        tracing::debug!(?progress, "update progress");
         let actor = progress.backfill_actor_id;
+
+        //let table_id = self.actor_map.get(&3).unwrap().clone();
         let Some(table_id) = self.actor_map.get(&actor).copied() else {
             // On restart, backfill will ALWAYS notify CreateMviewProgressTracker,
             // even if backfill is finished on recovery.
@@ -618,6 +648,8 @@ impl CreateMviewProgressTracker {
             BackfillState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };
 
+        let vnodes = progress.backfill_vnodes.as_ref().map(|x| Bitmap::from(x));
+
         match self.progress_map.entry(table_id) {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
@@ -626,7 +658,7 @@ impl CreateMviewProgressTracker {
                     calculate_total_key_count(&progress.upstream_mv_count, version_stats);
 
                 tracing::debug!(?table_id, "updating progress for table");
-                progress.update(actor, new_state, upstream_total_key_count);
+                progress.update(actor, new_state, upstream_total_key_count, vnodes);
 
                 if progress.is_done() {
                     tracing::debug!(
@@ -645,7 +677,7 @@ impl CreateMviewProgressTracker {
             }
             Entry::Vacant(_) => {
                 tracing::warn!(
-                    "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
+                            "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
                 );
                 None
             }

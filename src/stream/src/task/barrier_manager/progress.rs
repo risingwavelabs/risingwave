@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::fmt::{Display, Formatter};
 
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgress;
 
@@ -35,7 +36,7 @@ pub(crate) enum BackfillState {
 }
 
 impl BackfillState {
-    pub fn to_pb(self, actor_id: ActorId) -> PbCreateMviewProgress {
+    pub fn to_pb(self, actor_id: ActorId, vnodes: Option<Bitmap>) -> PbCreateMviewProgress {
         let (done, consumed_epoch, consumed_rows, pending_barrier_num) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(consumed_epoch, consumed_rows) => {
                 (false, consumed_epoch, consumed_rows, 0)
@@ -48,12 +49,14 @@ impl BackfillState {
             } => (false, 0, 0, pending_barrier_num as _),
             BackfillState::DoneConsumingLogStore => (true, 0, 0, 0),
         };
+
         PbCreateMviewProgress {
             backfill_actor_id: actor_id,
             done,
             consumed_epoch,
             consumed_rows,
             pending_barrier_num,
+            backfill_vnodes: vnodes.map(|v| v.to_protobuf()),
         }
     }
 }
@@ -92,7 +95,10 @@ impl DatabaseManagedBarrierState {
         epoch: EpochPair,
         actor: ActorId,
         state: BackfillState,
+        vnodes: Option<Bitmap>,
     ) {
+
+        println!("2222222222");
         if let Some(actor_state) = self.actor_states.get(&actor)
             && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
             && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
@@ -101,7 +107,7 @@ impl DatabaseManagedBarrierState {
                 .create_mview_progress
                 .entry(epoch.curr)
                 .or_default()
-                .insert(actor, state);
+                .insert(actor, (state, vnodes));
         } else {
             warn!(?epoch, actor, ?state, "ignore create mview progress");
         }
@@ -109,11 +115,18 @@ impl DatabaseManagedBarrierState {
 }
 
 impl LocalBarrierManager {
-    fn update_create_mview_progress(&self, epoch: EpochPair, actor: ActorId, state: BackfillState) {
+    fn update_create_mview_progress(
+        &self,
+        epoch: EpochPair,
+        actor: ActorId,
+        state: BackfillState,
+        vnodes: Option<Bitmap>,
+    ) {
         self.send_event(ReportCreateProgress {
             epoch,
             actor,
             state,
+            vnodes,
         })
     }
 }
@@ -155,20 +168,26 @@ pub struct CreateMviewProgressReporter {
     backfill_actor_id: ActorId,
 
     state: Option<BackfillState>,
+    vnodes: Option<Bitmap>,
 }
 
 impl CreateMviewProgressReporter {
-    pub fn new(barrier_manager: LocalBarrierManager, backfill_actor_id: ActorId) -> Self {
+    pub fn new(
+        barrier_manager: LocalBarrierManager,
+        backfill_actor_id: ActorId,
+        vnodes: Option<Bitmap>,
+    ) -> Self {
         Self {
             barrier_manager,
             backfill_actor_id,
             state: None,
+            vnodes,
         }
     }
 
     #[cfg(test)]
     pub fn for_test(barrier_manager: LocalBarrierManager) -> Self {
-        Self::new(barrier_manager, 0)
+        Self::new(barrier_manager, 0, None)
     }
 
     pub fn actor_id(&self) -> u32 {
@@ -177,8 +196,12 @@ impl CreateMviewProgressReporter {
 
     fn update_inner(&mut self, epoch: EpochPair, state: BackfillState) {
         self.state = Some(state);
-        self.barrier_manager
-            .update_create_mview_progress(epoch, self.backfill_actor_id, state);
+        self.barrier_manager.update_create_mview_progress(
+            epoch,
+            self.backfill_actor_id,
+            state,
+            self.vnodes.clone(),
+        );
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
@@ -300,8 +323,9 @@ impl LocalBarrierManager {
     pub(crate) fn register_create_mview_progress(
         &self,
         backfill_actor_id: ActorId,
+        vnodes: Option<Bitmap>,
     ) -> CreateMviewProgressReporter {
-        trace!("register create mview progress: {}", backfill_actor_id);
-        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id)
+        debug!("register create mview progress: {}, vnodes: {:?}", backfill_actor_id, vnodes);
+        CreateMviewProgressReporter::new(self.clone(), backfill_actor_id, vnodes)
     }
 }

@@ -413,6 +413,14 @@ where
                     .backfill_upstream_output_row_count
                     .inc_by(cur_barrier_upstream_processed_rows);
 
+                if let Some(Mutation::Update(mutation)) = barrier.mutation.as_deref() {
+                    if let Some(bitmap) = mutation.vnode_bitmaps.get(&self.actor_id) {
+                        if let Some(state_table) = self.state_table.as_mut() {
+                            let (_prev, _res) = state_table.update_vnode_bitmap(bitmap.clone());
+                        }
+                    }
+                }
+
                 // Update snapshot read epoch.
                 snapshot_read_epoch = barrier.epoch.prev;
 
