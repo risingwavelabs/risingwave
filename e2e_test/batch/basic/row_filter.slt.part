@@ -14,19 +14,19 @@ statement ok
 create materialized view mv3 as select * from t1 order by v1 asc, v2 asc, v3 asc;
 
 query III
-select * from mv1 where (v1,v2,v3) > (1,3,1);
+select * from mv1 where (v1,v2,v3) > (1,3,1) order by v3;
 ----
-1 3 3
 1 3 2
+1 3 3
 
 query III
-select * from mv2 where (v1,v2,v3) > (1,3,1);
+select * from mv2 where (v1,v2,v3) > (1,3,1) order by v3;
 ----
-1 3 3
 1 3 2
+1 3 3
 
 query III
-select * from mv3 where (v1,v2,v3) > (1,3,1);
+select * from mv3 where (v1,v2,v3) > (1,3,1) order by v3;
 ----
 1 3 2
 1 3 3
