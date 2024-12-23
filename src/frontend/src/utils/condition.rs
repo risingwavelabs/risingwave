@@ -368,8 +368,8 @@ impl Condition {
 
             let order_types = table_desc.pk.iter().map(|x| x.order_type).collect_vec();
             scan_ranges.sort_by(|left, right| {
-                let (left_start, _left_end) = &left.covert_to_range();
-                let (right_start, _right_end) = &right.covert_to_range();
+                let (left_start, _left_end) = &left.convert_to_range();
+                let (right_start, _right_end) = &right.convert_to_range();
 
                 let left_start_vec = match &left_start {
                     Bound::Included(vec) | Bound::Excluded(vec) => vec,

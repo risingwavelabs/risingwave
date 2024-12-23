@@ -101,7 +101,7 @@ impl ScanRange {
         }
     }
 
-    pub fn covert_to_range(&self) -> (Bound<Vec<Datum>>, Bound<Vec<Datum>>) {
+    pub fn convert_to_range(&self) -> (Bound<Vec<Datum>>, Bound<Vec<Datum>>) {
         fn handle_bound(eq_conds: &Vec<Datum>, bound: &Bound<Vec<Datum>>) -> Bound<Vec<Datum>> {
             match bound {
                 Bound::Included(literal) => {
@@ -130,8 +130,8 @@ impl ScanRange {
     }
 
     pub fn is_overlap(left: &ScanRange, right: &ScanRange, order_types: &[OrderType]) -> bool {
-        let range_left = left.covert_to_range();
-        let range_right = right.covert_to_range();
+        let range_left = left.convert_to_range();
+        let range_right = right.convert_to_range();
         Self::range_overlap_check(range_left, range_right, order_types)
     }
 
@@ -357,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn test_covert_to_range() {
+    fn test_convert_to_range() {
         {
             // test empty eq_conds
             let scan_range = ScanRange {
@@ -368,7 +368,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(left, Bound::Included(vec![Some(ScalarImpl::from(1))]));
             assert_eq!(right, Bound::Included(vec![Some(ScalarImpl::from(2))]));
         }
@@ -383,7 +383,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(left, Bound::Excluded(vec![Some(ScalarImpl::from(1))]));
             assert_eq!(right, Bound::Excluded(vec![Some(ScalarImpl::from(2))]));
         }
@@ -398,7 +398,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(left, Bound::Included(vec![Some(ScalarImpl::from(1))]));
             assert_eq!(right, Bound::Unbounded);
         }
@@ -413,7 +413,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(
                 left,
                 Bound::Excluded(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))])
@@ -434,7 +434,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(
                 left,
                 Bound::Included(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))])
@@ -454,7 +454,7 @@ mod tests {
                 ),
             };
 
-            let (left, right) = scan_range.covert_to_range();
+            let (left, right) = scan_range.convert_to_range();
             assert_eq!(
                 left,
                 Bound::Included(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))])
