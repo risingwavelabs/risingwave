@@ -46,7 +46,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
 use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
+    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Throttle, Watermark,
 };
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -799,25 +799,25 @@ pub type BackfillRateLimiter =
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
 pub fn create_builder(
-    rate_limit: Option<usize>,
+    throttle: Throttle,
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
-    if let Some(rate_limit) = rate_limit
-        && rate_limit < chunk_size
-        && rate_limit > 0
-    {
-        DataChunkBuilder::new(data_types, rate_limit)
-    } else {
-        DataChunkBuilder::new(data_types, chunk_size)
-    }
+    let batch_size = match throttle {
+        Throttle::Fixed(rate) if rate > 0 && chunk_size > rate as usize => rate as usize,
+        _ => chunk_size,
+    };
+    DataChunkBuilder::new(data_types, batch_size)
 }
 
-pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
-    if rate_limit == 0 {
-        return None;
+pub fn create_limiter(throttle: Throttle) -> Option<BackfillRateLimiter> {
+    match throttle {
+        Throttle::Disabled => None,
+        Throttle::Fixed(0) => None,
+        Throttle::Fixed(rate) => {
+            let quota = Quota::per_second(NonZeroU32::new(rate).unwrap());
+            let clock = MonotonicClock;
+            Some(RateLimiter::direct_with_clock(quota, &clock))
+        }
     }
-    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
-    let clock = MonotonicClock;
-    Some(RateLimiter::direct_with_clock(quota, &clock))
 }

@@ -122,7 +122,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             None,
             params.executor_stats,
             state_table,
-            node.rate_limit,
+            node.backfill_throttle.unwrap_or_default(),
             scan_options,
         );
         Ok((params.info, exec).into())

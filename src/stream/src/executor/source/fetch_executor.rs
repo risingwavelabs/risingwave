@@ -38,9 +38,9 @@ use super::{
     apply_rate_limit, get_split_offset_col_idx, get_split_offset_mapping_from_chunk,
     prune_additional_cols, SourceStateTableHandler, StreamSourceCore,
 };
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::executor::Throttle;
 
 const SPLIT_BATCH_SIZE: usize = 1000;
 
@@ -56,7 +56,7 @@ pub struct FsFetchExecutor<S: StateStore, Src: OpendalSource> {
     upstream: Option<Executor>,
 
     /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    source_throttle: Throttle,
 
     _marker: PhantomData<Src>,
 }
@@ -66,13 +66,13 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,
         upstream: Executor,
-        rate_limit_rps: Option<u32>,
+        source_throttle: Throttle,
     ) -> Self {
         Self {
             actor_ctx,
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
-            rate_limit_rps,
+            source_throttle,
             _marker: PhantomData,
         }
     }
@@ -181,7 +181,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             source_name.to_owned(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
+                chunk_size: self.source_throttle.max_chunk_size(),
                 rate_limit: self.rate_limit_rps,
             },
             source_desc.source.config.clone(),
@@ -232,7 +232,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             self.build_source_ctx(&source_desc, core.source_id, &core.source_name),
             &source_desc,
             &mut stream,
-            self.rate_limit_rps,
+            self.source_throttle,
         )
         .await?;
 

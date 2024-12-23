@@ -31,9 +31,8 @@ use risingwave_connector::source::cdc::external::{
 use risingwave_pb::plan_common::additional_column::ColumnType;
 
 use super::external::ExternalStorageTable;
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::backfill::utils::{get_new_pos, iter_chunks};
-use crate::executor::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::{StreamExecutorError, StreamExecutorResult, Throttle};
 
 pub trait UpstreamTableRead {
     fn snapshot_read_full_table(
@@ -50,7 +49,7 @@ pub trait UpstreamTableRead {
 #[derive(Debug, Clone)]
 pub struct SnapshotReadArgs {
     pub current_pos: Option<OwnedRow>,
-    pub rate_limit_rps: Option<u32>,
+    pub throttle: Throttle,
     pub pk_indices: Vec<usize>,
     pub additional_columns: Vec<ColumnDesc>,
     pub schema_table_name: SchemaTableName,
@@ -60,7 +59,7 @@ pub struct SnapshotReadArgs {
 impl SnapshotReadArgs {
     pub fn new(
         current_pos: Option<OwnedRow>,
-        rate_limit_rps: Option<u32>,
+        throttle: Throttle,
         pk_indices: Vec<usize>,
         additional_columns: Vec<ColumnDesc>,
         schema_table_name: SchemaTableName,
@@ -68,7 +67,7 @@ impl SnapshotReadArgs {
     ) -> Self {
         Self {
             current_pos,
-            rate_limit_rps,
+            throttle,
             pk_indices,
             additional_columns,
             schema_table_name,
@@ -149,20 +148,24 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             .collect_vec();
 
         // prepare rate limiter
-        if args.rate_limit_rps == Some(0) {
-            // If limit is 0, we should not read any data from the upstream table.
+        if args.throttle.is_zero() {
+            // If throttle is 0, we should not read any data from the upstream table.
             // Keep waiting util the stream is rebuilt.
             let future = futures::future::pending::<()>();
             future.await;
             unreachable!();
         }
-        let limiter = args.rate_limit_rps.map(|limit| {
-            tracing::info!(rate_limit = limit, "rate limit applied");
-            RateLimiter::direct_with_clock(
-                Quota::per_second(NonZeroU32::new(limit).unwrap()),
-                &MonotonicClock,
-            )
-        });
+
+        let limiter = match args.throttle {
+            Throttle::Disabled => None,
+            Throttle::Fixed(rate) => {
+                tracing::info!(rate_limit = rate, "rate limit applied");
+                Some(RateLimiter::direct_with_clock(
+                    Quota::per_second(NonZeroU32::new(rate).unwrap()),
+                    &MonotonicClock,
+                ))
+            }
+        };
 
         let mut read_args = args;
         let schema_table_name = read_args.schema_table_name.clone();
@@ -186,7 +189,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
                 self.table.schema().data_types(),
-                limited_chunk_size(read_args.rate_limit_rps),
+                read_args.throttle.max_chunk_size(),
             );
             let chunk_stream = iter_chunks(row_stream, &mut builder);
             let mut current_pk_pos = read_args.current_pos.clone().unwrap_or_default();
@@ -198,36 +201,39 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
                 read_count += chunk.cardinality();
                 current_pk_pos = get_new_pos(&chunk, &read_args.pk_indices);
 
-                if read_args.rate_limit_rps.is_none() || chunk_size == 0 {
-                    // no limit, or empty chunk
-                    yield Some(with_additional_columns(
-                        chunk,
-                        &read_args.additional_columns,
-                        schema_table_name.clone(),
-                        database_name.clone(),
-                    ));
-                    continue;
-                } else {
-                    // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
-                    // May be should be refactored to a common function later.
-                    let limiter = limiter.as_ref().unwrap();
-                    let limit = read_args.rate_limit_rps.unwrap() as usize;
+                match read_args.throttle {
+                    Throttle::Fixed(rate) if chunk_size > 0 => {
+                        // Apply rate limit, see `risingwave_stream::executor::source::apply_rate_limit` for more.
+                        // May be should be refactored to a common function later.
+                        let limiter = limiter.as_ref().unwrap();
+                        let limit = rate as usize;
 
-                    // Because we produce chunks with limited-sized data chunk builder and all rows
-                    // are `Insert`s, the chunk size should never exceed the limit.
-                    assert!(chunk_size <= limit);
+                        // Because we produce chunks with limited-sized data chunk builder and all rows
+                        // are `Insert`s, the chunk size should never exceed the limit.
+                        assert!(chunk_size <= limit);
 
-                    // `InsufficientCapacity` should never happen because we have check the cardinality
-                    limiter
-                        .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
-                        .await
-                        .unwrap();
-                    yield Some(with_additional_columns(
-                        chunk,
-                        &read_args.additional_columns,
-                        schema_table_name.clone(),
-                        database_name.clone(),
-                    ));
+                        // `InsufficientCapacity` should never happen because we have check the cardinality
+                        limiter
+                            .until_n_ready(NonZeroU32::new(chunk_size as u32).unwrap())
+                            .await
+                            .unwrap();
+                        yield Some(with_additional_columns(
+                            chunk,
+                            &read_args.additional_columns,
+                            schema_table_name.clone(),
+                            database_name.clone(),
+                        ));
+                    }
+                    Throttle::Fixed(_) | Throttle::Disabled => {
+                        // no limit, or empty chunk
+                        yield Some(with_additional_columns(
+                            chunk,
+                            &read_args.additional_columns,
+                            schema_table_name.clone(),
+                            database_name.clone(),
+                        ));
+                        continue;
+                    }
                 }
             }
 

@@ -27,6 +27,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::throttle::Throttle;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
@@ -173,7 +174,6 @@ pub type DispatcherMessageStreamItem = MessageStreamItemInner<()>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 
 pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
-use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
 pub trait MessageStream = Stream<Item = MessageStreamItem> + Send;
@@ -303,7 +303,7 @@ pub enum Mutation {
     SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
-    Throttle(HashMap<ActorId, Option<u32>>),
+    Throttle(HashMap<ActorId, Throttle>),
     AddAndUpdate(AddMutation, UpdateMutation),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
@@ -707,9 +707,9 @@ impl Mutation {
             Mutation::Pause => PbMutation::Pause(PauseMutation {}),
             Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
             Mutation::Throttle(changes) => PbMutation::Throttle(ThrottleMutation {
-                actor_throttle: changes
+                actor_throttles: changes
                     .iter()
-                    .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
+                    .map(|(actor_id, throttle)| (*actor_id, throttle.to_protobuf()))
                     .collect(),
             }),
 
@@ -840,9 +840,9 @@ impl Mutation {
             PbMutation::Resume(_) => Mutation::Resume,
             PbMutation::Throttle(changes) => Mutation::Throttle(
                 changes
-                    .actor_throttle
+                    .actor_throttles
                     .iter()
-                    .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
+                    .map(|(actor_id, throttle)| (*actor_id, throttle.into()))
                     .collect(),
             ),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {

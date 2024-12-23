@@ -91,7 +91,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    source.source_throttle.unwrap_or_default().into(),
                 )
                 .boxed()
             }
@@ -100,7 +100,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    source.source_throttle.unwrap_or_default().into(),
                 )
                 .boxed()
             }
@@ -109,7 +109,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    source.source_throttle.unwrap_or_default().into(),
                 )
                 .boxed()
             }
@@ -118,7 +118,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     params.actor_context.clone(),
                     stream_source_core,
                     upstream,
-                    source.rate_limit,
+                    source.source_throttle.unwrap_or_default().into(),
                 )
                 .boxed()
             }

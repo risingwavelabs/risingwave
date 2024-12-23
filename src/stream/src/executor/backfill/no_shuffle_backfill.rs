@@ -29,6 +29,7 @@ use crate::executor::backfill::utils::{
     mapping_chunk, mapping_message, mark_chunk, BackfillRateLimiter, METADATA_STATE_LEN,
 };
 use crate::executor::prelude::*;
+use crate::executor::Throttle;
 use crate::task::CreateMviewProgressReporter;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
@@ -86,7 +87,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Rate limit, just used to initialize the chunk size for
     /// snapshot read side.
     /// If smaller than `chunk_size`, it will take precedence.
-    rate_limit: Option<usize>,
+    backfill_throttle: Throttle,
 }
 
 impl<S> BackfillExecutor<S>
@@ -102,7 +103,7 @@ where
         progress: CreateMviewProgressReporter,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        rate_limit: Option<usize>,
+        backfill_throttle: Throttle,
     ) -> Self {
         let actor_id = progress.actor_id();
         Self {
@@ -114,7 +115,7 @@ where
             actor_id,
             metrics,
             chunk_size,
-            rate_limit,
+            backfill_throttle,
         }
     }
 
@@ -126,7 +127,7 @@ where
         // The pk indices specify the pk columns of the pruned chunk.
         let pk_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
-        let mut rate_limit = self.rate_limit;
+        let mut backfill_throttle = self.backfill_throttle;
 
         let state_len = pk_indices.len() + METADATA_STATE_LEN;
 
@@ -159,7 +160,7 @@ where
         let data_types = self.upstream_table.schema().data_types();
 
         // Chunk builder will be instantiated with min(rate_limit, self.chunk_size) as the chunk's max size.
-        let mut builder = create_builder(rate_limit, self.chunk_size, data_types.clone());
+        let mut builder = create_builder(backfill_throttle, self.chunk_size, data_types.clone());
 
         // Use this buffer to construct state,
         // which will then be persisted.
@@ -207,7 +208,7 @@ where
         if !is_finished {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
             let mut pending_barrier: Option<Barrier> = None;
-            let mut rate_limiter = rate_limit.and_then(create_limiter);
+            let mut rate_limiter = create_limiter(backfill_throttle);
 
             let metrics = self
                 .metrics
@@ -224,7 +225,7 @@ where
 
                 {
                     let left_upstream = upstream.by_ref().map(Either::Left);
-                    let paused = paused || matches!(rate_limit, Some(0));
+                    let paused = paused || backfill_throttle.is_zero();
                     let right_snapshot = pin!(Self::make_snapshot_stream(
                         &self.upstream_table,
                         snapshot_read_epoch,
@@ -451,14 +452,13 @@ where
                             paused = false;
                         }
                         Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = new_rate_limit.as_ref().map(|x| *x as _);
-                                if new_rate_limit != rate_limit {
-                                    rate_limit = new_rate_limit;
+                            if let Some(new_backfill_throttle) = actor_to_apply.get(&self.actor_id)
+                            {
+                                if backfill_throttle != *new_backfill_throttle {
+                                    backfill_throttle = *new_backfill_throttle;
                                     tracing::info!(
                                         id = self.actor_id,
-                                        new_rate_limit = ?rate_limit,
+                                        new_rate_limit = ?backfill_throttle,
                                         "actor rate limit changed",
                                     );
                                     // The builder is emptied above via `DataChunkBuilder::consume_all`.
@@ -467,11 +467,11 @@ where
                                         "builder should already be emptied"
                                     );
                                     builder = create_builder(
-                                        rate_limit,
+                                        backfill_throttle,
                                         self.chunk_size,
                                         self.upstream_table.schema().data_types(),
                                     );
-                                    rate_limiter = new_rate_limit.and_then(create_limiter);
+                                    rate_limiter = create_limiter(backfill_throttle);
                                 }
                             }
                         }

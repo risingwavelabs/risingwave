@@ -209,7 +209,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats,
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        source.source_throttle.unwrap_or_default().into(),
                     )?
                     .boxed()
                 } else if is_fs_v2_connector {
@@ -219,7 +219,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        source.source_throttle.unwrap_or_default().into(),
                     )
                     .boxed()
                 } else {
@@ -230,7 +230,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
-                        source.rate_limit,
+                        source.source_throttle.unwrap_or_default().into(),
                         is_shared && !source.with_properties.is_cdc_connector(),
                     )
                     .boxed()

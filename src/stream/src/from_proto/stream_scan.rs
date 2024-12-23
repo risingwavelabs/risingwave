@@ -90,7 +90,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     progress,
                     params.executor_stats.clone(),
                     params.env.config().developer.chunk_size,
-                    node.rate_limit.map(|x| x as _),
+                    node.backfill_throttle.unwrap_or_default().into(),
                 )
                 .boxed()
             }
@@ -132,7 +132,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             progress,
                             params.executor_stats.clone(),
                             params.env.config().developer.chunk_size,
-                            node.rate_limit.map(|x| x as _),
+                            node.backfill_throttle.unwrap_or_default().into(),
                         )
                         .boxed()
                     }};

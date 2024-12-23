@@ -23,6 +23,7 @@ use governor::clock::MonotonicClock;
 use governor::{Quota, RateLimiter};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
+use risingwave_common::throttle::Throttle;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -63,26 +64,27 @@ pub struct DmlExecutor {
 type RateLimiterType =
     RateLimiter<governor::state::NotKeyed, governor::state::InMemoryState, MonotonicClock>;
 struct DmlRateLimiter {
-    row_per_second: Option<u32>,
+    throttle: Throttle,
     rate_limiter: Option<RateLimiterType>,
     resume_rx: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 impl DmlRateLimiter {
-    fn new(row_per_second: Option<u32>, resume_rx: oneshot::Receiver<()>) -> Self {
-        let rate_limiter = if row_per_second == Some(0) {
-            None
-        } else {
-            row_per_second.map(|limit| {
-                tracing::info!(rate_limit = limit, "DML rate limit applied");
-                RateLimiter::direct_with_clock(
-                    Quota::per_second(NonZeroU32::new(limit).unwrap()),
+    fn new(throttle: Throttle, resume_rx: oneshot::Receiver<()>) -> Self {
+        let rate_limiter = match throttle {
+            Throttle::Disabled => None,
+            Throttle::Fixed(0) => None,
+            Throttle::Fixed(rate) => {
+                tracing::info!(rate = rate, "DML rate limit applied");
+                Some(RateLimiter::direct_with_clock(
+                    Quota::per_second(NonZeroU32::new(rate).unwrap()),
                     &MonotonicClock,
-                )
-            })
+                ))
+            }
         };
+
         Self {
-            row_per_second,
+            throttle,
             rate_limiter,
             resume_rx: Mutex::new(Some(resume_rx)),
         }
@@ -90,7 +92,7 @@ impl DmlRateLimiter {
 
     /// If true, the rate limiter should block the data stream, by invoking `block_until_resume`.
     fn is_pause(&self) -> bool {
-        self.row_per_second == Some(0)
+        self.throttle.is_zero()
     }
 
     async fn block_until_resume(&self) {
@@ -103,7 +105,9 @@ impl DmlRateLimiter {
 
     /// If true, the rate limiter should never block the data stream.
     fn is_unlimited(&self) -> bool {
-        self.row_per_second.is_none()
+        match self.throttle {
+            Throttle::Disabled => true,
+        }
     }
 }
 
@@ -133,7 +137,7 @@ impl DmlExecutor {
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
         chunk_size: usize,
-        rate_limit_info: Option<u32>,
+        throttle: Throttle,
     ) -> Self {
         let (tx, rx) = oneshot::channel();
         Self {
@@ -144,7 +148,7 @@ impl DmlExecutor {
             table_version_id,
             column_descs,
             chunk_size,
-            rate_limiter: ArcSwap::new(DmlRateLimiter::new(rate_limit_info, rx).into()).into(),
+            rate_limiter: ArcSwap::new(DmlRateLimiter::new(throttle, rx).into()).into(),
             rate_limit_resume_tx: tx,
         }
     }
@@ -212,19 +216,18 @@ impl DmlExecutor {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(new_rate_limit) =
+                                    if let Some(new_throttle) =
                                         actor_to_apply.get(&self.actor_ctx.id)
-                                        && *new_rate_limit
-                                            != self.rate_limiter.load().row_per_second
+                                        && *new_throttle != self.rate_limiter.load().throttle
                                     {
                                         tracing::info!(
                                             "Updating rate limit from {:?} to {:?}.",
-                                            self.rate_limiter.load().row_per_second,
-                                            *new_rate_limit
+                                            self.rate_limiter.load().throttle,
+                                            *new_throttle
                                         );
                                         let (tx, rx) = oneshot::channel();
                                         self.rate_limiter
-                                            .store(DmlRateLimiter::new(*new_rate_limit, rx).into());
+                                            .store(DmlRateLimiter::new(*new_throttle, rx).into());
                                         // Resume the data stream if it is being blocked by the old rate limiter.
                                         let _ = self.rate_limit_resume_tx.send(());
                                         // Store the new resume tx.

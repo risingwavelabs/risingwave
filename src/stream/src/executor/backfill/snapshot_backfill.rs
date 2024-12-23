@@ -39,7 +39,7 @@ use crate::executor::prelude::{try_stream, StreamExt};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BackfillExecutor, Barrier, BoxedMessageStream,
     DispatcherBarrier, DispatcherMessage, Execute, MergeExecutorInput, Message,
-    StreamExecutorError, StreamExecutorResult,
+    StreamExecutorError, StreamExecutorResult, Throttle,
 };
 use crate::task::CreateMviewProgressReporter;
 
@@ -56,7 +56,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     progress: CreateMviewProgressReporter,
 
     chunk_size: usize,
-    rate_limit: Option<usize>,
+    throttle: Throttle,
 
     barrier_rx: UnboundedReceiver<Barrier>,
 
@@ -73,24 +73,23 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
         chunk_size: usize,
-        rate_limit: Option<usize>,
+        throttle: Throttle,
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
-        if let Some(rate_limit) = rate_limit {
-            debug!(
-                rate_limit,
-                "create snapshot backfill executor with rate limit"
-            );
+
+        if throttle != Throttle::Disabled {
+            debug!(throttle = ?throttle, "create snapshot backfill executor with throttle");
         }
+
         Self {
             upstream_table,
             upstream,
             output_indices,
             progress,
             chunk_size,
-            rate_limit,
+            throttle,
             barrier_rx,
             actor_ctx,
             metrics,
@@ -136,7 +135,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &self.upstream_table,
                             first_barrier_epoch.prev,
                             self.chunk_size,
-                            self.rate_limit,
+                            self.throttle,
                             &mut self.barrier_rx,
                             &mut self.progress,
                             first_recv_barrier,
@@ -202,7 +201,8 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             ))
                             .await?;
                         let data_types = self.upstream_table.schema().data_types();
-                        let builder = create_builder(None, self.chunk_size, data_types);
+                        let builder =
+                            create_builder(Throttle::Disabled, self.chunk_size, data_types);
                         let stream = read_change_log(stream, builder);
                         pin_mut!(stream);
                         while let Some(chunk) =
@@ -515,7 +515,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     upstream_table: &'a StorageTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
-    rate_limit: Option<usize>,
+    throttle: Throttle,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     progress: &'a mut CreateMviewProgressReporter,
     first_recv_barrier: Barrier,
@@ -536,7 +536,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         None,
     );
     let data_types = upstream_table.schema().data_types();
-    let builder = create_builder(rate_limit, chunk_size, data_types.clone());
+    let builder = create_builder(throttle, chunk_size, data_types.clone());
     let snapshot_stream = make_snapshot_stream(snapshot_row_stream, builder);
     pin_mut!(snapshot_stream);
 
@@ -558,10 +558,10 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     let mut count = 0;
     let mut epoch_row_count = 0;
     loop {
-        let throttle_snapshot_stream = if let Some(rate_limit) = rate_limit {
-            epoch_row_count > rate_limit
-        } else {
-            false
+        let throttle_snapshot_stream = match throttle {
+            Throttle::Fixed(rate) if epoch_row_count > rate as usize => true,
+            Throttle::Fixed(_) => false,
+            Throttle::Disabled => false,
         };
         match select_barrier_and_snapshot_stream(
             barrier_rx,

@@ -89,11 +89,9 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
-    optional uint32 rate_limit = 1;
-  }
-
-  map<uint32, RateLimit> actor_throttle = 1;
+  reserved "actor_throttle";
+  reserved 1;
+  map<uint32, Throttle> actor_throttles = 2;
 }
 
 message CombinedMutation {
@@ -191,9 +189,10 @@ message StreamSource {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Source rate limit
-  optional uint32 rate_limit = 9;
+  reserved "rate_limit";
+  reserved 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  Throttle source_throttle = 11;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future
@@ -207,9 +206,10 @@ message StreamFsFetch {
   map<string, string> with_properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
-  // Source rate limit
-  optional uint32 rate_limit = 9;
+  reserved "rate_limit";
+  reserved 9;
   map<string, secret.SecretRef> secret_refs = 10;
+  Throttle source_throttle = 11;
 }
 
 // The executor only for receiving barrier from the meta service. It always resides in the leaves
@@ -235,14 +235,14 @@ message SourceBackfillNode {
   catalog.StreamSourceInfo info = 4;
   string source_name = 5;
   map<string, string> with_properties = 6;
-  // Backfill rate limit
-  optional uint32 rate_limit = 7;
-
-  // fields above are the same as StreamSource
+  reserved "rate_limit";
+  reserved 7;
 
   // `| partition_id | backfill_progress |`
   catalog.Table state_table = 8;
   map<string, secret.SecretRef> secret_refs = 9;
+
+  Throttle backfill_throttle = 11;
 }
 
 message SinkDesc {
@@ -617,8 +617,8 @@ message StreamScanNode {
   // Used iff `ChainType::Backfill`.
   plan_common.StorageTableDesc table_desc = 7;
 
-  // The backfill rate limit for the stream scan node.
-  optional uint32 rate_limit = 8;
+  reserved "rate_limit";
+  reserved 8;
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
@@ -626,6 +626,9 @@ message StreamScanNode {
   // The state table used by ArrangementBackfill to replicate upstream mview's state table.
   // Used iff `ChainType::ArrangementBackfill`.
   catalog.Table arrangement_table = 10;
+
+  // The backfill rate limit for the stream scan node.
+  Throttle backfill_throttle = 11;
 }
 
 // Config options for CDC backfill
@@ -654,14 +657,17 @@ message StreamCdcScanNode {
   // The external table that will be backfilled for CDC.
   plan_common.ExternalTableDesc cdc_table_desc = 5;
 
-  // The backfill rate limit for the stream cdc scan node.
-  optional uint32 rate_limit = 6;
+  reserved "rate_limit";
+  reserved 6;
 
   // Whether skip the backfill and only consume from upstream.
   // keep it for backward compatibility, new stream plan will use `options.disable_backfill`
   bool disable_backfill = 7;
 
   StreamCdcScanOptions options = 8;
+
+  // The backfill rate limit for the stream cdc scan node.
+  Throttle backfill_throttle = 11;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -769,7 +775,9 @@ message DmlNode {
   uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
-  optional uint32 rate_limit = 4;
+  reserved "rate_limit";
+  reserved 4;
+  Throttle throttle = 5;
 }
 
 message RowIdGenNode {
@@ -1065,4 +1073,17 @@ message StreamFragmentGraph {
   // upstream fragment graph requires two fragments to be in the same distribution,
   // thus the same vnode count.
   uint32 max_parallelism = 7;
+}
+
+enum ThrottleKind {
+  THROTTLE_KIND_DISABLED = 0;
+  THROTTLE_KIND_FIXED = 1;
+}
+
+message Throttle {
+  ThrottleKind kind = 1;
+  // The rate limit per second.
+  //
+  // Only valid when `kind` is `THROTTLE_KIND_FIXED`.
+  uint32 rate = 2;
 }

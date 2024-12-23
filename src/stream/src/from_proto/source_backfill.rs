@@ -83,7 +83,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
             params.executor_stats.clone(),
             params.env.system_params_manager_ref().get_params(),
             backfill_state_table,
-            node.rate_limit,
+            node.backfill_throttle.unwrap_or_default(),
             progress,
         );
         let [input]: [_; 1] = params.input.try_into().unwrap();

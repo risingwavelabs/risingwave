@@ -23,6 +23,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
+use risingwave_common::throttle::Throttle;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::parser::{
     ByteStreamSourceParser, DebeziumParser, DebeziumProps, EncodingProperties, JsonProperties,
@@ -76,8 +77,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     metrics: CdcBackfillMetrics,
 
-    /// Rate limit in rows/s.
-    rate_limit_rps: Option<u32>,
+    backfill_throttle: Throttle,
 
     options: CdcScanOptions,
 }
@@ -93,7 +93,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         progress: Option<CreateMviewProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
-        rate_limit_rps: Option<u32>,
+        backfill_throttle: Throttle,
         options: CdcScanOptions,
     ) -> Self {
         let pk_indices = external_table.pk_indices();
@@ -115,7 +115,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_impl,
             progress,
             metrics,
-            rate_limit_rps,
+            backfill_throttle,
             options,
         }
     }
@@ -165,7 +165,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let first_barrier_epoch = first_barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-        let mut rate_limit_to_zero = self.rate_limit_rps.is_some_and(|val| val == 0);
+        let mut rate_limit_to_zero = self.backfill_throttle.is_zero();
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
@@ -260,7 +260,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             is_finished = state.is_finished,
             is_snapshot_paused,
             snapshot_row_count = total_snapshot_row_count,
-            rate_limit = self.rate_limit_rps,
+            backfiill_throttle = ?self.backfill_throttle,
             disable_backfill = self.options.disable_backfill,
             snapshot_interval = self.options.snapshot_interval,
             snapshot_batch_size = self.options.snapshot_batch_size,
@@ -347,7 +347,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let mut snapshot_read_row_cnt: usize = 0;
                 let read_args = SnapshotReadArgs::new(
                     current_pk_pos.clone(),
-                    self.rate_limit_rps,
+                    self.backfill_throttle,
                     pk_indices.clone(),
                     additional_columns.clone(),
                     schema_table_name.clone(),
@@ -398,14 +398,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 snapshot_valve.resume();
                                             }
                                             Mutation::Throttle(some) => {
-                                                if let Some(new_rate_limit) =
+                                                if let Some(new_backfill_throttle) =
                                                     some.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && *new_backfill_throttle
+                                                        != self.backfill_throttle
                                                 {
-                                                    self.rate_limit_rps = *new_rate_limit;
-                                                    rate_limit_to_zero = self
-                                                        .rate_limit_rps
-                                                        .is_some_and(|val| val == 0);
+                                                    self.backfill_throttle = *new_backfill_throttle;
+                                                    rate_limit_to_zero =
+                                                        self.backfill_throttle.is_zero();
 
                                                     // update and persist current backfill progress without draining the buffered upstream chunks
                                                     state_impl
