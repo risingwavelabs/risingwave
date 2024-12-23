@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use anyhow::Context as _;
 use apache_avro::Schema;
 use moka::future::Cache;
 
@@ -59,11 +58,22 @@ impl PulsarSchemaCache {
         {
             return Ok(schema);
         }
-        let res = self
-            .pulsar_client
-            .get_schema(&self.topic, schema_version)
-            .await
-            .context("pulsar rest error")?;
+        let mut res = None;
+        for _ in 0..5 {
+            res = Some(
+                self.pulsar_client
+                    .get_schema(&self.topic, schema_version)
+                    .await,
+            );
+            match res.as_ref().unwrap() {
+                Ok(_) => break,
+                Err(err) => {
+                    eprintln!("==== {err:#?}");
+                    // return Err(anyhow::anyhow!(err).into())
+                }
+            }
+        }
+        let res = res.unwrap()?;
         let schema_version = res.version;
         let crate::schema::pulsar_schema::PulsarSchema::Avro(definition) = res.schema else {
             unreachable!("glue sdk response without definition");
