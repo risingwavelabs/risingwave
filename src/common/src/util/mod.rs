@@ -43,3 +43,4 @@ pub mod value_encoding;
 pub mod worker_util;
 pub use tokio_util;
 pub mod cluster_limit;
+pub mod id_alloc;
