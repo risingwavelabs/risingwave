@@ -73,7 +73,7 @@ use self::rule::*;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
-use crate::handler::create_table::{AAA, BBB};
+use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
@@ -641,22 +641,22 @@ impl PlanRoot {
         mut self,
         context: OptimizerContextRef,
         table_name: String,
-        AAA {
+        CreateTableInfo {
             columns,
             pk_column_ids,
             row_id_index,
             watermark_descs,
             source_catalog,
             version,
-        }: AAA,
-        BBB {
+        }: CreateTableInfo,
+        CreateTableProps {
             definition,
             append_only,
             on_conflict,
             with_version_column,
             webhook_info,
             engine,
-        }: BBB,
+        }: CreateTableProps,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);

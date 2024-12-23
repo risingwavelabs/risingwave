@@ -480,9 +480,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     include_column_options: IncludeOption,
-    bbb: BBB,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    if bbb.append_only
+    if props.append_only
         && format_encode.format != Format::Plain
         && format_encode.format != Format::Native
     {
@@ -536,7 +536,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         schema_name,
         source_catalog,
         col_id_gen.into_version(),
-        bbb,
+        props,
     )?;
 
     Ok((plan, Some(pb_source), table))
@@ -552,7 +552,7 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
-    bbb: BBB,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
     let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
@@ -572,7 +572,7 @@ pub(crate) fn gen_create_table_plan(
         constraints,
         source_watermarks,
         Some(col_id_gen.into_version()),
-        bbb,
+        props,
     )
 }
 
@@ -585,7 +585,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     version: Option<TableVersion>,
-    bbb: BBB,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
     // XXX: Why not bind outside?
     let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
@@ -611,7 +611,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
 
-    let aaa = AAA {
+    let info = CreateTableInfo {
         columns,
         pk_column_ids,
         row_id_index,
@@ -620,7 +620,7 @@ pub(crate) fn gen_create_table_plan_without_source(
         version,
     };
 
-    gen_table_plan_inner(context.into(), schema_name, table_name, aaa, bbb)
+    gen_table_plan_inner(context.into(), schema_name, table_name, info, props)
 }
 
 fn gen_table_plan_with_source(
@@ -628,11 +628,11 @@ fn gen_table_plan_with_source(
     schema_name: Option<String>,
     source_catalog: SourceCatalog,
     version: TableVersion,
-    bbb: BBB,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
     let table_name = source_catalog.name.clone();
 
-    let aaa = AAA {
+    let info = CreateTableInfo {
         columns: source_catalog.columns.clone(),
         pk_column_ids: source_catalog.pk_col_ids.clone(),
         row_id_index: source_catalog.row_id_index,
@@ -641,10 +641,27 @@ fn gen_table_plan_with_source(
         version: Some(version),
     };
 
-    gen_table_plan_inner(context, schema_name, table_name, aaa, bbb)
+    gen_table_plan_inner(context, schema_name, table_name, info, props)
 }
 
-pub struct BBB {
+/// Arguments of the functions that generate a table plan, part 1.
+///
+/// Compared to [`CreateTableProps`], this struct contains fields that need some work of binding
+/// or resolving based on the user input.
+pub struct CreateTableInfo {
+    pub columns: Vec<ColumnCatalog>,
+    pub pk_column_ids: Vec<ColumnId>,
+    pub row_id_index: Option<usize>,
+    pub watermark_descs: Vec<WatermarkDesc>,
+    pub source_catalog: Option<SourceCatalog>,
+    pub version: Option<TableVersion>, // TODO: `CREATE TABLE AS` does not fill this field
+}
+
+/// Arguments of the functions that generate a table plan, part 2.
+///
+/// Compared to [`CreateTableInfo`], this struct contains fields that can be (relatively) simply
+/// obtained from the input or the context.
+pub struct CreateTableProps {
     pub definition: String,
     pub append_only: bool,
     pub on_conflict: Option<OnConflict>,
@@ -653,37 +670,26 @@ pub struct BBB {
     pub engine: Engine,
 }
 
-pub struct AAA {
-    pub columns: Vec<ColumnCatalog>,
-    pub pk_column_ids: Vec<ColumnId>,
-    pub row_id_index: Option<usize>,
-    pub watermark_descs: Vec<WatermarkDesc>,
-    pub source_catalog: Option<SourceCatalog>,
-    pub version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
-                                        * TABLE` for `CREATE TABLE AS`. */
-}
-
 #[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
     context: OptimizerContextRef,
     schema_name: Option<String>,
     table_name: String,
-    aaa: AAA,
-    bbb: BBB,
+    info: CreateTableInfo,
+    props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
-    let AAA {
+    let CreateTableInfo {
         ref columns,
         row_id_index,
         ref watermark_descs,
         ref source_catalog,
         ..
-    } = aaa;
-
-    let BBB {
+    } = info;
+    let CreateTableProps {
         append_only,
         on_conflict,
         ..
-    } = bbb;
+    } = props;
 
     let (database_id, schema_id) = context
         .session_ctx()
@@ -742,8 +748,15 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    let materialize =
-        plan_root.gen_table_plan(context, table_name, aaa, BBB { on_conflict, ..bbb })?;
+    let materialize = plan_root.gen_table_plan(
+        context,
+        table_name,
+        info,
+        CreateTableProps {
+            on_conflict,
+            ..props
+        },
+    )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
@@ -864,7 +877,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
-        AAA {
+        CreateTableInfo {
             columns,
             pk_column_ids,
             row_id_index: None,
@@ -872,7 +885,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             source_catalog: Some((*source).clone()),
             version: Some(col_id_gen.into_version()),
         },
-        BBB {
+        CreateTableProps {
             definition,
             append_only: false,
             on_conflict,
@@ -976,7 +989,7 @@ pub(super) async fn handle_create_table_plan(
         .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
         .transpose()?;
 
-    let bbb = BBB {
+    let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict,
@@ -998,7 +1011,7 @@ pub(super) async fn handle_create_table_plan(
                 source_watermarks,
                 col_id_gen,
                 include_column_options,
-                bbb,
+                props,
             )
             .await?,
             TableJobType::General,
@@ -1012,7 +1025,7 @@ pub(super) async fn handle_create_table_plan(
                 constraints,
                 col_id_gen,
                 source_watermarks,
-                bbb,
+                props,
             )?;
 
             ((plan, None, table), TableJobType::General)
@@ -1733,7 +1746,7 @@ pub async fn generate_stream_graph_for_replace_table(
 ) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, TableJobType)> {
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
-    let bbb = BBB {
+    let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict,
@@ -1755,7 +1768,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source_watermarks,
                 col_id_gen,
                 include_column_options,
-                bbb,
+                props,
             )
             .await?,
             TableJobType::General,
@@ -1769,7 +1782,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 constraints,
                 col_id_gen,
                 source_watermarks,
-                bbb,
+                props,
             )?;
             ((plan, None, table), TableJobType::General)
         }
