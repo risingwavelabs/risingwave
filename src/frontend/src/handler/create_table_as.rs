@@ -21,7 +21,9 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator, CreateTableProps};
+use crate::handler::create_table::{
+    gen_create_table_plan_without_source, ColumnIdGenerator, CreateTableProps,
+};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
