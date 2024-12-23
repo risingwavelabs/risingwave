@@ -90,6 +90,8 @@ pub struct BigQueryCommon {
     #[serde(default)] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
+    #[serde(rename = "bigquery.credentials")]
+    pub credentials: Option<String>,
 }
 
 struct BigQueryFutureManager {
@@ -208,7 +210,9 @@ impl BigQueryCommon {
     }
 
     async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
-        if let Some(local_path) = &self.local_path {
+        if let Some(credentials) = &self.credentials {
+            Ok(credentials.clone())
+        } else if let Some(local_path) = &self.local_path {
             std::fs::read_to_string(local_path)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))
         } else if let Some(s3_path) = &self.s3_path {
