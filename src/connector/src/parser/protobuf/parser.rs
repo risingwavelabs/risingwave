@@ -93,7 +93,7 @@ impl ProtobufParserConfig {
         }
         let pool = if protobuf_config.use_schema_registry {
             let client = Client::new(url, &protobuf_config.client_config)?;
-            let loader = SchemaLoader {
+            let loader = SchemaLoader::Confluent {
                 client,
                 name_strategy: protobuf_config.name_strategy,
                 topic: protobuf_config.topic,
