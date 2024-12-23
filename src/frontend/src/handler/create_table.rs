@@ -52,8 +52,8 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSink, CreateSinkStatement,
     CreateSourceStatement, DataType, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
-    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
+    FormatEncodeOptions, Ident, ObjectName, OnConflict, SourceWatermark, Statement,
+    TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
@@ -1891,7 +1891,7 @@ fn bind_webhook_info(
 
     // validate secret_ref
     let db_name = session.database();
-    let (schema_name, secret_name) =
+    let (_schema_name, secret_name) =
         Binder::resolve_schema_qualified_name(db_name, secret_ref.secret_name.clone())?;
     // let secret_catalog = session.get_secret_by_name(schema_name, &secret_name)?;
     let pb_secret_ref = PbSecretRef {
