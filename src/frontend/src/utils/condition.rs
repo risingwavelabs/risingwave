@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::ops::Bound;
@@ -364,7 +365,40 @@ impl Condition {
 
                 scan_ranges.extend(scan_ranges_chunk);
             }
-            scan_ranges.sort_by(|a, b| a.eq_conds.len().cmp(&b.eq_conds.len()));
+
+            let order_types = table_desc.pk.iter().map(|x| x.order_type).collect_vec();
+            scan_ranges.sort_by(|left, right| {
+                let (left_start, _left_end) = &left.covert_to_range();
+                let (right_start, _right_end) = &right.covert_to_range();
+
+                let left_start_vec = match &left_start {
+                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                    _ => &vec![],
+                };
+                let right_start_vec = match &right_start {
+                    Bound::Included(vec) | Bound::Excluded(vec) => vec,
+                    _ => &vec![],
+                };
+
+                if left_start_vec.is_empty() && right_start_vec.is_empty() {
+                    return Ordering::Less;
+                }
+
+                if left_start_vec.is_empty() {
+                    return Ordering::Less;
+                }
+
+                if right_start_vec.is_empty() {
+                    return Ordering::Greater;
+                }
+
+                let cmp_column_len = left_start_vec.len().min(right_start_vec.len());
+                cmp_rows(
+                    &left_start_vec[0..cmp_column_len],
+                    &right_start_vec[0..cmp_column_len],
+                    &order_types[0..cmp_column_len],
+                )
+            });
 
             if scan_ranges.is_empty() {
                 return Ok(None);
@@ -376,7 +410,6 @@ impl Condition {
 
             let mut output_scan_ranges: Vec<ScanRange> = vec![];
             output_scan_ranges.push(scan_ranges[0].clone());
-            let order_types = table_desc.pk.iter().map(|x| x.order_type).collect_vec();
             let mut idx = 1;
             loop {
                 if idx >= scan_ranges.len() {

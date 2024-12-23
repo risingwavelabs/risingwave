@@ -460,6 +460,12 @@
     SELECT * FROM orders_count_by_user WHERE (user_id < 10 and user_id > 1) or (user_id > 20 and user_id <= 30) or (user_id >= 30 and user_id < 40) or (user_id = 15);
   expected_outputs:
   - batch_plan
+- before:
+  - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE (user_id < 10) or (user_id > 30) or (user_id > 5 and user_id < 15);
+  expected_outputs:
+  - batch_plan
 - name: When OR clauses contain overlapping conditions, we cannot push down if it results in a full table scan.
   before:
   - create_table_and_mv
