@@ -82,7 +82,7 @@ impl StreamMaterialize {
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
-        retention_seconds: Option<NonZeroU32>,
+        _retention_seconds: Option<NonZeroU32>, // TODO
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -141,7 +141,7 @@ impl StreamMaterialize {
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
-        let mut table = Self::derive_table_catalog(
+        let table = Self::derive_table_catalog(
             input.clone(),
             name,
             user_order_by,

@@ -51,14 +51,11 @@ pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
-use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Engine, Field, Schema,
-};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
-use risingwave_pb::catalog::{PbWebhookSourceInfo, WatermarkDesc};
 use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -73,7 +70,7 @@ use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{has_batch_exchange, CardinalityVisitor, StreamKeyChecker};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
-use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{AAA, BBB};

@@ -649,7 +649,7 @@ fn gen_table_plan_with_source(
     gen_table_plan_inner(context, schema_name, table_name, aaa, bbb)
 }
 
-pub(crate) struct BBB {
+pub struct BBB {
     pub append_only: bool,
     pub on_conflict: Option<OnConflict>,
     pub with_version_column: Option<String>,
@@ -659,7 +659,7 @@ pub(crate) struct BBB {
     pub engine: Engine,
 }
 
-pub(crate) struct AAA {
+pub struct AAA {
     pub columns: Vec<ColumnCatalog>,
     pub pk_column_ids: Vec<ColumnId>,
     pub row_id_index: Option<usize>,
@@ -678,20 +678,16 @@ fn gen_table_plan_inner(
 ) -> Result<(PlanRef, PbTable)> {
     let AAA {
         ref columns,
-        ref pk_column_ids,
         row_id_index,
-        ref definition,
         ref watermark_descs,
         ref source_catalog,
+        ..
     } = aaa;
 
     let BBB {
         append_only,
         on_conflict,
-        ref with_version_column,
-        ref version,
-        ref webhook_info,
-        ref engine,
+        ..
     } = bbb;
 
     let (database_id, schema_id) = context
