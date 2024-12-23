@@ -508,8 +508,7 @@ impl HummockVersion {
                             BTreeSet::from_iter(group_construct.table_ids.clone())
                         };
 
-                        if group_construct.version
-                            >= CompatibilityVersion::SplitGroupByTableId as _
+                        if group_construct.version >= CompatibilityVersion::SplitGroupByTableId as _
                         {
                             let split_key = if group_construct.split_key.is_some() {
                                 Some(Bytes::from(group_construct.split_key.clone().unwrap()))
