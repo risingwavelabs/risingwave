@@ -535,10 +535,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         schema_name,
         source_catalog,
-        BBB {
-            version: Some(col_id_gen.into_version()),
-            ..bbb
-        },
+        col_id_gen.into_version(),
+        bbb,
     )?;
 
     Ok((plan, Some(pb_source), table))
@@ -573,10 +571,8 @@ pub(crate) fn gen_create_table_plan(
         column_defs,
         constraints,
         source_watermarks,
-        BBB {
-            version: Some(col_id_gen.into_version()),
-            ..bbb
-        },
+        Some(col_id_gen.into_version()),
+        bbb,
     )
 }
 
@@ -588,6 +584,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
+    version: Option<TableVersion>,
     bbb: BBB,
 ) -> Result<(PlanRef, PbTable)> {
     // XXX: Why not bind outside?
@@ -620,6 +617,7 @@ pub(crate) fn gen_create_table_plan_without_source(
         row_id_index,
         watermark_descs,
         source_catalog: None,
+        version,
     };
 
     gen_table_plan_inner(context.into(), schema_name, table_name, aaa, bbb)
@@ -629,6 +627,7 @@ fn gen_table_plan_with_source(
     context: OptimizerContextRef,
     schema_name: Option<String>,
     source_catalog: SourceCatalog,
+    version: TableVersion,
     bbb: BBB,
 ) -> Result<(PlanRef, PbTable)> {
     let table_name = source_catalog.name.clone();
@@ -639,6 +638,7 @@ fn gen_table_plan_with_source(
         row_id_index: source_catalog.row_id_index,
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
+        version: Some(version),
     };
 
     gen_table_plan_inner(context, schema_name, table_name, aaa, bbb)
@@ -649,8 +649,6 @@ pub struct BBB {
     pub append_only: bool,
     pub on_conflict: Option<OnConflict>,
     pub with_version_column: Option<String>,
-    pub version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
-                                        * TABLE` for `CREATE TABLE AS`. */
     pub webhook_info: Option<PbWebhookSourceInfo>,
     pub engine: Engine,
 }
@@ -661,6 +659,8 @@ pub struct AAA {
     pub row_id_index: Option<usize>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub source_catalog: Option<SourceCatalog>,
+    pub version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
+                                        * TABLE` for `CREATE TABLE AS`. */
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -870,13 +870,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             row_id_index: None,
             watermark_descs: vec![],
             source_catalog: Some((*source).clone()),
+            version: Some(col_id_gen.into_version()),
         },
         BBB {
             definition,
             append_only: false,
             on_conflict,
             with_version_column,
-            version: Some(col_id_gen.into_version()),
             webhook_info: None,
             engine,
         },
@@ -981,7 +981,6 @@ pub(super) async fn handle_create_table_plan(
         append_only,
         on_conflict,
         with_version_column: with_version_column.clone(),
-        version: None, // placeholder
         webhook_info,
         engine,
     };
@@ -1739,7 +1738,6 @@ pub async fn generate_stream_graph_for_replace_table(
         append_only,
         on_conflict,
         with_version_column: with_version_column.clone(),
-        version: None, // placeholder
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
     };
