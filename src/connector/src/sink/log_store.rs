@@ -526,7 +526,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
                         paused = self.rate_limit == Some(0);
                         tracing::info!("rate limit changed from {:?} to {:?}, paused = {paused}", prev, self.rate_limit);
                     } else {
-                        tracing::warn!("rate limit control channel closed");
+                        bail!("rate limit control channel closed");
                     }
                 },
                 item = self.core.next_item(), if !paused => {
