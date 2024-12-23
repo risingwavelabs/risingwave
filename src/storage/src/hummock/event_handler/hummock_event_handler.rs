@@ -24,9 +24,9 @@ use await_tree::InstrumentAwait;
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use tokio::spawn;
@@ -62,14 +62,11 @@ pub struct BufferTracker {
     flush_threshold: usize,
     min_batch_flush_size: usize,
     global_buffer: Arc<MemoryLimiter>,
-    global_upload_task_size: GenericGauge<AtomicU64>,
+    global_upload_task_size: UintGauge,
 }
 
 impl BufferTracker {
-    pub fn from_storage_opts(
-        config: &StorageOpts,
-        global_upload_task_size: GenericGauge<AtomicU64>,
-    ) -> Self {
+    pub fn from_storage_opts(config: &StorageOpts, global_upload_task_size: UintGauge) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
         let shared_buffer_min_batch_flush_size =
@@ -93,7 +90,7 @@ impl BufferTracker {
         Self::new(
             usize::MAX,
             flush_threshold,
-            GenericGauge::new("test", "test").unwrap(),
+            UintGauge::new("test", "test").unwrap(),
             min_batch_flush_size,
         )
     }
@@ -101,7 +98,7 @@ impl BufferTracker {
     fn new(
         capacity: usize,
         flush_threshold: usize,
-        global_upload_task_size: GenericGauge<AtomicU64>,
+        global_upload_task_size: UintGauge,
         min_batch_flush_size: usize,
     ) -> Self {
         assert!(capacity >= flush_threshold);
@@ -116,7 +113,7 @@ impl BufferTracker {
     pub fn for_test() -> Self {
         Self::from_storage_opts(
             &StorageOpts::default(),
-            GenericGauge::new("test", "test").unwrap(),
+            UintGauge::new("test", "test").unwrap(),
         )
     }
 
@@ -128,7 +125,7 @@ impl BufferTracker {
         &self.global_buffer
     }
 
-    pub fn global_upload_task_size(&self) -> &GenericGauge<AtomicU64> {
+    pub fn global_upload_task_size(&self) -> &UintGauge {
         &self.global_upload_task_size
     }
 

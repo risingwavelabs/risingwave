@@ -142,6 +142,8 @@ mod tait {
 }
 pub use tait::*;
 
+use crate::UintGauge;
+
 pub type LabelGuardedHistogramVec<const N: usize> = LabelGuardedMetricVec<VecBuilderOfHistogram, N>;
 pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
@@ -155,6 +157,7 @@ pub type LabelGuardedGaugeVec<const N: usize> =
 pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<Histogram, N>;
 pub type LabelGuardedIntCounter<const N: usize> = LabelGuardedMetric<IntCounter, N>;
 pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<IntGauge, N>;
+pub type LabelGuardedUintGauge<const N: usize> = LabelGuardedMetric<UintGauge, N>;
 pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<Gauge, N>;
 
 pub type LabelGuardedLocalHistogram<const N: usize> = LabelGuardedMetric<LocalHistogram, N>;
