@@ -19,7 +19,7 @@ mod loader;
 pub mod protobuf;
 pub mod schema_registry;
 
-pub use loader::SchemaLoader;
+pub use loader::{SchemaLoader, SchemaVersion};
 
 const MESSAGE_NAME_KEY: &str = "message";
 const KEY_MESSAGE_NAME_KEY: &str = "key.message";
