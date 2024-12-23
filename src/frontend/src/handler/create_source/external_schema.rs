@@ -173,6 +173,9 @@ async fn bind_columns_from_source_for_non_cdc(
             if format_encode_options_to_consume
                 .remove(AWS_GLUE_SCHEMA_ARN_KEY)
                 .is_none()
+                && format_encode_options_to_consume
+                    .remove("pulsar_rest_base")
+                    .is_none()
             {
                 // Legacy logic that assumes either `schema.location` or confluent `schema.registry`.
                 // The handling of newly added aws glue is centralized in `connector::parser`.

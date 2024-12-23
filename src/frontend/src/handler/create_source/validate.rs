@@ -166,8 +166,13 @@ pub fn validate_compatibility(
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
+                match try_consume_string_from_options(options.inner_mut(), "pulsar_rest_base") {
+                    Some(_) => false,
+                    None => {
+                        let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+                        use_schema_registry
+                    }
+                }
             }
             (Format::Debezium, Encode::Avro) => true,
             (_, _) => false,
