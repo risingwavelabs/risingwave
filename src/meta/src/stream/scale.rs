@@ -1818,7 +1818,7 @@ impl ScaleController {
 
         let schedulable_worker_slots = workers
             .values()
-            .map(|worker| (worker.id as WorkerId, worker.parallelism()))
+            .map(|worker| (worker.id as WorkerId, worker.compute_node_parallelism()))
             .collect::<BTreeMap<_, _>>();
 
         // index for no shuffle relation
@@ -2579,7 +2579,7 @@ impl GlobalStreamManager {
 
                             match prev_worker {
                                 // todo, add label checking in further changes
-                                Some(prev_worker) if prev_worker.parallelism() != worker.parallelism()  => {
+                                Some(prev_worker) if prev_worker.compute_node_parallelism() != worker.compute_node_parallelism()  => {
                                     tracing::info!(worker = worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }

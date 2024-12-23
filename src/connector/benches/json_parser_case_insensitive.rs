@@ -89,7 +89,7 @@ fn create_parser(chunk_size: usize, chunk_num: usize, mode: &str) -> (Parser, In
 
 async fn parse(parser: Parser, input: Input) {
     parser
-        .into_stream(futures::stream::iter(input.into_iter().map(Ok)).boxed())
+        .parse_stream(futures::stream::iter(input.into_iter().map(Ok)).boxed())
         .count() // consume the stream
         .await;
 }
