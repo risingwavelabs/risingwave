@@ -25,8 +25,8 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::Endpoint;
 use tonic::Response;
 
+use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::Result;
-use crate::tracing::{Channel, TracingInjectedChannelExt};
 use crate::{RpcClient, RpcClientPool};
 
 const DEFAULT_RETRY_INTERVAL: u64 = 50;
@@ -49,7 +49,7 @@ impl FrontendClient {
                 },
             )
             .await?
-            .tracing_injected();
+            .wrapped();
 
         Ok(Self(
             FrontendServiceClient::new(channel).max_decoding_message_size(usize::MAX),

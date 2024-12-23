@@ -122,7 +122,7 @@ impl Binder {
         // regclass. We just hack the `obj_description` and `col_description` here, to disable it to
         // bind its arguments.
         if func_name == "obj_description" || func_name == "col_description" {
-            return Ok(ExprImpl::literal_varchar("".to_string()));
+            return Ok(ExprImpl::literal_varchar("".to_owned()));
         }
 
         // special binding logic for `array_transform`
@@ -179,7 +179,7 @@ impl Binder {
 
                 if !func.kind.is_scalar() {
                     return Err(ErrorCode::InvalidInputSyntax(
-                        "expect a scalar function after `AGGREGATE:`".to_string(),
+                        "expect a scalar function after `AGGREGATE:`".to_owned(),
                     )
                     .into());
                 }
@@ -406,7 +406,7 @@ impl Binder {
         else {
             return Err(ErrorCode::BindError(
                 "The `lambda` argument for `array_transform` should be a lambda function"
-                    .to_string(),
+                    .to_owned(),
             )
             .into());
         };
@@ -477,7 +477,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         if func.body.is_none() {
             return Err(
-                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_string()).into(),
+                ErrorCode::InvalidInputSyntax("`body` must exist for sql udf".to_owned()).into(),
             );
         }
 
@@ -546,7 +546,7 @@ impl Binder {
         Err(ErrorCode::InvalidInputSyntax(
             "failed to parse the input query and extract the udf expression,
                 please recheck the syntax"
-                .to_string(),
+                .to_owned(),
         )
         .into())
     }

@@ -18,7 +18,7 @@ use futures::io::Cursor;
 use futures::AsyncBufReadExt;
 use futures_async_stream::try_stream;
 
-use crate::source::{BoxSourceStream, SourceMessage};
+use crate::source::{BoxSourceMessageStream, SourceMessage};
 
 #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
 /// This function splits a byte stream by the newline separator "(\r)\n" into a message stream.
@@ -27,7 +27,7 @@ use crate::source::{BoxSourceStream, SourceMessage};
 /// - When a bytes chunk does not end with "(\r)\n", we should not treat the last segment as a new line
 ///   message, but keep it for the next chunk, and prepend it to the first line of the next chunk.
 /// - When a bytes chunk ends with "(\r)\n", there is no additional action required.
-pub(super) async fn split_stream(data_stream: BoxSourceStream) {
+pub(super) async fn split_stream(data_stream: BoxSourceMessageStream) {
     let mut last_message = None;
 
     #[for_await]
@@ -141,7 +141,7 @@ mod tests {
                 })
                 + tail_separator;
             let text = text.into_bytes();
-            let split_id: Arc<str> = "1".to_string().into_boxed_str().into();
+            let split_id: Arc<str> = "1".to_owned().into_boxed_str().into();
             let s = text
                 .chunks(N2)
                 .enumerate()

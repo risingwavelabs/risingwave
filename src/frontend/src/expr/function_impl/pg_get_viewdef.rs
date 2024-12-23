@@ -24,6 +24,11 @@ use crate::catalog::CatalogReader;
 
 #[function("pg_get_viewdef(int4) -> varchar")]
 fn pg_get_viewdef(oid: i32, writer: &mut impl Write) -> Result<()> {
+    pg_get_viewdef_pretty(oid, false, writer)
+}
+
+#[function("pg_get_viewdef(int4, boolean) -> varchar")]
+fn pg_get_viewdef_pretty(oid: i32, _pretty: bool, writer: &mut impl Write) -> Result<()> {
     pg_get_viewdef_impl_captured(oid, writer)
 }
 

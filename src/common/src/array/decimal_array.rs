@@ -70,8 +70,6 @@ mod tests {
     fn test_decimal_array_hash() {
         use std::hash::BuildHasher;
 
-        use twox_hash::RandomXxHashBuilder64;
-
         use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 3;
@@ -118,7 +116,7 @@ mod tests {
             })
             .collect_vec();
 
-        let hasher_builder = RandomXxHashBuilder64::default();
+        let hasher_builder = twox_hash::xxhash64::RandomState::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
             v.iter()

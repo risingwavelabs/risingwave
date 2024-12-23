@@ -61,7 +61,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         Arc::new(ObjectStoreConfig::default()),
     );
     let store = Arc::new(ObjectStoreImpl::InMem(store));
-    let path = "test".to_string();
+    let path = "test".to_owned();
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)

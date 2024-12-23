@@ -296,7 +296,7 @@ pub fn start(
                 tags.split(',')
                     .map(|s| {
                         let key_val = s.split_once('=').unwrap();
-                        (key_val.0.to_string(), key_val.1.to_string())
+                        (key_val.0.to_owned(), key_val.1.to_owned())
                     })
                     .collect()
             });

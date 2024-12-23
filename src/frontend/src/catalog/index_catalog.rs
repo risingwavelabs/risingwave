@@ -230,7 +230,7 @@ impl IndexCatalog {
             .iter()
             .filter(|x| !index_table.columns[x.column_index].is_hidden)
             .map(|x| {
-                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                let index_column_name = index_table.columns[x.column_index].name().to_owned();
                 format!("{} {}", index_column_name, x.order_type)
             })
             .collect_vec();
@@ -247,13 +247,13 @@ impl IndexCatalog {
             .enumerate()
             .filter(|(i, _)| !pk_column_index_set.contains(i))
             .filter(|(_, x)| !x.is_hidden)
-            .map(|(_, x)| x.name().to_string())
+            .map(|(_, x)| x.name().to_owned())
             .collect_vec();
 
         let distributed_by_columns = index_table
             .distribution_key
             .iter()
-            .map(|&x| index_table.columns[x].name().to_string())
+            .map(|&x| index_table.columns[x].name().to_owned())
             .collect_vec();
 
         IndexDisplay {

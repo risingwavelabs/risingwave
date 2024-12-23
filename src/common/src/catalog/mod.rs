@@ -33,7 +33,7 @@ use risingwave_pb::catalog::{
     StreamJobStatus as PbStreamJobStatus,
 };
 use risingwave_pb::plan_common::ColumnDescVersion;
-pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
+pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, FieldLike, Schema};
 use serde::{Deserialize, Serialize};
 
 use crate::array::DataChunk;
@@ -98,6 +98,7 @@ pub fn default_key_column_name_version_mapping(version: &ColumnDescVersion) -> &
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
+pub const RISINGWAVE_ICEBERG_ROW_ID: &str = "_risingwave_iceberg_row_id";
 pub fn is_system_schema(schema_name: &str) -> bool {
     SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
 }
@@ -543,10 +544,10 @@ impl ConflictBehavior {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            ConflictBehavior::NoCheck => "NoCheck".to_string(),
-            ConflictBehavior::Overwrite => "Overwrite".to_string(),
-            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_string(),
-            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_string(),
+            ConflictBehavior::NoCheck => "NoCheck".to_owned(),
+            ConflictBehavior::Overwrite => "Overwrite".to_owned(),
+            ConflictBehavior::IgnoreConflict => "IgnoreConflict".to_owned(),
+            ConflictBehavior::DoUpdateIfNotNull => "DoUpdateIfNotNull".to_owned(),
         }
     }
 }
@@ -575,8 +576,8 @@ impl Engine {
 
     pub fn debug_to_string(self) -> String {
         match self {
-            Engine::Hummock => "Hummock".to_string(),
-            Engine::Iceberg => "Iceberg".to_string(),
+            Engine::Hummock => "Hummock".to_owned(),
+            Engine::Iceberg => "Iceberg".to_owned(),
         }
     }
 }

@@ -317,7 +317,7 @@ impl Decode for TracedSubResp {
     ) -> Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
         let resp = Message::decode(&buf[..]).map_err(|_| {
-            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+            DecodeError::OtherString("failed to decode subscribeResponse".to_owned())
         })?;
         Ok(Self(resp))
     }
@@ -329,7 +329,7 @@ impl<'de> bincode::BorrowDecode<'de> for TracedSubResp {
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
         let resp = Message::decode(&buf[..]).map_err(|_| {
-            DecodeError::OtherString("failed to decode subscribeResponse".to_string())
+            DecodeError::OtherString("failed to decode subscribeResponse".to_owned())
         })?;
         Ok(Self(resp))
     }

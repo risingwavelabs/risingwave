@@ -34,10 +34,13 @@
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
 #![feature(try_trait_v2)]
+#![feature(cell_update)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+#[cfg(test)]
+risingwave_batch_executors::enable!();
 
 #[macro_use]
 mod catalog;

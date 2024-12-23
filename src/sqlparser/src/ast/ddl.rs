@@ -184,6 +184,9 @@ pub enum AlterSinkOperation {
     SwapRenameSink {
         target_sink: ObjectName,
     },
+    SetSinkRateLimit {
+        rate_limit: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -419,6 +422,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 write!(f, "SWAP WITH {}", target_sink)
+            }
+            AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
+                write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
         }
     }
@@ -683,7 +689,7 @@ impl fmt::Display for ColumnDef {
             if let Some(data_type) = &self.data_type {
                 data_type.to_string()
             } else {
-                "None".to_string()
+                "None".to_owned()
             }
         )?;
         for option in &self.options {

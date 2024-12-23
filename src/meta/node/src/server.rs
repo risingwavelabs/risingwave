@@ -520,6 +520,7 @@ pub async fn start_service_as_election_leader(
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
+        barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
     );
@@ -625,7 +626,7 @@ pub async fn start_service_as_election_leader(
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
-    if report_scarf_enabled() {
+    if !cfg!(madsim) && report_scarf_enabled() {
         tokio::spawn(report_to_scarf());
     } else {
         tracing::info!("Scarf reporting is disabled");

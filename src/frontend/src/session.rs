@@ -341,7 +341,7 @@ impl FrontendEnv {
 
         LocalSecretManager::init(
             opts.temp_secret_file_dir,
-            meta_client.cluster_id().to_string(),
+            meta_client.cluster_id().to_owned(),
             worker_id,
         );
 
@@ -763,8 +763,8 @@ impl SessionImpl {
         Self {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
-                DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER.to_owned(),
                 DEFAULT_SUPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
@@ -1145,7 +1145,7 @@ impl SessionImpl {
 
     pub fn notice_to_user(&self, str: impl Into<String>) {
         let notice = str.into();
-        tracing::trace!("notice to user:{}", notice);
+        tracing::trace!(notice, "notice to user");
         self.notices.write().push(notice);
     }
 
@@ -1168,7 +1168,7 @@ impl SessionImpl {
     pub fn create_temporary_source(&self, source: SourceCatalog) {
         self.temporary_source_manager
             .lock()
-            .create_source(source.name.to_string(), source);
+            .create_source(source.name.clone(), source);
     }
 
     pub fn get_temporary_source(&self, name: &str) -> Option<SourceCatalog> {
@@ -1416,8 +1416,8 @@ impl SessionManagerImpl {
             let session_impl: Arc<SessionImpl> = SessionImpl::new(
                 self.env.clone(),
                 Arc::new(AuthContext::new(
-                    database_name.to_string(),
-                    user_name.to_string(),
+                    database_name.to_owned(),
+                    user_name.to_owned(),
                     user.id,
                 )),
                 user_authenticator,
