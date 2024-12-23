@@ -926,9 +926,11 @@ pub(crate) mod tests {
 
         let table_id_to_vnode =
             HashMap::from_iter([(existing_table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
+            table_id_to_watermark_serde,
         ));
 
         let compact_ctx = get_compactor_context(&storage);
@@ -1830,11 +1832,13 @@ pub(crate) mod tests {
             }
         }
         let watermark = BTreeMap::from_iter([(TableId::new(1), watermark)]);
+        let compaction_catalog_agent = CompactionCatalogAgent::for_test(vec![1]);
 
         let mut normal_iter = UserIterator::for_test(
             SkipWatermarkIterator::new(
                 ConcatIterator::new(ret, sstable_store.clone(), read_options.clone()),
                 watermark.clone(),
+                compaction_catalog_agent.clone(),
             ),
             (Bound::Unbounded, Bound::Unbounded),
         );
@@ -1842,6 +1846,7 @@ pub(crate) mod tests {
             SkipWatermarkIterator::new(
                 ConcatIterator::new(fast_ret, sstable_store, read_options),
                 watermark,
+                compaction_catalog_agent.clone(),
             ),
             (Bound::Unbounded, Bound::Unbounded),
         );

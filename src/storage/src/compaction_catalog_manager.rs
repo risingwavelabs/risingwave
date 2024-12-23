@@ -449,8 +449,8 @@ impl CompactionCatalogAgent {
             .collect();
 
         let table_id_to_watermark_serde = table_id_to_vnode
-            .iter()
-            .map(|(table_id, _)| (*table_id, None))
+            .keys()
+            .map(|table_id| (*table_id, None))
             .collect();
 
         Arc::new(CompactionCatalogAgent::new(
@@ -538,7 +538,7 @@ fn build_watermark_col_serde(table_catalog: &Table) -> Option<(OrderedRowSerde, 
 
         let watermark_col_serde = OrderedRowSerde::new(
             vec![data_types[watermark_col_idx].clone()],
-            vec![order_types[watermark_col_idx].clone()],
+            vec![order_types[watermark_col_idx]],
         );
 
         let pk_serde = OrderedRowSerde::new(data_types, order_types);

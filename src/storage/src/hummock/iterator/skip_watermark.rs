@@ -291,7 +291,7 @@ impl SkipWatermarkState {
                                     .unwrap()
                                     .1
                                     .clone()
-                                    .deserialize(&watermarks).unwrap_or_else(|_| {
+                                    .deserialize(watermarks).unwrap_or_else(|_| {
                                         panic!("Failed to deserialize watermark {:?} serde data_types {:?} order_types {:?}", watermarks, serde.as_ref().unwrap().1.get_data_types(), serde.as_ref().unwrap().1.get_order_types());
                                     });
                                 WatermarkSerdeType::Serde(row[0].clone())

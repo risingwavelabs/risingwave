@@ -59,7 +59,7 @@ impl OrderedRowSerde {
         } else {
             Cow::Owned(Self {
                 schema: vec![self.schema[idx].clone()],
-                order_types: vec![self.order_types[idx].clone()],
+                order_types: vec![self.order_types[idx]],
             })
         }
     }

@@ -758,7 +758,7 @@ impl HummockManager {
                 .table_watermarks
                 .iter()
                 .filter_map(|(table_id, table_watermarks)| {
-                    if table_id_with_pk_prefix_watermark.contains(&table_id) {
+                    if table_id_with_pk_prefix_watermark.contains(table_id) {
                         Some((*table_id, table_watermarks.clone()))
                     } else {
                         None
