@@ -156,6 +156,8 @@ pub struct StateTableInner<
     output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
+
+    watermark_col_idx: usize,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -253,6 +255,7 @@ where
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
+        println!("from_table_catalog table_catalog: {:?}", table_catalog);
         Self::from_table_catalog_with_consistency_level(
             table_catalog,
             store,
@@ -427,24 +430,31 @@ where
             row_serde.kind().is_column_aware()
         );
 
+        let watermark_col_idx = if table_catalog.watermark_indices.is_empty() {
+            0
+        } else {
+            table_catalog.watermark_indices[0] as usize
+        };
+
         // Restore persisted table watermark.
-        let prefix_deser = if pk_indices.is_empty() {
+        let prefix_watermark_deser = if pk_indices.is_empty() {
             None
         } else {
-            Some(pk_serde.prefix(1))
+            assert!(watermark_col_idx == 0 || pk_indices.contains(&watermark_col_idx));
+            Some(pk_serde.index(watermark_col_idx))
         };
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = prefix_deser
+        let committed_watermark = if let Some(deser) = prefix_watermark_deser
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
-            let deserialized = deser
-                .deserialize(&max_watermark)
-                .ok()
-                .and_then(|row| row[0].clone());
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
             if deserialized.is_none() {
                 tracing::error!(
                     vnodes = ?distribution.vnodes(),
@@ -510,6 +520,7 @@ where
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
+            watermark_col_idx,
         }
     }
 
@@ -938,6 +949,10 @@ where
     /// * `watermark` - Latest watermark received.
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
+        println!(
+            "WATERMARK update watermark table_id: {}, watermark: {:?}",
+            self.table_id, watermark
+        );
         self.pending_watermark = Some(watermark);
     }
 
@@ -1041,7 +1056,8 @@ where
                     for entry in merged_stream.take(self.watermark_cache.capacity()) {
                         let keyed_row = entry?;
                         let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                        if !pk.is_null_at(0) {
+                        // watermark column should be part of the pk
+                        if !pk.is_null_at(self.watermark_col_idx) {
                             pks.push(pk);
                         }
                     }
@@ -1066,6 +1082,12 @@ where
     /// Commit pending watermark and return vnode bitmap-watermark pairs to seal.
     fn commit_pending_watermark(&mut self) -> Option<(WatermarkDirection, Vec<VnodeWatermark>)> {
         let watermark = self.pending_watermark.take();
+        println!(
+            "WATERMARK commit_pending_watermark table_id: {}, watermark: {:?} pk_indices: {:?}",
+            self.table_id,
+            watermark,
+            self.pk_indices()
+        );
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });
@@ -1073,7 +1095,7 @@ where
         let prefix_serializer = if self.pk_indices().is_empty() {
             None
         } else {
-            Some(self.pk_serde.prefix(1))
+            Some(self.pk_serde.index(self.watermark_col_idx))
         };
 
         let should_clean_watermark = match watermark {
@@ -1116,7 +1138,7 @@ where
                 .as_ref()
                 .unwrap()
                 .get_order_types()
-                .first()
+                .get(self.watermark_col_idx)
                 .unwrap()
                 .is_ascending()
             {

@@ -24,6 +24,8 @@ use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
+use risingwave_common::types::ToDatumRef;
+use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
 use risingwave_pb::hummock::{PbVnodeWatermark, TableWatermarks as PbTableWatermarks};
@@ -292,12 +294,36 @@ impl Display for WatermarkDirection {
 }
 
 impl WatermarkDirection {
-    pub fn filter_by_watermark(&self, key: impl AsRef<[u8]>, watermark: impl AsRef<[u8]>) -> bool {
+    pub fn filter_by_watermark_key(
+        &self,
+        key: impl AsRef<[u8]>,
+        watermark: impl AsRef<[u8]>,
+    ) -> bool {
         let key = key.as_ref();
         let watermark = watermark.as_ref();
         match self {
             WatermarkDirection::Ascending => key < watermark,
             WatermarkDirection::Descending => key > watermark,
+        }
+    }
+
+    pub fn filter_by_watermark_datum(
+        &self,
+        watermark_col_in_pk: impl ToDatumRef,
+        watermark: impl ToDatumRef,
+        order_type: OrderType,
+    ) -> bool {
+        let watermark_col_in_pk = watermark_col_in_pk.to_datum_ref();
+        let watermark = watermark.to_datum_ref();
+        match self {
+            WatermarkDirection::Ascending => {
+                // watermark_col_in_pk < watermark
+                cmp_datum(watermark_col_in_pk, watermark, order_type).is_lt()
+            }
+            WatermarkDirection::Descending => {
+                //  watermark_col_in_pk > watermark
+                cmp_datum(watermark_col_in_pk, watermark, order_type).is_gt()
+            }
         }
     }
 

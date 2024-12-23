@@ -58,6 +58,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         global_watermark_table: StorageTable<S>,
         eval_error_report: ActorEvalErrorReport,
     ) -> Self {
+        println!(
+            "WATERMARK WatermarkFilterExecutor::new watermark_expr: {:?} event_time_col_idx {:?}",
+            watermark_expr, event_time_col_idx
+        );
+
         Self {
             ctx,
             input,
@@ -118,6 +123,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         if let Some(watermark) = current_watermark.clone()
             && !is_paused
         {
+            println!(
+                "WATERMARK WatermarkFilterExecutor::execute_inner first watermark: {:?}",
+                watermark
+            );
             yield Message::Watermark(Watermark::new(
                 event_time_col_idx,
                 watermark_type.clone(),
@@ -188,6 +197,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
 
                     if let Some(watermark) = current_watermark.clone() {
                         idle_input = false;
+                        println!(
+                            "WATERMARK WatermarkFilterExecutor::execute_inner current_watermark: {:?} event_time_col_idx {:?} watermark_type {:?}",
+                            watermark, event_time_col_idx, watermark_type
+                        );
                         yield Message::Watermark(Watermark::new(
                             event_time_col_idx,
                             watermark_type.clone(),
@@ -197,6 +210,11 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     table.try_flush().await?;
                 }
                 Message::Watermark(watermark) => {
+                    println!(
+                        "WATERMARK WatermarkFilterExecutor::execute_inner recv watermark: {:?}",
+                        watermark
+                    );
+
                     if watermark.col_idx == event_time_col_idx {
                         tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
                         let watermark = watermark.val;
@@ -212,6 +230,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             ));
                         }
                     } else {
+                        println!(
+                            "WATERMARK WatermarkFilterExecutor::execute_inner recv and tield watermark: {:?} event_time_col_idx {:?} watermark_type {:?}",
+                            watermark, event_time_col_idx, watermark_type
+                        );
                         yield Message::Watermark(watermark)
                     }
                 }
@@ -299,6 +321,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                                     current_watermark.or(global_max_watermark)
                                 };
                                 if let Some(watermark) = current_watermark.clone() {
+                                    println!(
+                                        "WATERMARK WatermarkFilterExecutor::execute_inner yied current_watermark: {:?} event_time_col_idx {:?} watermark_type {:?} when ckpt",
+                                        watermark, event_time_col_idx, watermark_type
+                                    );
                                     yield Message::Watermark(Watermark::new(
                                         event_time_col_idx,
                                         watermark_type.clone(),
