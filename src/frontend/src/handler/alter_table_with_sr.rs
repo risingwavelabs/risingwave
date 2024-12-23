@@ -104,7 +104,7 @@ pub async fn handle_refresh_schema(
     let catalog_writer = session.catalog_writer()?;
 
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(source, table, graph, col_index_mapping, job_type, false)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

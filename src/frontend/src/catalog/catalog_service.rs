@@ -98,6 +98,7 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
         job_type: TableJobType,
+        drop_connector: bool,
     ) -> Result<()>;
 
     async fn replace_source(
@@ -316,6 +317,7 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
         mapping: ColIndexMapping,
         job_type: TableJobType,
+        drop_connector: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -326,6 +328,7 @@ impl CatalogWriter for CatalogWriterImpl {
                     source,
                     table: Some(table),
                     job_type: job_type as _,
+                    drop_connector,
                 }),
             )
             .await?;

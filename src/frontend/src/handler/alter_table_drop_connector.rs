@@ -174,7 +174,7 @@ pub async fn handle_alter_table_drop_connector(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .replace_table(source, table, graph, col_index_mapping, job_type)
+        .replace_table(source, table, graph, col_index_mapping, job_type, true)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))

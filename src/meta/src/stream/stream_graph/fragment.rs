@@ -490,12 +490,17 @@ impl StreamFragmentGraph {
     pub fn fit_internal_table_ids(
         &mut self,
         mut old_internal_tables: Vec<Table>,
+        drop_connector: bool,
     ) -> MetaResult<()> {
         let mut new_internal_table_ids = Vec::new();
         for fragment in self.fragments.values() {
             for table in &fragment.extract_internal_tables() {
                 new_internal_table_ids.push(table.id);
             }
+        }
+
+        if new_internal_table_ids.is_empty() && drop_connector {
+            return Ok(());
         }
 
         if new_internal_table_ids.len() != old_internal_tables.len() {

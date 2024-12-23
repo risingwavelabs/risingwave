@@ -100,6 +100,7 @@ pub async fn handle_drop_sink(
                     table: Some(table),
                     source,
                     job_type: TableJobType::General as _,
+                    drop_connector: false,
                 },
             )),
             fragment_graph: Some(graph),

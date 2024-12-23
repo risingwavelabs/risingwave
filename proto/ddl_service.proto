@@ -370,6 +370,9 @@ message ReplaceJobPlan {
     // Source catalog of table's associated source
     catalog.Source source = 2;
     TableJobType job_type = 3;
+
+    // Whether to drop the connector of the table.
+    bool drop_connector = 4;
   }
 
   message ReplaceSource {

@@ -324,6 +324,7 @@ impl CatalogWriter for MockCatalogWriter {
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
         _job_type: TableJobType,
+        _drop_connector: bool,
     ) -> Result<()> {
         table.stream_job_status = PbStreamJobStatus::Created as _;
         assert_eq!(table.vnode_count(), VirtualNode::COUNT_FOR_TEST);

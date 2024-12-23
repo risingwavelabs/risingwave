@@ -115,6 +115,7 @@ async fn get_new_table_plan(
                 table: Some(table),
                 source: None, // none for cdc table
                 job_type: job_type as _,
+                drop_connector: false,
             },
         )),
         fragment_graph: Some(graph),

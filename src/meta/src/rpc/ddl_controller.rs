@@ -122,6 +122,7 @@ pub struct ReplaceStreamJobInfo {
     pub streaming_job: StreamingJob,
     pub fragment_graph: StreamFragmentGraphProto,
     pub col_index_mapping: Option<ColIndexMapping>,
+    pub drop_connector: bool, // mark if to drop the connector part of a table.
 }
 
 pub enum DdlCommand {
@@ -334,9 +335,15 @@ impl DdlController {
                     streaming_job,
                     fragment_graph,
                     col_index_mapping,
+                    drop_connector,
                 }) => {
-                    ctrl.replace_job(streaming_job, fragment_graph, col_index_mapping)
-                        .await
+                    ctrl.replace_job(
+                        streaming_job,
+                        fragment_graph,
+                        col_index_mapping,
+                        drop_connector,
+                    )
+                    .await
                 }
                 DdlCommand::AlterName(relation, name) => ctrl.alter_name(relation, &name).await,
                 DdlCommand::AlterObjectOwner(object, owner_id) => {
@@ -692,7 +699,14 @@ impl DdlController {
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         let (mut replace_table_ctx, mut stream_job_fragments) = self
-            .build_replace_job(stream_ctx, streaming_job, fragment_graph, None, tmp_id as _)
+            .build_replace_job(
+                stream_ctx,
+                streaming_job,
+                fragment_graph,
+                None,
+                tmp_id as _,
+                false,
+            )
             .await?;
 
         let target_table = streaming_job.table().unwrap();
@@ -1302,6 +1316,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         col_index_mapping: Option<ColIndexMapping>,
+        drop_connector: bool,
     ) -> MetaResult<NotificationVersion> {
         match &mut streaming_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1356,6 +1371,7 @@ impl DdlController {
                     fragment_graph,
                     col_index_mapping.as_ref(),
                     tmp_id as _,
+                    drop_connector,
                 )
                 .await?;
 
@@ -1694,6 +1710,7 @@ impl DdlController {
         mut fragment_graph: StreamFragmentGraph,
         col_index_mapping: Option<&ColIndexMapping>,
         tmp_job_id: TableId,
+        drop_connector: bool,
     ) -> MetaResult<(ReplaceStreamJobContext, StreamJobFragments)> {
         match &stream_job {
             StreamingJob::Table(..) | StreamingJob::Source(..) => {}
@@ -1717,7 +1734,7 @@ impl DdlController {
             .get_table_catalog_by_ids(old_internal_table_ids)
             .await?;
 
-        fragment_graph.fit_internal_table_ids(old_internal_tables)?;
+        fragment_graph.fit_internal_table_ids(old_internal_tables, drop_connector)?;
 
         // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
