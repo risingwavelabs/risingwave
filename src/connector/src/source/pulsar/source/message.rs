@@ -16,6 +16,11 @@ use pulsar::consumer::Message;
 
 use crate::source::{SourceMessage, SourceMeta};
 
+#[derive(Debug, Clone)]
+pub struct PulsarMeta {
+    pub schema_version: Option<Vec<u8>>,
+}
+
 impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
         let message_id = msg.message_id.id;
@@ -31,7 +36,9 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                 message_id.batch_index.unwrap_or(-1)
             ),
             split_id: msg.topic.into(),
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::Pulsar(PulsarMeta {
+                schema_version: msg.payload.metadata.schema_version.clone(),
+            }),
         }
     }
 }
