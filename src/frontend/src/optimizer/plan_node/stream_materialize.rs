@@ -82,7 +82,7 @@ impl StreamMaterialize {
         definition: String,
         table_type: TableType,
         cardinality: Cardinality,
-        _retention_seconds: Option<NonZeroU32>, // TODO
+        retention_seconds: Option<NonZeroU32>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -97,6 +97,7 @@ impl StreamMaterialize {
         } else {
             CreateType::Foreground
         };
+
         let table = Self::derive_table_catalog(
             input.clone(),
             name,
@@ -110,6 +111,7 @@ impl StreamMaterialize {
             table_type,
             None,
             cardinality,
+            retention_seconds,
             create_type,
             None,
             Engine::Hummock,
@@ -136,6 +138,7 @@ impl StreamMaterialize {
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
+        retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
     ) -> Result<Self> {
@@ -154,6 +157,7 @@ impl StreamMaterialize {
             TableType::Table,
             version,
             Cardinality::unknown(), // unknown cardinality for tables
+            retention_seconds,
             CreateType::Foreground,
             webhook_info,
             engine,
@@ -227,6 +231,7 @@ impl StreamMaterialize {
         table_type: TableType,
         version: Option<TableVersion>,
         cardinality: Cardinality,
+        retention_seconds: Option<NonZeroU32>,
         create_type: CreateType,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
@@ -237,7 +242,6 @@ impl StreamMaterialize {
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
-        let retention_seconds = input.ctx().with_options().retention_seconds();
 
         let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices

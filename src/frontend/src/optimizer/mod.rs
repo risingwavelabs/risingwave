@@ -868,6 +868,8 @@ impl PlanRoot {
             ))?
         }
 
+        let retention_seconds = context.with_options().retention_seconds();
+
         let table_required_dist = {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
             for idx in &pk_column_indices {
@@ -890,6 +892,7 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
+            retention_seconds,
             webhook_info,
             engine,
         )
