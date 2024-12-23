@@ -39,6 +39,7 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -728,6 +729,43 @@ impl HummockManager {
                 }
             }
 
+            // Filter out the table that has a primary key prefix watermark.
+            let table_id_with_pk_prefix_watermark: HashSet<_> = self
+                .metadata_manager
+                .catalog_controller
+                .get_table_by_ids(
+                    version
+                        .latest_version()
+                        .table_watermarks
+                        .keys()
+                        .map(|id| id.table_id() as _)
+                        .collect(),
+                )
+                .await
+                .map_err(|e| Error::Internal(e.into()))?
+                .into_iter()
+                .filter_map(|table| {
+                    if table.watermark_indices[0] == 0 {
+                        Some(TableId::from(table.get_id()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let table_watermarks = version
+                .latest_version()
+                .table_watermarks
+                .iter()
+                .filter_map(|(table_id, table_watermarks)| {
+                    if table_id_with_pk_prefix_watermark.contains(&table_id) {
+                        Some((*table_id, table_watermarks.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
             while let Some(compact_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -742,7 +780,7 @@ impl HummockManager {
                 selector,
                 &table_id_to_option,
                 developer_config.clone(),
-                &version.latest_version().table_watermarks,
+                &table_watermarks,
                 &version.latest_version().state_table_info,
             ) {
                 let target_level_id = compact_task.input.target_level as u32;
