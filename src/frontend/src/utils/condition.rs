@@ -562,28 +562,43 @@ impl Condition {
                     || matches!(func_type, ExprType::GreaterThan))
             {
                 let mut pk_struct = vec![];
+                let mut order_type = None;
                 let mut all_added = true;
                 let mut iter = row_left_inputs.iter().zip_eq_fast(right_iter);
-                for i in 0..table_desc.order_column_indices().len() {
+                for column_order in &table_desc.pk {
                     if let Some((left_expr, right_expr)) = iter.next() {
-                        if left_expr.as_input_ref().unwrap().index != i {
+                        if left_expr.as_input_ref().unwrap().index != column_order.column_index {
                             all_added = false;
                             break;
+                        }
+                        match order_type {
+                            Some(o) => {
+                                if o != column_order.order_type {
+                                    all_added = false;
+                                    break;
+                                }
+                            }
+                            None => order_type = Some(column_order.order_type),
                         }
                         pk_struct.push(right_expr.clone());
                     }
                 }
 
+                // Here it is necessary to determine whether all of row is included in the `ScanRanges`, if so, the data for eq is not needed
                 if !pk_struct.is_empty() {
-                    let scan_range = ScanRange {
-                        eq_conds: vec![],
-                        range: match func_type {
-                            ExprType::GreaterThan => (Bound::Excluded(pk_struct), Bound::Unbounded),
-                            ExprType::LessThan => (Bound::Unbounded, Bound::Excluded(pk_struct)),
-                            _ => unreachable!(),
-                        },
-                    };
                     if !all_added {
+                        let scan_range = ScanRange {
+                            eq_conds: vec![],
+                            range: match func_type {
+                                ExprType::GreaterThan => {
+                                    (Bound::Included(pk_struct), Bound::Unbounded)
+                                }
+                                ExprType::LessThan => {
+                                    (Bound::Unbounded, Bound::Included(pk_struct))
+                                }
+                                _ => unreachable!(),
+                            },
+                        };
                         return Ok(Some((
                             vec![scan_range],
                             Condition {
@@ -591,6 +606,18 @@ impl Condition {
                             },
                         )));
                     } else {
+                        let scan_range = ScanRange {
+                            eq_conds: vec![],
+                            range: match func_type {
+                                ExprType::GreaterThan => {
+                                    (Bound::Excluded(pk_struct), Bound::Unbounded)
+                                }
+                                ExprType::LessThan => {
+                                    (Bound::Unbounded, Bound::Excluded(pk_struct))
+                                }
+                                _ => unreachable!(),
+                            },
+                        };
                         return Ok(Some((
                             vec![scan_range],
                             Condition {
