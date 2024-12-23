@@ -137,7 +137,7 @@ impl StreamMaterialize {
         version_column_index: Option<usize>,
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
-        version: Option<TableVersion>,
+        version: TableVersion,
         retention_seconds: Option<NonZeroU32>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
@@ -155,7 +155,7 @@ impl StreamMaterialize {
             Some(pk_column_indices),
             row_id_index,
             TableType::Table,
-            version,
+            Some(version),
             Cardinality::unknown(), // unknown cardinality for tables
             retention_seconds,
             CreateType::Foreground,

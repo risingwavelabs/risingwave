@@ -111,9 +111,9 @@ pub async fn handle_create_as(
             vec![],
             vec![],
             vec![], // No watermark should be defined in for `CREATE TABLE AS`
-            None,
+            col_id_gen.into_version(),
             CreateTableProps {
-                definition: "".to_owned(), /* TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS` */
+                definition: "".to_owned(), // TODO: empty definition means no schema change support
                 append_only,
                 on_conflict,
                 with_version_column,

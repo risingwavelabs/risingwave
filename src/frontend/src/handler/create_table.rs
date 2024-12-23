@@ -571,7 +571,7 @@ pub(crate) fn gen_create_table_plan(
         column_defs,
         constraints,
         source_watermarks,
-        Some(col_id_gen.into_version()),
+        col_id_gen.into_version(),
         props,
     )
 }
@@ -584,7 +584,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
-    version: Option<TableVersion>,
+    version: TableVersion,
     props: CreateTableProps,
 ) -> Result<(PlanRef, PbTable)> {
     // XXX: Why not bind outside?
@@ -638,7 +638,7 @@ fn gen_table_plan_with_source(
         row_id_index: source_catalog.row_id_index,
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
-        version: Some(version),
+        version,
     };
 
     gen_table_plan_inner(context, schema_name, table_name, info, props)
@@ -654,7 +654,7 @@ pub struct CreateTableInfo {
     pub row_id_index: Option<usize>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub source_catalog: Option<SourceCatalog>,
-    pub version: Option<TableVersion>, // TODO: `CREATE TABLE AS` does not fill this field
+    pub version: TableVersion,
 }
 
 /// Arguments of the functions that generate a table plan, part 2.
@@ -883,7 +883,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             row_id_index: None,
             watermark_descs: vec![],
             source_catalog: Some((*source).clone()),
-            version: Some(col_id_gen.into_version()),
+            version: col_id_gen.into_version(),
         },
         CreateTableProps {
             definition,
