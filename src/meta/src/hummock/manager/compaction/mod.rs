@@ -745,7 +745,8 @@ impl HummockManager {
                 .map_err(|e| Error::Internal(e.into()))?
                 .into_iter()
                 .filter_map(|table| {
-                    if table.watermark_indices[0] == 0 {
+                    // pk prefix watermark.
+                    if table.watermark_indices.is_empty() || table.watermark_indices[0] == 0 {
                         Some(TableId::from(table.get_id()))
                     } else {
                         None
