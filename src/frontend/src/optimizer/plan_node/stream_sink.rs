@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
-use icelake::types::Transform;
+use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, CreateType};
@@ -602,6 +602,7 @@ impl StreamNode for StreamSink {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
             log_store_type: self.log_store_type as i32,
+            rate_limit: self.base.ctx().overwrite_options().sink_rate_limit,
         })
     }
 }
@@ -612,13 +613,12 @@ impl ExprVisitable for StreamSink {}
 
 #[cfg(test)]
 mod test {
-    use icelake::types::Transform;
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::IcebergPartitionInfo;
+    use super::{IcebergPartitionInfo, *};
     use crate::expr::{Expr, ExprImpl};
 
     fn create_column_catalog() -> Vec<ColumnCatalog> {

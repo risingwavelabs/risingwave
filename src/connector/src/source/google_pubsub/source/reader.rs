@@ -23,7 +23,7 @@ use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
+    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId,
     SplitMetaData, SplitReader,
 };
 
@@ -105,7 +105,7 @@ impl SplitReader for PubsubSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

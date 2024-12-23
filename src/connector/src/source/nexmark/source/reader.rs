@@ -35,7 +35,7 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
 };
 
 #[derive(Debug)]
@@ -107,7 +107,7 @@ impl SplitReader for NexmarkSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let actor_id = self.source_ctx.actor_id.to_string();
         let fragment_id = self.source_ctx.fragment_id.to_string();
         let source_id = self.source_ctx.source_id.to_string();

@@ -39,7 +39,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
-icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
 linkme = { workspace = true }
@@ -61,7 +60,7 @@ pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = { workspace = true }
-quick-xml = { version = "0.36", features = ["serialize"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 rand = { version = "0.8", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }

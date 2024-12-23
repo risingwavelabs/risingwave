@@ -13,7 +13,7 @@ Other tests can be run in parallel.
 
 ```bash
 # run all parallel tests
-risedev slt './e2e_test/source_inline/**/*.slt' -j16
+risedev slt './e2e_test/source_inline/**/*.slt' --keep-db-on-failure -j16
 # run all serial tests
 risedev slt './e2e_test/source_inline/**/*.slt.serial'
 ```

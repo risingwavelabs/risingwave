@@ -20,7 +20,6 @@ use std::sync::LazyLock;
 use anyhow::{anyhow, bail, Context, Result};
 use itertools::Itertools;
 use sqlx::{ConnectOptions, Database};
-use tempfile::NamedTempFile;
 use url::Url;
 
 use super::{risingwave_cmd, ExecuteContext, Task};
@@ -48,13 +47,20 @@ fn sql_endpoint_from_env() -> String {
             );
             endpoint
         } else {
-            let temp_path = NamedTempFile::with_suffix(".db").unwrap().into_temp_path();
-            let temp_sqlite_endpoint = format!("sqlite://{}?mode=rwc", temp_path.to_string_lossy());
+            // `meta-backend: env` is specified, but env var is not set.
+            // Act as if `meta-backend: sqlite` is specified.
+            // Not using a temporary file because we want to persist the data across restarts.
+            let prefix_data = env::var("PREFIX_DATA").unwrap();
+            let dir = PathBuf::from(&prefix_data).join("meta-backend-env-fallback-sqlite");
+            fs_err::create_dir_all(&dir).unwrap();
+
+            let path = dir.join("metadata.db");
+            let sqlite_endpoint = format!("sqlite://{}?mode=rwc", path.to_string_lossy());
             tracing::warn!(
-                "env RISEDEV_SQL_ENDPOINT not set, use temporary sqlite `{}`",
-                temp_sqlite_endpoint
+                "env RISEDEV_SQL_ENDPOINT not set, use fallback sqlite `{}`",
+                sqlite_endpoint
             );
-            temp_sqlite_endpoint
+            sqlite_endpoint
         }
     });
 
@@ -365,7 +371,9 @@ fn initialize_meta_store() -> Result<(), anyhow::Error> {
             // SQLite in-memory database does not need initialization.
         } else {
             let filename = options.get_filename();
-            fs_err::write(filename, b"").context("failed to empty SQLite file")?;
+            if std::fs::exists(filename)? {
+                fs_err::write(filename, b"").context("failed to empty SQLite file")?;
+            }
         }
 
         return Ok(());

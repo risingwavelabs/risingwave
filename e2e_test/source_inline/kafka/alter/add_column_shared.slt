@@ -50,6 +50,16 @@ alter source s add column v3 varchar;
 
 # New MV will have v3.
 
+# Check it should still be shared source <https://github.com/risingwavelabs/risingwave/issues/19799>
+query
+explain create materialized view mv_after_alter as select * from s;
+----
+StreamMaterialize { columns: [v1, v2, v3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [v1, v2, v3, _row_id] }
+  └─StreamRowIdGen { row_id_index: 5 }
+    └─StreamSourceScan { columns: [v1, v2, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, v3] }
+
+
 statement ok
 create materialized view mv_after_alter as select * from s;
 
@@ -106,16 +116,6 @@ select * from mv_after_alter;
 7 g g1
 8 h h1
 
-query error
-select * from mv_after_alter_2;
-----
-db error: ERROR: Failed to run the query
-
-Caused by these errors (recent errors listed first):
-  1: Catalog error
-  2: table or source not found: mv_after_alter_2
-
-
 
 # Batch select from source will have v3.
 
@@ -132,6 +132,19 @@ select * from s;
 8 h h1
 
 # Old MV is not affected.
+
+query ?? rowsort
+select * from mv_before_alter;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+6 f
+7 g
+8 h
+
 
 query ?? rowsort
 select * from mv_before_alter;
@@ -195,5 +208,3 @@ drop source s cascade;
 
 system ok
 rpk topic delete shared_source_alter;
-
-# TODO: test alter source with schema registry
