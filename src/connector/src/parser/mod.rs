@@ -31,7 +31,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::log::LogSuppresser;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
-use risingwave_common::types::{Datum, DatumCow, DatumRef};
+use risingwave_common::types::{DatumCow, DatumRef};
 use risingwave_common::util::tracing::InstrumentStream;
 use risingwave_connector_codec::decoder::avro::MapHandling;
 use thiserror_ext::AsReport;
@@ -43,13 +43,13 @@ pub use self::sql_server::{sql_server_row_to_owned_row, ScalarImplTiberiusWrappe
 pub use self::unified::json::{JsonAccess, TimestamptzHandling};
 pub use self::unified::Access;
 use self::upsert_parser::UpsertParser;
-use crate::error::{ConnectorError, ConnectorResult};
+use crate::error::ConnectorResult;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceStream, ChunkSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceMessage, SourceMeta,
+    BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceCtrlOpts, SourceMeta,
 };
 
 mod access_builder;
@@ -85,7 +85,7 @@ pub use unified::{AccessError, AccessResult};
 /// Extracted from the `SourceMessage`.
 #[derive(Clone, Copy, Debug)]
 pub struct MessageMeta<'a> {
-    meta: &'a SourceMeta,
+    source_meta: &'a SourceMeta,
     split_id: &'a str,
     offset: &'a str,
 }
@@ -102,7 +102,7 @@ impl<'a> MessageMeta<'a> {
             // Extract the offset from the meta data.
             SourceColumnType::Offset => Some(self.offset.into()),
             // Extract custom meta data per connector.
-            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     KAFKA_TIMESTAMP_COLUMN_NAME,
@@ -110,7 +110,7 @@ impl<'a> MessageMeta<'a> {
                 );
                 kafka_meta.extract_timestamp()
             }
-            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
+            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.source_meta => {
                 assert_eq!(
                     desc.name.as_str(),
                     TABLE_NAME_COLUMN_NAME,
@@ -161,7 +161,7 @@ pub enum ParserFormat {
 /// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
 /// It consumes bytes of one individual message and produces parsed records.
 ///
-/// It's used by [`ByteStreamSourceParserImpl::into_stream`]. `pub` is for benchmark only.
+/// It's used by [`ByteStreamSourceParserImpl::parse_stream`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
@@ -198,80 +198,48 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
-
-    fn append_empty_row<'a>(&'a mut self, mut writer: SourceStreamChunkRowWriter<'a>) {
-        _ = writer.do_insert(|_column| Ok(Datum::None));
-    }
-}
-
-#[try_stream(ok = Vec<SourceMessage>, error = ConnectorError)]
-async fn ensure_largest_at_rate_limit(stream: BoxSourceStream, rate_limit: u32) {
-    #[for_await]
-    for batch in stream {
-        let mut batch = batch?;
-        let mut start = 0;
-        let end = batch.len();
-        while start < end {
-            let next = std::cmp::min(start + rate_limit as usize, end);
-            yield std::mem::take(&mut batch[start..next].as_mut()).to_vec();
-            start = next;
-        }
-    }
 }
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a data stream of one source split into a stream of [`StreamChunk`].
+    /// Parse a `SourceMessage` stream into a [`StreamChunk`] stream.
     ///
     /// # Arguments
-    /// - `data_stream`: A data stream of one source split.
-    ///  To be able to split multiple messages from mq, so it is not a pure byte stream
+    ///
+    /// - `msg_stream`: A stream of batches of `SourceMessage`.
     ///
     /// # Returns
     ///
-    /// A [`ChunkSourceStream`] which is a stream of parsed messages.
-    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl ChunkSourceStream {
+    /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
+    /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
+    /// large transaction and `source_ctrl_opts.split_txn` is false.
+    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.table_id();
 
-        // Ensure chunk size is smaller than rate limit
-        let data_stream = if let Some(rate_limit) = &self.source_ctx().source_ctrl_opts.rate_limit {
-            Box::pin(ensure_largest_at_rate_limit(data_stream, *rate_limit))
-        } else {
-            data_stream
-        };
-
-        // The parser stream will be long-lived. We use `instrument_with` here to create
+        // The stream will be long-lived. We use `instrument_with` here to create
         // a new span for the polling of each chunk.
-        into_chunk_stream_inner(self, data_stream)
+        let source_ctrl_opts = self.source_ctx().source_ctrl_opts;
+        parse_message_stream(self, msg_stream, source_ctrl_opts)
             .instrument_with(move || tracing::info_span!("source_parse_chunk", actor_id, source_id))
     }
 }
 
-/// Maximum number of rows in a transaction. If a transaction is larger than this, it will be force
-/// committed to avoid potential OOM.
-const MAX_TRANSACTION_SIZE: usize = 4096;
-
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
 #[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
-async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
+async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
-    data_stream: BoxSourceStream,
+    msg_stream: BoxSourceMessageStream,
+    source_ctrl_opts: SourceCtrlOpts,
 ) {
-    let columns = parser.columns().to_vec();
+    let mut chunk_builder =
+        SourceStreamChunkBuilder::new(parser.columns().to_vec(), source_ctrl_opts);
 
-    let mut chunk_builder = SourceStreamChunkBuilder::with_capacity(columns, 0);
-
-    struct Transaction {
-        id: Box<str>,
-        len: usize,
-    }
-    let mut current_transaction = None;
     let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
-    for batch in data_stream {
+    for batch in msg_stream {
         // It's possible that the split is not active, which means the next batch may arrive
         // very lately, so we should prefer emitting all records in current batch before the end
         // of each iteration, instead of merging them with the next batch. An exception is when
@@ -292,49 +260,30 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             // heartbeat message. Note that all messages in `batch` should belong to the same
             // split, so we don't have to do a split to heartbeats mapping here.
 
-            if let Some(Transaction { id, len }) = &mut current_transaction {
-                // if there's an ongoing transaction, something may be wrong
-                tracing::warn!(
-                    id,
-                    len,
-                    "got a batch of empty messages during an ongoing transaction"
-                );
-                // for the sake of simplicity, let's force emit the partial transaction chunk
-                if *len > 0 {
-                    *len = 0; // reset `len` while keeping `id`
-                    yield chunk_builder.take_and_reserve(1); // next chunk will only contain the heartbeat
-                }
-            }
-
-            // According to the invariant we mentioned at the beginning of the `for batch` loop,
-            // there should be no data of previous batch in `chunk_builder`.
-            assert!(chunk_builder.is_empty());
-
             let heartbeat_msg = batch.last().unwrap();
             tracing::debug!(
                 offset = heartbeat_msg.offset,
-                "emitting a heartbeat message"
+                "handling a heartbeat message"
             );
-            // TODO(rc): should be `chunk_builder.append_heartbeat` instead, which is simpler
-            parser.append_empty_row(chunk_builder.row_writer().invisible().with_meta(
-                MessageMeta {
-                    meta: &heartbeat_msg.meta,
-                    split_id: &heartbeat_msg.split_id,
-                    offset: &heartbeat_msg.offset,
-                },
-            ));
-            yield chunk_builder.take_and_reserve(batch_len);
+            chunk_builder.heartbeat(MessageMeta {
+                source_meta: &heartbeat_msg.meta,
+                split_id: &heartbeat_msg.split_id,
+                offset: &heartbeat_msg.offset,
+            });
 
-            continue;
+            for chunk in chunk_builder.consume_ready_chunks() {
+                yield chunk;
+            }
+            continue; // continue to next batch
         }
 
         // When we reach here, there is at least one data message in the batch. We should ignore all
         // heartbeat messages.
 
-        let mut txn_started_in_last_batch = current_transaction.is_some();
+        let mut txn_started_in_last_batch = chunk_builder.is_in_transaction();
         let process_time_ms = chrono::Utc::now().timestamp_millis();
 
-        for (i, msg) in batch.into_iter().enumerate() {
+        for msg in batch {
             if msg.is_cdc_heartbeat() {
                 // ignore heartbeat messages
                 continue;
@@ -355,13 +304,15 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 direct_cdc_event_lag_latency.observe(lag_ms as f64);
             }
 
-            let old_len = chunk_builder.len();
+            // Parse the message and write to the chunk builder, it's possible that the message
+            // contains multiple rows. When the chunk size reached the limit during parsing, the
+            // chunk builder may yield the chunk to `ready_chunks` and start a new chunk.
             match parser
                 .parse_one_with_txn(
                     msg.key,
                     msg.payload,
                     chunk_builder.row_writer().with_meta(MessageMeta {
-                        meta: &msg.meta,
+                        source_meta: &msg.meta,
                         split_id: &msg.split_id,
                         offset: &msg.offset,
                     }),
@@ -371,12 +322,6 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                 // It's possible that parsing multiple rows in a single message PARTIALLY failed.
                 // We still have to maintain the row number in this case.
                 res @ (Ok(ParseResult::Rows) | Err(_)) => {
-                    // Aggregate the number of new rows into the current transaction.
-                    if let Some(Transaction { len, .. }) = &mut current_transaction {
-                        let n_new_rows = chunk_builder.len() - old_len;
-                        *len += n_new_rows;
-                    }
-
                     if let Err(error) = res {
                         // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
                         //       see #13105
@@ -401,27 +346,29 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
                             context.fragment_id.to_string(),
                         ]);
                     }
+
+                    for chunk in chunk_builder.consume_ready_chunks() {
+                        yield chunk;
+                    }
                 }
 
                 Ok(ParseResult::TransactionControl(txn_ctl)) => match txn_ctl {
                     TransactionControl::Begin { id } => {
-                        if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                            tracing::warn!(current_id, id, "already in transaction");
-                        }
-                        tracing::debug!(id, "begin upstream transaction");
-                        current_transaction = Some(Transaction { id, len: 0 });
+                        chunk_builder.begin_transaction(id);
                     }
                     TransactionControl::Commit { id } => {
-                        let current_id = current_transaction.as_ref().map(|t| &t.id);
-                        if current_id != Some(&id) {
-                            tracing::warn!(?current_id, id, "transaction id mismatch");
-                        }
-                        tracing::debug!(id, "commit upstream transaction");
-                        current_transaction = None;
+                        chunk_builder.commit_transaction(id);
+                        assert!(!chunk_builder.is_in_transaction());
 
                         if txn_started_in_last_batch {
-                            yield chunk_builder.take_and_reserve(batch_len - (i + 1));
+                            // If a transaction is across multiple batches, we yield the chunk
+                            // immediately after the transaction is committed.
+                            chunk_builder.finish_current_chunk();
                             txn_started_in_last_batch = false;
+                        }
+
+                        for chunk in chunk_builder.consume_ready_chunks() {
+                            yield chunk;
                         }
                     }
                 },
@@ -450,22 +397,12 @@ async fn into_chunk_stream_inner<P: ByteStreamSourceParser>(
             }
         }
 
-        if let Some(Transaction { len, id }) = &mut current_transaction {
-            // in transaction, check whether it's too large
-            if *len > MAX_TRANSACTION_SIZE {
-                // force commit
-                tracing::warn!(
-                    id,
-                    len,
-                    "transaction is larger than {MAX_TRANSACTION_SIZE} rows, force commit"
-                );
-                *len = 0; // reset `len` while keeping `id`
-                yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
-            }
-            // TODO(rc): we will have better chunk size control later
-        } else if !chunk_builder.is_empty() {
-            // not in transaction, yield the chunk now
-            yield chunk_builder.take_and_reserve(batch_len); // use curr batch len as next capacity, just a hint
+        // Finish the remaining records in the batch.
+        if !chunk_builder.is_in_transaction() {
+            chunk_builder.finish_current_chunk();
+        }
+        for chunk in chunk_builder.consume_ready_chunks() {
+            yield chunk;
         }
     }
 }
@@ -476,7 +413,7 @@ pub enum EncodingType {
     Value,
 }
 
-/// The entrypoint of parsing. It parses [`SourceMessage`] stream (byte stream) into [`StreamChunk`] stream.
+/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
@@ -490,17 +427,20 @@ pub enum ByteStreamSourceParserImpl {
 }
 
 impl ByteStreamSourceParserImpl {
-    /// Converts [`SourceMessage`] stream into [`StreamChunk`] stream.
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> impl ChunkSourceStream + Unpin {
+    /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
+    pub fn parse_stream(
+        self,
+        msg_stream: BoxSourceMessageStream,
+    ) -> impl SourceChunkStream + Unpin {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
-            Self::Csv(parser) => parser.into_stream(msg_stream),
-            Self::Debezium(parser) => parser.into_stream(msg_stream),
-            Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
-            Self::Maxwell(parser) => parser.into_stream(msg_stream),
-            Self::CanalJson(parser) => parser.into_stream(msg_stream),
-            Self::Plain(parser) => parser.into_stream(msg_stream),
-            Self::Upsert(parser) => parser.into_stream(msg_stream),
+            Self::Csv(parser) => parser.parse_stream(msg_stream),
+            Self::Debezium(parser) => parser.parse_stream(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.parse_stream(msg_stream),
+            Self::Maxwell(parser) => parser.parse_stream(msg_stream),
+            Self::CanalJson(parser) => parser.parse_stream(msg_stream),
+            Self::Plain(parser) => parser.parse_stream(msg_stream),
+            Self::Upsert(parser) => parser.parse_stream(msg_stream),
         };
         Box::pin(stream)
     }
@@ -558,10 +498,11 @@ impl ByteStreamSourceParserImpl {
 /// Test utilities for [`ByteStreamSourceParserImpl`].
 #[cfg(test)]
 pub mod test_utils {
-    use futures::StreamExt as _;
-    use itertools::Itertools as _;
+    use futures::StreamExt;
+    use itertools::Itertools;
 
     use super::*;
+    use crate::source::SourceMessage;
 
     #[easy_ext::ext(ByteStreamSourceParserImplTestExt)]
     pub(crate) impl ByteStreamSourceParserImpl {
@@ -575,7 +516,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()
@@ -593,7 +534,7 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.into_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
+            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
                 .next()
                 .await
                 .unwrap()

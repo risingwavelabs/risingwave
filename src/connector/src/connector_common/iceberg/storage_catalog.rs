@@ -97,7 +97,7 @@ impl StorageCatalog {
             Error::new(
                 ErrorKind::DataInvalid,
                 format!(
-                    "Fail to covert version_hint from utf8 to string: {}",
+                    "Fail to convert version_hint from utf8 to string: {}",
                     err.as_report()
                 ),
             )

@@ -268,7 +268,7 @@ pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
     let seconds = (Interval::from_str(interval)
         .map_err(|err| {
             ErrorCode::InternalError(format!(
-                "Covert interval to u64 error, please check format, error: {:?}",
+                "Convert interval to u64 error, please check format, error: {:?}",
                 err.to_report_string()
             ))
         })?

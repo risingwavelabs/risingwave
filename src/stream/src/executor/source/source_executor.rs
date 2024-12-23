@@ -32,7 +32,7 @@ use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    BoxChunkSourceStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    BoxSourceChunkStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData, WaitCheckpointTask,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -127,7 +127,7 @@ impl<S: StateStore> SourceExecutor<S> {
         source_desc: &SourceDesc,
         state: ConnectorState,
         seek_to_latest: bool,
-    ) -> StreamExecutorResult<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> {
+    ) -> StreamExecutorResult<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> {
         let (column_ids, source_ctx) = self.prepare_source_stream_build(source_desc);
         let (stream, latest_splits) = source_desc
             .source
@@ -203,7 +203,7 @@ impl<S: StateStore> SourceExecutor<S> {
             source_desc.metrics.clone(),
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
-                rate_limit: self.rate_limit_rps,
+                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             schema_change_tx,
@@ -538,7 +538,7 @@ impl<S: StateStore> SourceExecutor<S> {
             // because we can rely on the persisted source states to recover the source stream
             // and can avoid the potential race with "seek to latest"
             // https://github.com/risingwavelabs/risingwave/issues/19681#issuecomment-2532183002
-            let mut reader_and_splits: Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)> =
+            let mut reader_and_splits: Option<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)> =
                 None;
             let source_reader = source_desc.source.clone();
             let (column_ids, source_ctx) = self.prepare_source_stream_build(&source_desc);
@@ -868,9 +868,9 @@ impl<S: StateStore> SourceExecutor<S> {
 
 async fn build_source_stream_and_poll_barrier(
     barrier_stream: &mut BoxStream<'static, StreamExecutorResult<Message>>,
-    reader_and_splits: &mut Option<(BoxChunkSourceStream, Option<Vec<SplitImpl>>)>,
+    reader_and_splits: &mut Option<(BoxSourceChunkStream, Option<Vec<SplitImpl>>)>,
     build_future: &mut Pin<
-        Box<impl Future<Output = (BoxChunkSourceStream, Option<Vec<SplitImpl>>)>>,
+        Box<impl Future<Output = (BoxSourceChunkStream, Option<Vec<SplitImpl>>)>>,
     >,
 ) -> StreamExecutorResult<Option<Message>> {
     if reader_and_splits.is_some() {
