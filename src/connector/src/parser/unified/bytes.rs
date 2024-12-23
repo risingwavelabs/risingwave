@@ -41,14 +41,14 @@ impl Access for BytesAccess<'_> {
                 ))));
             }
             return Err(AccessError::Undefined {
-                name: path[0].to_string(),
+                name: path[0].to_owned(),
                 path: self.column_name.as_ref().unwrap().to_string(),
             });
         }
         Err(AccessError::TypeError {
-            expected: "Bytea".to_string(),
+            expected: "Bytea".to_owned(),
             got: format!("{:?}", type_expected),
-            value: "".to_string(),
+            value: "".to_owned(),
         })
     }
 }

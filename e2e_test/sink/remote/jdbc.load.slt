@@ -66,7 +66,9 @@ create materialized view mv_remote_1 as select * from t_remote_1;
 statement ok
 CREATE SINK s_postgres_0 FROM mv_remote_0 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t_remote_0',
     primary_key='id',
     type='upsert'
@@ -75,7 +77,9 @@ CREATE SINK s_postgres_0 FROM mv_remote_0 WITH (
 statement ok
 CREATE SINK s_postgres_1 FROM mv_remote_1 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t_remote_1',
     primary_key='id',
     type='upsert'
@@ -84,7 +88,9 @@ CREATE SINK s_postgres_1 FROM mv_remote_1 WITH (
 statement ok
 CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?connectionTimeZone=UTC',
+    user='mysqluser',
+    password='mysqlpw',
     table.name='t_remote_0',
     primary_key='id',
     type='upsert'
@@ -93,7 +99,9 @@ CREATE SINK s_mysql_0 FROM mv_remote_0 WITH (
 statement ok
 CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?connectionTimeZone=UTC',
+    user='mysqluser',
+    password='mysqlpw',
     table.name='t_remote_1',
     primary_key='id',
     type='upsert'
@@ -102,7 +110,9 @@ CREATE SINK s_mysql_1 FROM mv_remote_1 WITH (
 statement ok
 CREATE SINK s2_postgres FROM rw_typed_data WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t_types',
     primary_key='id',
     schema.name='biz',
@@ -112,7 +122,9 @@ CREATE SINK s2_postgres FROM rw_typed_data WITH (
 statement ok
 CREATE SINK s2_mysql FROM rw_typed_data WITH (
     connector='jdbc',
-    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw&connectionTimeZone=UTC',
+    jdbc.url='jdbc:mysql://mysql:3306/test?connectionTimeZone=UTC',
+    user='mysqluser',
+    password='mysqlpw',
     table.name='t_types',
     primary_key='id',
     type='upsert'
@@ -127,7 +139,9 @@ CREATE TABLE tt1 (
 statement ok
 CREATE SINK s_pg_0 FROM tt1 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t_append_only',
     type='append-only',
     force_append_only=true
@@ -141,7 +155,9 @@ CREATE TABLE tt2 (
 statement ok
 CREATE SINK s_pg_t2 FROM tt2 WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t2',
     schema.name='biz',
     type='append-only',
@@ -155,7 +171,9 @@ create table t1_uuid (v1 int primary key, v2 varchar, v3 varchar);
 statement ok
 CREATE SINK s1_uuid FROM t1_uuid WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='t1_uuid',
     primary_key='v1',
     type='upsert'
@@ -174,7 +192,9 @@ INSERT INTO t1_test_uuid_delete VALUES ('fb48ecc1-917f-4f4b-ab6d-d8e37809caf8', 
 statement ok
 CREATE SINK sk_t1_uuid FROM t1_test_uuid_delete WITH (
     connector='jdbc',
-    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    jdbc.url='jdbc:postgresql://db:5432/test',
+    user='test',
+    password='connector',
     table.name='sk_t1_uuid',
     primary_key='id, v2',
     type='upsert'

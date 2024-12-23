@@ -268,7 +268,7 @@ pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
     let seconds = (Interval::from_str(interval)
         .map_err(|err| {
             ErrorCode::InternalError(format!(
-                "Covert interval to u64 error, please check format, error: {:?}",
+                "Convert interval to u64 error, please check format, error: {:?}",
                 err.to_report_string()
             ))
         })?
@@ -326,7 +326,7 @@ pub fn get_table_catalog_by_table_name(
     let (table, schema_name) =
         reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
-    Ok((table.clone(), schema_name.to_string()))
+    Ok((table.clone(), schema_name.to_owned()))
 }
 
 #[cfg(test)]

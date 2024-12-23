@@ -90,6 +90,8 @@ pub struct BigQueryCommon {
     #[serde(default)] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
+    #[serde(rename = "bigquery.credentials")]
+    pub credentials: Option<String>,
 }
 
 struct BigQueryFutureManager {
@@ -208,7 +210,9 @@ impl BigQueryCommon {
     }
 
     async fn get_auth_json_from_path(&self, aws_auth_props: &AwsAuthProps) -> Result<String> {
-        if let Some(local_path) = &self.local_path {
+        if let Some(credentials) = &self.credentials {
+            Ok(credentials.clone())
+        } else if let Some(local_path) = &self.local_path {
             std::fs::read_to_string(local_path)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))
         } else if let Some(s3_path) = &self.s3_path {
@@ -382,7 +386,7 @@ impl BigQuerySink {
             DataType::List(dt) => {
                 let inner_field = Self::map_field(&Field::with_name(*dt.clone(), &rw_field.name))?;
                 TableFieldSchema {
-                    mode: Some("REPEATED".to_string()),
+                    mode: Some("REPEATED".to_owned()),
                     ..inner_field
                 }
             }
@@ -575,7 +579,7 @@ impl BigQuerySinkWriter {
 
         if !is_append_only {
             let field = FieldDescriptorProto {
-                name: Some(CHANGE_TYPE.to_string()),
+                name: Some(CHANGE_TYPE.to_owned()),
                 number: Some((schema.len() + 1) as i32),
                 r#type: Some(field_descriptor_proto::Type::String.into()),
                 ..Default::default()
@@ -653,14 +657,14 @@ impl BigQuerySinkWriter {
                     .message
                     .try_set_field(
                         self.proto_field.as_ref().unwrap(),
-                        prost_reflect::Value::String("UPSERT".to_string()),
+                        prost_reflect::Value::String("UPSERT".to_owned()),
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
                 Op::Delete => pb_row
                     .message
                     .try_set_field(
                         self.proto_field.as_ref().unwrap(),
-                        prost_reflect::Value::String("DELETE".to_string()),
+                        prost_reflect::Value::String("DELETE".to_owned()),
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
                 Op::UpdateDelete => continue,
@@ -668,7 +672,7 @@ impl BigQuerySinkWriter {
                     .message
                     .try_set_field(
                         self.proto_field.as_ref().unwrap(),
-                        prost_reflect::Value::String("UPSERT".to_string()),
+                        prost_reflect::Value::String("UPSERT".to_owned()),
                     )
                     .map_err(|e| SinkError::BigQuery(e.into()))?,
             };
@@ -831,7 +835,7 @@ impl StorageWriterClient {
 fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflect::DescriptorPool> {
     let file_descriptor = FileDescriptorProto {
         message_type: vec![desc.clone()],
-        name: Some("bigquery".to_string()),
+        name: Some("bigquery".to_owned()),
         ..Default::default()
     };
 
@@ -855,7 +859,7 @@ fn build_protobuf_schema<'a>(
         .enumerate()
         .map(|(index, (name, data_type))| {
             let (field, des_proto) =
-                build_protobuf_field(data_type, (index + 1) as i32, name.to_string())?;
+                build_protobuf_field(data_type, (index + 1) as i32, name.to_owned())?;
             if let Some(sv) = des_proto {
                 struct_vec.push(sv);
             }
@@ -972,7 +976,7 @@ mod test {
             .fields()
             .iter()
             .map(|f| (f.name.as_str(), &f.data_type));
-        let desc = build_protobuf_schema(fields, "t1".to_string()).unwrap();
+        let desc = build_protobuf_schema(fields, "t1".to_owned()).unwrap();
         let pool = build_protobuf_descriptor_pool(&desc).unwrap();
         let t1_message = pool.get_message_by_name("t1").unwrap();
         assert_matches!(

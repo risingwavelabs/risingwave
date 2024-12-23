@@ -58,7 +58,7 @@ where
         self.inner.into_stream(to_owned_item).map(|item_res| {
             item_res
                 .map(|(key, value)| (key.user_key.table_key.0.into(), value.into()))
-                .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_string()))
+                .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_owned()))
         })
     }
 }

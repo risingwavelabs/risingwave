@@ -376,7 +376,7 @@ async fn test_release_context_resource() {
     let context_id_1 = worker_id as _;
 
     let fake_host_address_2 = HostAddress {
-        host: "127.0.0.1".to_string(),
+        host: "127.0.0.1".to_owned(),
         port: 2,
     };
     let fake_parallelism = 4;
@@ -459,7 +459,7 @@ async fn test_hummock_manager_basic() {
     ));
 
     let fake_host_address_2 = HostAddress {
-        host: "127.0.0.1".to_string(),
+        host: "127.0.0.1".to_owned(),
         port: 2,
     };
     let fake_parallelism = 4;

@@ -102,7 +102,7 @@ pub fn infer_some_all(
         Some(*datatype)
     } else {
         return Err(ErrorCode::BindError(
-            "op SOME/ANY/ALL (array) requires array on right side".to_string(),
+            "op SOME/ANY/ALL (array) requires array on right side".to_owned(),
         )
         .into());
     };
@@ -265,7 +265,7 @@ fn infer_struct_cast_target_type(
                 let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
                 lcasts |= lcast;
                 rcasts |= rcast;
-                tys.push(("".to_string(), ty)); // TODO(chi): generate field name
+                tys.push(("".to_owned(), ty)); // TODO(chi): generate field name
             }
             Ok((lcasts, rcasts, DataType::Struct(StructType::new(tys))))
         }

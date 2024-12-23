@@ -194,7 +194,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
-        let table = Table::new(name.to_string(), schema);
+        let table = Table::new(name.to_owned(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
         let mview = Statement::CreateView {
             or_replace: false,

@@ -134,7 +134,7 @@ impl Binder {
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         if !returning_items.is_empty() && table_catalog.has_generated_column() {
             return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_string(),
+                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
             )));
         }
 

@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
     AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject, AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
@@ -61,7 +61,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 NATS_CONNECTOR,
-                HashSet::from(["partition", "offset", "payload"]),
+                HashSet::from(["partition", "offset", "payload", "subject"]),
             ),
             (
                 OPENDAL_S3_CONNECTOR,
@@ -126,7 +126,7 @@ pub fn gen_default_addition_col_name(
         inner_field_name,
         legacy_dt_name.as_deref(),
     ];
-    col_name.iter().fold("_rw".to_string(), |name, ele| {
+    col_name.iter().fold("_rw".to_owned(), |name, ele| {
         if let Some(ele) = ele {
             format!("{}_{}", name, ele)
         } else {
@@ -267,6 +267,14 @@ pub fn build_additional_column_desc(
                 )),
             },
         ),
+        "subject" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar, // Assuming subject is a string
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Subject(AdditionalSubject {})),
+            },
+        ),
         _ => unreachable!(),
     };
 
@@ -373,7 +381,7 @@ fn build_header_catalog(
             data_type.clone(),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
-                    inner_field: inner.to_string(),
+                    inner_field: inner.to_owned(),
                     data_type: Some(pb_data_type),
                 })),
             },

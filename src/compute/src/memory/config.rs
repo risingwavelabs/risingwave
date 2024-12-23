@@ -415,8 +415,8 @@ mod tests {
         assert_eq!(memory_config.compactor_memory_limit_mb, 0);
 
         // Embedded compactor enabled, streaming node, file cache
-        storage_config.data_file_cache.dir = "data".to_string();
-        storage_config.meta_file_cache.dir = "meta".to_string();
+        storage_config.data_file_cache.dir = "data".to_owned();
+        storage_config.meta_file_cache.dir = "meta".to_owned();
         let memory_config = storage_memory_config(
             total_non_reserved_memory_bytes,
             true,

@@ -33,22 +33,41 @@ import org.slf4j.LoggerFactory;
 public class DbzSourceUtils {
     static final Logger LOG = LoggerFactory.getLogger(DbzSourceUtils.class);
 
+    public static void createPostgresPublicationInValidate(Map<String, String> properties)
+            throws SQLException {
+        boolean pubAutoCreate =
+                properties.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+        var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
+        if (!pubAutoCreate) {
+            LOG.info(
+                    "Postgres publication auto creation is disabled, skip creation for publication {}.",
+                    pubName);
+            return;
+        }
+        createPostgresPublicationInner(properties, pubName);
+    }
+
     /**
      * This method is used to create a publication for the cdc source job or cdc table if it doesn't
      * exist.
      */
-    public static void createPostgresPublicationIfNeeded(
+    public static void createPostgresPublicationInSourceExecutor(
             Map<String, String> properties, long sourceId) throws SQLException {
         boolean pubAutoCreate =
                 properties.get(DbzConnectorConfig.PG_PUB_CREATE).equalsIgnoreCase("true");
+        var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
         if (!pubAutoCreate) {
             LOG.info(
-                    "Postgres publication auto creation is disabled, skip creation for source {}.",
+                    "Postgres publication auto creation is disabled, skip creation for publication {}, sourceId = {}.",
+                    pubName,
                     sourceId);
             return;
         }
+        createPostgresPublicationInner(properties, pubName);
+    }
 
-        var pubName = properties.get(DbzConnectorConfig.PG_PUB_NAME);
+    private static void createPostgresPublicationInner(
+            Map<String, String> properties, String pubName) throws SQLException {
         var dbHost = properties.get(DbzConnectorConfig.HOST);
         var dbPort = properties.get(DbzConnectorConfig.PORT);
         var dbName = properties.get(DbzConnectorConfig.DB_NAME);

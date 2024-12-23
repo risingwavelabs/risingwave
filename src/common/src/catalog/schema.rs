@@ -34,6 +34,17 @@ pub struct Field {
     pub type_name: String,
 }
 
+impl Field {
+    pub fn new(name: impl Into<String>, data_type: DataType) -> Self {
+        Self {
+            data_type,
+            name: name.into(),
+            sub_fields: vec![],
+            type_name: String::new(),
+        }
+    }
+}
+
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.name, self.data_type)
@@ -44,7 +55,7 @@ impl Field {
     pub fn to_prost(&self) -> PbField {
         PbField {
             data_type: Some(self.data_type.to_protobuf()),
-            name: self.name.to_string(),
+            name: self.name.clone(),
         }
     }
 }
@@ -83,6 +94,23 @@ impl From<&PbColumnDesc> for Field {
             sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
             type_name: pb_column_desc.type_name.clone(),
         }
+    }
+}
+
+/// Something that has a data type and a name.
+#[auto_impl::auto_impl(&)]
+pub trait FieldLike {
+    fn data_type(&self) -> &DataType;
+    fn name(&self) -> &str;
+}
+
+impl FieldLike for Field {
+    fn data_type(&self) -> &DataType {
+        &self.data_type
+    }
+
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 

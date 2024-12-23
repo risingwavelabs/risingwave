@@ -28,7 +28,7 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, DataType, SourceContextRef, SourceMessage,
+    into_chunk_stream, BoxSourceChunkStream, Column, DataType, SourceContextRef, SourceMessage,
     SplitId, SplitMetaData, SplitReader,
 };
 
@@ -142,7 +142,7 @@ impl SplitReader for DatagenSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
@@ -154,7 +154,7 @@ impl SplitReader for DatagenSplitReader {
                 let actor_id = self.source_ctx.actor_id.to_string();
                 let fragment_id = self.source_ctx.fragment_id.to_string();
                 let source_id = self.source_ctx.source_id.to_string();
-                let source_name = self.source_ctx.source_name.to_string();
+                let source_name = self.source_ctx.source_name.clone();
                 let split_id = self.split_id.to_string();
                 let metrics = self.source_ctx.metrics.clone();
                 let partition_input_count_metric =
@@ -292,7 +292,7 @@ fn generator_from_data_type(
                         split_num,
                         offset,
                     )?;
-                    Ok((field_name.to_string(), gen))
+                    Ok((field_name.to_owned(), gen))
                 })
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields).map_err(Into::into)
@@ -355,24 +355,24 @@ mod tests {
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
             Column {
-                name: "random_int".to_string(),
+                name: "random_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },
             Column {
-                name: "random_float".to_string(),
+                name: "random_float".to_owned(),
                 data_type: DataType::Float32,
                 is_visible: true,
             },
             Column {
-                name: "sequence_int".to_string(),
+                name: "sequence_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },
             Column {
-                name: "struct".to_string(),
+                name: "struct".to_owned(),
                 data_type: DataType::Struct(StructType::new(vec![(
-                    "random_int".to_string(),
+                    "random_int".to_owned(),
                     DataType::Int32,
                 )])),
                 is_visible: true,
@@ -445,12 +445,12 @@ mod tests {
     async fn test_random_deterministic() -> Result<()> {
         let mock_datum = vec![
             Column {
-                name: "_".to_string(),
+                name: "_".to_owned(),
                 data_type: DataType::Int64,
                 is_visible: true,
             },
             Column {
-                name: "random_int".to_string(),
+                name: "random_int".to_owned(),
                 data_type: DataType::Int32,
                 is_visible: true,
             },

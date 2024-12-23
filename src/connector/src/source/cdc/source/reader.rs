@@ -33,7 +33,7 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::{CdcProperties, CdcSourceType, CdcSourceTypeTrait, DebeziumCdcSplit};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SplitId, SplitMetaData,
+    into_chunk_stream, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitMetaData,
     SplitReader,
 };
 
@@ -86,8 +86,8 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             citus_server_addr = Some(server_addr.clone());
             let host_addr =
                 HostAddr::from_str(server_addr).context("invalid server address for cdc split")?;
-            properties.insert("hostname".to_string(), host_addr.host);
-            properties.insert("port".to_string(), host_addr.port.to_string());
+            properties.insert("hostname".to_owned(), host_addr.host);
+            properties.insert("port".to_owned(), host_addr.port.to_string());
             // rewrite table name with suffix to capture all shards in the split
             let mut table_name = properties
                 .remove("table.name")
@@ -199,7 +199,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
         Ok(instance)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

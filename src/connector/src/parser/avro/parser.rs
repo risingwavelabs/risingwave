@@ -49,7 +49,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema.resolved_schema),
+            AvroParseOptions::create(&self.schema.original_schema),
         )))
     }
 }
@@ -251,7 +251,7 @@ mod test {
     #[tokio::test]
     #[ignore]
     async fn test_load_schema_from_s3() {
-        let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
+        let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_owned();
         let url = Url::parse(&schema_location).unwrap();
         let aws_auth_config: AwsAuthProps =
             serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
