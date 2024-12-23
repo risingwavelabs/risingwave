@@ -1133,6 +1133,12 @@ pub enum SchemaLocation {
         // When `Some(_)`, ignore AWS and load schemas from provided config
         mock_config: Option<String>,
     },
+    /// <>
+    Pulsar {
+        rest_base: String,
+        token: Option<String>,
+        topic: String,
+    },
 }
 
 // TODO: `SpecificParserConfig` shall not `impl`/`derive` a `Default`
@@ -1277,6 +1283,17 @@ impl SpecificParserConfig {
                         mock_config: format_encode_options_with_secret
                             .get("aws.glue.mock_config")
                             .cloned(),
+                    }
+                } else if let Some(rest_base) =
+                    format_encode_options_with_secret.get("pulsar_rest_base")
+                {
+                    let topic = get_kafka_topic(&options_with_secret)?;
+                    let topic = topic.strip_prefix("persistent://").unwrap_or(topic);
+                    let topic = topic.strip_prefix("non-persistent://").unwrap_or(topic);
+                    SchemaLocation::Pulsar {
+                        rest_base: rest_base.clone(),
+                        token: options_with_secret.get("auth.token").cloned(),
+                        topic: topic.to_owned(),
                     }
                 } else if info.use_schema_registry {
                     SchemaLocation::Confluent {

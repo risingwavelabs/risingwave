@@ -24,7 +24,7 @@ use risingwave_connector_codec::decoder::avro::{
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
+use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl, PulsarSchemaCache};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::bytes_from_url;
@@ -137,6 +137,15 @@ impl AvroAccessBuilder {
                     Some(&self.schema.original_schema),
                 )?))
             }
+            WriterSchemaCache::Pulsar(resolver) => {
+                let writer_schema = resolver.get(None).await?;
+                let mut raw_payload = payload;
+                Ok(Some(from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    Some(&self.schema.original_schema),
+                )?))
+            }
         }
     }
 }
@@ -155,6 +164,7 @@ pub struct AvroParserConfig {
 enum WriterSchemaCache {
     Confluent(Arc<ConfluentSchemaCache>),
     Glue(Arc<GlueSchemaCacheImpl>),
+    Pulsar(Arc<PulsarSchemaCache>),
     File,
 }
 
@@ -222,6 +232,20 @@ impl AvroParserConfig {
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
+                    map_handling,
+                })
+            }
+            SchemaLocation::Pulsar {
+                rest_base,
+                token,
+                topic,
+            } => {
+                let rest_base = rest_base.parse().unwrap();
+                let resolver = PulsarSchemaCache::new(rest_base, token, &topic).unwrap();
+                let schema = resolver.get(None).await?;
+                Ok(Self {
+                    schema: Arc::new(ResolvedAvroSchema::create(schema)?),
+                    writer_schema_cache: WriterSchemaCache::Pulsar(Arc::new(resolver)),
                     map_handling,
                 })
             }
