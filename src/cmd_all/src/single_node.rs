@@ -15,7 +15,9 @@
 use clap::Parser;
 use home::home_dir;
 use risingwave_common::config::MetaBackend;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_compactor::CompactorOpts;
+use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
@@ -207,6 +209,16 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     frontend_opts.meta_addr = meta_addr.parse().unwrap();
     compactor_opts.meta_address = meta_addr.parse().unwrap();
 
+    // Allocate memory for each node
+    let system_total_mem = system_memory_available_bytes();
+    frontend_opts.frontend_total_memory_bytes = memory_for_frontend(system_total_mem);
+    compactor_opts.compactor_total_memory_bytes = memory_for_compactor(system_total_mem);
+    compute_opts.total_memory_bytes = system_total_mem
+        - memory_for_frontend(system_total_mem)
+        - memory_for_compactor(system_total_mem);
+    compute_opts.memory_manager_target_bytes =
+        Some(gradient_reserve_memory_bytes(system_total_mem));
+
     // Apply node-specific options
     if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
         compute_opts.total_memory_bytes = total_memory_bytes;
@@ -232,5 +244,21 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
         compactor_opts: Some(compactor_opts),
+    }
+}
+
+fn memory_for_frontend(total_memory_bytes: usize) -> usize {
+    if total_memory_bytes <= (16 << 30) {
+        total_memory_bytes / 8
+    } else {
+        (total_memory_bytes - (16 << 30)) / 16 + (16 << 30) / 8
+    }
+}
+
+fn memory_for_compactor(total_memory_bytes: usize) -> usize {
+    if total_memory_bytes <= (16 << 30) {
+        total_memory_bytes / 8
+    } else {
+        (total_memory_bytes - (16 << 30)) / 16 + (16 << 30) / 8
     }
 }
