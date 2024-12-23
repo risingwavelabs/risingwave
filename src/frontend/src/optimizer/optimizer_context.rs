@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
-use super::property::WatermarkGroupId;
 use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
@@ -65,8 +64,6 @@ pub struct OptimizerContext {
     last_correlated_id: Cell<u32>,
     /// Last assigned expr display ID.
     last_expr_display_id: Cell<usize>,
-    /// Last assigned watermark group ID.
-    last_watermark_group_id: Cell<u32>,
 
     _phantom: PhantomUnsend,
 }
@@ -75,7 +72,6 @@ pub(in crate::optimizer) struct LastAssignedIds {
     last_plan_node_id: i32,
     last_correlated_id: u32,
     last_expr_display_id: usize,
-    last_watermark_group_id: u32,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -109,7 +105,6 @@ impl OptimizerContext {
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
-            last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
 
             _phantom: Default::default(),
         }
@@ -135,7 +130,6 @@ impl OptimizerContext {
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
-            last_watermark_group_id: Cell::new(0),
 
             _phantom: Default::default(),
         }
@@ -154,16 +148,11 @@ impl OptimizerContext {
         self.last_expr_display_id.update(|id| id + 1)
     }
 
-    pub fn next_watermark_group_id(&self) -> WatermarkGroupId {
-        WatermarkGroupId(self.last_watermark_group_id.update(|id| id + 1))
-    }
-
     pub(in crate::optimizer) fn backup_elem_ids(&self) -> LastAssignedIds {
         LastAssignedIds {
             last_plan_node_id: self.last_plan_node_id.get(),
             last_correlated_id: self.last_correlated_id.get(),
             last_expr_display_id: self.last_expr_display_id.get(),
-            last_watermark_group_id: self.last_watermark_group_id.get(),
         }
     }
 
@@ -172,15 +161,12 @@ impl OptimizerContext {
         self.last_plan_node_id.set(0);
         self.last_correlated_id.set(0);
         self.last_expr_display_id.set(0);
-        self.last_watermark_group_id.set(0);
     }
 
     pub(in crate::optimizer) fn restore_elem_ids(&self, backup: LastAssignedIds) {
         self.last_plan_node_id.set(backup.last_plan_node_id);
         self.last_correlated_id.set(backup.last_correlated_id);
         self.last_expr_display_id.set(backup.last_expr_display_id);
-        self.last_watermark_group_id
-            .set(backup.last_watermark_group_id);
     }
 
     pub fn add_rule_applied(&self, num: usize) {
