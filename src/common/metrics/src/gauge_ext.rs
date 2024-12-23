@@ -15,7 +15,7 @@
 use prometheus::core::{AtomicU64, GenericGauge};
 use prometheus::IntGauge;
 
-/// The integer version of [`Gauge`]. Provides better performance if metric values are
+/// The integer version of [`prometheus::Gauge`]. Provides better performance if metric values are
 /// all unsigned integers.
 pub type UintGauge = GenericGauge<AtomicU64>;
 
