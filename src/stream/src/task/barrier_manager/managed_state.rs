@@ -840,8 +840,9 @@ impl DatabaseManagedBarrierState {
                     epoch,
                     actor,
                     state,
+                    vnode_bitmap,
                 } => {
-                    self.update_create_mview_progress(epoch, actor, state);
+                    self.update_create_mview_progress(epoch, actor, vnode_bitmap, state);
                 }
                 LocalBarrierEvent::RegisterBarrierSender {
                     actor_id,
@@ -940,8 +941,8 @@ impl PartialGraphManagedBarrierState {
                 .remove(&barrier_state.barrier.epoch.curr)
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(actor, state)| state.to_pb(actor))
-                .collect();
+                .map(|(actor, state)| state.to_pb(actor, vec![]))
+                .collect(); // todo
 
             let prev_state = replace(
                 &mut barrier_state.inner,

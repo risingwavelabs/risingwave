@@ -34,6 +34,8 @@ message BarrierCompleteResponse {
     // MV backfill snapshot read rows / Source backfilled rows
     uint64 consumed_rows = 4;
     uint32 pending_barrier_num = 5;
+
+    repeated uint32 vnodes = 6;
   }
   string request_id = 1;
   common.Status status = 2;

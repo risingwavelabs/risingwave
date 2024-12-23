@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use risingwave_common::bitmap::Bitmap;
 use std::fmt::Display;
 use std::future::{pending, poll_fn};
 use std::sync::Arc;
@@ -215,6 +216,7 @@ pub(super) enum LocalBarrierEvent {
     ReportCreateProgress {
         epoch: EpochPair,
         actor: ActorId,
+        vnode_bitmap: Option<Bitmap>,
         state: BackfillState,
     },
     RegisterBarrierSender {

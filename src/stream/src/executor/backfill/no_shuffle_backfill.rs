@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
@@ -180,6 +182,8 @@ where
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = row_count;
+
+        // let mut total_snapshot_vnode_processed_rows = HashMap::new();
 
         // Backfill Algorithm:
         //
@@ -422,6 +426,24 @@ where
                     total_snapshot_processed_rows,
                 );
 
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Update(update) => {
+                            if let Some(bitmap) = update.vnode_bitmaps.get(&self.actor_id) {
+                                if let Some(table) = self.state_table.as_mut() {
+                                    let (prev, res) = table.update_vnode_bitmap(bitmap.clone());
+
+                                    println!("curr is {:#?}", bitmap);
+                                    println!("prev {:#?}", prev);
+                                    println!("res is {:?}", res);
+                                }
+                                self.progress.update_vnodes(bitmap);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Persist state on barrier
                 Self::persist_state(
                     barrier.epoch,
@@ -450,6 +472,7 @@ where
                         Mutation::Resume => {
                             paused = false;
                         }
+
                         Mutation::Throttle(actor_to_apply) => {
                             let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {

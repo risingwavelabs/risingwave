@@ -47,7 +47,9 @@ enum BackfillState {
 pub(super) struct Progress {
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
     states: HashMap<ActorId, BackfillState>,
-    done_count: usize,
+
+    //vnode_count: usize,
+    done_vnode_count: usize,
 
     /// Tells whether the backfill is from source or mv.
     backfill_upstream_types: HashMap<ActorId, BackfillUpstreamType>,
@@ -70,6 +72,7 @@ impl Progress {
     /// Create a [`Progress`] for some creating mview, with all `actors` containing the backfill executors.
     fn new(
         actors: impl IntoIterator<Item = (ActorId, BackfillUpstreamType)>,
+        vnodes: impl IntoIterator<Item = (usize, BackfillUpstreamType)>,
         upstream_mv_count: HashMap<TableId, usize>,
         upstream_total_key_count: u64,
         definition: String,
@@ -85,7 +88,7 @@ impl Progress {
         Self {
             states,
             backfill_upstream_types,
-            done_count: 0,
+            done_vnode_count: 0,
             upstream_mv_count,
             upstream_mvs_total_key_count: upstream_total_key_count,
             mv_backfill_consumed_rows: 0,
@@ -118,10 +121,10 @@ impl Progress {
             BackfillState::Done(new_consumed_rows) => {
                 tracing::debug!("actor {} done", actor);
                 new = *new_consumed_rows;
-                self.done_count += 1;
+                self.done_vnode_count += 1;
                 tracing::debug!(
                     "{} actors out of {} complete",
-                    self.done_count,
+                    self.done_vnode_count,
                     total_actors,
                 );
             }
@@ -145,11 +148,11 @@ impl Progress {
     fn is_done(&self) -> bool {
         tracing::trace!(
             "Progress::is_done? {}, {}, {:?}",
-            self.done_count,
+            self.done_vnode_count,
             self.states.len(),
             self.states
         );
-        self.done_count == self.states.len()
+        self.done_vnode_count == self.states.len()
     }
 
     /// Returns the ids of all actors containing the backfill executors for the mview tracked by this
@@ -353,7 +356,7 @@ impl CreateMviewProgressTracker {
         Progress {
             states,
             backfill_upstream_types,
-            done_count: 0, // Fill only after first barrier pass
+            done_vnode_count: 0, // Fill only after first barrier pass
             upstream_mv_count,
             upstream_mvs_total_key_count,
             mv_backfill_consumed_rows: 0, // Fill only after first barrier pass
@@ -501,7 +504,7 @@ impl CreateMviewProgressTracker {
         version_stats: &HummockVersionStats,
     ) -> Option<TrackingJob> {
         tracing::trace!(?info, "add job to track");
-        let (info, actors, replace_table_info) = {
+        let (info, actors, vnodes, replace_table_info) = {
             let CreateStreamingJobCommandInfo {
                 stream_job_fragments,
                 ..
@@ -514,7 +517,9 @@ impl CreateMviewProgressTracker {
                     replace_stream_job: replace_stream_job.cloned(),
                 }));
             }
-            (info.clone(), actors, replace_stream_job.cloned())
+            let vnodes = stream_job_fragments.tracking_progress_vnodes();
+
+            (info.clone(), actors, vnodes, replace_stream_job.cloned())
         };
 
         let CreateStreamingJobCommandInfo {
@@ -558,6 +563,7 @@ impl CreateMviewProgressTracker {
 
         let progress = Progress::new(
             actors,
+            vnodes,
             upstream_mv_count,
             upstream_total_key_count,
             definition.clone(),
