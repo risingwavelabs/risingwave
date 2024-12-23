@@ -556,7 +556,6 @@ pub(crate) fn gen_create_table_plan(
     source_watermarks: Vec<SourceWatermark>,
     bbb: BBB,
 ) -> Result<(PlanRef, PbTable)> {
-    let definition = context.normalized_sql().to_owned();
     let mut columns = bind_sql_columns(&column_defs)?;
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -573,7 +572,6 @@ pub(crate) fn gen_create_table_plan(
         columns,
         column_defs,
         constraints,
-        definition,
         source_watermarks,
         BBB {
             version: Some(col_id_gen.into_version()),
@@ -589,7 +587,6 @@ pub(crate) fn gen_create_table_plan_without_source(
     columns: Vec<ColumnCatalog>,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    definition: String,
     source_watermarks: Vec<SourceWatermark>,
     bbb: BBB,
 ) -> Result<(PlanRef, PbTable)> {
@@ -621,7 +618,6 @@ pub(crate) fn gen_create_table_plan_without_source(
         columns,
         pk_column_ids,
         row_id_index,
-        definition,
         watermark_descs,
         source_catalog: None,
     };
@@ -641,7 +637,6 @@ fn gen_table_plan_with_source(
         columns: source_catalog.columns.clone(),
         pk_column_ids: source_catalog.pk_col_ids.clone(),
         row_id_index: source_catalog.row_id_index,
-        definition: source_catalog.definition.clone(), // TODO: ?
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
     };
@@ -650,6 +645,7 @@ fn gen_table_plan_with_source(
 }
 
 pub struct BBB {
+    pub definition: String,
     pub append_only: bool,
     pub on_conflict: Option<OnConflict>,
     pub with_version_column: Option<String>,
@@ -663,7 +659,6 @@ pub struct AAA {
     pub columns: Vec<ColumnCatalog>,
     pub pk_column_ids: Vec<ColumnId>,
     pub row_id_index: Option<usize>,
-    pub definition: String,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub source_catalog: Option<SourceCatalog>,
 }
@@ -873,11 +868,11 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             columns,
             pk_column_ids,
             row_id_index: None,
-            definition,
             watermark_descs: vec![],
             source_catalog: Some((*source).clone()),
         },
         BBB {
+            definition,
             append_only: false,
             on_conflict,
             with_version_column,
@@ -982,6 +977,7 @@ pub(super) async fn handle_create_table_plan(
         .transpose()?;
 
     let bbb = BBB {
+        definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict,
         with_version_column: with_version_column.clone(),
@@ -1739,6 +1735,7 @@ pub async fn generate_stream_graph_for_replace_table(
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 
     let bbb = BBB {
+        definition: handler_args.normalized_sql.clone(),
         append_only,
         on_conflict,
         with_version_column: with_version_column.clone(),

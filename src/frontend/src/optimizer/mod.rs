@@ -645,11 +645,11 @@ impl PlanRoot {
             columns,
             pk_column_ids,
             row_id_index,
-            definition,
             watermark_descs,
             source_catalog,
         }: AAA,
         BBB {
+            definition,
             append_only,
             on_conflict,
             with_version_column,

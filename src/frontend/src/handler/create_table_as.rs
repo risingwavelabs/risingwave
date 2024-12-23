@@ -108,9 +108,9 @@ pub async fn handle_create_as(
             columns,
             vec![],
             vec![],
-            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            vec![],        // No watermark should be defined in for `CREATE TABLE AS`
+            vec![], // No watermark should be defined in for `CREATE TABLE AS`
             BBB {
+                definition: "".to_owned(), /* TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS` */
                 append_only,
                 on_conflict,
                 with_version_column,
