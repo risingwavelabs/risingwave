@@ -31,7 +31,6 @@ pub mod meta_snapshot_v2;
 pub mod storage;
 
 use std::collections::{HashMap, HashSet};
-use std::hash::Hasher;
 
 use itertools::Itertools;
 use risingwave_common::RW_VERSION;
@@ -92,9 +91,7 @@ pub struct MetaSnapshotManifest {
 }
 
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
+    twox_hash::XxHash64::oneshot(0, data)
 }
 
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {

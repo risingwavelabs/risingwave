@@ -22,10 +22,12 @@ use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::actor::ActorStatus;
 use risingwave_meta_model::actor_dispatcher::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_meta_model::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
+use risingwave_meta_model::prelude::{
+    Actor, ActorDispatcher, Fragment, Sink, Source, StreamingJob, Table,
+};
 use risingwave_meta_model::{
-    actor, actor_dispatcher, fragment, streaming_job, ActorId, ActorMapping, ActorUpstreamActors,
-    ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
+    actor, actor_dispatcher, fragment, sink, source, streaming_job, table, ActorId, ActorMapping,
+    ActorUpstreamActors, ConnectorSplits, FragmentId, I32Array, ObjectId, VnodeBitmap,
 };
 use risingwave_meta_model_migration::{
     Alias, CommonTableExpression, Expr, IntoColumnRef, QueryStatementBuilder, SelectStatement,
@@ -165,7 +167,7 @@ pub struct RescheduleWorkingSet {
     pub fragment_downstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
     pub fragment_upstreams: HashMap<FragmentId, Vec<(FragmentId, DispatcherType)>>,
 
-    pub related_jobs: HashMap<ObjectId, streaming_job::Model>,
+    pub related_jobs: HashMap<ObjectId, (streaming_job::Model, String)>,
 }
 
 async fn resolve_no_shuffle_query<C>(
@@ -190,6 +192,67 @@ where
         .map_err(MetaError::from)?;
 
     Ok(result)
+}
+
+async fn resolve_streaming_job_definition<C>(
+    txn: &C,
+    job_ids: &HashSet<ObjectId>,
+) -> MetaResult<HashMap<ObjectId, String>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids = job_ids.iter().cloned().collect_vec();
+
+    // including table, materialized view, index
+    let common_job_definitions: Vec<(ObjectId, String)> = Table::find()
+        .select_only()
+        .columns([
+            table::Column::TableId,
+            #[cfg(not(debug_assertions))]
+            table::Column::Name,
+            #[cfg(debug_assertions)]
+            table::Column::Definition,
+        ])
+        .filter(table::Column::TableId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let sink_definitions: Vec<(ObjectId, String)> = Sink::find()
+        .select_only()
+        .columns([
+            sink::Column::SinkId,
+            #[cfg(not(debug_assertions))]
+            sink::Column::Name,
+            #[cfg(debug_assertions)]
+            sink::Column::Definition,
+        ])
+        .filter(sink::Column::SinkId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let source_definitions: Vec<(ObjectId, String)> = Source::find()
+        .select_only()
+        .columns([
+            source::Column::SourceId,
+            #[cfg(not(debug_assertions))]
+            source::Column::Name,
+            #[cfg(debug_assertions)]
+            source::Column::Definition,
+        ])
+        .filter(source::Column::SourceId.is_in(job_ids.clone()))
+        .into_tuple()
+        .all(txn)
+        .await?;
+
+    let definitions: HashMap<ObjectId, String> = common_job_definitions
+        .into_iter()
+        .chain(sink_definitions.into_iter())
+        .chain(source_definitions.into_iter())
+        .collect();
+
+    Ok(definitions)
 }
 
 impl CatalogController {
@@ -339,6 +402,9 @@ impl CatalogController {
         let related_job_ids: HashSet<_> =
             fragments.values().map(|fragment| fragment.job_id).collect();
 
+        let related_job_definitions =
+            resolve_streaming_job_definition(txn, &related_job_ids).await?;
+
         let related_jobs = StreamingJob::find()
             .filter(streaming_job::Column::JobId.is_in(related_job_ids))
             .all(txn)
@@ -346,7 +412,19 @@ impl CatalogController {
 
         let related_jobs = related_jobs
             .into_iter()
-            .map(|job| (job.job_id, job))
+            .map(|job| {
+                let job_id = job.job_id;
+                (
+                    job_id,
+                    (
+                        job,
+                        related_job_definitions
+                            .get(&job_id)
+                            .cloned()
+                            .unwrap_or("".to_owned()),
+                    ),
+                )
+            })
             .collect();
 
         Ok(RescheduleWorkingSet {
@@ -374,7 +452,14 @@ impl CatalogController {
     pub async fn integrity_check(&self) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
+        Self::graph_check(&txn).await
+    }
 
+    // Perform integrity checks on the Actor, ActorDispatcher and Fragment tables.
+    pub async fn graph_check<C>(txn: &C) -> MetaResult<()>
+    where
+        C: ConnectionTrait,
+    {
         #[derive(Clone, DerivePartialModel, FromQueryResult)]
         #[sea_orm(entity = "ActorDispatcher")]
         pub struct PartialActorDispatcher {
@@ -409,14 +494,14 @@ impl CatalogController {
         let mut flag = false;
 
         let fragments: Vec<PartialFragment> =
-            Fragment::find().into_partial_model().all(&txn).await?;
+            Fragment::find().into_partial_model().all(txn).await?;
 
         let fragment_map: HashMap<_, _> = fragments
             .into_iter()
             .map(|fragment| (fragment.fragment_id, fragment))
             .collect();
 
-        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(&txn).await?;
+        let actors: Vec<PartialActor> = Actor::find().into_partial_model().all(txn).await?;
 
         let mut fragment_actors = HashMap::new();
         for actor in &actors {
@@ -433,7 +518,7 @@ impl CatalogController {
 
         let actor_dispatchers: Vec<PartialActorDispatcher> = ActorDispatcher::find()
             .into_partial_model()
-            .all(&txn)
+            .all(txn)
             .await?;
 
         let mut discovered_upstream_fragments = HashMap::new();
@@ -562,10 +647,7 @@ impl CatalogController {
             crit_check_in_loop!(
                 flag,
                 actor_map.contains_key(actor_id),
-                format!(
-                    "ActorDispatcher {} has actor_id {} which does not exist",
-                    id, actor_id
-                )
+                format!("ActorDispatcher {id} has actor_id {actor_id} which does not exist",)
             );
 
             let actor = &actor_map[actor_id];
@@ -574,8 +656,7 @@ impl CatalogController {
                 flag,
                 fragment_map.contains_key(dispatcher_id),
                 format!(
-                    "ActorDispatcher {} has dispatcher_id {} which does not exist",
-                    id, dispatcher_id
+                    "ActorDispatcher {id} has dispatcher_id {dispatcher_id} which does not exist",
                 )
             );
 
@@ -599,8 +680,8 @@ impl CatalogController {
                 flag,
                 fragment_actors.contains_key(dispatcher_id),
                 format!(
-                    "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
-                )
+                "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has no actors",
+            )
             );
 
             let dispatcher_downstream_actor_ids: HashSet<_> =
@@ -640,7 +721,7 @@ impl CatalogController {
                         flag,
                         &dispatcher_downstream_actor_ids == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {dispatcher_downstream_actor_ids:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher downstream actor ids: {dispatcher_downstream_actor_ids:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
                         )
                     );
                 }
@@ -693,7 +774,7 @@ impl CatalogController {
                         flag,
                         &mapping_actors == target_fragment_actor_ids,
                         format!(
-                            "ActorDispatcher {id} has downstream fragment {dispatcher_id} which has different actors: {mapping_actors:?} != {target_fragment_actor_ids:?}",
+                            "ActorDispatcher {id} has downstream fragment {dispatcher_id}, but dispatcher mapping actor ids {mapping_actors:?} != target fragment actor ids: {target_fragment_actor_ids:?}",
                         )
                     );
 
@@ -719,7 +800,7 @@ impl CatalogController {
                                 flag,
                                 mapping.to_bitmaps() == downstream_bitmaps,
                                 format!(
-                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id} which has different bitmaps: {mapping:?} != {downstream_bitmaps:?}"
+                                    "ActorDispatcher {id} has hash downstream fragment {dispatcher_id}, but dispatcher mapping {mapping:?} != discovered downstream actor bitmaps: {downstream_bitmaps:?}"
                                 )
                             );
                         }
@@ -790,7 +871,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_fragment_ids == upstream_fragment_ids,
                 format!(
-                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != {upstream_fragment_ids:?}",
+                    "Fragment {fragment_id} has different upstream_fragment_ids from discovered: {discovered_upstream_fragment_ids:?} != fragment upstream fragment ids: {upstream_fragment_ids:?}",
                 )
             );
         }
@@ -823,7 +904,7 @@ impl CatalogController {
                 flag,
                 discovered_upstream_actor_ids == upstream_actor_ids,
                 format!(
-                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != {upstream_actor_ids:?}",
+                    "Actor {actor_id} has different upstream_actor_ids from discovered: {discovered_upstream_actor_ids:?} != actor upstream actor ids: {upstream_actor_ids:?}",
                 )
             )
         }

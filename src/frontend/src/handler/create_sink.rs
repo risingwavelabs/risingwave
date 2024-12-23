@@ -379,62 +379,56 @@ async fn get_partition_compute_info_for_iceberg(
         if _iceberg_config.create_table_if_not_exists {
             return Ok(None);
         }
-        let table = _iceberg_config.load_table().await?;
-        let Some(partition_spec) = table.current_table_metadata().current_partition_spec().ok()
-        else {
-            return Ok(None);
-        };
+        let table = _iceberg_config.load_table_v2().await?;
+        let partition_spec = table.metadata().default_partition_spec();
 
         if partition_spec.is_unpartitioned() {
             return Ok(None);
         }
 
+        use iceberg::spec::Transform;
         // Separate the partition spec into two parts: sparse partition and range partition.
         // Sparse partition means that the data distribution is more sparse at a given time.
         // Range partition means that the data distribution is likely same at a given time.
         // Only compute the partition and shuffle by them for the sparse partition.
-        let has_sparse_partition = partition_spec.fields.iter().any(|f| match f.transform {
+        let has_sparse_partition = partition_spec.fields().iter().any(|f| match f.transform {
             // Sparse partition
-            icelake::types::Transform::Identity
-            | icelake::types::Transform::Truncate(_)
-            | icelake::types::Transform::Bucket(_) => true,
+            Transform::Identity | Transform::Truncate(_) | Transform::Bucket(_) => true,
             // Range partition
-            icelake::types::Transform::Year
-            | icelake::types::Transform::Month
-            | icelake::types::Transform::Day
-            | icelake::types::Transform::Hour
-            | icelake::types::Transform::Void => false,
+            Transform::Year
+            | Transform::Month
+            | Transform::Day
+            | Transform::Hour
+            | Transform::Void => false,
+            // unknown
+            Transform::Unknown => false,
         });
 
         if !has_sparse_partition {
             return Ok(None);
         }
 
-        let arrow_type: ArrowDataType = table
-            .current_partition_type()
-            .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?
-            .try_into()
+        let schema = table.metadata().current_schema();
+        let partition_type = partition_spec
+            .partition_type(schema)
+            .map_err(|err| RwError::from(ErrorCode::SinkError(err.into())))?;
+        let arrow_type: ArrowDataType = iceberg::arrow::type_to_arrow_type(&partition_type.into())
             .map_err(|_| {
                 RwError::from(ErrorCode::SinkError(
                     "Fail to convert iceberg partition type to arrow type".into(),
                 ))
             })?;
-        let Some(schema) = table.current_table_metadata().current_schema().ok() else {
-            return Ok(None);
-        };
-        let partition_fields = partition_spec
-            .fields
-            .iter()
-            .map(|f| {
-                let source_f =
-                    schema
-                        .look_up_field_by_id(f.source_column_id)
-                        .ok_or(RwError::from(ErrorCode::SinkError(
-                            "Fail to look up iceberg partition field".into(),
-                        )))?;
-                Ok((source_f.name.clone(), f.transform))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let partition_fields =
+            partition_spec
+                .fields()
+                .iter()
+                .map(|f| {
+                    let source_f = schema.field_by_id(f.source_id).ok_or(RwError::from(
+                        ErrorCode::SinkError("Fail to look up iceberg partition field".into()),
+                    ))?;
+                    Ok((source_f.name.clone(), f.transform))
+                })
+                .collect::<Result<Vec<_>>>()?;
 
         let ArrowDataType::Struct(partition_type) = arrow_type else {
             return Err(RwError::from(ErrorCode::SinkError(

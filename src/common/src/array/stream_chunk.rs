@@ -101,8 +101,6 @@ impl Op {
     }
 }
 
-pub type Ops<'a> = &'a [Op];
-
 /// `StreamChunk` is used to pass data over the streaming pathway.
 #[derive(Clone, PartialEq)]
 pub struct StreamChunk {

@@ -60,6 +60,7 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::{IncludeOption, Parser};
 use thiserror_ext::AsReport;
 
+use super::create_source::{bind_columns_from_source, CreateSourceType};
 use super::{create_sink, create_source, RwPgResponse};
 use crate::binder::{bind_data_type, bind_struct_field, Clause, SecureCompareContext};
 use crate::catalog::root_catalog::SchemaPath;
@@ -69,8 +70,8 @@ use crate::catalog::{check_valid_column_name, ColumnId, DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::create_source::{
-    bind_columns_from_source, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns, UPSTREAM_SOURCE_KEY,
+    bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
+    handle_addition_columns, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::{CdcScanOptions, SourceNodeKind};
@@ -498,8 +499,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let session = &handler_args.session;
     let with_properties = bind_connector_props(&handler_args, &format_encode, false)?;
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(session, &format_encode, Either::Left(&with_properties)).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        session,
+        &format_encode,
+        Either::Left(&with_properties),
+        CreateSourceType::Table,
+    )
+    .await?;
 
     let overwrite_options = OverwriteOptions::new(&mut handler_args);
     let rate_limit = overwrite_options.source_rate_limit;
@@ -516,8 +522,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         source_info,
         include_column_options,
         &mut col_id_gen,
-        false,
-        false,
+        CreateSourceType::Table,
         rate_limit,
     )
     .await?;
@@ -848,12 +853,19 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (options, secret_refs) = cdc_with_options.into_parts();
 
+    let non_generated_column_descs = columns
+        .iter()
+        .filter(|&c| (!c.is_generated()))
+        .map(|c| c.column_desc.clone())
+        .collect_vec();
+    let non_generated_column_num = non_generated_column_descs.len();
+
     let cdc_table_desc = CdcTableDesc {
         table_id,
         source_id: source.id.into(), // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
-        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        columns: non_generated_column_descs,
         stream_key: pk_column_indices,
         connect_properties: options,
         secret_refs,
@@ -871,7 +883,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     );
 
     let scan_node: PlanRef = logical_scan.into();
-    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let required_cols = FixedBitSet::with_capacity(non_generated_column_num);
     let plan_root = PlanRoot::new_with_logical_plan(
         scan_node,
         RequiredDist::Any,
@@ -1158,18 +1170,6 @@ fn sanity_check_for_cdc_table(
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
 ) -> Result<()> {
-    for c in column_defs {
-        for op in &c.options {
-            if let ColumnOption::GeneratedColumns(_) = op.option {
-                return Err(ErrorCode::NotSupported(
-                    "generated column defined on the table created from a CDC source".into(),
-                    "Remove the generated column in the column list".into(),
-                )
-                .into());
-            }
-        }
-    }
-
     // wildcard cannot be used with column definitions
     if wildcard_idx.is_some() && !column_defs.is_empty() {
         return Err(ErrorCode::NotSupported(
