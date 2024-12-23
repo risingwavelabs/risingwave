@@ -62,6 +62,7 @@ pub(super) mod handlers {
         Path((database, schema, table)): Path<(String, String, String)>,
         body: Bytes,
     ) -> Result<()> {
+        return Ok(());
         let session_mgr = SESSION_MANAGER
             .get()
             .expect("session manager has been initialized");
