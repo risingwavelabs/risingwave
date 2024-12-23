@@ -99,7 +99,7 @@ impl ProtobufParserConfig {
                 base.clone(),
                 protobuf_config.pulsar_token,
             );
-            let schema_info = client.get_schema(&pulsar_topic).await?;
+            let schema_info = client.get_schema(&pulsar_topic, None).await?;
             let crate::schema::pulsar_schema::PulsarSchema::ProtobufNative(message_descriptor) =
                 schema_info.schema
             else {

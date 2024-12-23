@@ -29,7 +29,7 @@ pub struct Client {
 #[derive(Debug)]
 pub struct SchemaInfo {
     pub topic: String,
-    pub version: usize,
+    pub version: i64,
     pub timestamp_ms: i64,
     pub schema: PulsarSchema,
     pub properties: HashMap<String, String>,
@@ -49,10 +49,14 @@ impl Client {
         Self { inner, base, token }
     }
 
-    pub async fn get_schema(&self, topic: &str) -> Result<SchemaInfo, reqwest::Error> {
+    pub async fn get_schema(
+        &self,
+        topic: &str,
+        version: Option<i64>,
+    ) -> Result<SchemaInfo, reqwest::Error> {
         #[derive(serde::Deserialize)]
         struct GetSchemaResponse {
-            version: usize,
+            version: i64,
             r#type: String,
             timestamp: i64,
             data: String,
@@ -68,10 +72,11 @@ impl Client {
             root_file_descriptor_name: String,
         }
 
-        let url = self
-            .base
-            .join(&format!("/admin/v2/schemas/{topic}/schema"))
-            .unwrap();
+        let path = match version {
+            Some(version) => format!("/admin/v2/schemas/{topic}/schema/{version}"),
+            None => format!("/admin/v2/schemas/{topic}/schema"),
+        };
+        let url = self.base.join(&path).unwrap();
         let mut q = self.inner.request(Method::GET, url);
         if let Some(token) = &self.token {
             q = q.bearer_auth(token);
@@ -117,7 +122,7 @@ mod tests {
     #[tokio::test]
     async fn test_xxx() {
         let c = Client::new(Url::parse("http://0.0.0.0:8080").unwrap(), None);
-        let z = c.get_schema("public/default/test-000").await;
+        let z = c.get_schema("public/default/test-000", None).await;
         assert_eq!(format!("{z:#?}"), "");
     }
 }
