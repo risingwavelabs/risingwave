@@ -51,7 +51,7 @@ impl AccessBuilder for AvroAccessBuilder {
         payload: Vec<u8>,
         source_meta: &SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
-        self.value = self.parse_avro_value(&payload).await?;
+        self.value = self.parse_avro_value(&payload, source_meta).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
             AvroParseOptions::create(&self.schema.original_schema),
@@ -93,7 +93,11 @@ impl AvroAccessBuilder {
     ///
     /// - In Kafka ([Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)):
     ///   starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
-    async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
+    async fn parse_avro_value(
+        &self,
+        payload: &[u8],
+        _source_meta: &SourceMeta,
+    ) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         match &self.writer_schema_cache {
