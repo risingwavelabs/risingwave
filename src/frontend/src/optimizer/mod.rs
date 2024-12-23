@@ -76,6 +76,7 @@ use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::error::{ErrorCode, Result};
 use crate::expr::TimestamptzExprFinder;
+use crate::handler::create_table::{AAA, BBB};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
@@ -639,25 +640,26 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create table plan.
-    #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         mut self,
         context: OptimizerContextRef,
         table_name: String,
-        columns: Vec<ColumnCatalog>,
-        definition: String,
-        pk_column_ids: Vec<ColumnId>,
-        row_id_index: Option<usize>,
-        append_only: bool,
-        on_conflict: Option<OnConflict>,
-        with_version_column: Option<String>,
-        watermark_descs: Vec<WatermarkDesc>,
-        version: Option<TableVersion>,
-        with_external_source: bool,
-        retention_seconds: Option<NonZeroU32>,
-        cdc_table_id: Option<String>,
-        webhook_info: Option<PbWebhookSourceInfo>,
-        engine: Engine,
+        AAA {
+            columns,
+            pk_column_ids,
+            row_id_index,
+            definition,
+            watermark_descs,
+            source_catalog,
+        }: AAA,
+        BBB {
+            append_only,
+            on_conflict,
+            with_version_column,
+            version,
+            webhook_info,
+            engine,
+        }: BBB,
     ) -> Result<StreamMaterialize> {
         assert_eq!(self.phase, PlanPhase::Logical);
         assert_eq!(self.plan.convention(), Convention::Logical);
@@ -751,6 +753,7 @@ impl PlanRoot {
             None
         };
 
+        let with_external_source = source_catalog.is_some();
         let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
@@ -890,8 +893,6 @@ impl PlanRoot {
             pk_column_indices,
             row_id_index,
             version,
-            retention_seconds,
-            cdc_table_id,
             webhook_info,
             engine,
         )

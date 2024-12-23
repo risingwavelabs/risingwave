@@ -110,7 +110,6 @@ impl StreamMaterialize {
             table_type,
             None,
             cardinality,
-            retention_seconds,
             create_type,
             None,
             Engine::Hummock,
@@ -137,8 +136,6 @@ impl StreamMaterialize {
         pk_column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
-        retention_seconds: Option<NonZeroU32>,
-        cdc_table_id: Option<String>,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
     ) -> Result<Self> {
@@ -157,13 +154,10 @@ impl StreamMaterialize {
             TableType::Table,
             version,
             Cardinality::unknown(), // unknown cardinality for tables
-            retention_seconds,
             CreateType::Foreground,
             webhook_info,
             engine,
         )?;
-
-        table.cdc_table_id = cdc_table_id;
 
         Ok(Self::new(input, table))
     }
@@ -233,7 +227,6 @@ impl StreamMaterialize {
         table_type: TableType,
         version: Option<TableVersion>,
         cardinality: Cardinality,
-        retention_seconds: Option<NonZeroU32>,
         create_type: CreateType,
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
@@ -244,6 +237,7 @@ impl StreamMaterialize {
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
+        let retention_seconds = input.ctx().with_options().retention_seconds();
 
         let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices
