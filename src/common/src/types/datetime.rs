@@ -481,6 +481,38 @@ impl Time {
     }
 }
 
+/// document about old and new format, including the meaning of highest 2 bits, and the corresponding accepted ranges.
+/// The enumeration holds the correct value, which will be added(removed) to highest 2 bits when calling `to_protobuf` and `from_protobuf` methods
+enum FirstI64 {
+    V0 { usecs: i64 },
+    V1 { secs: i64 },
+}
+impl FirstI64 {
+    pub fn to_protobuf(&self) -> i64 {
+        match self {
+            FirstI64::V0 { usecs } => *usecs,
+            FirstI64::V1 { secs } => secs ^ (0b01 << 62),
+        }
+    }
+
+    pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<FirstI64> {
+        let value = cur
+            .read_i64::<BigEndian>()
+            .context("failed to read i64 from Time buffer")?;
+        if Self::is_v1_format_state(value) {
+            let secs = value ^ (0b01 << 62);
+            Ok(FirstI64::V1 { secs })
+        } else {
+            Ok(FirstI64::V0 { usecs: value })
+        }
+    }
+
+    fn is_v1_format_state(value: i64) -> bool {
+        let state = (value >> 62) & 0b11;
+        state == 0b10 || state == 0b01
+    }
+}
+
 impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(Timestamp::new({
@@ -491,17 +523,14 @@ impl Timestamp {
     }
 
     pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
-        let secs = cur
-            .read_i64::<BigEndian>()
-            .context("failed to read i64 from Time buffer")?;
-        if Self::has_timestamp_namo_format_state(secs) {
-            let secs = Self::remove_timestamp_namo_format_state(secs);
-            let nsecs = cur
-                .read_u32::<BigEndian>()
-                .context("failed to read u32 from Time buffer")?;
-            Ok(Timestamp::with_secs_nsecs(secs, nsecs)?)
-        } else {
-            Ok(Timestamp::with_micros(secs)?)
+        match FirstI64::from_protobuf(cur)? {
+            FirstI64::V0 { usecs } => Ok(Timestamp::with_micros(usecs)?),
+            FirstI64::V1 { secs } => {
+                let nsecs = cur
+                    .read_u32::<BigEndian>()
+                    .context("failed to read u32 from Time buffer")?;
+                Ok(Timestamp::with_secs_nsecs(secs, nsecs)?)
+            }
         }
     }
 
@@ -511,27 +540,17 @@ impl Timestamp {
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         let timestamp_size = output
             .write(
-                &(Self::add_timestamp_namo_format_state(self.0.and_utc().timestamp()))
-                    .to_be_bytes(),
+                &(FirstI64::V1 {
+                    secs: self.0.and_utc().timestamp(),
+                }
+                .to_protobuf())
+                .to_be_bytes(),
             )
             .map_err(Into::<ArrayError>::into)?;
         let timestamp_subsec_nanos_size = output
             .write(&(self.0.and_utc().timestamp_subsec_nanos()).to_be_bytes())
             .map_err(Into::<ArrayError>::into)?;
         Ok(timestamp_subsec_nanos_size + timestamp_size)
-    }
-
-    fn add_timestamp_namo_format_state(value: i64) -> i64 {
-        value ^ (0b01 << 62)
-    }
-
-    fn has_timestamp_namo_format_state(value: i64) -> bool {
-        let state = (value >> 62) & 0b11;
-        state == 0b10 || state == 0b01
-    }
-
-    fn remove_timestamp_namo_format_state(value: i64) -> i64 {
-        value ^ (0b01 << 62)
     }
 
     pub fn get_timestamp_nanos(&self) -> i64 {

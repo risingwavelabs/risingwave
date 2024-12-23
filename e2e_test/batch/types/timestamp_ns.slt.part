@@ -57,7 +57,7 @@ select * from t1 order by v2;
 2  2012-01-01 01:01:01.123456
 1  2013-01-01 01:01:01.123456789
 4  2213-01-01 01:01:01.123456789
-5 
+5  null
 
 query T
 select * from t1 where v2 >= '2012-01-01 01:01:01.123456';
@@ -70,7 +70,7 @@ query T
 select v1, cast(v2 as date) as date_v2, cast(v2 as timestamp with time zone) as timestamptz_v2 from t1;
 ----
 3  0001-01-01 BC  0001-01-01 01:01:01.123456+00:00 BC
-5  null           null    
+5  null           null
 1  2013-01-01     2013-01-01 01:01:01.123456+00:00
 4  2213-01-01     2213-01-01 01:01:01.123456+00:00
 2  2012-01-01     2012-01-01 01:01:01.123456+00:00
@@ -85,7 +85,7 @@ select v1, date_trunc('day', v2) AS truncated_v2 from t1;
 4  2213-01-01 00:00:00
 
 query T
-select v1, v2 at time zone 'UTC' as v2_utc from t1;          
+select v1, v2 at time zone 'UTC' as v2_utc from t1;
 ----
 3  0001-01-01 01:01:01.123456+00:00 BC
 5  null

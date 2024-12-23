@@ -495,7 +495,7 @@ impl HummockVersion {
                             .clone_from(&group_construct.table_ids);
                         self.levels.insert(*compaction_group_id, new_levels);
                         let member_table_ids = if group_construct.version
-                            >= CompatibilityVersion::NoMemberTableIds as i32
+                            >= CompatibilityVersion::NoMemberTableIds as _
                         {
                             self.state_table_info
                                 .compaction_group_member_table_ids(*compaction_group_id)
@@ -509,7 +509,7 @@ impl HummockVersion {
                         };
 
                         if group_construct.version
-                            >= CompatibilityVersion::SplitGroupByTableId as i32
+                            >= CompatibilityVersion::SplitGroupByTableId as _
                         {
                             let split_key = if group_construct.split_key.is_some() {
                                 Some(Bytes::from(group_construct.split_key.clone().unwrap()))
