@@ -21,7 +21,9 @@ export RUST_MIN_STACK=4194304
 unset LANG
 
 function dump_diagnose_info() {
-  ./risedev diagnose || true
+  if [ -f .risingwave/config/risedev-env ]; then
+    ./risedev diagnose || true
+  fi
 }
 trap dump_diagnose_info EXIT
 
