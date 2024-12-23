@@ -34,6 +34,7 @@ use crate::parser::{
 use crate::schema::schema_registry::{
     extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
 };
+use crate::source::SourceMeta;
 
 // Default avro access builder
 #[derive(Debug)]
@@ -45,7 +46,11 @@ pub struct AvroAccessBuilder {
 }
 
 impl AccessBuilder for AvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        source_meta: &SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         self.value = self.parse_avro_value(&payload).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
