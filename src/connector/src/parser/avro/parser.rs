@@ -24,7 +24,7 @@ use risingwave_connector_codec::decoder::avro::{
     AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
 };
 
-use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
+use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl, PulsarSchemaCache};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
@@ -96,7 +96,7 @@ impl AvroAccessBuilder {
     async fn parse_avro_value(
         &self,
         payload: &[u8],
-        _source_meta: &SourceMeta,
+        source_meta: &SourceMeta,
     ) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -146,6 +146,23 @@ impl AvroAccessBuilder {
                     Some(&self.schema.original_schema),
                 )?))
             }
+            WriterSchemaCache::Pulsar(resolver) => {
+                use bytes::Buf as _;
+                let SourceMeta::Pulsar(pulsar_meta) = source_meta else {
+                    unreachable!();
+                };
+                let schema_version = pulsar_meta
+                    .schema_version
+                    .as_deref()
+                    .map(|mut buf| buf.get_i64());
+                let writer_schema = resolver.get(schema_version).await?;
+                let mut raw_payload = payload;
+                Ok(Some(from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    Some(&self.schema.original_schema),
+                )?))
+            }
         }
     }
 }
@@ -164,6 +181,7 @@ pub struct AvroParserConfig {
 enum WriterSchemaCache {
     Confluent(Arc<ConfluentSchemaCache>),
     Glue(Arc<GlueSchemaCacheImpl>),
+    Pulsar(Arc<PulsarSchemaCache>),
     File,
 }
 
@@ -231,6 +249,20 @@ impl AvroParserConfig {
                 Ok(Self {
                     schema: Arc::new(ResolvedAvroSchema::create(schema)?),
                     writer_schema_cache: WriterSchemaCache::Glue(Arc::new(resolver)),
+                    map_handling,
+                })
+            }
+            SchemaLocation::Pulsar {
+                rest_base,
+                token,
+                topic,
+            } => {
+                let rest_base = rest_base.parse().unwrap();
+                let resolver = PulsarSchemaCache::new(rest_base, token, &topic).unwrap();
+                let schema = resolver.get(None).await?;
+                Ok(Self {
+                    schema: Arc::new(ResolvedAvroSchema::create(schema)?),
+                    writer_schema_cache: WriterSchemaCache::Pulsar(Arc::new(resolver)),
                     map_handling,
                 })
             }

@@ -96,6 +96,9 @@ impl TryFrom<&SchemaLocation> for WireType {
             SchemaLocation::Glue { .. } => bail_invalid_option_error!(
                 "encode protobuf from aws glue schema registry not supported yet"
             ),
+            SchemaLocation::Pulsar { .. } => bail_invalid_option_error!(
+                "encode protobuf from pulsar schema registry not supported yet"
+            ),
         }
     }
 }
@@ -151,6 +154,9 @@ impl ProtobufParserConfig {
             }
             SchemaLocation::Glue { .. } => bail_invalid_option_error!(
                 "encode protobuf from aws glue schema registry not supported yet"
+            ),
+            SchemaLocation::Pulsar { .. } => bail_invalid_option_error!(
+                "encode protobuf from pulsar schema registry not supported yet"
             ),
         };
 
