@@ -21,7 +21,9 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
+use crate::handler::create_table::{
+    gen_create_table_plan_without_source, ColumnIdGenerator, CreateTableProps,
+};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
 pub async fn handle_create_as(
@@ -107,14 +109,16 @@ pub async fn handle_create_as(
             columns,
             vec![],
             vec![],
-            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            vec![],        // No watermark should be defined in for `CREATE TABLE AS`
-            append_only,
-            on_conflict,
-            with_version_column,
-            Some(col_id_gen.into_version()),
-            None,
-            engine,
+            vec![], // No watermark should be defined in for `CREATE TABLE AS`
+            col_id_gen.into_version(),
+            CreateTableProps {
+                definition: "".to_owned(), // TODO: empty definition means no schema change support
+                append_only,
+                on_conflict,
+                with_version_column,
+                webhook_info: None,
+                engine,
+            },
         )?;
         let graph = build_graph(plan)?;
 

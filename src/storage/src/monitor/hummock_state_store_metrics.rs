@@ -14,7 +14,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
@@ -23,7 +23,7 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec, RelabeledMetricVec,
+    RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -73,9 +73,9 @@ pub struct HummockStateStoreMetrics {
     pub spill_task_size_from_sealed: GenericCounter<AtomicU64>,
 
     // uploading task
-    pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
+    pub uploader_uploading_task_size: UintGauge,
     pub uploader_uploading_task_count: IntGauge,
-    pub uploader_imm_size: GenericGauge<AtomicU64>,
+    pub uploader_imm_size: UintGauge,
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
@@ -312,7 +312,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let uploader_uploading_task_size = GenericGauge::new(
+        let uploader_uploading_task_size = UintGauge::new(
             "state_store_uploader_uploading_task_size",
             "Total size of uploader uploading tasks",
         )
@@ -328,7 +328,7 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let uploader_imm_size = GenericGauge::new(
+        let uploader_imm_size = UintGauge::new(
             "state_store_uploader_imm_size",
             "Total size of imms tracked by uploader",
         )

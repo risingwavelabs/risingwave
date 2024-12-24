@@ -10,7 +10,6 @@ repository = { workspace = true }
 [dependencies]
 anyhow = "1"
 bincode = "1"
-bytes = "1"
 easy-ext = "1"
 serde = "1"
 serde-error = "0.1"

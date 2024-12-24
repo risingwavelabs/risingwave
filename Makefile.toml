@@ -1208,7 +1208,7 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_simulation
 """
 
 [tasks.check-trailing-spaces]
@@ -1340,7 +1340,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.23.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.24.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
