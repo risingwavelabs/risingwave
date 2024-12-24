@@ -553,7 +553,9 @@ fn create_delete_sql(
     let number_of_pk = pk_indices.len();
     let parameters: String = (0..number_of_rows)
         .map(|i| {
-            let row_parameters: String = pk_indices.iter().enumerate()
+            let row_parameters: String = pk_indices
+                .iter()
+                .enumerate()
                 .map(|(j, pk_index)| {
                     format!(
                         "{} = ${}",
