@@ -246,7 +246,7 @@ impl TryToStreamPb for StreamTemporalJoin {
             .as_stream_table_scan()
             .expect("should be a stream table scan");
 
-        Ok(NodeBody::TemporalJoin(TemporalJoinNode {
+        Ok(NodeBody::TemporalJoin(Box::new(TemporalJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -267,7 +267,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 Some(memo_table.to_internal_table_prost())
             },
             is_nested_loop: self.is_nested_loop,
-        }))
+        })))
     }
 }
 
