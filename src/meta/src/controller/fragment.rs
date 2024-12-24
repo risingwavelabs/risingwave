@@ -1639,11 +1639,11 @@ mod tests {
         let mut input = vec![];
         for (upstream_fragment_id, upstream_actor_ids) in actor_upstream_actor_ids {
             input.push(PbStreamNode {
-                node_body: Some(PbNodeBody::Merge(MergeNode {
+                node_body: Some(PbNodeBody::Merge(Box::new(MergeNode {
                     upstream_actor_id: upstream_actor_ids.iter().map(|id| *id as _).collect(),
                     upstream_fragment_id: *upstream_fragment_id as _,
                     ..Default::default()
-                })),
+                }))),
                 ..Default::default()
             });
         }
