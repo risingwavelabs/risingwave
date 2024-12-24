@@ -111,7 +111,7 @@ impl StreamNode for StreamProjectSet {
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        PbNodeBody::ProjectSet(ProjectSetNode {
+        PbNodeBody::ProjectSet(Box::new(ProjectSetNode {
             select_list: self
                 .core
                 .select_list
@@ -121,7 +121,7 @@ impl StreamNode for StreamProjectSet {
             watermark_input_cols,
             watermark_expr_indices,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
-        })
+        }))
     }
 }
 

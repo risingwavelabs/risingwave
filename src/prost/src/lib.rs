@@ -566,7 +566,8 @@ mod tests {
     #[test]
     fn test_size() {
         use static_assertions::const_assert_eq;
-
+        // box all fields in NodeBody to avoid large_enum_variant
+        // see https://github.com/risingwavelabs/risingwave/issues/19910
         const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
     }
 }
