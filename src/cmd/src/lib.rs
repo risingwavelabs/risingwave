@@ -33,6 +33,7 @@ macro_rules! main {
     };
 }
 
+risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();
 
 // Entry point functions.

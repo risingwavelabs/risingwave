@@ -13,9 +13,21 @@
 // limitations under the License.
 
 use async_nats::jetstream::Message;
+use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::source::base::SourceMessage;
 use crate::source::{SourceMeta, SplitId};
+
+#[derive(Debug, Clone)]
+pub struct NatsMeta {
+    pub subject: String,
+}
+
+impl NatsMeta {
+    pub fn extract_subject(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(self.subject.as_str()))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct NatsMessage {
@@ -23,6 +35,7 @@ pub struct NatsMessage {
     pub sequence_number: String,
     pub payload: Vec<u8>,
     pub reply_subject: Option<String>,
+    pub subject: String,
 }
 
 impl From<NatsMessage> for SourceMessage {
@@ -36,7 +49,9 @@ impl From<NatsMessage> for SourceMessage {
             // use reply_subject as offset for ack use, we just check the persisted state for whether this is the first run
             offset: message.reply_subject.unwrap_or_default(),
             split_id: message.split_id,
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::Nats(NatsMeta {
+                subject: message.subject.clone(),
+            }),
         }
     }
 }
@@ -51,6 +66,7 @@ impl NatsMessage {
                 .message
                 .reply
                 .map(|subject| subject.as_str().to_owned()),
+            subject: message.message.subject.as_str().to_owned(),
         }
     }
 }

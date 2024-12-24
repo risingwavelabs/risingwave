@@ -19,6 +19,14 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export RUST_MIN_STACK=4194304
 
 unset LANG
+
+function dump_diagnose_info() {
+  if [ -f .risingwave/config/risedev-env ]; then
+    ./risedev diagnose || true
+  fi
+}
+trap dump_diagnose_info EXIT
+
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
 fi

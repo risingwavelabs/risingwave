@@ -30,9 +30,8 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
-use super::alter_table_column::schema_has_schema_registry;
 use super::create_source::{
-    bind_columns_from_source, generate_stream_graph_for_source, validate_compatibility,
+    generate_stream_graph_for_source, schema_has_schema_registry, validate_compatibility,
 };
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
@@ -40,6 +39,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
+use crate::handler::create_source::{bind_columns_from_source, CreateSourceType};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -81,6 +81,9 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
 /// - Hidden columns and `INCLUDE ... AS ...` columns are ignored. Because it's only for the special handling of alter sr.
 ///   For the newly resolved `columns_from_resolve_source` (created by [`bind_columns_from_source`]), it doesn't contain hidden columns (`_row_id`) and `INCLUDE ... AS ...` columns.
 ///   This is fragile and we should really refactor it later.
+/// - Column with the same name but different data type is considered as a different column, i.e., altering the data type of a column
+///   will be treated as dropping the old column and adding a new column. Note that we don't reject here like we do in `ALTER TABLE REFRESH SCHEMA`,
+///   because there's no data persistence (thus compatibility concern) in the source case.
 fn columns_minus(columns_a: &[ColumnCatalog], columns_b: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
     columns_a
         .iter()
@@ -164,8 +167,13 @@ pub async fn refresh_sr_and_get_columns_diff(
         bail_not_implemented!("altering a cdc source is not supported");
     }
 
-    let (Some(columns_from_resolve_source), source_info) =
-        bind_columns_from_source(session, format_encode, Either::Right(&with_properties)).await?
+    let (Some(columns_from_resolve_source), source_info) = bind_columns_from_source(
+        session,
+        format_encode,
+        Either::Right(&with_properties),
+        CreateSourceType::for_replace(original_source),
+    )
+    .await?
     else {
         // Source without schema registry is rejected.
         unreachable!("source without schema registry is rejected")
@@ -277,7 +285,6 @@ pub async fn handle_alter_source_with_sr(
     source.version += 1;
 
     let pb_source = source.to_prost(schema_id, database_id);
-
     let catalog_writer = session.catalog_writer()?;
     if source.info.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source.clone())?;

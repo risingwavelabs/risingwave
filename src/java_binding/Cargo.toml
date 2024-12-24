@@ -3,12 +3,6 @@ name = "risingwave_java_binding"
 version = "0.1.0"
 edition = "2021"
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 bytes = "1"
