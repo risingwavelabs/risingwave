@@ -43,7 +43,9 @@ use risingwave_connector::source::cdc::external::{
 };
 use risingwave_connector::{source, WithOptionsSecResolved};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc};
+use risingwave_pb::catalog::{
+    PbHandleConflictBehavior, PbSource, PbTable, PbWebhookSourceInfo, Table, WatermarkDesc,
+};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{
@@ -667,6 +669,25 @@ fn gen_table_plan_with_source(
     gen_table_plan_inner(context, schema_name, table_name, info, props)
 }
 
+/// On-conflict behavior either from user input or existing table catalog.
+#[derive(Clone, Copy)]
+pub enum EitherOnConflict {
+    Ast(Option<OnConflict>),
+    Pb(PbHandleConflictBehavior),
+}
+
+impl From<PbHandleConflictBehavior> for EitherOnConflict {
+    fn from(v: PbHandleConflictBehavior) -> Self {
+        Self::Pb(v)
+    }
+}
+
+impl From<Option<OnConflict>> for EitherOnConflict {
+    fn from(v: Option<OnConflict>) -> Self {
+        Self::Ast(v)
+    }
+}
+
 /// Arguments of the functions that generate a table plan, part 1.
 ///
 /// Compared to [`CreateTableProps`], this struct contains fields that need some work of binding
@@ -687,7 +708,7 @@ pub struct CreateTableInfo {
 pub struct CreateTableProps {
     pub definition: String,
     pub append_only: bool,
-    pub on_conflict: Option<OnConflict>,
+    pub on_conflict: EitherOnConflict,
     pub with_version_column: Option<String>,
     pub webhook_info: Option<PbWebhookSourceInfo>,
     pub engine: Engine,
@@ -708,11 +729,7 @@ fn gen_table_plan_inner(
         ref source_catalog,
         ..
     } = info;
-    let CreateTableProps {
-        append_only,
-        on_conflict,
-        ..
-    } = props;
+    let CreateTableProps { append_only, .. } = props;
 
     let (database_id, schema_id) = context
         .session_ctx()
@@ -740,21 +757,6 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    let pk_on_append_only = append_only && row_id_index.is_none();
-
-    let on_conflict = if pk_on_append_only {
-        let on_conflict = on_conflict.unwrap_or(OnConflict::Nothing);
-        if on_conflict != OnConflict::Nothing {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "When PRIMARY KEY constraint applied to an APPEND ONLY table, the ON CONFLICT behavior must be DO NOTHING.".to_owned(),
-            )
-                .into());
-        }
-        Some(on_conflict)
-    } else {
-        on_conflict
-    };
-
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
@@ -771,15 +773,7 @@ fn gen_table_plan_inner(
         .into());
     }
 
-    let materialize = plan_root.gen_table_plan(
-        context,
-        table_name,
-        info,
-        CreateTableProps {
-            on_conflict,
-            ..props
-        },
-    )?;
+    let materialize = plan_root.gen_table_plan(context, table_name, info, props)?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
 
@@ -911,7 +905,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         CreateTableProps {
             definition,
             append_only: false,
-            on_conflict,
+            on_conflict: on_conflict.into(),
             with_version_column,
             webhook_info: None,
             engine,
@@ -1015,7 +1009,7 @@ pub(super) async fn handle_create_table_plan(
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
-        on_conflict,
+        on_conflict: on_conflict.into(),
         with_version_column: with_version_column.clone(),
         webhook_info,
         engine,
@@ -1772,7 +1766,7 @@ pub async fn generate_stream_graph_for_replace_table(
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
         append_only,
-        on_conflict,
+        on_conflict: on_conflict.into(),
         with_version_column: with_version_column.clone(),
         webhook_info: original_catalog.webhook_info.clone(),
         engine,
