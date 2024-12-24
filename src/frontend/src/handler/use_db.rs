@@ -14,7 +14,6 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_common::session_config::SessionConfig;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -49,8 +48,9 @@ pub async fn handle_use_db(
         session.user_name()
     ));
 
-    // reset session config
-    *session.shared_config().write() = SessionConfig::default();
+    // reset search_path
+    session.reset_config("search_path")?;
+
     session.update_database(database_name);
 
     Ok(builder.into())

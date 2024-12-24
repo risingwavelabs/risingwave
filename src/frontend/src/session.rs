@@ -827,6 +827,13 @@ impl SessionImpl {
             .map_err(Into::into)
     }
 
+    pub fn reset_config(&self, key: &str) -> Result<String> {
+        self.config_map
+            .write()
+            .reset(key, &mut ())
+            .map_err(Into::into)
+    }
+
     pub fn set_config_report(
         &self,
         key: &str,
